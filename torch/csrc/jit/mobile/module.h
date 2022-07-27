@@ -163,6 +163,16 @@ class TORCH_API Module {
   // Extra handle for the module to delete when itself is deleted
   std::shared_ptr<char> mem_to_delete_;
 };
+
+struct TORCH_API ModuleInfo {
+  uint64_t bytecode_version;
+  uint64_t operator_version;
+  std::unordered_map<std::string, int> opname_to_num_args;
+  std::unordered_set<std::string> function_names;
+  std::unordered_set<std::string> type_names;
+};
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module);
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

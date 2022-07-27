@@ -22,7 +22,7 @@ class RNNModel(nn.Module):
         tie_weights=False,
         batchsize=2,
     ):
-        super(RNNModel, self).__init__()
+        super().__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
         if rnn_type in ["LSTM", "GRU"]:
@@ -66,7 +66,7 @@ class RNNModel(nn.Module):
         if isinstance(h, torch.Tensor):
             return h.detach()
         else:
-            return tuple(RNNModel.repackage_hidden(v) for v in h)
+            return tuple([RNNModel.repackage_hidden(v) for v in h])
 
     def init_weights(self):
         initrange = 0.1

@@ -274,6 +274,30 @@ bool test_hardswish() {
   });
 }
 
+bool test_leaky_relu_() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::leaky_relu_(X, -0.0125);
+    auto Y2 = at::leaky_relu_(X2, -0.0125).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_leaky_relu() {
+  __block std::vector<int64_t> size{1, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::leaky_relu(X, 0.025);
+    auto Y2 = at::leaky_relu(X2, 0.025).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_addmm() {
   bool result = true;
   for (int i = 0; i < ITER_COUNT; ++i) {

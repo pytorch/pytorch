@@ -463,7 +463,6 @@ traced_operators:
   aten::binary_cross_entropy: 13
   aten::binary_cross_entropy_backward: 12
   aten::binary_cross_entropy_with_logits: 3
-  aten::binary_cross_entropy_with_logits_backward: 2
   aten::bitwise_and.Tensor: 13
   aten::bitwise_and_.Tensor: 1
   aten::bitwise_not: 13

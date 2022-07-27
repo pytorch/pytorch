@@ -1,19 +1,17 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
-
+import caffe2.python.onnx.backend as c2
 import numpy as np
 import onnx
-from test_pytorch_onnx_caffe2 import do_export
-from test_pytorch_onnx_onnxruntime import run_model_test
-
-import caffe2.python.onnx.backend as c2
+import onnx_test_common
 import torch
 import torch.utils.cpp_extension
-from torch.onnx.symbolic_helper import _unimplemented
+from test_pytorch_onnx_caffe2 import do_export
+from torch.onnx import symbolic_helper
+from torch.testing._internal import common_utils
 
 
-class TestCustomOps(unittest.TestCase):
+class TestCustomOps(common_utils.TestCase):
     def test_custom_add(self):
         op_source = """
         #include <torch/script.h>
@@ -57,7 +55,7 @@ class TestCustomOps(unittest.TestCase):
         np.testing.assert_array_equal(caffe2_out[0], model(x, y).cpu().numpy())
 
 
-class TestCustomAutogradFunction(unittest.TestCase):
+class TestCustomAutogradFunction(common_utils.TestCase):
     opset_version = 9
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -84,7 +82,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
     def test_register_custom_op(self):
         class MyClip(torch.autograd.Function):
@@ -118,7 +116,9 @@ class TestCustomAutogradFunction(unittest.TestCase):
             elif name == "MyRelu":
                 return g.op("Relu", args[0], outputs=n.outputsSize())
             else:
-                return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+                return symbolic_helper._unimplemented(
+                    "prim::PythonOp", "unknown node kind: " + name
+                )
 
         from torch.onnx import register_custom_op_symbolic
 
@@ -126,10 +126,10 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
-class TestExportAsContribOps(unittest.TestCase):
+class TestExportAsContribOps(common_utils.TestCase):
     opset_version = 14
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -160,8 +160,8 @@ class TestExportAsContribOps(unittest.TestCase):
 
         x = torch.randn(3, 3, 4, requires_grad=True)
         model = torch.jit.script(M())
-        run_model_test(self, model, input=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

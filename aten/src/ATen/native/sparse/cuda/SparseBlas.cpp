@@ -76,13 +76,23 @@ Tensor sparse_sampled_addmm_sparse_csr_cuda(
 }
 
 // result = beta * self + alpha * (mat1 @ mat2)
-Tensor& addmm_out_sparse_csr_cuda(
+Tensor& addmm_out_sparse_compressed_cuda(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+
+  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
+    // TODO: Add native CSC support to avoid costly conversion.
+    return addmm_out_sparse_compressed_cuda(self, mat1.to_sparse_csr(), mat2.to_sparse_csr(),
+        beta, alpha, result);
+  }
+  TORCH_CHECK(!(mat1.layout() == kSparseBsc || mat2.layout() == kSparseBsc),
+      "addmm_out_sparse_compressed_cuda currently does not support layout SparseBsc for input mat, but got ",
+      mat1.layout(), " for mat 1 and ", mat2.layout(), " for mat2.");
+
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
   sparse::impl::_check_is_cuda(mat2, "mat2");
@@ -195,14 +205,19 @@ Tensor& bmm_out_sparse_csr_cuda(
   return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, result);
 }
 
-Tensor& addmv_out_sparse_csr_cuda(
+Tensor& addmv_out_sparse_compressed_cuda(
     const Tensor& self,
     const Tensor& mat,
     const Tensor& vec,
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.layout() == kSparseCsr || mat.layout() == kSparseBsr);
+
+  if (mat.layout() == kSparseCsc) {
+    return addmv_out_sparse_compressed_cuda(self, mat.to_sparse_csr(), vec,
+        beta, alpha, result);
+  }
+  TORCH_CHECK(mat.layout() != kSparseBsc, "addmm_out_sparse_csr_cuda currently does not support layout SparseBsc for input mat.");
 
   TORCH_CHECK(mat.dim() == 2, "addmv: Expected mat to be 2-D");
   TORCH_CHECK(vec.dim() == 1, "addmv: Expected vec to be 1-D");

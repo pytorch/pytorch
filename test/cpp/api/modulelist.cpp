@@ -184,8 +184,8 @@ TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
   ASSERT_TRUE(b[0]->as<C>());
   ASSERT_TRUE(b[1]->as<D>());
 
-  std::vector<std::shared_ptr<A>> c = {std::make_shared<A>(),
-                                       std::make_shared<A>()};
+  std::vector<std::shared_ptr<A>> c = {
+      std::make_shared<A>(), std::make_shared<A>()};
   b->extend(c);
 
   ASSERT_EQ(b->size(), 4);
@@ -291,13 +291,12 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
 
 TEST_F(ModuleListTest, RangeBasedForLoop) {
   torch::nn::ModuleList mlist(
-    torch::nn::Linear(3, 4),
-    torch::nn::BatchNorm1d(4),
-    torch::nn::Dropout(0.5)
-  );
+      torch::nn::Linear(3, 4),
+      torch::nn::BatchNorm1d(4),
+      torch::nn::Dropout(0.5));
 
   std::stringstream buffer;
-  for (const auto &module : *mlist) {
+  for (const auto& module : *mlist) {
     module->pretty_print(buffer);
   }
 }
