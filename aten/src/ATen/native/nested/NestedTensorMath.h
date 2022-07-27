@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <ATen/NestedTensorImpl.h>
 
@@ -149,10 +150,36 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
     return TensorNode(std::move(tensor));
   }
   std::vector<TensorNode> structure;
-  for (const auto& tensor_i : tensor.unbind()) {
-    structure.emplace_back(TensorNode(std::move(tensor_i)));
+  for (auto tensor_i : tensor.unbind()) {
+    structure.push_back(TensorNode(std::move(tensor_i)));
   }
-  return TensorNode(structure);
+  return TensorNode(std::move(structure));
+}
+
+inline Tensor wrap_tensor_node(TensorNode tensor_node,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(!tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+  if (tensor_node.degree() == 0) {
+    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
+  }
+  std::vector<Tensor> sizes;
+  std::vector<Tensor> flat_tensors;
+  for (const auto i : c10::irange(tensor_node.degree())) {
+    // TODO: Remove call to contiguous once we support strides.
+    flat_tensors.push_back(tensor_node.children(i).payload().reshape(-1).contiguous());
+    sizes.push_back(tensor(c10::IntArrayRef(tensor_node.children(i).payload().sizes())));
+  }
+
+  TensorOptions options = flat_tensors[0].options().merge_in(options_);
+
+  return wrap_buffer(
+      at::cat(flat_tensors).to(options), at::native::stack(sizes));
 }
 
 
@@ -162,16 +189,11 @@ template <class F, class... A>
 inline at::Tensor map_nested_tensor(F&& fn, A... a) {
   // torch_check_tensor_shape_matches(a...);
   // torch_check_is_nested_tensor(a...);
-  impl::TensorNode result_node = impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...);
-  if (result_node.is_leaf()) {
-    return result_node.payload();
-  }
-  std::vector<Tensor> result_tensors;
-  for (const auto& child : result_node.children()) {
-    TORCH_CHECK(child.is_leaf(), "Expected result children to be leafs. No support for multiple nested dimensions yet.");
-    result_tensors.push_back(child.payload());
-  }
-  return nested_tensor(result_tensors);
+  return wrap_tensor_node(impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...),
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt);
 }
 
 } // namespace native

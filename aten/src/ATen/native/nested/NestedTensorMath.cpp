@@ -264,15 +264,7 @@ Tensor nested_tensor(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  TensorOptions options_ =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  if (list.size() == 0) {
-    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
-  }
-  std::vector<Tensor> sizes;
-  std::vector<Tensor> flat_tensors;
+  std::vector<impl::TensorNode> tensor_nodes;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       int64_t dim_i = list[i].dim();
@@ -290,15 +282,14 @@ Tensor nested_tensor(
           i - 1,
           ".");
     }
-    // TODO: Remove call to contiguous once we support strides.
-    flat_tensors.push_back(list[i].reshape(-1).contiguous());
-    sizes.push_back(tensor(c10::IntArrayRef(list[i].sizes())));
+    tensor_nodes.push_back(impl::TensorNode(at::Tensor(list[i])));
   }
-
-  TensorOptions options = flat_tensors[0].options().merge_in(options_);
-
-  return wrap_buffer(
-      at::cat(flat_tensors).to(options), at::native::stack(sizes));
+  return impl::wrap_tensor_node(
+      impl::TensorNode(std::move(tensor_nodes)),
+      dtype,
+      layout,
+      device,
+      pin_memory);
 }
 
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
@@ -713,7 +704,10 @@ Tensor& dropout_nested_(Tensor& input, double p, bool train) {
   return input;
 }
 
-Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to_float) {
+Tensor softmax_nested(
+    const Tensor& input,
+    const int64_t dim,
+    const bool half_to_float) {
   auto input_ptr = get_nested_tensor_impl(input);
   int64_t ntensors = input_ptr->size(0);
   if (ntensors == 0) {
@@ -721,11 +715,12 @@ Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to
   }
   int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
   TORCH_CHECK(
-      positive_dim >= 1,
-      "Cannot apply softmax across nested dimension 0");
-  return map_nested_tensor([&dim, &half_to_float](const Tensor& input_i) {
-      return at::softmax(input_i, dim - 1, half_to_float);
-      }, input);
+      positive_dim >= 1, "Cannot apply softmax across nested dimension 0");
+  return map_nested_tensor(
+      [&positive_dim, &half_to_float](Tensor input_i) -> Tensor {
+        return at::_softmax(input_i, positive_dim - 1, half_to_float);
+      },
+      input);
 }
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
@@ -736,12 +731,12 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   TORCH_CHECK(
       self.size(0) == mat2.size(0),
       "Expected size for the 1st dimension of batch2 tensor to be: ",
-      ntensors,
+      self.size(0),
       " but got: ",
-      ntensors2,
+      mat2.size(0),
       ".");
   return map_nested_tensor(
-      [](const Tensor& self_i, const Tensor& mat2_i) {
+      [](Tensor self_i, Tensor mat2_i) -> Tensor {
         return at::mm(self_i, mat2_i);
       },
       self,
