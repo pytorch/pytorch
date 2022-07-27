@@ -458,6 +458,9 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
+
+  if (result.is_meta()) return result;
+
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
