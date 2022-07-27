@@ -63,7 +63,6 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
 
   linux-focal-rocm5_2-py3_7-distributed-test:
-    if: false # https://github.com/pytorch/pytorch/issues/80529
     name: linux-focal-rocm5.2-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_2-py3_7-distributed-build
