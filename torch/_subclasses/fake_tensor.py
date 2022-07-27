@@ -44,7 +44,7 @@ _device_not_kwarg_ops = (
 )
 
 # this op is never actually used
-_non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
+_non_kwarg_device_constructors = (aten._list_to_tensor,)
 
 
 def contains_tensor_types(type):
@@ -229,7 +229,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 
 # _to_copy fails when run with FakeTensors to cuda device
 # TODO: debug
-@register_op_impl(torch.ops.aten._to_copy.default)
+@register_op_impl(aten._to_copy.default)
 def to_copy(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -239,16 +239,14 @@ def to_copy(fake_mode, func, *args, **kwargs):
     out_device = input_device if input_device else new_kwargs["input"].device
     with no_dispatch():
         input = new_kwargs.pop("input").to("meta")
-        return FakeTensor(
-            fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
-        )
+        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
-@register_op_impl(torch.ops.aten.clone.default)
+@register_op_impl(aten.clone.default)
 def clone(fake_mode, func, input, memory_format=None):
     out_device = input.device
     with no_dispatch():
-        out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
+        out = aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
 
@@ -512,6 +510,11 @@ class FakeTensorMode(TorchDispatchMode):
             with no_dispatch():
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+                if func == aten.size.default:
+                    raise RuntimeError(
+                        "Trying to call aten.size on a tensor with symbolic shapes. "
+                        "It's likely that this is from calling tensor.shape in C++"
+                    )
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
@@ -521,7 +524,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func(*args, **kwargs)
 
         if has_symbolic_sizes:
-            constructors = [torch.ops.aten.empty.SymInt]
+            constructors = [aten.empty.SymInt]
             if func not in constructors:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
@@ -577,8 +580,8 @@ class FakeTensorMode(TorchDispatchMode):
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
             # we need to handle before error checking
             if func in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.lift_fresh_copy.default,
+                aten.lift_fresh.default,
+                aten.lift_fresh_copy.default,
             ]:
                 assert (
                     len(kwargs) == 0
