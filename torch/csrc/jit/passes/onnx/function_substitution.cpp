@@ -64,7 +64,7 @@ std::string GetCallNodeVariableName(const Node* call_node) {
   return module_name;
 }
 
-WithCurrentScope SetScopeGuardForForwardCall(Graph& graph, Node* call_node) {
+ScopePtr ForwardCallScope(Graph& graph, Node* call_node) {
   TORCH_INTERNAL_ASSERT(call_node->kind() == prim::CallMethod);
   const std::string& method_name = call_node->s(attr::name);
   if (method_name == "forward") {
@@ -73,10 +73,9 @@ WithCurrentScope SetScopeGuardForForwardCall(Graph& graph, Node* call_node) {
     const auto variable_name = GetCallNodeVariableName(call_node);
     const auto scope_name =
         onnx::ONNXScopeName::createFullScopeName(class_name, variable_name);
-    auto call_scope = graph.current_scope()->push(Symbol::scope(scope_name));
-    return WithCurrentScope(graph, call_scope);
+    return graph.current_scope()->push(Symbol::scope(scope_name));
   }
-  return WithCurrentScope(graph, graph.current_scope());
+  return graph.current_scope();
 }
 
 void functionCallSubstitution(Block* block) {
@@ -134,8 +133,8 @@ void functionCallSubstitution(Block* block) {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           Function& function = class_type->getMethod(name);
-          WithCurrentScope scope_guard =
-              SetScopeGuardForForwardCall(*graph, cur);
+          ScopePtr call_scope = ForwardCallScope(*graph, cur);
+          WithCurrentScope scope_guard(*graph, call_scope);
           GRAPH_DEBUG(
               "Setting scope guard for forward call: ",
               graph->current_scope()->namesFromRoot());
@@ -145,8 +144,8 @@ void functionCallSubstitution(Block* block) {
                 name,
                 ": ",
                 *graphFunction->graph());
-            WithCurrentScope inner_graph_scope_guard = WithCurrentScope(
-                *graphFunction->graph(), graph->current_scope());
+            WithCurrentScope inner_graph_scope_guard(
+                *graphFunction->graph(), call_scope);
             functionCallSubstitution(graphFunction->graph()->block());
             inlineCallTo(cur, graphFunction, false);
           }
@@ -167,19 +166,17 @@ void functionCallSubstitution(Block* block) {
   }
 }
 
-WithCurrentScope ONNXGraphTopLevelScopeGuard(Graph& graph) {
-  WithCurrentScope current_scope_guard(graph, graph.current_scope());
+ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
   if (graph.inputs().size() == 0) {
-    return current_scope_guard;
+    return graph.current_scope();
   }
   if (auto top_module_type = graph.inputs().at(0)->type()->cast<ClassType>()) {
     auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
         TidyClassNameFromTorchScript(top_module_type->name()),
         top_module_variable_name);
-    auto scope = graph.current_scope()->push(Symbol::scope(scope_name));
-    return WithCurrentScope(graph, scope);
+    return graph.current_scope()->push(Symbol::scope(scope_name));
   }
-  return current_scope_guard;
+  return graph.current_scope();
 }
 
 } // namespace
@@ -191,7 +188,7 @@ WithCurrentScope ONNXGraphTopLevelScopeGuard(Graph& graph) {
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {
   GRAPH_DUMP("Before function call substitution calls: ", &graph);
-  auto top_level_scope_guard = ONNXGraphTopLevelScopeGuard(graph);
+  WithCurrentScope top_level_scope_guard(graph, ONNXGraphTopLevelScope(graph));
   functionCallSubstitution(graph.block());
   GRAPH_DUMP("After function call substitution calls: ", &graph);
 }
