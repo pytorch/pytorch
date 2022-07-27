@@ -225,6 +225,11 @@ PowerPC
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
+Docs / Tutorials
+~~~~~~~~~~~~~~~~
+
+- Svetlana Karslioglu (`svekars <https://github.com/svekars>`__)
+
 Library-level maintainers
 -------------------------
 
