@@ -3,12 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch._C import _onnx as _C_onnx
-from torch.onnx import (
-    _type_utils,
-    symbolic_helper,
-    symbolic_opset9 as opset9,
-    utils
-)
+from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9, utils
 
 
 # EDITING THIS FILE? READ THIS FIRST!
