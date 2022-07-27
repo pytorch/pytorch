@@ -111,7 +111,6 @@ DONT_REQUIRE_DERIVATIVE = {
     "new_full",
     "new_zeros",
     "new_ones",
-    "sparse_coo_tensor",
     # These are only implemented on integral types
     "__and__",
     "__iand__",
