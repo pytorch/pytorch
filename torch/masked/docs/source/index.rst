@@ -6,7 +6,7 @@
 MaskedTensor
 ========================================
 
-This library is a part of the `PyTorch <http://pytorch.org/>`_ project. Please note that this library is currently 
+This library is a part of the `PyTorch <http://pytorch.org/>`_ project. Please note that this library is currently
 classified as a prototype -- that is, this library is at an early stage for feedback and testing, and we encourage
 users to submit any issues they may encounter, feature requests, etc. The Github can be found `here <https://github.com/pytorch/maskedtensor>`_.
 

@@ -3,10 +3,10 @@
 Binary Operations
 =================
 
-As you may have seen in the tutorial, :mod:`MaskedTensor` also has binary operations implemented with the caveat 
-that the masks in two masked tensors must match or else an error will be raised. As noted in the error, if you 
-need support for a particular operator or have proposed semantics for how they should be behave instead, please open 
-an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users 
+As you may have seen in the tutorial, :mod:`MaskedTensor` also has binary operations implemented with the caveat
+that the masks in two masked tensors must match or else an error will be raised. As noted in the error, if you
+need support for a particular operator or have proposed semantics for how they should be behave instead, please open
+an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users
 know exactly what is going on and are being intentional about their decisions with masked semantics.
 
 The available binary operators are:

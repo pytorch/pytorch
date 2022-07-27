@@ -7,7 +7,7 @@ pip
 
 To install MaskedTensor via pip, use the following command:
 
-:: 
+::
 
     pip install maskedtensor-nightly
 
