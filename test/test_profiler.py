@@ -32,7 +32,8 @@ from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              ExtraCUDACopyPattern,
                                              ForLoopIndexingPattern,
                                              FP32MatMulPattern,
-                                             OptimizerSingleTensorPattern)
+                                             OptimizerSingleTensorPattern,
+                                             SynchronizedDataLoaderPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1655,6 +1656,16 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    def test_profiler_synchronized_dataloader_pattern(self):
+        dataset = torch.rand((100, 100))
+        sync_dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
+        async_dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=4)
+        with profile(with_stack=True) as prof:
+            next(iter(sync_dataloader))
+            next(iter(async_dataloader))
+        pattern = SynchronizedDataLoaderPattern(prof)
+        num_matched = len(pattern.matched_events())
+        self.assertEqual(num_matched, 1)
 
 if __name__ == '__main__':
     run_tests()
