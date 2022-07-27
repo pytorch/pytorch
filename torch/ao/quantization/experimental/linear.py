@@ -1,10 +1,9 @@
 import torch
 import numpy as np
-import math
 
 from torch.nn.quantized.modules.utils import WeightedQuantizedModule
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.quantizer import quantize_APoT
 
 class LinearAPoT(WeightedQuantizedModule):
     r"""
@@ -21,133 +20,112 @@ class LinearAPoT(WeightedQuantizedModule):
         gamma: `gamma` qparam of output Quantized Tensor, type: Tensor
         quantization_levels: `quantization_levels` qparam of output Quantized Tensor, type: Tensor
         level_indices: `level_indices` qparam of output Quantized Tensor, type: Tensor
+        weight: APoT quantized tensor from weight2quantize
+        weight_transposed: transposed weight tensor, used in linear transformation calculation (y = x * A^T + b)
     """
 
-    def __init__(self, weight2quantize: torch.Tensor, signed=False):
+    def __init__(self, weight2quantize: torch.Tensor):
+        assert weight2quantize.dim() == 2
+
         super().__init__()
 
-        # hard code to APoT paper example inputs: b=4, k=2
-        observer = APoTObserver(b=4, k=2)
+        # hard code b, k to match uniform quantization: b=4, k=1
+        self.b = 8
+        self.k = 1
+        self.n = 8
+
+        observer = APoTObserver(b=self.b, k=self.k)
 
         observer(weight2quantize)
 
-        self.alpha, self.gamma, self.quantization_levels, self.level_indices = observer.calculate_qparams(signed=signed)
+        self.alpha, self.gamma, self.quantization_levels, self.level_indices = observer.calculate_qparams(signed=False)
 
         quantized = quantize_APoT(weight2quantize, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
-        self.weight = dequantize_APoT(quantized)
-        self.weight = self.weight.reshape(weight2quantize.shape)
+        self.weight = quantized.data
+        self.weight_transposed = torch.transpose(self.weight, 0, 1)
 
-    def decompose_APoT(self):
+        self.weight_transposed = self.weight_transposed.reshape(weight2quantize.shape)
+        self.weight_transposed = self.weight_transposed.reshape(weight2quantize.shape[1], weight2quantize.shape[0])
+
+    def decompose_APoT(self, x):
         r"""
-        Helper function to decompose sums of PoT from APoT quantization
-        into corresponding tuples of PoT terms.
-        For weight[i][j] = gamma * W = gamma * (W1 + W2),
-        levels_decomposed[i][j] = (W1, W2)
-        """
-        size = int(math.sqrt(torch.numel(self.weight)))
-
-        # decompose APoT weight
-        p_all = []
-
-        # create the "levels"
-        p0 = torch.tensor([0, 2**0, 2**-2, 2**-4])
-        p1 = torch.tensor([0, 2**-1, 2**-3, 2**-5])
-
-        # make pair of tensors that associate tuple (decomp1, decomp2) with value
-        all_levels_decomposed = []
-        vals = []
-        for level0 in range(size):
-            for level1 in range(size):
-                all_levels_decomposed.append((p0[level0], p1[level1]))
-                vals.append(self.gamma * (p0[level0] + p1[level1]))
-
-        # decompose levels in weight
-        levels_decomposed = []
-        for ele in self.weight.flatten():
-            idx = vals.index(ele)
-            levels_decomposed.append(all_levels_decomposed[idx])
-
-        # reshape decomposed levels array into 2d matrix size
-        np_levels_decomposed = np.empty(len(levels_decomposed), dtype=object)
-        np_levels_decomposed[:] = levels_decomposed
-        np_levels_decomposed = np_levels_decomposed.reshape(size, size)
-
-        return np_levels_decomposed
-
-    def linear_APoT_fn(self, activation: torch.Tensor) -> torch.FloatTensor:
-        r"""
-        Multiply APoT quantized weight and uniformly quantized activation
-        with bitshifting instead of matrix multiplication.
+        Decompose APoT quantized terms into binary digits
         Args:
-            activation (Tensor): uniformly quantized activation tensor
+            x (Tensor): binary representation of APoT quantized tensor
         """
-        # assert activation is 2D tensor
-        size = int(math.sqrt(torch.numel(self.weight)))
+        # remove "0b" prefix from binary representation
+        x = x[2:]
 
-        levels_decomposed = self.decompose_APoT()
+        # initialize list of blocks
+        blocks = []
 
-        rows1 = self.weight.shape[0]
-        cols1 = self.weight.shape[1]
+        while x:
+            blocks.append(x[0:self.k])
+            x = x[self.k:]
 
-        rows2 = activation.shape[0]
-        cols2 = activation.shape[1]
+        return blocks
+
+    def bitshift_multiplication(self, decomposed_weight, activation):
+        r"""
+        Compute matrix multiplication result of input weight and activation using bitshifting
+        Args:
+            decomposed_weight (Tensor): APoT quantized weight decomposed into binary
+            activation (Tensor): uniformly quantized activation
+        """
+        rows2 = activation.size(dim=0)
+        cols2 = activation.size(dim=1)
+
+        rows1 = decomposed_weight.shape[0]
+        cols1 = decomposed_weight.shape[1]
 
         result = torch.zeros(rows1, cols2)
 
         # compute matrix multiplication with bitshifts
-        for i in range(rows1):
-            for j in range(cols1):
-                for k in range(rows2):
-                    ele1 = levels_decomposed[i][k]
-                    r = int(activation[k][j])
+        for i in range(rows2):
+            for j in range(cols2):
+                for k in range(rows1):
+                    weight_val = decomposed_weight[k][j]
+                    r = int(activation[i][k])
 
-                    for x in ele1:
-                        # curr_result = x * r
-                        # print("curr result", curr_result)
-                        if x == 0:
-                            curr_result = 0.0
+                    for idx in range(len(weight_val)):
+                        ele = int(weight_val[idx])
+
+                        x = len(weight_val) - 1 - idx
+
+                        if ele:
+                            curr_result = r << x
                         else:
-                            x = int(math.log2(x))
-
-                            if x == 0:
-                                curr_result = r
-                            elif x > 0:
-                                curr_result = float(r << x)
-                            else:
-                                x = - x
-                                r_bin = bin(r)
-                                r_bin = r_bin[2:]
-
-                                # pad r_bin with 0s
-                                while len(r_bin) < x + 1:
-                                    r_bin = "0" + r_bin
-
-                                # perform shifts, store decimal portion
-                                dec = ""
-                                for m in range(x):
-                                    dec = r_bin[-1] + dec
-                                    r_bin = "0" + r_bin[:-1]
-
-                                # convert dec portion from binary -> decimal
-                                dec_portion = 0.0
-                                for exp in range(len(dec)):
-                                    if int(dec[exp]):
-                                        dec_portion = dec_portion + (2 ** - (exp + 1))
-
-                                # convert whole portion from binary -> decimal
-                                r_bin = r_bin[::-1]
-                                whole_portion = 0.0
-                                for exp in range(len(r_bin)):
-                                    if int(r_bin[exp]):
-                                        whole_portion = whole_portion + (2 ** exp)
-
-                                curr_result = float(whole_portion + dec_portion)
-
+                            curr_result = 0
                         result[i][j] += curr_result
 
-        result = result * self.gamma
+        return result
 
-        print("result dtype", result.dtype)
+    def linear_APoT_fn(self, activation: torch.Tensor) -> torch.FloatTensor:
+        r"""
+        Multiply APoT quantized weight and uniformly quantized activation (dtype: quint8)
+        with bitshifting instead of matrix multiplication.
+        Result has dtype torch.float32
+        Args:
+            activation (Tensor): uniformly quantized activation tensor
+        """
+        assert activation.dim() == 2
+
+        weight_rows = self.weight_transposed.size()[0]
+        weight_cols = self.weight_transposed.size()[1]
+
+        decomposed_weight = np.empty(shape=(weight_rows, weight_cols), dtype=object)
+        for row in range(weight_rows):
+            for col in range(weight_cols):
+                decomposed_weight[row][col] = self.decompose_APoT(bin(self.weight_transposed[row][col]))
+
+        rows1 = self.weight_transposed.size(dim=0)
+        cols1 = self.weight_transposed.size(dim=1)
+
+        rows2 = activation.size(dim=0)
+        cols2 = activation.size(dim=1)
+
+        result = self.bitshift_multiplication(decomposed_weight, activation).type(torch.FloatTensor)
+
         return result
 
     def forward(self, activation: torch.Tensor) -> torch.FloatTensor:

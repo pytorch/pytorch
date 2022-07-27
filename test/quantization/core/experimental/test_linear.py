@@ -1,51 +1,37 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch import quantize_per_tensor
-from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.experimental.linear import LinearAPoT
+from torch.nn.modules.linear import Linear
 import unittest
 
 class TestNonUniformObserver(unittest.TestCase):
     """
-        Test linear_APoT_fn by calling forward method
+        Test linear_APoT_fn by comparing to uniform linear
+        for 2d tensors with size (4,4)
     """
     def test_linear_APoT_fn(self):
+        # weight: fp tensor
         weight = 1000 * torch.rand(4, 4)
-        activation2quantize = 1000 * torch.rand(4, 4)
 
-        uniform_observer = MinMaxObserver()
-        uniform_observer(activation2quantize)
-        scale, zero_point = uniform_observer.calculate_qparams()
-
-        activation = quantize_per_tensor(input=activation2quantize,
-                                         scale=scale,
-                                         zero_point=zero_point,
-                                         dtype=torch.quint8).int_repr()
-        # activation = activation.int()
+        # activtion: uniformly quantized tensor
+        activation = torch.randint(low=0, high=255, size=(4, 4), dtype=torch.float)
 
         # calculate result from calling linear forward method
-        linear = LinearAPoT(weight)
-        linear_result = linear.forward(activation)
+        apot_linear = LinearAPoT(weight)
+        apot_linear_result = apot_linear(activation)
 
         # calculate expected results
-        levels_decomposed = linear.decompose_APoT()
+        fp_linear = Linear(4, 4, bias=False)
 
-        expected_result = torch.zeros(weight.shape[0], activation.shape[1])
+        # set weight for fp linear
+        apot_quantized_weight_float = apot_linear.weight.type(torch.FloatTensor)
+        fp_linear_weight = torch.nn.parameter.Parameter(data=apot_quantized_weight_float)
+        fp_linear.weight = fp_linear_weight
 
-        for i in range(weight.shape[0]):
-            for j in range(activation.shape[1]):
-                for k in range(activation.shape[0]):
-                    ele1 = levels_decomposed[i][k]
-                    r = int(activation[k][j])
+        fp_linear_result = fp_linear(activation).data
 
-                    for x in ele1:
-                        curr_result = x * r
-                        expected_result[i][j] += float(curr_result)
-
-        expected_result = expected_result * linear.gamma
-
-        self.assertTrue(torch.equal(linear_result, expected_result))
+        self.assertTrue(torch.equal(apot_linear_result, fp_linear_result))
 
 if __name__ == '__main__':
     unittest.main()
