@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 import torch
 from collections import defaultdict
 from torch import nn
@@ -324,6 +324,26 @@ class ActivationSparsifier:
             data_groups[name] = new_config
         return data_groups
 
+    def _convert_mask(self, states_dict, sparse_coo=True):
+        r"""Converts the mask to sparse coo or dense depending on the `sparse_coo` argument.
+        If `sparse_coo=True`, then the mask is stored as sparse coo else dense tensor
+        """
+        states = copy.deepcopy(states_dict)
+        for _, state in states.items():
+            if state['mask'] is not None:
+                if isinstance(state['mask'], List):
+                    for idx in range(len(state['mask'])):
+                        if sparse_coo:
+                            state['mask'][idx] = state['mask'][idx].to_sparse_coo()
+                        else:
+                            state['mask'][idx] = state['mask'][idx].to_dense()
+                else:
+                    if sparse_coo:
+                        state['mask'] = state['mask'].to_sparse_coo()
+                    else:
+                        state['mask'] = state['mask'].to_dense()
+        return states
+
     def state_dict(self) -> Dict[str, Any]:
         r"""Returns the state of the sparsifier as a :class:`dict`.
 
@@ -334,9 +354,9 @@ class ActivationSparsifier:
         * defaults - the default config while creating the constructor
         """
         data_groups = self._get_serializable_data_groups()
-
+        state = self._convert_mask(self.state)
         return {
-            'state': self.state,
+            'state': state,
             'data_groups': data_groups,
             'defaults': self.defaults
         }
@@ -355,13 +375,15 @@ class ActivationSparsifier:
     def __get_state__(self) -> Dict[str, Any]:
 
         data_groups = self._get_serializable_data_groups()
+        state = self._convert_mask(self.state)
         return {
             'defaults': self.defaults,
-            'state': self.state,
+            'state': state,
             'data_groups': data_groups,
         }
 
     def __set_state__(self, state: Dict[str, Any]) -> None:
+        state['state'] = self._convert_mask(state['state'], sparse_coo=False)  # convert mask to dense tensor
         self.__dict__.update(state)
 
         # need to attach layer and hook info into the data_groups
