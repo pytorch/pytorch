@@ -12,9 +12,9 @@ retry conda install -y \
   mkl=2021.2.0 \
   mkl-include=2021.2.0 \
   numpy \
-  pyyaml=5.3 \
+  pyyaml \
   setuptools \
-  cmake=3.19 \
+  cmake>=3.19 \
   cffi \
   ninja \
   typing_extensions \

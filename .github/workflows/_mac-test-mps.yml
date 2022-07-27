@@ -41,7 +41,7 @@ jobs:
       - name: Install PyTorch
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
-          PY_VERS: 3.8
+          PY_VERS: 3.9.4
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
