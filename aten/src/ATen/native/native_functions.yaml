@@ -1976,6 +1976,13 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+# all calls to empty() in python used to go through the symint overload
+# even if all arguments were concerete integers.
+# adding symint overloads of kernels for every dispatch key allowed us
+# to skip redispatching to `empty.memory_format` and hit backend kernels directly
+# we recently updated signature parsing to dispath `empty()` calls in python
+# to `empty.SymInt` iff there's is a symint node argument
+# hopefully, we could simplify this entry soon
 - func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
     CPU: empty_symint_cpu
@@ -2218,13 +2225,13 @@
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: eye_out_cpu
+    CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
 - func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: eye_out_cpu
+    CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
@@ -3461,6 +3468,7 @@
   dispatch:
     CompositeExplicitAutograd: mul
     SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Scalar
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3468,6 +3476,7 @@
   dispatch:
     CompositeExplicitAutograd: mul_
     SparseCsrCPU, SparseCsrCUDA: mul__scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Scalar
   autogen: mul.Scalar_out
 
 # multiply, alias for mul
@@ -6414,7 +6423,6 @@
 # TODO: this should have a view annotation
 # TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
-  variants: method
   dispatch:
     CompositeExplicitAutograd: lift
 
