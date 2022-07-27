@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
     generate_elementwise_unary_tensors,
-    _NOTHING,
     generate_elementwise_unary_small_value_tensors,
     generate_elementwise_unary_large_value_tensors,
     generate_elementwise_unary_extremal_value_tensors,
@@ -59,7 +58,7 @@ if TEST_SCIPY:
 # Refer [scipy reference filter]
 # Filter operators for which the reference function
 # is available in the current environment (for reference_numerics tests).
-reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_ufuncs))
+reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
