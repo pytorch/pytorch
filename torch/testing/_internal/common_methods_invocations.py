@@ -13092,6 +13092,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
                             dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                             device_type="cuda"),
+               # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
+               # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
+               # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
+               # CUDA driver allocated memory was 1254555648 and is now 1242955776.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -13122,6 +13128,12 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
                             dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+               # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
+               # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
+               # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
+               # CUDA driver allocated memory was 1254555648 and is now 1242955776.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
