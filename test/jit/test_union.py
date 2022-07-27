@@ -489,7 +489,7 @@ class TestUnion(JitTestCase):
                 return str(y)
             else:
                 return "foo"
-        
+
         self.checkScript(fn(1), "2")
 
     def test_union_type_refinement_statically_false(self):
