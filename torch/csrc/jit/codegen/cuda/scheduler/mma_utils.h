@@ -121,6 +121,12 @@ class TORCH_CUDA_CU_API WarpMmaSwizzler {
       TensorView* tv,
       const MmaOptions& options);
 
+  //! Swizzle implementations for Turing mma.
+  static void scheduleTuringOperandRead(TensorView* tv, MmaOptions options);
+  static void scheduleTuringM16N8K16MmaWarpOutput(
+      TensorView* tv,
+      const MmaOptions& options);
+
   //! Utility to lock the transformed dimensions from further transforms.
   static void setWarpMapped(TensorView* tv, int number_of_dims);
 };

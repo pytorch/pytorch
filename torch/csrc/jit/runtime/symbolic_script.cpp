@@ -1063,11 +1063,12 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self, *, memory_format: Optional[int]):
-            def backward(grad_output):
-                return None
+        # TODO: Fix rand_like to match expected format
+        # def rand_like(self, *, memory_format: Optional[int]):
+        #    def backward(grad_output):
+        #        return None
 
-            return torch.rand_like(self, memory_format=memory_format), backward
+        #    return torch.rand_like(self, memory_format=memory_format), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
@@ -1548,6 +1549,17 @@ void loadModule(const CompilationUnit& module) {
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
+
+    // checks that num forward graph inputs equals num backward graph outputs
+    TORCH_CHECK(
+        pair.forward->inputs().size() ==
+            unpackOutputs(pair.backward->outputs().vec()).size(),
+        "The autodiff implementation of ",
+        method->name(),
+        " backward() returns an incorrect number of values: ",
+        unpackOutputs(pair.backward->outputs().vec()).size(),
+        " instead of ",
+        pair.forward->inputs().size());
 
     // do surgery on the forward function to remove the closure tuple and
     // replace it with the context variable:

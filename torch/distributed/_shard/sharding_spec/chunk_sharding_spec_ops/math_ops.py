@@ -13,7 +13,7 @@ from ._common import (
 
 def register_math_op(op):
     @custom_sharding_spec_op(ChunkShardingSpec, op)
-    def binary_math_op(types, args=(), kwargs=None):
+    def binary_math_op(types, args=(), kwargs=None, pg=None):
         """
         Handles ``__torch_function__`` dispatch for the binary math ops
         such as `torch.add`, `torch.mul`, `torch.div`, etc.
@@ -23,7 +23,6 @@ def register_math_op(op):
             raise ValueError("Only support binary math op on ShardedTensor for now!")
         lhs = args[0]
         rhs = args[1]
-        pg = lhs._process_group if isinstance(lhs, ShardedTensor) else rhs._process_group
         # Validate types
         if isinstance(lhs, ShardedTensor) and isinstance(rhs, ShardedTensor):
             lhs_spec = lhs.sharding_spec()

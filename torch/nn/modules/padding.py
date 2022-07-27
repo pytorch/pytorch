@@ -9,6 +9,8 @@ from typing import Sequence, Tuple
 
 # TODO: grad_output size asserts in THNN
 
+__all__ = ['ConstantPad1d', 'ConstantPad2d', 'ConstantPad3d', 'ReflectionPad1d', 'ReflectionPad2d',
+           'ReflectionPad3d', 'ReplicationPad1d', 'ReplicationPad2d', 'ReplicationPad3d', 'ZeroPad2d']
 
 class _ConstantPadNd(Module):
     __constants__ = ['padding', 'value']

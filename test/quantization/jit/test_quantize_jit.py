@@ -1416,6 +1416,38 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             str(get_forward_graph(m.conv3d._c))
         )
 
+    def test_convtranspose_trace(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.convtranspose1d = torch.nn.ConvTranspose1d(3, 3, 3).float()
+                self.convtranspose2d = torch.nn.ConvTranspose2d(3, 3, 3).float()
+                self.convtranspose3d = torch.nn.ConvTranspose3d(3, 3, 3).float()
+
+            def forward(self, x, y, z):
+                a = self.convtranspose1d(x)
+                b = self.convtranspose2d(y)
+                c = self.convtranspose3d(z)
+                return (a, b, c)
+
+        qconfig_dict = {"": default_qconfig}
+        inputs = (
+            torch.rand((1, 3, 10), dtype=torch.float),
+            torch.rand((1, 3, 10, 10), dtype=torch.float),
+            torch.rand((1, 3, 10, 10, 10), dtype=torch.float),
+        )
+        model = torch.jit.trace(M(), inputs).eval()
+        m = prepare_jit(model, qconfig_dict)
+        FileCheck().check("aten::conv_transpose1d").check_not("aten::_convolution").run(
+            str(get_forward_graph(m.convtranspose1d._c))
+        )
+        FileCheck().check("aten::conv_transpose2d").check_not("aten::_convolution").run(
+            str(get_forward_graph(m.convtranspose2d._c))
+        )
+        FileCheck().check("aten::conv_transpose3d").check_not("aten::_convolution").run(
+            str(get_forward_graph(m.convtranspose3d._c))
+        )
+
     @unittest.skipUnless(
         "fbgemm" in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

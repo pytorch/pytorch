@@ -353,6 +353,7 @@ class TestDtypeCustomRules(TestDtypeBase):
         # Run the Dtype Analysis
         graph = traced_fn.graph  # Note this is a cached graph
         input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
+        input_tensors += [v for v in sample_input.kwargs.values() if isinstance(v, torch.Tensor)]
         self.prop_dtype_on_graph(graph, input_tensors)
         self.assert_output_dtype_equal(expected_res, graph)
 
