@@ -101,7 +101,7 @@ def get_nx_node_name(node_name: str) -> str:
     raise Exception("node name is not _in or _out, " + node_name)
 
 
-def get_cut_nodes_from_partition(partition, nx_graph):
+def get_cut_nodes_from_partition(partition: Tuple[Set[str], Set[str]], nx_graph) -> Set[str]:
     """
     Return the cut nodes from the partition. Cut nodes are the nodes reachable from the root node
     and have outgoing edges to nodes in the non-reachable partition. 
@@ -132,14 +132,21 @@ def order_topologically(nodes: List[fx.Node], gm: fx.GraphModule) -> List[fx.Nod
     return nodes
 
 
-def get_output_node_args(node):
+def get_output_node_args(node: fx.Node) -> Tuple[fx.Node]:
     if type(node.args[0]) is not tuple:
         return node.args
     return node.args[0]
 
 
-def get_user_name_to_user_map(output_node_in_module, fused_node):
+def get_user_name_to_user_map(output_node_in_module: fx.Node, fused_node: fx.Node) -> Dict[str, fx.Node]:
+    """
+    Return a dictionary from the names of the user nodes of ``fused_node``
+    to ``output_node_in_module``'s args. The user nodes here are the nodes that
+    uses the output of ``fused_node`` through getitem nodes.
 
+    ``output_node_in_module`` is the output node of the submodule corresponding to ``fused_node`` in a fused graph.
+    """
+    assert(output_node_in_module.op == "output")
     user_name_to_user_map = {}
     output_args = get_output_node_args(output_node_in_module)
     for user in fused_node.users:
@@ -153,11 +160,18 @@ def get_user_name_to_user_map(output_node_in_module, fused_node):
     return user_name_to_user_map
 
 
-def add_new_outputs(node_pair, fused_graph, name_to_node, module_origin, cut_nodes, name_to_node_origin):
-    # modify the outputs of module_origin to contain new outputs
+def add_new_outputs(node_pair: Tuple[fx.Node, fx.Node], 
+                    fused_graph: fx.GraphModule, 
+                    name_to_node: Dict[str, fx.Node],
+                    module_origin: fx.GraphModule,
+                    module_origin_new_outputs: List[fx.Node]):
+    """
+    Modify the outputs of ``module_origin`` to contain new outputs required after rematerialization.
+    Add new getitem nodes in ``fused_graph`` if necessary.
 
+    ``module_origin_new_outputs`` is a list of outputs required after rematerialization.
+    """
     origin_placeholders = set(node for node in module_origin.graph.nodes if node.op == "placeholder")
-    module_origin_new_outputs = {name_to_node_origin[name] for name in cut_nodes}
     for node in module_origin.graph.nodes:
         if node.op == "output":
             old_args = get_output_node_args(node)
@@ -228,11 +242,18 @@ def get_node_to_copy(non_reachable, cut_nodes):
     return node_to_copy
 
 
-def copy_nodes(node_pair, fused_graph, name_to_node, partition, cut_nodes):
+def copy_nodes(node_pair: Tuple[fx.Node, fx.Node], 
+               fused_graph: fx.GraphModule, 
+               name_to_node: Dict[str, fx.Node], 
+               partition: Tuple[Set[str], Set[str]], 
+               cut_nodes: Set[str]):
     """
-    copy nodes in the non_reachable partition to module of node_pair[1]
+    Copy nodes in the non_reachable partition to module of node_pair[1]
 
-    name_to_node is a mapping from name to nodes in fused graph
+    ``name_to_node`` is a mapping from name to nodes in fused graph. It is used to modify the args of 
+    nodes. In general the name nodes corresponds to each other, except one case.
+    e.g. if a node "fused_0" orignally has a single output, but after rematerialization it has multiple outputs,
+    name_to_node["fused_0"] will be changed to map to the new getitem(fused_0, 0).
     """
     # breakpoint()
     reachable, non_reachable = partition
@@ -246,7 +267,8 @@ def copy_nodes(node_pair, fused_graph, name_to_node, partition, cut_nodes):
     name_to_node_dest = {node.name: node for node in module_dest.graph.nodes}
 
     # modify the outputs of module_origin to contain new outputs
-    add_new_outputs(node_pair, fused_graph, name_to_node, module_origin, cut_nodes, name_to_node_origin)
+    module_origin_new_outputs = {name_to_node_origin[name] for name in cut_nodes}
+    add_new_outputs(node_pair, fused_graph, name_to_node, module_origin, module_origin_new_outputs)
 
     first_node_dest = None
     for node in module_dest.graph.nodes:
