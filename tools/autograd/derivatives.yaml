@@ -342,11 +342,6 @@
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
-- name: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
-  self: _NestedTensor_GeneralizedBMM(grad, mat2.transpose(1, 2).conj())
-  mat2: _NestedTensor_GeneralizedBMM(self.transpose(1, 2).conj(), grad)
-  result: _NestedTensor_GeneralizedBMM(self_t, mat2_p) + _NestedTensor_GeneralizedBMM(self_p, mat2_t)
-
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)
@@ -1527,6 +1522,10 @@
   self: grad.expand(self.sizes())
   result: auto_linear
 
+- name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+  result: auto_linear
+
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
@@ -1711,6 +1710,12 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: auto_linear
+
+- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  # TODO: add proper double backward for view.SymInt
+  # by SymIntizing `reshape`
+  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
@@ -2771,6 +2776,10 @@
 # when used with a Tensor subclass together with __torch_dispatch__.
 # All the other factory functions are composite and call into one of these.
 - name: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  self: non_differentiable
+  output_differentiability: [False]
+
+- name: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   self: non_differentiable
   output_differentiability: [False]
 
