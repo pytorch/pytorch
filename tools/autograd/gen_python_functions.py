@@ -560,7 +560,7 @@ def load_deprecated_signatures(
                         return False
 
             return len(schema.returns) == len(aten_schema.returns) and all(
-                a.type == b.type for a, b in zip(schema.returns, aten_schema.returns)
+                a == b for a, b in zip(schema.returns, aten_schema.returns)
             )
 
         any_schema_found = False
