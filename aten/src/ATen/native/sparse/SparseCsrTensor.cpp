@@ -705,10 +705,44 @@ Tensor empty_like_sparse_csr(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
+  TORCH_CHECK(options.layout() == self.layout(),
+    "empty_like with different sparse layout is not supported (self is ",
+    self.layout(), " but you requested ", options.layout(), ")");
   if (options.layout() == kSparseCsr) {
     auto result = at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().clone(),
         self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
+  } else if (options.layout() == kSparseCsc) {
+    auto result = at::native::_sparse_csc_tensor_unsafe(
+        self.ccol_indices().clone(),
+        self.row_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
+  } else if (options.layout() == kSparseBsr) {
+    auto result = at::native::_sparse_bsr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+
+    return result;
+  } else if (options.layout() == kSparseBsc) {
+    auto result = at::native::_sparse_bsc_tensor_unsafe(
+        self.ccol_indices().clone(),
+        self.row_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
