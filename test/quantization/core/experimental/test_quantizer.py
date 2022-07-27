@@ -29,7 +29,7 @@ class TestQuantizer(unittest.TestCase):
         alpha, gamma, quantization_levels, level_indices = apot_observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
-        qtensor = quantize_APoT(tensor2quantize=torch.clone(tensor2quantize),
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
                                 alpha=alpha,
                                 gamma=gamma,
                                 quantization_levels=quantization_levels,
@@ -44,9 +44,6 @@ class TestQuantizer(unittest.TestCase):
                                                 scale=scale,
                                                 zero_point=zero_point,
                                                 dtype=torch.quint8).int_repr()
-
-        print(scale)
-        print(uniform_quantized)
 
         qtensor_data = qtensor.data.int()
         uniform_quantized_tensor = uniform_quantized.data.int()
