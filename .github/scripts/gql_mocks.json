@@ -17949,5 +17949,835 @@
         "team": null
       }
     }
+  },
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=82169 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "ezyang"
+          },
+          "title": "Move test_dtypes so it runs later",
+          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* __->__ #82169\n\nThe error messages it gives are very unhelpful (because a failure\ngets translated into \"dtype was not supported\" rather than the\nactual backtrace), so I'd rather get error messages about this after\nI've tested basic functionality.\n\nSigned-off-by: Edward Z. Yang <ezyang@fb.com>",
+          "headRefName": "gh/ezyang/1279/head",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "gh/ezyang/1279/base",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "cef34da55a59da5a32494bff218ccd4978b659d3"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "83ad7e73a07111ac1d85e931d14360cc22c01edd"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "28140e4008289251b695385acfb48ac7a47cd49c"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            },
+            "totalCount": 3
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Lint"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "lintrunner",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543705427?check_suite_focus=true"
+                              },
+                              {
+                                "name": "Test collect_env (with_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543705796?check_suite_focus=true"
+                              },
+                              {
+                                "name": "Test collect_env (without_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543705914?check_suite_focus=true"
+                              },
+                              {
+                                "name": "Test collect_env (older_python_version)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706071?check_suite_focus=true"
+                              },
+                              {
+                                "name": "quick-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706300?check_suite_focus=true"
+                              },
+                              {
+                                "name": "toc",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706581?check_suite_focus=true"
+                              },
+                              {
+                                "name": "Test tools",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706911?check_suite_focus=true"
+                              },
+                              {
+                                "name": "workflow-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543707223?check_suite_focus=true"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAcGj1lc=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696649"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRc8k="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "CANCELLED",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696651"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRc8s="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "run-torchbench",
+                                "conclusion": "NEUTRAL",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543705420?check_suite_focus=true"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAcGjz0w=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SKIPPED",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696656"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRc9A="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Lint"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "CANCELLED",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696660"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRc9Q="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "pull"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "CANCELLED",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696715"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdAs="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "pull"
+                            }
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706290?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706587?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543706915?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543707231?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3_7-clang8-xla / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543707459?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7-no-ops / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543707794?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543708127?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543708379?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543708606?check_suite_focus=true"
+                              },
+                              {
+                                "name": "win-vs2019-cuda11.6-py3 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543709052?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543709309?check_suite_focus=true"
+                              },
+                              {
+                                "name": "win-vs2019-cpu-py3 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543709535?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543709809?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang10-onnx / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543709986?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-py3-clang5-mobile-build / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543710238?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-rocm5.2-py3.7 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543710467?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-jammy-cuda11.6-cudnn8-py3.8-clang12 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543710675?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543710925?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-cuda11_3-py3_7-gcc7-deploy / build",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543711166?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7543711347?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544378552?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544378697?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544378800?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544378922?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (dynamo, 1, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544379063?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (dynamo, 2, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544379177?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3.7-clang9 / test (functorch, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544379274?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang10-onnx / test (default, 1, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544414957?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang10-onnx / test (default, 2, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544415089?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-docs / build-docs (cpp)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418146?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-docs / build-docs (python)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418325?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418649?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418760?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (distributed, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418892?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (functorch, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544418988?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (docs_test, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544419111?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544419210?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-gcc7 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544419367?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544420236?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544427790?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / test (default, 1, 5, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544526201?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / test (default, 2, 5, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544526466?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / test (default, 3, 5, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544526651?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / test (default, 4, 5, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544526810?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-focal-py3.7-clang7-asan / test (default, 5, 5, linux.2xlarge)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544526939?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (default, 1, 4, linux.4xlarge.nvidia.gpu)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544790873?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544790983?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (default, 3, 4, linux.4xlarge.nvidia.gpu)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791069?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (default, 4, 4, linux.4xlarge.nvidia.gpu)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791145?check_suite_focus=true"
+                              },
+                              {
+                                "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (distributed, 1, 2, linux.8xlarge.nvidia.gpu)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791233?check_suite_focus=true"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAcG0YME=",
+                              "hasNextPage": true
+                            }
+                          },
+                          "conclusion": "SUCCESS",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696836"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdIQ="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Facebook CLA Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://code.intern.facebook.com/cla/"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAcGjyQg=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS",
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546696896"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdMA="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null,
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546697185"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdeE="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null,
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546697205"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdfU="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null,
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546697224"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdgg="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "pushedDate": "2022-07-27T15:34:17Z",
+                  "oid": "28140e4008289251b695385acfb48ac7a47cd49c"
+                }
+              }
+            ]
+          },
+          "changedFiles": 1,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_ops.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "zou3519"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "Chillee"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNy0yNVQxNDo0NTozNS0wNzowMLkyMDIyLTA3LTI1VDE0OjQ1OjM1LTA3OjAwzj6XYmg=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "@pytorchbot merge -f FORCE",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1197107402
+              },
+              {
+                "bodyText": "You need to provide a reason for using force merge, in the format @pytorchbot merge -f '[CATEGORY] Explanation'. With [CATEGORY] being one the following:\nEMERGENCY - an emergency fix to quickly address an issue\nMINOR - a minor fix such as cleaning locally unused variables, which shouldn't break anything\nPRE_TESTED - a previous CI run tested everything and you've only added minor changes like fixing lint\nOTHER - something not covered above",
+                "author": {
+                  "login": "pytorch-bot"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1197107439
+              },
+              {
+                "bodyText": "@pytorchbot merge -f \"[OTHER] normal land failed twice already\"",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1197108130
+              },
+              {
+                "bodyText": "@pytorchbot successfully started a merge job. Check the current status here",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1197119348
+              },
+              {
+                "bodyText": "Hey @ezyang.\nYou've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. Please add one of each to the PR. The 'release notes: ...' label should represent the part of PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). The list of valid labels can be found here for the 'release notes: ...' and here for the 'topics: ...'.\nFor changes that are 'topic: not user facing' there is no need for a release notes label.",
+                "author": {
+                  "login": "github-actions"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1197120095
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOR1poyg==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "query_sha=4c16925415d1fcc12ac0f5f7ce73b8e6122997d2f51c4c2757c2543e6493c60d cr_cursor=Y3Vyc29yOnYyOpHPAAAAAcG0YME= cs_cursor=Y3Vyc29yOnYyOpHPAAAAAcHRdAs= name=pytorch number=82169 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "28140e4008289251b695385acfb48ac7a47cd49c",
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (distributed, 2, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791308?check_suite_focus=true"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.6-py3.7-gcc7 / test (functorch, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791418?check_suite_focus=true"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11_3-py3_7-gcc7-deploy / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544791778?check_suite_focus=true"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544877177?check_suite_focus=true"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544877276?check_suite_focus=true"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (functorch, 1, 1, windows.4xlarge)",
+                              "conclusion": "SUCCESS",
+                              "detailsUrl": "https://github.com/pytorch/pytorch/runs/7544877367?check_suite_focus=true"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAcG1sTc=",
+                            "hasNextPage": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "query_sha=4fa42dda073cf7ac75b2bbf595a8ef67b6dfff4bd248668750ff33ea913bf75f cursor=Y3Vyc29yOnYyOpHPAAAAAcHRdgg= name=pytorch number=82169 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "28140e4008289251b695385acfb48ac7a47cd49c",
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null,
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546697240"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdhg="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null,
+                          "url": "https://github.com/pytorch/pytorch/commit/28140e4008289251b695385acfb48ac7a47cd49c/checks?check_suite_id=7546697255"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAcHRdic="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
   }
 }
