@@ -27,22 +27,27 @@ class _LRScheduler(object):
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
 
         # Attach optimizer
-        if not isinstance(optimizer, Optimizer):
+        if not isinstance(optimizer, Optimizer) and not optimizer.is_overlapped:
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
-
-        # Initialize epoch and base learning rates
-        if last_epoch == -1:
-            for group in optimizer.param_groups:
-                group.setdefault('initial_lr', group['lr'])
-        else:
-            for i, group in enumerate(optimizer.param_groups):
-                if 'initial_lr' not in group:
-                    raise KeyError("param 'initial_lr' is not specified "
-                                   "in param_groups[{}] when resuming an optimizer".format(i))
-        self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
+
+        self.is_overlapped = hasattr(optimizer, 'is_overlapped') and optimizer.is_overlapped
+
+        if self.is_overlapped:
+            self.base_lrs = [optimizer.defaults['lr']]
+        else:  
+            # Initialize epoch and base learning rates
+            if last_epoch == -1:
+                for group in optimizer.param_groups:
+                    group.setdefault('initial_lr', group['lr'])
+            else:
+                for i, group in enumerate(optimizer.param_groups):
+                    if 'initial_lr' not in group:
+                        raise KeyError("param 'initial_lr' is not specified "
+                                    "in param_groups[{}] when resuming an optimizer".format(i))
+            self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
 
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
@@ -72,7 +77,11 @@ class _LRScheduler(object):
             wrapper._with_counter = True
             return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step)
+        if self.is_overlapped:
+            self.optimizer.step_param = with_counter(self.optimizer.step_param)
+        else:
+            self.optimizer.step = with_counter(self.optimizer.step)
+
         self.verbose = verbose
 
         self._initial_step()
@@ -169,14 +178,15 @@ class _LRScheduler(object):
 
         # Compitiable with customized reseting
         if hasattr(self.optimizer, 'reset_lr'):
-            self.optimizer.reset_lr(lr)
+            self.optimizer.reset_lr(values[0])
+            self._last_lr = [values[0]]
+        else:
+            for i, data in enumerate(zip(self.optimizer.param_groups, values)):
+                param_group, lr = data
+                param_group['lr'] = lr
+                self.print_lr(self.verbose, i, lr, epoch)
 
-        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
-            param_group, lr = data
-            param_group['lr'] = lr
-            self.print_lr(self.verbose, i, lr, epoch)
-
-        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+            self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
 
 class LambdaLR(_LRScheduler):

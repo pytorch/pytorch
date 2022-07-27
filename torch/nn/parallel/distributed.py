@@ -1468,9 +1468,9 @@ class DistributedDataParallel(Module, Joinable):
             _OptimizerHookState,
             _hook_then_optimizer
         )
-        opt_hook_state = _OptimizerHookState(optim, optim.params)
-        opt_hook = _hook_then_optimizer(allreduce_hook, opt_hook_state)
-        self.register_comm_hook(opt_hook)
+        self._opt_hook_state = _OptimizerHookState(optim, optim.params)
+        opt_hook = _hook_then_optimizer(allreduce_hook, self._opt_hook_state)
+        self.register_comm_hook(None, opt_hook)
     
 
     def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):

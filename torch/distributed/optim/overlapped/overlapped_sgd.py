@@ -2,6 +2,8 @@ from typing import List, Optional, Union
 from torch import Tensor
 from ..functional_sgd import _FunctionalSGD
 from .overlapped_optim import OverlappedOptimizer
+
+
 class OverlappedSGD(OverlappedOptimizer):
     def __init__(
         self,
@@ -16,8 +18,7 @@ class OverlappedSGD(OverlappedOptimizer):
         grad_scaler=None,
         zero_grad=False
     ):
-        super().__init__(grad_scaler=grad_scaler, zero_grad=zero_grad)
-        self._functional_sgd = _FunctionalSGD(params,
+        self._functional_sgd = _FunctionalSGD(None,
                                               lr,
                                               momentum,
                                               dampening,
@@ -26,7 +27,8 @@ class OverlappedSGD(OverlappedOptimizer):
                                               maximize,
                                               foreach,
                                               _allow_empty_param_list=True)
+        super().__init__(functional_optim=self._functional_sgd, grad_scaler=grad_scaler, zero_grad=zero_grad)
         self.params = params
+
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):
         return self._functional_sgd.step_param(param=param, grad=grad)
-

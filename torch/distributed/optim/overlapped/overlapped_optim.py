@@ -9,6 +9,7 @@ class OverlappedOptimizer(object):
         self._functional_optim = functional_optim
         self.grad_scaler = grad_scaler
         self.zero_grad = zero_grad
+        self.is_overlapped = True
         
     def step_param(self, param: Tensor, grad: Optional[Tensor]):
         self._pre_step(param=param, grad=grad)
