@@ -580,6 +580,12 @@ static int THPVariable_clear(THPVariable* self) {
   return 0;
 }
 
+int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(
+      false, "Tensor tp_traverse function was not overriden properly");
+  return 0;
+}
+
 PyObject* THPVariable_pynew(
     PyTypeObject* type,
     PyObject* args,
@@ -1650,7 +1656,7 @@ PyTypeObject THPVariableType = {
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     // Also set by metaclass
-    nullptr, /* tp_traverse */
+    (traverseproc)THPFunction_traverse, /* tp_traverse */
     (inquiry)THPVariable_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
@@ -1697,7 +1703,7 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
@@ -1909,7 +1915,7 @@ static int traverse_slots(
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;

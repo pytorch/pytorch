@@ -112,6 +112,9 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
   c10::SymIntArrayRef sym_sizes_custom() const override {
     TORCH_CHECK(false, "Internal error: sym_sizes_custom() not supported for QTensorImpl.");
   }
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    TORCH_CHECK(false, "Internal error: sym_strides_custom() not supported for QTensorImpl.");
+  }
   IntArrayRef strides_custom() const override {
     TORCH_CHECK(false, "Internal error: strides_custom() not supported for QTensorImpl.");
   }

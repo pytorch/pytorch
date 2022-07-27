@@ -226,8 +226,6 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeRpcAsync(Node* node);
-  void analyzeBatchNorm(Node* node);
-  void analyzeInstanceNorm(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
@@ -314,7 +312,7 @@ class AliasDb {
 // Helper check that invariants over AliasDb are maintained.
 // Useful if you are using the AliasDb mutation API and want to check you did
 // the right thing.
-void Lint(const AliasDb* db);
+TORCH_API void Lint(const AliasDb* db);
 
 } // namespace jit
 } // namespace torch
