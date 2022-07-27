@@ -41,6 +41,8 @@ class C10_API SymInt {
 
   SymInt operator+(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  bool operator==(SymInt sci) const;
+  bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
   // Perhaps these should return symbolic bools?
@@ -88,7 +90,7 @@ class C10_API SymInt {
   static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & ~(1ULL << 62);
+  static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 
