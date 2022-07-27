@@ -13,8 +13,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import _type_utils
+from torch.onnx import _patch_torch, _type_utils  # noqa: F401
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -1378,7 +1377,6 @@ def _set_operator_export_type(operator_export_type):
 # onnx_shape_inference = False by default.
 def _set_onnx_shape_inference(onnx_shape_inference: bool):
     GLOBALS.onnx_shape_inference = onnx_shape_inference
-
 
 
 # Deprecated. Internally use _type_utils.ScalarType
