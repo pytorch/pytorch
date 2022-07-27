@@ -150,7 +150,7 @@ def _assert_nvfuser_op_exists(fname: str):
     try:
         from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
 
-        assert getattr(fd.Ops, fname)
+        assert getattr(fd.Operators, fname)
     except ImportError:
         # Not all PyTorch builds have nvfuser
         pass
@@ -163,7 +163,7 @@ for fname in _nvfuser_unary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd, a):
-    return fd.Ops.{fname}(a)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a)  # type: ignore[attr-defined]
 
 _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 """
@@ -196,7 +196,7 @@ for fname in _nvfuser_binary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd, a, b):
-    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b)  # type: ignore[attr-defined]
 
 _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 """
@@ -213,7 +213,7 @@ for fname in _nvfuser_ternary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd, a, b, c):
-    return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b)  # type: ignore[attr-defined]
 
 _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 """
@@ -226,12 +226,12 @@ def _broadcast_in_dim_nvfuser(
     shape: ShapeType,
     broadcast_dimensions: ShapeType,
 ):
-    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
+    return fd.ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
 
 
 def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype):
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
+    return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
 def _sum_nvfuser(
@@ -241,7 +241,7 @@ def _sum_nvfuser(
 ):
     keep_dims = False
     output_dtype = torch._C._nvfuser.DataType.Null
-    return fd.Ops.sum(a, dims, keep_dims, output_dtype)
+    return fd.ops.sum(a, dims, keep_dims, output_dtype)
 
 
 def _var_nvfuser(
@@ -252,7 +252,7 @@ def _var_nvfuser(
     correction: int,
 ):
     keep_dims = False
-    return fd.Ops.var(a, dims, correction, keep_dims)
+    return fd.ops.var(a, dims, correction, keep_dims)
 
 
 def _amax_nvfuser(
@@ -261,7 +261,7 @@ def _amax_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.max(a, dims, keep_dims)
+    return fd.ops.max(a, dims, keep_dims)
 
 
 def _amin_nvfuser(
@@ -270,7 +270,7 @@ def _amin_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.min(a, dims, keep_dims)
+    return fd.ops.min(a, dims, keep_dims)
 
 
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
