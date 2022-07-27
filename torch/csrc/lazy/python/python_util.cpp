@@ -4,6 +4,7 @@
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
@@ -19,9 +20,10 @@ c10::optional<SourceLocation> GetPythonFrameTop() {
     return c10::nullopt;
   }
   SourceLocation loc;
-  loc.line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-  loc.file = THPUtils_unpackString(frame->f_code->co_filename);
-  loc.function = THPUtils_unpackString(frame->f_code->co_name);
+  auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+  loc.line = PyFrame_GetLineNumber(frame);
+  loc.file = THPUtils_unpackString(code->co_filename);
+  loc.function = THPUtils_unpackString(code->co_name);
   return loc;
 }
 
@@ -30,13 +32,17 @@ std::vector<SourceLocation> GetPythonFrames() {
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
     PyFrameObject* frame = PyEval_GetFrame();
+    Py_INCREF(frame);
     while (frame != nullptr) {
       SourceLocation loc;
-      loc.line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      loc.file = THPUtils_unpackString(frame->f_code->co_filename);
-      loc.function = THPUtils_unpackString(frame->f_code->co_name);
+      auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+      loc.line = PyFrame_GetLineNumber(frame);
+      loc.file = THPUtils_unpackString(code->co_filename);
+      loc.function = THPUtils_unpackString(code->co_name);
       frames.push_back(std::move(loc));
-      frame = frame->f_back;
+      auto new_frame = PyFrame_GetBack(frame);
+      Py_DECREF(frame);
+      frame = new_frame;
     }
   }
   return frames;
