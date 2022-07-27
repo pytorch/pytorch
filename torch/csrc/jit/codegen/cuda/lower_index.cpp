@@ -137,14 +137,20 @@ void IndexLowering::handle(const ViewAsScalar* uop) {
 
 namespace {
 
+struct GridCommWorkBufferSizeInfo {
+  // Size of overall buffer. Can be expanded for privatization
+  Val* size_of_privatized_buffer = nullptr;
+  // Size of single buffer.
+  Val* buffer_stride = nullptr;
+};
+
 // Get the size of the temporary work buffer for grid communication, this can be
 // grid reduction, broadcast, or grid welford.
-// expansion_factor can be optionally passed to expand the allocation
-// size. For example, FusedReduction should double the work buffer size.
-Val* getGridCommWorkBufferSize(
+// The buffer is expanded for privatization when not persistent or grouped.
+GridCommWorkBufferSizeInfo getGridCommWorkBufferSize(
     const TensorDomain* td,
-    const std::vector<kir::ForLoop*>& for_loops = {},
-    int expansion_factor = 1) {
+    const std::vector<kir::ForLoop*>& for_loops,
+    bool is_persistent) {
   // The buffer size is the number of thread blocks multiplied by the
   // number of threads not used for reduction domains.
   // Note: Previously it was calculated based on the shape of the
@@ -154,11 +160,7 @@ Val* getGridCommWorkBufferSize(
   // size if the parallel dimensions are exact, but otherwise, just
   // computing the buffer size based on the tensor shape isn't
   // sufficient since there could be extra threads/blocks.
-  TORCH_INTERNAL_ASSERT(
-      expansion_factor >= 1, "Invalid expansion factor: ", expansion_factor);
-  Val* buffer_size = expansion_factor == 1
-      ? GpuLower::current()->kernel()->oneVal()
-      : IrBuilder::create<Int>(expansion_factor);
+  Val* size_of_single_buffer = GpuLower::current()->kernel()->oneVal();
   for (auto pt : kParallelTypeThreads) {
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
     if (pt_dim == nullptr || pt_dim->isOneInt()) {
@@ -171,29 +173,58 @@ Val* getGridCommWorkBufferSize(
         })) {
       continue;
     }
-    buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
+    size_of_single_buffer =
+        SimplifyingIrBuilder::mulExpr(size_of_single_buffer, pt_dim);
   }
 
-  // All iteration domains require a separate entry in the buffer for re-entrant
-  // grid reductions.
+  // Expand the buffer for privatization. The buffer is expanded so
+  // that each non-reduction IterDomain uses a different part of the
+  // buffer. For persistent mode, this expansion is only done for
+  // grouped IterDomains.
+
+  Val* size_of_privatized_buffer = size_of_single_buffer;
+
+  // In persistent mode, if non-grouped no-reduction domain is used,
+  // double the buffer size to save a final grid sync
+  bool is_doubled = false;
+
   for (auto fl : for_loops) {
-    if (fl->isTrivial()) {
+    // Buffer size of parallelized domains are already taken care
+    if (fl->isTrivial() || fl->iter_domain()->isReduction() ||
+        fl->iter_domain()->isThread()) {
       continue;
     }
-    if (fl->iter_domain()->isThread()) {
-      // already accounted for.
-      continue;
+    // If persistent, i.e., allreduce, only IterDomains with
+    // ParallelType::Group are privatized
+    if (!is_persistent ||
+        fl->iter_domain()->getParallelType() == ParallelType::Group) {
+      size_of_privatized_buffer = SimplifyingIrBuilder::mulExpr(
+          size_of_privatized_buffer, fl->iter_domain()->extent());
+    } else if (is_persistent) {
+      is_doubled = true;
     }
-    buffer_size =
-        SimplifyingIrBuilder::mulExpr(buffer_size, fl->iter_domain()->extent());
   }
 
-  return buffer_size;
+  if (is_doubled) {
+    size_of_privatized_buffer = SimplifyingIrBuilder::mulExpr(
+        size_of_privatized_buffer, IrBuilder::create<Int>(2));
+  }
+
+  GridCommWorkBufferSizeInfo info;
+  info.size_of_privatized_buffer = size_of_privatized_buffer;
+  info.buffer_stride = size_of_single_buffer;
+  if (is_doubled) {
+    info.buffer_stride = SimplifyingIrBuilder::mulExpr(
+        info.buffer_stride, IrBuilder::create<Int>(2));
+  }
+
+  return info;
 }
 
 Val* getGridSyncBufferSize(
     const TensorDomain* td,
-    const std::vector<kir::ForLoop*>& for_loops = {}) {
+    const std::vector<kir::ForLoop*>& for_loops,
+    bool is_persistent) {
   // See the comment above for getGridCommWorkBufferSize.
   Val* buffer_size = GpuLower::current()->kernel()->oneVal();
   for (auto pt : kParallelTypeBIDs) {
@@ -210,19 +241,21 @@ Val* getGridSyncBufferSize(
     buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
   }
 
-  // All iteration domains require a separate semaphore for re-entrant grid
-  // reductions
-  for (auto fl : for_loops) {
-    if (fl->isTrivial()) {
-      continue;
-    }
-    if (fl->iter_domain()->isThread()) {
-      // already accounted for.
-      continue;
-    }
+  // If not persistent, all iteration domains require a separate
+  // semaphore for re-entrant grid reductions
+  if (!is_persistent) {
+    for (auto fl : for_loops) {
+      if (fl->isTrivial()) {
+        continue;
+      }
+      if (fl->iter_domain()->isThread()) {
+        // already accounted for.
+        continue;
+      }
 
-    buffer_size =
-        SimplifyingIrBuilder::mulExpr(buffer_size, fl->iter_domain()->extent());
+      buffer_size = SimplifyingIrBuilder::mulExpr(
+          buffer_size, fl->iter_domain()->extent());
+    }
   }
 
   return buffer_size;
@@ -338,13 +371,6 @@ void IndexLowering::handleGridReduction(
       "then the grid reduction. ",
       rop->toString());
 
-  // When using the fused reduction in a loop, the global work buffer
-  // is double buffered to save global synchronizations.
-  auto is_within_a_loop = std::any_of(
-      out_domain->domain().begin(),
-      out_domain->domain().end(),
-      [](IterDomain* id) { return !isTrivialIterDomain(id); });
-
   // Use a unique buffer for work and sync flag when called within a
   // loop unless it's persistent. Grid all reduce means persistence is
   // required. However, not being a grid all reduce does not mean
@@ -352,27 +378,26 @@ void IndexLowering::handleGridReduction(
   // required anywhere in the kernel, all grid reducitons are done in
   // a persistent manner, so all grid reductions should be consulted.
   // TODO: fix this
-  const bool privatize_buffer = !rop->isAllreduce();
+  const bool is_persistent = rop->isAllreduce();
+  const auto buffer_size_info =
+      getGridCommWorkBufferSize(out_domain, for_loops_, is_persistent);
 
-  const auto reduce_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridCommWorkBufferSize(
-          out_domain,
-          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
-          rop->isAllreduce() && is_within_a_loop ? 2 : 1),
-      out->dtype(),
-      false);
+  auto work_buffer = allocateUniqueBuffer(
+      buffer_size_info.size_of_privatized_buffer,
+      out_tv->dtype(),
+      false,
+      out_tv,
+      work_buffer_map_);
 
-  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(
-          out_domain,
-          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
-      DataType::Int,
-      true);
+  auto sync_buffer_size =
+      getGridSyncBufferSize(out_domain, for_loops_, is_persistent);
+  auto sync_buffer = allocateUniqueBuffer(
+      sync_buffer_size, DataType::Int, true, out_tv, sync_buffer_map_);
 
-  const auto entrance_ind = privatize_buffer
+  const auto entrance_ind = !is_persistent
       ? getEntranceLinIndGridReduce(for_loops_)
       : GpuLower::current()->kernel()->zeroVal();
-  const auto n_entrances = privatize_buffer
+  const auto n_entrances = !is_persistent
       ? getEntranceCountGridReduce(for_loops_)
       : GpuLower::current()->kernel()->oneVal();
 
@@ -387,7 +412,7 @@ void IndexLowering::handleGridReduction(
       rop->init(),
       out,
       in,
-      reduce_buffer,
+      work_buffer,
       sync_buffer,
       entrance_ind,
       n_entrances,
@@ -402,17 +427,11 @@ void IndexLowering::handleGridReduction(
     grid_reduction->setWritePredicate(rop->writePredicate());
   }
 
-  pushBack(reduce_buffer);
-  pushBack(sync_buffer);
   pushBack(grid_reduction);
   GpuLower::current()->propagateExprInfo(rop, back());
 
   if (rop->isAllreduce()) {
-    // When using the fused reduction, allocate the reduction object at
-    // the outer-most scope
-    auto fused_reduction_alloc_reduction =
-        IrBuilder::create<kir::AllocateFusedReduction>(grid_reduction);
-    insertAtTopLevel(fused_reduction_alloc_reduction);
+    allocateUniqueFusedReduction(grid_reduction, out_tv);
   }
 }
 
@@ -425,10 +444,10 @@ void IndexLowering::handle(const GroupedReductionOp* grouped_rop) {
   const bool has_block_reduce = out_domain->hasBlockReduction();
   const bool has_grid_reduce = out_domain->hasGridReduction();
 
-  std::vector<Val*> indexed_outputs(grouped_rop->numReductions());
-  std::vector<Val*> indexed_inputs(grouped_rop->numReductions());
+  std::vector<Val*> indexed_outputs(grouped_rop->numExprs());
+  std::vector<Val*> indexed_inputs(grouped_rop->numExprs());
 
-  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+  for (const auto i : c10::irange(grouped_rop->numExprs())) {
     indexed_outputs.at(i) = lowerDstIndex(grouped_rop->output(i));
     indexed_inputs.at(i) =
         lowerSrcIndex(grouped_rop->input(i), grouped_rop->output(i));
@@ -439,7 +458,7 @@ void IndexLowering::handle(const GroupedReductionOp* grouped_rop) {
   } else if (has_block_reduce) {
     handleBlockReduction(grouped_rop, indexed_outputs, indexed_inputs);
   } else {
-    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    for (const auto i : c10::irange(grouped_rop->numExprs())) {
       pushBack(IrBuilder::create<BinaryOp>(
           grouped_rop->getReductionOpType(i),
           indexed_outputs.at(i),
@@ -496,41 +515,33 @@ void IndexLowering::handleGridReduction(
       "please use rfactor to do the serialized reduction first, ",
       "then the grid reduction.");
 
-  // When using the fused reduction in a loop, the global work buffer
-  // is double buffered to save global synchronizations.
-  auto is_within_a_loop = std::any_of(
-      out_domain->domain().begin(),
-      out_domain->domain().end(),
-      [](IterDomain* id) { return !isTrivialIterDomain(id); });
+  const bool is_persistent = grouped_rop->isAllreduce();
+  auto work_buf_size_info =
+      getGridCommWorkBufferSize(out_domain, for_loops_, is_persistent);
 
-  const bool privatize_buffer = !grouped_rop->isAllreduce();
-
-  std::vector<kir::Allocate*> reduce_buffers;
+  std::vector<kir::Allocate*> work_buffers;
   std::transform(
       outputs.begin(),
       outputs.end(),
-      std::back_inserter(reduce_buffers),
+      std::back_inserter(work_buffers),
       [&](Val* output) {
-        return ir_utils::allocGlobalBufferForGridComm(
-            getGridCommWorkBufferSize(
-                out_domain,
-                privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
-                (grouped_rop->isAllreduce() && is_within_a_loop ? 2 : 1)),
+        return allocateUniqueBuffer(
+            work_buf_size_info.size_of_privatized_buffer,
             output->dtype(),
-            false);
+            false,
+            output->as<kir::TensorIndex>()->view(),
+            work_buffer_map_);
       });
 
-  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(
-          out_domain,
-          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
-      DataType::Int,
-      true);
+  auto sync_buffer_size =
+      getGridSyncBufferSize(out_domain, for_loops_, is_persistent);
+  auto sync_buffer = allocateUniqueBuffer(
+      sync_buffer_size, DataType::Int, true, out_tv, sync_buffer_map_);
 
-  const auto entrance_ind = privatize_buffer
+  const auto entrance_ind = !is_persistent
       ? getEntranceLinIndGridReduce(for_loops_)
       : GpuLower::current()->kernel()->zeroVal();
-  const auto n_entrances = privatize_buffer
+  const auto n_entrances = !is_persistent
       ? getEntranceCountGridReduce(for_loops_)
       : GpuLower::current()->kernel()->oneVal();
 
@@ -545,10 +556,11 @@ void IndexLowering::handleGridReduction(
       grouped_rop->initVals(),
       outputs,
       inputs,
-      reduce_buffers,
+      work_buffers,
       sync_buffer,
       entrance_ind,
       n_entrances,
+      work_buf_size_info.buffer_stride,
       grouped_rop->isAllreduce());
 
   grid_reduction->setThreadPredicate(thread_pred);
@@ -560,17 +572,11 @@ void IndexLowering::handleGridReduction(
     grid_reduction->setWritePredicate(grouped_rop->writePredicate());
   }
 
-  for (auto reduce_buffer : reduce_buffers) {
-    pushBack(reduce_buffer);
-  }
-  pushBack(sync_buffer);
   pushBack(grid_reduction);
   GpuLower::current()->propagateExprInfo(grouped_rop, back());
 
   if (grouped_rop->isAllreduce()) {
-    auto fused_reduction_alloc_reduction =
-        IrBuilder::create<kir::AllocateFusedReduction>(grid_reduction);
-    insertAtTopLevel(fused_reduction_alloc_reduction);
+    allocateUniqueFusedReduction(grid_reduction, out_tv);
   }
 }
 
@@ -654,40 +660,40 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   const auto out_tv = indexed_wop->out()->as<kir::TensorIndex>()->view();
   const auto out_domain = out_tv->domain();
 
-  // Buffer allocation
-  // When using the fused reduction in a loop, the global work buffer
-  // is double buffered to save global synchronizations.
-  auto is_within_a_loop = std::any_of(
-      out_domain->domain().begin(),
-      out_domain->domain().end(),
-      [](IterDomain* id) { return !isTrivialIterDomain(id); });
-
   // TODO: See the comment on the same variable in handleGridReduction
-  const bool privatize_buffer = !indexed_wop->isAllreduce();
+  const bool is_persistent = indexed_wop->isAllreduce();
+  const auto buffer_size_info =
+      getGridCommWorkBufferSize(out_domain, for_loops_, is_persistent);
 
-  const auto work_buffer_size = getGridCommWorkBufferSize(
-      out_domain,
-      privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
-      indexed_wop->isAllreduce() && is_within_a_loop ? 2 : 1);
+  const auto work_buffer_size = buffer_size_info.size_of_privatized_buffer;
+  auto out_var_buffer = allocateUniqueBuffer(
+      work_buffer_size,
+      indexed_wop->outVar()->dtype(),
+      false,
+      indexed_wop->outVar()->as<kir::TensorIndex>()->view(),
+      work_buffer_map_);
+  auto out_avg_buffer = allocateUniqueBuffer(
+      work_buffer_size,
+      indexed_wop->outAvg()->dtype(),
+      false,
+      indexed_wop->outAvg()->as<kir::TensorIndex>()->view(),
+      work_buffer_map_);
+  auto out_N_buffer = allocateUniqueBuffer(
+      work_buffer_size,
+      indexed_wop->outN()->dtype(),
+      false,
+      indexed_wop->outN()->as<kir::TensorIndex>()->view(),
+      work_buffer_map_);
 
-  const auto out_var_buffer = ir_utils::allocGlobalBufferForGridComm(
-      work_buffer_size, indexed_wop->outVar()->dtype(), false);
-  const auto out_avg_buffer = ir_utils::allocGlobalBufferForGridComm(
-      work_buffer_size, indexed_wop->outAvg()->dtype(), false);
-  const auto out_N_buffer = ir_utils::allocGlobalBufferForGridComm(
-      work_buffer_size, indexed_wop->outN()->dtype(), false);
+  auto sync_buffer_size =
+      getGridSyncBufferSize(out_domain, for_loops_, is_persistent);
+  auto sync_buffer = allocateUniqueBuffer(
+      sync_buffer_size, DataType::Int, true, out_tv, sync_buffer_map_);
 
-  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(
-          out_domain,
-          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
-      DataType::Int,
-      true);
-
-  const auto entrance_ind = privatize_buffer
+  const auto entrance_ind = !is_persistent
       ? getEntranceLinIndGridReduce(for_loops_)
       : GpuLower::current()->kernel()->zeroVal();
-  const auto n_entrances = privatize_buffer
+  const auto n_entrances = !is_persistent
       ? getEntranceCountGridReduce(for_loops_)
       : GpuLower::current()->kernel()->oneVal();
 
@@ -729,19 +735,13 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
     GpuLower::current()->propagateExprInfo(indexed_wop, back());
   }
 
-  pushBack(out_var_buffer);
-  pushBack(out_avg_buffer);
-  pushBack(out_N_buffer);
-  pushBack(sync_buffer);
   pushBack(grid_welford);
   GpuLower::current()->propagateExprInfo(indexed_wop, back());
 
   if (indexed_wop->isAllreduce()) {
     // When using the fused reduction, allocate the reduction object at
     // the outer-most scope
-    auto fused_reduction_alloc_reduction =
-        IrBuilder::create<kir::AllocateFusedReduction>(grid_welford);
-    insertAtTopLevel(fused_reduction_alloc_reduction);
+    allocateUniqueFusedReduction(grid_welford, out_tv);
   }
 }
 
@@ -792,21 +792,24 @@ void IndexLowering::handle(const BroadcastOp* bop) {
 
   // Grid broadcast
   const auto out_domain = out_tv->domain();
-  const auto broadcast_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridCommWorkBufferSize(out_domain), out->dtype(), false);
+  const auto work_buffer_size =
+      getGridCommWorkBufferSize(out_domain, for_loops_, true)
+          .size_of_privatized_buffer;
 
-  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(out_domain), DataType::Int, true);
+  auto work_buffer = allocateUniqueBuffer(
+      work_buffer_size, out->dtype(), false, out_tv, work_buffer_map_);
+
+  auto sync_buffer_size = getGridSyncBufferSize(out_domain, for_loops_, true);
+  auto sync_buffer = allocateUniqueBuffer(
+      sync_buffer_size, DataType::Int, true, out_tv, sync_buffer_map_);
 
   auto grid_broadcast = IrBuilder::create<kir::GridBroadcast>(
-      indexed_expr, broadcast_buffer, sync_buffer);
+      indexed_expr, work_buffer, sync_buffer);
 
   if (bop->predicate()) {
     grid_broadcast->setPredicate(bop->predicate());
   }
 
-  pushBack(broadcast_buffer);
-  pushBack(sync_buffer);
   pushBack(grid_broadcast);
   GpuLower::current()->propagateExprInfo(bop, back());
 }
@@ -835,6 +838,69 @@ void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   for (auto expr : exprs) {
     OptOutConstDispatch::handle(expr);
   }
+}
+
+kir::Allocate* IndexLowering::allocateUniqueBuffer(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init,
+    TensorView* out_tv,
+    std::unordered_map<TensorView*, kir::Allocate*>& alloc_map) {
+  // Return an existing allocation if exists
+  auto it = alloc_map.find(out_tv);
+  if (it != alloc_map.end()) {
+    return it->second;
+  }
+
+  // No existing allocation found. Create a new one
+  auto new_buffer =
+      ir_utils::allocGlobalBufferForGridComm(buffer_size, dtype, zero_init);
+
+  // Keep track of the allocation
+  alloc_map.emplace(out_tv, new_buffer);
+
+  // A buffer may be used in both the unswitched paths, so it must be
+  // placed outside of the current scope. Simplying placing it at the
+  // top-level scope should work.
+  insertAtTopLevel(new_buffer);
+
+  return new_buffer;
+}
+
+void IndexLowering::allocateUniqueFusedReduction(
+    Expr* expr,
+    TensorView* out_tv) {
+  auto it = fused_reduction_map_.find(out_tv);
+  if (it != fused_reduction_map_.end()) {
+    return;
+  }
+
+  kir::AllocateFusedReduction* fused_reduction_alloc_reduction = nullptr;
+  switch (expr->getExprType().value()) {
+    case ExprType::GridReduction:
+      fused_reduction_alloc_reduction =
+          IrBuilder::create<kir::AllocateFusedReduction>(
+              expr->as<kir::GridReduction>());
+      break;
+    case ExprType::GridWelford:
+      fused_reduction_alloc_reduction =
+          IrBuilder::create<kir::AllocateFusedReduction>(
+              expr->as<kir::GridWelford>());
+      break;
+    case ExprType::GroupedGridReduction:
+      fused_reduction_alloc_reduction =
+          IrBuilder::create<kir::AllocateFusedReduction>(
+              expr->as<kir::GroupedGridReduction>());
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Invalid expr: ", expr->toString());
+  }
+
+  fused_reduction_map_.emplace(out_tv, fused_reduction_alloc_reduction);
+
+  // When using the fused reduction, allocate the reduction object at
+  // the outer-most scope
+  insertAtTopLevel(fused_reduction_alloc_reduction);
 }
 
 } // namespace cuda

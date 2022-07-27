@@ -100,6 +100,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
 
   void handle(const kir::Predicate*) final;
   void handle(const kir::TensorIndex*) final;
+  void handle(const kir::IntPair*) final;
 
   void handle(const kir::GridBroadcast*) final;
   void handle(const kir::GridReduction*) final;
@@ -114,11 +115,14 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const kir::InitMagicZero*) final;
   void handle(const kir::UpdateMagicZero*) final;
   void handle(const kir::AllocateFusedReduction*) final;
+  void handle(const kir::Swizzle2DInt*) final;
+  void handle(const kir::PairSelect*) final;
 
   // IR math printer overrides these to prevent them from printing, keep
   // override
   void handle(const Split*) override;
   void handle(const Merge*) override;
+  void handle(const Swizzle2D*) override;
 
   void print_inline(const Statement* stmt) {
     bool prev = print_inline_;

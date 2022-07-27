@@ -33,6 +33,7 @@ enum class ValType {
   NamedScalar,
   Predicate,
   TensorIndex,
+  IntPair
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.
@@ -119,6 +120,9 @@ enum class ExprType {
   Split,
   ViewAsScalar,
   Merge,
+  Swizzle2D,
+  Swizzle2DInt,
+  PairSelect,
   Allocate,
   BlockSync,
   GridSync,
@@ -255,6 +259,7 @@ enum class ParallelType {
   Unroll,
   Unswitch,
   Mma,
+  Group,
   Serial
 };
 
@@ -313,6 +318,14 @@ enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose, CpAsync };
 //  a for loop is materializing.
 enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
 
+//! Supported swizzle types,
+//!  corresponds to swizzles functions on the runtime cuda
+//!  naming it swizzle_2d to reserve the options to have a swizzle_1d.
+//!
+//!  TODO: unify with existing swizzle logic, currently
+//!    doesn't have the same type.
+enum class Swizzle2DType { NoSwizzle = 0, ZShape, Transpose, XOR, Scatter };
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
@@ -343,6 +356,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
 TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream&,
     const DoubleBufferLoopStage);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const Swizzle2DType&);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);
@@ -386,6 +400,10 @@ enum class LaunchConfigType {
 };
 
 const char* const kMagicZeroName = "nvfuser_zero";
+
+//! Maximum number of reductions that can be grouped together. The
+//! limit can be increased by extending struct Tuple define in tuple.cu.
+static constexpr int kMaxNumGroupedReductions = 8;
 
 } // namespace cuda
 } // namespace fuser

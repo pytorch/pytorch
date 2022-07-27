@@ -30,6 +30,7 @@
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
@@ -101,6 +102,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -775,7 +777,12 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
-        const auto extent = root_domain[dim]->extent();
+        Val* extent = nullptr;
+        if (root_domain[dim]->hasExpandedExtent()) {
+          extent = root_domain[dim]->expandedExtent();
+        } else {
+          extent = root_domain[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -843,7 +850,12 @@ ExpressionEvaluator bindFusionInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");
       for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
+        Val* extent = nullptr;
+        if (root_dom[dim]->hasExpandedExtent()) {
+          extent = root_dom[dim]->expandedExtent();
+        } else {
+          extent = root_dom[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -1007,6 +1019,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");

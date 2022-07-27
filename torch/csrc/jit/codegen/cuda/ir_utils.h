@@ -181,6 +181,16 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
 // code.
 TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
 
+// Return immediate siblings of val, this function can be used on any Val and
+// will return siblings through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val);
+
 // Return immediate producers of vals, this function can be used on any vals and
 // will return producers through Exprs.
 //
@@ -222,6 +232,16 @@ TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 // strictly between fusion inputs/outputs, it could effectively return dead
 // code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+
+// Return immediate siblings of tv, this function will return all immediate
+// siblings of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv);
 
 // Return immediate producers of tvs, this function will return all immediate
 // producers of tvs through Exprs.

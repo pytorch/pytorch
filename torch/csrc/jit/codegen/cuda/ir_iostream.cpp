@@ -404,7 +404,7 @@ void IrPrinter::handle(const ReductionOp* rop) {
 void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
   indent() << "Grouped reduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+  for (const auto i : c10::irange(grouped_rop->numExprs())) {
     indent() << grouped_rop->output(i) << " = reduction( "
              << grouped_rop->input(i)
              << ", op = " << grouped_rop->getReductionOpType(i)
@@ -469,6 +469,18 @@ void IrPrinter::handle(const Merge* m) {
   handle(m->inner());
   os_ << " -> ";
   handle(m->out());
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const Swizzle2D* s) {
+  os_ << s->swizzleType() << "(2D): ";
+  handle(s->inX());
+  os_ << " , ";
+  handle(s->inY());
+  os_ << " -> ";
+  handle(s->outX());
+  os_ << " , ";
+  handle(s->outY());
   os_ << "\n";
 }
 
@@ -666,7 +678,7 @@ void IrPrinter::handle(const kir::GridReduction* node) {
 void IrPrinter::handle(const kir::GroupedGridReduction* node) {
   indent() << "Grouped grid reduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(node->numReductions())) {
+  for (const auto i : c10::irange(node->numExprs())) {
     indent();
     handle(node->output(i));
     os_ << " = "
@@ -691,7 +703,7 @@ void IrPrinter::handle(const kir::GroupedGridReduction* node) {
     os_ << "nullptr";
   }
   os_ << "\n";
-  for (const auto i : c10::irange(node->numReductions())) {
+  for (const auto i : c10::irange(node->numExprs())) {
     indent() << kTab << ".reduction_buffer=";
     handle(node->reduction_buffers().at(i)->buffer());
     os_ << "\n";
@@ -779,6 +791,51 @@ void IrPrinter::handle(const kir::AllocateFusedReduction* node) {
   indent() << "AllocateFusedReduction(reduction buffer=";
   handle(node->out());
   os_ << ")\n";
+}
+
+void IrPrinter::handle(const kir::IntPair* node) {
+  if (print_inline_) {
+    if (node->definition()) {
+      handle(node->definition());
+      return;
+    }
+  }
+  os_ << "iPair" << varName(node);
+}
+
+void IrPrinter::handle(const kir::Swizzle2DInt* node) {
+  if (!print_inline_) {
+    indent();
+    handle(node->out());
+    os_ << " = ";
+  }
+
+  os_ << node->swizzleType() << "2D(";
+  handle(node->inX());
+  os_ << ",";
+  handle(node->inY());
+  os_ << ")";
+}
+
+void IrPrinter::handle(const kir::PairSelect* node) {
+  if (!print_inline_) {
+    indent();
+    handle(node->out());
+    os_ << " = ";
+  }
+
+  handle(node->in());
+
+  switch (node->selection()) {
+    case kir::PairSelect::Selection::X:
+      os_ << ".x";
+      break;
+    case kir::PairSelect::Selection::Y:
+      os_ << ".y";
+      break;
+    default:
+      break;
+  }
 }
 
 void IrTransformPrinter::handle(Fusion* f) {

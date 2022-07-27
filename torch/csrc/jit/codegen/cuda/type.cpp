@@ -21,13 +21,12 @@ DataType indexModeToDtype(KernelIndexMode index_mode) {
 
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
-    case DataType::Bool:
-      return false;
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Bool:
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
@@ -78,10 +77,9 @@ bool isIntegralType(DataType dtype) {
     case DataType::Int32:
       return true;
     case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+      TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isIntegralType");
   }
 }
 
@@ -348,6 +346,12 @@ static const char* expr_type2string(ExprType t) {
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::Swizzle2D:
+      return "Swizzle2D";
+    case ExprType::Swizzle2DInt:
+      return "Swizzle2DInt";
+    case ExprType::PairSelect:
+      return "PairSelect";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -685,6 +689,8 @@ static const char* parallel_type2string(ParallelType t) {
       return "US";
     case ParallelType::Mma:
       return "MMA";
+    case ParallelType::Group:
+      return "G";
     case ParallelType::Serial:
       return "S";
     default:
@@ -971,6 +977,32 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& out,
     const IterType bt) {
   return out << iter_type2string(bt);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const Swizzle2DType& swizzle) {
+  switch (swizzle) {
+    case Swizzle2DType::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case Swizzle2DType::ZShape:
+      os << "ZShape";
+      break;
+    case Swizzle2DType::Transpose:
+      os << "Transpose";
+      break;
+    case Swizzle2DType::XOR:
+      os << "Xor";
+      break;
+    case Swizzle2DType::Scatter:
+      os << "Scatter";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
 }
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(

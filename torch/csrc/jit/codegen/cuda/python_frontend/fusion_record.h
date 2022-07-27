@@ -101,7 +101,8 @@ struct BroadcastOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
 
-    const auto arg_ndims = arg->domain()->noReductions().size();
+    const auto& arg_domains_nr = arg->domain()->noReductions();
+    const auto arg_ndims = arg_domains_nr.size();
     TORCH_CHECK(
         output_shape_.size() >= arg_ndims,
         "The new shape is expected to be greater-then-or-equal to the input",
@@ -114,6 +115,7 @@ struct BroadcastOpRecord : RecordFunctor {
         broadcast_dims_.size());
 
     std::vector<bool> is_broadcast_dim(output_shape_.size(), true);
+    std::vector<bool> is_expand_dim(output_shape_.size(), true);
     for (const auto idx : c10::irange(broadcast_dims_.size())) {
       if (idx > 0) {
         TORCH_CHECK(
@@ -124,9 +126,32 @@ struct BroadcastOpRecord : RecordFunctor {
           broadcast_dims_[idx] < static_cast<int>(output_shape_.size()),
           "Invalid broadcast_dims value.");
       is_broadcast_dim.at(broadcast_dims_[idx]) = false;
+      // Note: when we expand a broadcasted dimension, we need to expand it
+      // to a concrete size, hence the need for `is_expand_dim` flag and the
+      // expand operation following the broadcast.
+      is_expand_dim.at(broadcast_dims_[idx]) =
+          arg_domains_nr[idx]->isBroadcast();
+    }
+
+    std::vector<torch::jit::fuser::cuda::Val*> output_shape_on_bcast(
+        output_shape_.size(), nullptr);
+    bool has_expand = false;
+    for (const auto idx : c10::irange(output_shape_.size())) {
+      if (is_expand_dim[idx] && output_shape_[idx] != 1 &&
+          output_shape_[idx] != -1) {
+        // TODO: this would be tricky to handle on dynamic shapes, we'll
+        // need to pass-in a symbol instead somehow.
+        output_shape_on_bcast[idx] = IrBuilder::create<Int>(output_shape_[idx]);
+        has_expand = true;
+      } else {
+        output_shape_on_bcast[idx] = IrBuilder::create<Int>(-1);
+      }
     }
 
     auto output = torch::jit::fuser::cuda::broadcast(arg, is_broadcast_dim);
+    if (has_expand) {
+      output = torch::jit::fuser::cuda::expand(output, output_shape_on_bcast);
+    }
     fd.setFusionState(outputs.at(0), output);
   }
 
