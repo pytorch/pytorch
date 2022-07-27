@@ -184,6 +184,43 @@ class TestQuantizer(unittest.TestCase):
 
         self.assertTrue(torch.equal(original_input, result))
 
+    r""" Tests for correct dimensions in dequantize_apot result
+         on random 3-dim tensor with random dimension sizes
+         and hardcoded values for b, k.
+         Dequant an input tensor and verify that
+         dimensions are same as input.
+         * tensor2quantize: Tensor
+         * b: 4
+         * k: 2
+    """
+    def test_dequantize_dim(self):
+        # make observer
+        observer = APoTObserver(4, 2)
+
+        # generate random size of tensor2quantize between 1 -> 20
+        size1 = random.randint(1, 20)
+        size2 = random.randint(1, 20)
+        size3 = random.randint(1, 20)
+
+        # make tensor2quantize: random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size1, size2, size3, dtype=torch.float)
+
+        observer.forward(tensor2quantize)
+
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+
+        # make mock apot_tensor
+        original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
+                                      alpha=alpha,
+                                      gamma=gamma,
+                                      quantization_levels=quantization_levels,
+                                      level_indices=level_indices)
+
+        # dequantize apot_tensor
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
+
+        self.assertEqual(original_apot.data.size(), dequantize_result.size())
+
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):
             APoTQuantizer.q_apot_alpha(self)
