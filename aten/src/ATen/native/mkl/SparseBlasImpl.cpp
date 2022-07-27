@@ -352,7 +352,7 @@ void addmm_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
-  if (has_any_layout(mat1, kSparseCsr, kSparseBsr) &&
+  if ((mat1.layout() == kSparseCsr || mat1.layout() == kSparseBsr) &&
       mat2.layout() == kStrided && result.layout() == kStrided) {
     return addmm_dense_result(mat1, mat2, beta, alpha, result);
   }
