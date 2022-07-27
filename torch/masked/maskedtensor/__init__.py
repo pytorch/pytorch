@@ -10,6 +10,6 @@ from .reductions import apply_reduction, is_reduction
 from .unary import apply_native_unary, is_native_unary
 
 try:
-    from .version import __version__  # noqa: F401
+    from .version import __version__  # type: ignore[import] # noqa: F401
 except ImportError:
     pass

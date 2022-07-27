@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
-import pytest
+import pytest  # type: ignore[import]
 import torch
 from common_utils import _compare_mt_t
 from maskedtensor import masked_tensor
