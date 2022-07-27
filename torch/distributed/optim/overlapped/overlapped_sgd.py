@@ -27,7 +27,10 @@ class OverlappedSGD(OverlappedOptimizer):
                                               maximize,
                                               foreach,
                                               _allow_empty_param_list=True)
-        super().__init__(functional_optim=self._functional_sgd, grad_scaler=grad_scaler, zero_grad=zero_grad)
+
+        super().__init__(functional_optim=self._functional_sgd, 
+                         grad_scaler=grad_scaler, 
+                         zero_grad=zero_grad)
         self.params = params
 
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):
