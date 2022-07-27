@@ -128,8 +128,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
     ;;
   pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
@@ -141,8 +139,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
     ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
