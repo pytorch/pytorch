@@ -646,6 +646,11 @@ symbolic_tensor_failures = {
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promot...
+    xfail('new_full', ''),
+    xfail('new_ones', ''),
+    xfail('new_zeros', ''),
+    xfail('nn.functional.logsigmoid', ''),
+    xfail('xlogy', ''),
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
