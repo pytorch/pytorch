@@ -190,7 +190,6 @@ def constructors(fake_mode, func, *args, **kwargs):
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
     new_kwargs["device"] = torch.device("meta")
-    print(args, new_kwargs)
     r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
 
@@ -220,7 +219,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     # deal with non-meta inputs
     sd, dd, sz, indices, values = args
     if indices.fake_is_meta and values.fake_is_meta:
-        return contructors(fake_mode, func, *args, **kwargs)
+        return constructors(fake_mode, func, *args, **kwargs)
     else:
         not_implemented_error = NotImplementedError("sparse coo tensor constructor")
         if not fake_mode.allow_fallback_kernels:
@@ -380,8 +379,6 @@ class FakeTensor(torch.Tensor):
         elif func == torch.ops.aten.stride.default:
             return None
 
-        print(func)
-
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use
@@ -484,7 +481,6 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-        print(func)
 
         if func == torch.ops.prim.device.default:
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
@@ -608,12 +604,7 @@ class FakeTensorMode(TorchDispatchMode):
                 try:
                     if non_meta_elem:
                         raise NotImplementedError("one input is not representable as meta")
-                    try:
-                        r = func(*args, **kwargs)
-                    except:
-                        print(args)
-                        print(kwargs)
-                        raise
+                    r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
                         raise not_implemented_error
