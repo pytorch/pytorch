@@ -515,60 +515,42 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
+// For lists that have a mix of functional and nonfunctional tensors,
+// functionalization machinery should just unwrap the functional wrappers
+// and leave the ordinary tensors alone.
 bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
