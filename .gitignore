@@ -44,6 +44,7 @@ docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/generated/
 log
+usage_log.txt
 test-reports/
 test/.coverage
 test/.hypothesis/

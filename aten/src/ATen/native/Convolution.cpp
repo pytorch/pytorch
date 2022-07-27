@@ -243,63 +243,9 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
-bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
-  if (input.is_mkldnn()) {
-    return true;
-  }
-  auto input_dim = input.dim();
-  bool is_contiguous = input.is_contiguous(at::MemoryFormat::Contiguous);
-  bool is_channels_last = (input_dim == 4)
-      ? input.is_contiguous(at::MemoryFormat::ChannelsLast)
-      : input.is_contiguous(at::MemoryFormat::ChannelsLast3d);
-  if (!(is_contiguous || is_channels_last)) {
-    return true;
-  }
-
-  auto dims = input.sizes();
-  auto strides = input.strides();
-  bool mkldnn_conv_is_contiguous = true, mkldnn_conv_is_channels_last = true;
-  if (input_dim == 4) {
-    const auto n = 0, c = 1, h = 2, w = 3;
-    mkldnn_conv_is_contiguous =
-        (strides[n] == dims[c] * dims[h] * dims[w] &&
-         strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
-         strides[w] == 1);
-    mkldnn_conv_is_channels_last =
-        (strides[n] == dims[h] * dims[w] * dims[c] &&
-         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-         strides[c] == 1);
-  } else {
-    const auto n = 0, c = 1, d = 2, h = 3, w = 4;
-    mkldnn_conv_is_contiguous =
-        (strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
-         strides[c] == dims[d] * dims[h] * dims[w] &&
-         strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
-         strides[w] == 1);
-    mkldnn_conv_is_channels_last =
-        (strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
-         strides[d] == dims[h] * dims[w] * dims[c] &&
-         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-         strides[c] == 1);
-  }
-  if (is_channels_last && is_contiguous) {
-    return (mkldnn_conv_is_contiguous || mkldnn_conv_is_channels_last);
-  } else if (is_channels_last) {
-    return mkldnn_conv_is_channels_last;
-  } else if (is_contiguous) {
-    return mkldnn_conv_is_contiguous;
-  }
-  return true;
-}
-
 auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
-    return false;
-  }
-  if (!mkldnn_conv_contiguous_check(
-          input)) { // check whether current ATen input is contiguous based on
-                    // oneDNN requirements.
     return false;
   }
   if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
@@ -929,7 +875,7 @@ static Tensor convolution_same(
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
     DimVector output_padding(static_cast<size_t>(dim));
-    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+    return at::convolution(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
@@ -967,7 +913,7 @@ Tensor _convolution_mode(
   } else if (padding == "valid") {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
-    return at::native::convolution(
+    return at::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
