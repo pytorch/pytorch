@@ -1178,7 +1178,7 @@ void initJITBindings(PyObject* module) {
         }
       });
 
-  py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNodeImpl")
+  py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
       .def_static(
           "new_symint",
           [](py::object obj) -> c10::SymIntNode {
