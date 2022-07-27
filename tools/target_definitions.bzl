@@ -154,6 +154,8 @@ def add_torch_libs():
         link_whole = True,
         include_directories = include_directories,
         propagated_pp_flags = propagated_pp_flags_cpu,
+        # Disable merged linking so deploy works with pybind.
+        supports_merged_linking = False,
         exported_deps = (
             [
                 ":ATen-cpu",
