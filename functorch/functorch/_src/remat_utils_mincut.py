@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Set, Any
+from typing import List, Tuple, Dict, Set
 import torch
 import torch.fx as fx
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -104,7 +104,7 @@ def get_nx_node_name(node_name: str) -> str:
 def get_cut_nodes_from_partition(partition: Tuple[Set[str], Set[str]], nx_graph) -> Set[str]:
     """
     Return the cut nodes from the partition. Cut nodes are the nodes reachable from the root node
-    and have outgoing edges to nodes in the non-reachable partition. 
+    and have outgoing edges to nodes in the non-reachable partition.
 
     Args:
     ``partition`` is a tuple of set of nodes in nx_graph.
@@ -160,8 +160,8 @@ def get_user_name_to_user_map(output_node_in_module: fx.Node, fused_node: fx.Nod
     return user_name_to_user_map
 
 
-def add_new_outputs(node_pair: Tuple[fx.Node, fx.Node], 
-                    fused_graph: fx.GraphModule, 
+def add_new_outputs(node_pair: Tuple[fx.Node, fx.Node],
+                    fused_graph: fx.GraphModule,
                     name_to_node: Dict[str, fx.Node],
                     module_origin: fx.GraphModule,
                     module_origin_new_outputs: List[fx.Node]):
@@ -199,11 +199,13 @@ def add_new_outputs(node_pair: Tuple[fx.Node, fx.Node],
     fused_graph.recompile()
 
 
-def remove_unused_output(fused_graph, module_origin):
-    # remove the unused output to write less
-    # Use None instead of remove entirely because getitem will index into the outputs
-    # Need to do this after fused_graph.graph.eliminate_dead_code() such that
-    # extra getitem operators are removed.
+def remove_unused_output(fused_graph: fx.GraphModule, module_origin: fx.GraphModule):
+    """
+    Remove the unused output of module_origin to write less
+
+    Use None as a placeholder for removed output args because getitem will index into the outputs.
+    """
+    fused_graph.graph.eliminate_dead_code()
     used_inds = set()
 
     # need to modify the node in fused_graph, not the node passed in pairs
@@ -230,7 +232,11 @@ def remove_unused_output(fused_graph, module_origin):
     fused_graph.recompile()
 
 
-def get_node_to_copy(non_reachable, cut_nodes):
+def get_node_to_copy(non_reachable: Set[str], cut_nodes: Set[str]) -> Set[str]:
+    """
+    All nodes corresponding to vertices in non_reachable partition are recomputed
+    (except the nodes corresponding to cut vertices, whose are placeholders).
+    """
     node_to_copy = set()
     for node_name in non_reachable:
         if node_name == "sink":
@@ -242,20 +248,50 @@ def get_node_to_copy(non_reachable, cut_nodes):
     return node_to_copy
 
 
-def copy_nodes(node_pair: Tuple[fx.Node, fx.Node], 
-               fused_graph: fx.GraphModule, 
-               name_to_node: Dict[str, fx.Node], 
-               partition: Tuple[Set[str], Set[str]], 
+def copy_nodes(node_pair: Tuple[fx.Node, fx.Node],
+               fused_graph: fx.GraphModule,
+               name_to_node: Dict[str, fx.Node],
+               partition: Tuple[Set[str], Set[str]],
                cut_nodes: Set[str]):
     """
-    Copy nodes in the non_reachable partition to module of node_pair[1]
+    Copy nodes in the reachable partition to module of node_pair[1].
 
-    ``name_to_node`` is a mapping from name to nodes in fused graph. It is used to modify the args of 
-    nodes. In general the name nodes corresponds to each other, except one case.
-    e.g. if a node "fused_0" orignally has a single output, but after rematerialization it has multiple outputs,
-    name_to_node["fused_0"] will be changed to map to the new getitem(fused_0, 0).
+    Let the fusion groups corresponding to node_pair be (A,B).
+
+    Give a partition (reachable, non_reachable) of the nodes in fusion group A,
+    we want to re-compute all nodes in non_reachable in fusion group B.
+
+    We want to modify fusion group A such that:
+    * A outputs all nodes corresponding to cut vertices
+    * A does not output any node that has no user anymore
+
+    We want to modify fusion group B such that:
+    * All nodes corresponding to cut vertices are placeholders
+    * All nodes corresponding to vertices in non_reachable partition are recomputed in B
+      (except the nodes corresponding to cut vertices, whose are placeholders).
+    * Remove the old placeholders that are now re-computed
+
+
+    We want to modify fused_graph such that:
+    * If A has additional outputs, we also need to add getitem nodes in the fused graph such that B can access them.
+    * If A originally has a single output, but now has multiple outputs,
+      we also need to change the users of A in fused_graph now to use the new getitem(A, 0) node.
+    * The input args of node B in fused_graph need to be changed to match the new placeholders of B
+
+    Args:
+        node_pair: a pair of nodes in the fused graph.
+        fused_graph: the fused graph.
+        name_to_node: a dictionary from node name to node.
+        ``name_to_node`` is a mapping from name to nodes in fused graph. It is used to modify the args of
+        nodes. In general the name nodes corresponds to each other, except one case.
+        e.g. if a node "fused_0" orignally has a single output, but after rematerialization it has multiple outputs,
+        name_to_node["fused_0"] will be changed to map to the new getitem(fused_0, 0).
+
+        partition: a tuple of two sets. The first set is the reachable nodes in the fused graph, and the second set
+        is the non-reachable nodes in the fused graph.
+
+        cut_nodes: a set of nodes that cut across the partition
     """
-    # breakpoint()
     reachable, non_reachable = partition
     module_origin = getattr(fused_graph, node_pair[0].name)
     module_dest = getattr(fused_graph, node_pair[1].name)
@@ -332,8 +368,8 @@ def copy_nodes(node_pair: Tuple[fx.Node, fx.Node],
     node_pair[1].args = tuple(new_args)
     fused_graph.recompile()
 
-    fused_graph.graph.eliminate_dead_code()
-    fused_graph.graph.lint()
+    # fused_graph.graph.eliminate_dead_code()
+    # fused_graph.graph.lint()
     module_dest.recompile()
 
     # remove the unused output to write less
@@ -458,14 +494,14 @@ def rematerialize_fused_graph(fused_graph: fx.GraphModule, node_users_map: Dict[
     """
     Modify the fused graph to rematerialize the nodes.
     We find all pairs of fusion groups (A, B) that are “touching”, meaning fusion group A's output
-    is directly used by fusion group B. 
+    is directly used by fusion group B.
 
     The for each pair of nodes, we use a min-cut algorithm to determine whether rematerialization
-    is needed and which nodes should be rematerialized. This algorithm minimizes the memory reading/writing 
-    cost of computing the outputs of these two fusion groups. Then we modify the fusion groups to 
+    is needed and which nodes should be rematerialized. This algorithm minimizes the memory reading/writing
+    cost of computing the outputs of these two fusion groups. Then we modify the fusion groups to
     rematerialize the nodes based on the min-cut partition given.
 
-    This is a heuristic algorithm because even though the rematerialization decision between each pair of 
+    This is a heuristic algorithm because even though the rematerialization decision between each pair of
     touching fusion groups is optimal, the decision might not be the optimal for the whole graph.
 
     Args:
