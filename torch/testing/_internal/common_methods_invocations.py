@@ -3715,6 +3715,26 @@ def sample_inputs_eye(op, device, dtype, requires_grad, **kwargs):
         else:
             yield SampleInput(n, args=(m,), kwargs=_kwargs)
 
+def error_inputs_eye(op_info, device, **kwargs):
+    # TODO: no layout
+    _kwargs = {'device': device, 'dtype': torch.float32}
+
+    yield ErrorInput(
+        SampleInput(-1, args=(), kwargs=_kwargs),
+        error_regex="n must be greater or equal to 0, got -1"
+    )
+
+    yield ErrorInput(
+        SampleInput(-7, args=(42,), kwargs=_kwargs),
+        error_regex="n must be greater or equal to 0, got -7"
+    )
+
+    yield ErrorInput(
+        SampleInput(0, args=(-3,), kwargs=_kwargs),
+        error_regex="m must be greater or equal to 0, got -3"
+    )
+
+
 def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
@@ -17724,6 +17744,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
+           error_inputs_func=error_inputs_eye,
            supports_out=True,
            supports_autograd=False,
            skips=(
