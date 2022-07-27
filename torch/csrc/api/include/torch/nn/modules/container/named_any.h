@@ -38,8 +38,8 @@ namespace nn {
 ///   };
 ///
 ///   Sequential sequential({
-///     {"m1", std::make_shared<M>(1)},  // shared pointer to `Module` is supported
-///     {std::string("m2"), M(2)},  // `Module` is supported
+///     {"m1", std::make_shared<M>(1)},  // shared pointer to `Module` is
+///     supported {std::string("m2"), M(2)},  // `Module` is supported
 ///     {"linear1", Linear(10, 3)}  // `ModuleHolder` is supported
 ///   });
 /// \endrst
@@ -57,9 +57,9 @@ class NamedAnyModule {
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   NamedAnyModule(std::string name, M&& module)
       : NamedAnyModule(
-          std::move(name),
-          std::make_shared<typename std::remove_reference<M>::type>(
-            std::forward<M>(module))) {}
+            std::move(name),
+            std::make_shared<typename std::remove_reference<M>::type>(
+                std::forward<M>(module))) {}
 
   /// Creates a `NamedAnyModule` from a `Module` that is unwrapped from
   /// a `ModuleHolder`.
@@ -69,7 +69,7 @@ class NamedAnyModule {
 
   /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
   NamedAnyModule(std::string name, AnyModule any_module)
-    : name_(std::move(name)), module_(std::move(any_module)) {}
+      : name_(std::move(name)), module_(std::move(any_module)) {}
 
   /// Returns a reference to the name.
   const std::string& name() const noexcept {

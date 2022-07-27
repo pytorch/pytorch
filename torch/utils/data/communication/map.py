@@ -5,6 +5,15 @@ from torch.utils.data import communication, MapDataPipe
 
 DEFAULT_NON_BLOCKING_SLEEP = 0.001
 
+__all__ = [
+    "DataPipeBehindQueues",
+    "EnsureNonBlockingMapDataPipe",
+    "NonBlockingMap",
+    "NotAvailable",
+    "QueueWrapperForMap",
+    "default_not_available_hook",
+]
+
 
 def default_not_available_hook():
     time.sleep(DEFAULT_NON_BLOCKING_SLEEP)

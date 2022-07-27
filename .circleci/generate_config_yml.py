@@ -170,17 +170,14 @@ YAML_SOURCES = [
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
-    File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
-    File("job-specs/job-specs-promote.yml"),
     File("job-specs/binary_update_htmls.yml"),
     File("job-specs/binary-build-tests.yml"),
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-promote.yml"),
 ]
 
 

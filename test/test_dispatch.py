@@ -243,13 +243,13 @@ class TestDispatch(TestCase):
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
     def test_def_impl_schema_mismatch(self):
@@ -264,9 +264,9 @@ CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed
         self.assertExpectedInline(state, '''\
 Inferred operator schema for a C++ kernel function doesn't match the expected function schema.
   operator: test::foo
-  expected schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+  expected schema: test::foo(Tensor x, Tensor y) -> Tensor
     registered at /dev/null:0
-  inferred schema: (Tensor _0) -> (Tensor _0)
+  inferred schema: (Tensor _0) -> Tensor _0
     impl_t_t
   reason: The number of arguments is different. 2 vs 1.''')
 
@@ -283,13 +283,13 @@ Inferred operator schema for a C++ kernel function doesn't match the expected fu
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
     def test_def_only(self):
@@ -299,7 +299,7 @@ CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+schema: test::foo(Tensor x, Tensor y) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 ''')
@@ -318,10 +318,10 @@ alias analysis kind: FROM_SCHEMA
         self.assertExpectedInline(state, '''\
 name: test::foo
 schema: (none)
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
     def test_computed_table(self):
@@ -340,14 +340,14 @@ CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-XLA: fn_xla :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: fn_autogradcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+XLA: fn_xla :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+AutogradCPU: fn_autogradcpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -375,11 +375,11 @@ AutogradXLA: fn_autograd [autograd kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -407,10 +407,10 @@ AutogradXLA: default_def_name_t_t [math kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -440,11 +440,11 @@ AutogradXLA: impl_t_t [math kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -472,10 +472,10 @@ AutogradXLA: fn_math [math kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -504,12 +504,12 @@ AutogradXLA: impl_t_t [autograd kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -538,11 +538,11 @@ AutogradXLA: fn_math [math kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-FPGA: fn_fpga :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+FPGA: fn_fpga :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -572,11 +572,11 @@ FPGA: fn_fpga [kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -607,12 +607,12 @@ AutogradXLA: fallthrough registered in pytorch framework [backend fallback]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -646,13 +646,13 @@ FPGA: fn_defaultbackend [default backend kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
+schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -678,7 +678,7 @@ AutogradXLA: fn_autograd [autograd kernel]
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> (Tensor)) with the same name and overload '''
+            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> Tensor) with the same name and overload '''
             '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
             '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
@@ -693,7 +693,7 @@ AutogradXLA: fn_autograd [autograd kernel]
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+schema: test::foo(Tensor x, Tensor y) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 ''')
@@ -708,7 +708,7 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload '''
             '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
             '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
@@ -724,7 +724,7 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload '''
             '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
             '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
@@ -754,8 +754,8 @@ alias analysis kind: PURE_FUNCTION
             '''\
 name: test::foo
 schema: (none)
-CompositeImplicitAutograd[alias]: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CompositeImplicitAutograd[alias]: fn2 :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
+CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 '''
         )
 

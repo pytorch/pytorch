@@ -36,7 +36,7 @@ class FixedLearningRate : public LearningRateFunctor<T> {
 };
 
 // Alter: alternatate learning rate with active_period and inactive_period.
-// update for for a duration of active_period and then stop for a duration of
+// update for a duration of active_period and then stop for a duration of
 // inactive_period if active_first, and vice versa
 template <typename T>
 class AlternateLearningRate : public LearningRateFunctor<T> {
@@ -278,10 +278,10 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
  public:
   CompositeLearningRate(
       const std::list<CompositeLearningRateItem<T>>& sub_policies) {
-    DCHECK_GT(sub_policies.size(), 0);
+    TORCH_DCHECK_GT(sub_policies.size(), 0);
     int64_t num_iter_start = 1;
     for (auto it = sub_policies.begin(); it != sub_policies.end(); ++it) {
-      DCHECK_GT(it->num_iter_, 0);
+      TORCH_DCHECK_GT(it->num_iter_, 0);
       sub_policies_[num_iter_start].reset(it->policy_);
       sub_policy_lr_scales_[num_iter_start] = it->lr_scale_;
       num_iter_start += it->num_iter_;

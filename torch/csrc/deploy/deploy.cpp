@@ -94,6 +94,8 @@ InterpreterManager::InterpreterManager(
     size_t nInterp,
     std::shared_ptr<Environment> env)
     : resources_(nInterp) {
+  C10_LOG_API_USAGE_ONCE("torch.deploy.InterpreterManager");
+
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this, env);
@@ -301,8 +303,7 @@ int LoadBalancer::acquire() {
   size_t minusers = SIZE_MAX;
   int minIdx = 0;
   for (size_t i = 0; i < n_; ++i, ++last) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (last >= n_) {
+    if (last >= static_cast<int>(n_)) {
       last = 0;
     }
     uint64_t prev = 0;

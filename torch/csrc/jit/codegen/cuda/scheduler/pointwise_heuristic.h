@@ -30,8 +30,14 @@ class PointwiseParams {
   // Split grid y dimension, if otherwise it would be too large
   bool split_grid_y_dim = false;
 
+  // For many instances having BIDx on the inner most dimension is the most
+  // performant parallel binding. However, if we're broadcasting the outer
+  // dimension with a large inner dimension, it can be more performant to bind
+  // BIDy on the inner most dimension.
+  bool flip_grid_binding = false;
+
   // Unroll or vectorization factor
-  int64_t inner_factor = 1;
+  size_t unroll_factor = 1;
 
   std::string tag = "";
 
@@ -42,7 +48,8 @@ class PointwiseParams {
     bool attr_equal = other.vectorize == vectorize &&
         other.break_point == break_point && other.split_block == split_block &&
         other.split_grid_y_dim == split_grid_y_dim &&
-        other.inner_factor == inner_factor;
+        other.unroll_factor == unroll_factor &&
+        other.flip_grid_binding == flip_grid_binding;
     return attr_equal;
   }
 
@@ -62,12 +69,15 @@ class PointwiseParams {
         ss << "  Split y grid dim\n";
       }
     }
-    if (inner_factor > 1) {
+    if (unroll_factor > 1) {
       if (vectorize) {
-        ss << "Vectorize, Factor: " << inner_factor << "\n";
+        ss << "Vectorize, Factor: " << unroll_factor << "\n";
       } else {
-        ss << "Unroll, Factor: " << inner_factor << "\n";
+        ss << "Unroll, Factor: " << unroll_factor << "\n";
       }
+    }
+    if (flip_grid_binding) {
+      ss << "Flip BIDx/BIDy bindings\n";
     }
     ss << "====================================\n";
     return ss.str();
@@ -82,7 +92,8 @@ class PointwiseParamsHash {
         static_cast<size_t>(pp.break_point) << 4 ^
         static_cast<size_t>(pp.split_block) << 5 ^
         static_cast<size_t>(pp.split_grid_y_dim) << 6 ^
-        static_cast<size_t>(pp.inner_factor) << 9;
+        static_cast<size_t>(pp.unroll_factor) << 9 ^
+        static_cast<size_t>(pp.flip_grid_binding) << 10;
     return attr_hash;
   }
 };

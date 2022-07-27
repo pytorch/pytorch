@@ -1076,7 +1076,7 @@ class AllocateReuseModifier {
         if (!tv_def) {
           continue;
         }
-        if (!isPointwiseTvOp(tv_def) && !isReductionTvOp(tv_def)) {
+        if (!isPointwiseTvOp(tv_def) && !ir_utils::isReductionTvOp(tv_def)) {
           if (isBroadcastTvOp(tv_def)) {
             info.has_broadcast_between = true;
           } else {
@@ -1098,8 +1098,10 @@ class AllocateReuseModifier {
 
     // Check index map for the corresponding axes.
     for (const auto id_it : c10::irange(alloc_domains.size())) {
-      if (!GpuLower::current()->caIndexMap().areMapped(
-              alloc_domains[id_it], reuse_domains[id_it])) {
+      if (!GpuLower::current()->caMap()->areMapped(
+              alloc_domains[id_it],
+              reuse_domains[id_it],
+              IdMappingMode::EXACT)) {
         return false;
       }
     }
@@ -1125,14 +1127,6 @@ class AllocateReuseModifier {
           expr->isA<TernaryOp>();
     }
     return false;
-  }
-
-  // Utility to capture reduction ops
-  bool isReductionTvOp(const Expr* expr) {
-    if (!ir_utils::isTvOp(expr)) {
-      return false;
-    }
-    return expr->isA<ReductionOp>() || expr->isA<WelfordOp>();
   }
 
   // Utility to capture reduction ops

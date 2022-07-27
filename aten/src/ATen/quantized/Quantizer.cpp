@@ -4,7 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -357,7 +357,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     // NOLINTNEXTLINE
     strides[i] = 1;
     while (--i >= 0) {
-      strides[i] = sizes[i] * strides[i + 1];
+      strides[i] = sizes[i + 1] * strides[i + 1];
     }
   }
   return from_blob_quantized_per_tensor_affine(
@@ -429,7 +429,7 @@ Tensor& UnknownQuantizer::dequantize_out(Tensor& rtensor, const Tensor& qtensor)
 QScheme UnknownQuantizer::qscheme() const {
   TORCH_INTERNAL_ASSERT(false, "cannot call qscheme on UnknownQuantizer");
 }
-bool UnknownQuantizer::equalTo(QuantizerPtr other) {
+bool UnknownQuantizer::equalTo(QuantizerPtr other) const{
   TORCH_INTERNAL_ASSERT(false, "cannot call equalTo on UnknownQuantizer");
 }
 QuantizerPtr make_unknown_quantizer(ScalarType scalar_type) {
