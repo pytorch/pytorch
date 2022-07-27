@@ -13,32 +13,33 @@ struct NestedTensorImpl;
 // TODO: cache this and only do it once per NestedTensor
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
 
-inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
+inline at::Tensor wrap_buffer(
+    at::Tensor buffer,
+    at::Tensor nested_size_tensor) {
   TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor));
 }
 
+TORCH_API std::vector<int64_t> NestedTensor_get_max_size(
+    const NestedTensorImpl& nt);
 
-TORCH_API std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt);
-
-TORCH_API Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding, OptionalIntArrayRef output_size);
+TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
+    const Tensor& t,
+    double padding,
+    OptionalIntArrayRef output_size);
 
 namespace impl {
 
-// NOTE: For comparisons please use the map and reduce
-// functions to define what you mean by equal, etc. on your own
-// There can be ambiguity in the depth of comparison and
-// even in the value (should it construct a new tree or
-// return a single value).
 template <typename T>
 struct NestedNode {
-  // NestedNode() : _is_leaf(false), _height(1) {}
   NestedNode() = delete;
   explicit NestedNode(std::vector<NestedNode<T>>&& children)
       : _is_leaf(false), _children(children) {
     for (const auto& child : children) {
-      TORCH_CHECK(child.is_leaf(), "Expected children to be leafs. No support for multiple nested dimensions yet.");
+      TORCH_CHECK(
+          child.is_leaf(),
+          "Expected children to be leafs. No support for multiple nested dimensions yet.");
     }
   }
   // NestedNode(NestedNode&) = delete;
@@ -67,8 +68,6 @@ struct NestedNode {
  private:
   bool _is_leaf;
   std::vector<NestedNode<T>> _children;
-  // TODO: Make this const?
-  // _VariableNode _variable_node;
   T _payload;
 };
 
@@ -91,7 +90,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
         std::forward_as_tuple(nested_node...), [&all_leaf, &degree](auto n) {
           all_leaf = all_leaf && (n.is_leaf());
           if (degree > 1 && n.degree() > 1) {
-            TORCH_CHECK(degree == n.degree(), "NestedNodes don't broadcast.");
+            TORCH_CHECK(degree == n.degree(), "NestedNodes must match in degree.");
           }
           if (n.degree() > degree) {
             degree = n.degree();
@@ -117,9 +116,6 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             TORCH_CHECK(a.degree() > 0, "Internal assert.");
             return a.children(i);
           });
-      // TODO: Due to the experiences with to_vector and the inversion I'm a bit
-      // wary of apply but I haven't been able to reproduce the  argument
-      // inversion behavior in other contexts.
       c10::guts::apply(
           [&result, &fn](NestedNode<Args>... filtered) {
             result.emplace_back(function(std::forward<F>(fn), filtered...));
@@ -130,10 +126,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
   }
 };
 
-// NOTE: Assuming all NestedNodes have same shape.
-// TODO: Add check
 // TODO: Add static assert to verify lambda arguments match nested_node types
-// TODO: Do we want broadcasting?
 template <class F, class... B>
 static inline NestedNode<
     typename c10::guts::infer_function_traits<F>::type::return_type>
@@ -156,12 +149,14 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
   return TensorNode(std::move(structure));
 }
 
-inline Tensor wrap_tensor_node(TensorNode tensor_node,
+inline Tensor wrap_tensor_node(
+    TensorNode tensor_node,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  TORCH_CHECK(!tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
+  TORCH_CHECK(
+      !tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
   TensorOptions options_ =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
@@ -172,8 +167,10 @@ inline Tensor wrap_tensor_node(TensorNode tensor_node,
   std::vector<Tensor> flat_tensors;
   for (const auto i : c10::irange(tensor_node.degree())) {
     // TODO: Remove call to contiguous once we support strides.
-    flat_tensors.push_back(tensor_node.children(i).payload().reshape(-1).contiguous());
-    sizes.push_back(tensor(c10::IntArrayRef(tensor_node.children(i).payload().sizes())));
+    flat_tensors.push_back(
+        tensor_node.children(i).payload().reshape(-1).contiguous());
+    sizes.push_back(
+        tensor(c10::IntArrayRef(tensor_node.children(i).payload().sizes())));
   }
 
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
@@ -182,14 +179,12 @@ inline Tensor wrap_tensor_node(TensorNode tensor_node,
       at::cat(flat_tensors).to(options), at::native::stack(sizes));
 }
 
-
-}
+} // namespace impl
 
 template <class F, class... A>
 inline at::Tensor map_nested_tensor(F&& fn, A... a) {
-  // torch_check_tensor_shape_matches(a...);
-  // torch_check_is_nested_tensor(a...);
-  return wrap_tensor_node(impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...),
+  return wrap_tensor_node(
+      impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...),
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
