@@ -17,12 +17,18 @@
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/eye.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 namespace native {
@@ -386,11 +392,22 @@ Tensor new_empty(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt
     ) {
+  return self.new_empty_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
+Tensor new_empty_symint(
+    const Tensor& self,
+    SymIntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt
+    ) {
   auto dtype = dtype_opt.has_value() ? dtype_opt : optTypeMetaToScalarType(self.options().dtype_opt());
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
   auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor new_empty_strided(
@@ -416,7 +433,7 @@ Tensor eye(int64_t n,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // the default value of `m` equals to `n`
-  return native::eye(n, n, dtype, layout, device, pin_memory);
+  return at::eye(n, n, dtype, layout, device, pin_memory);
 }
 
 Tensor eye(int64_t n, int64_t m,
@@ -441,6 +458,9 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
+
+  if (result.is_meta()) return result;
+
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
@@ -1076,6 +1096,14 @@ Tensor zeros(IntArrayRef size,
 
   auto result = at::empty(size, options);
   return result.zero_();
+}
+
+Tensor zeros_symint(c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
