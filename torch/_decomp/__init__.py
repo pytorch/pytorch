@@ -116,7 +116,9 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                     # has a registration to Meta;
                     # either through a direct registration, or an indirect one through
                     # an alias dispatch key (e.g. CompositeImplicitAutograd)
-                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(name, "Meta")
+                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                        name, "Meta"
+                    )
                 ):
                     meta_lib.impl(op_overload, fn)
 
