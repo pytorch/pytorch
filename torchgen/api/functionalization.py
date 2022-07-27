@@ -1,23 +1,24 @@
+from typing import List, Optional
+
+from torchgen.api import dispatcher
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    boolT,
+    ConstRefCType,
+    CType,
+    longT,
+    NamedCType,
+    tensorT,
+)
 from torchgen.model import (
-    FunctionSchema,
+    Argument,
     BaseTy,
     BaseType,
-    NativeFunctionsViewGroup,
+    FunctionSchema,
     NativeFunction,
-    Argument,
+    NativeFunctionsViewGroup,
 )
-from torchgen.api.types import (
-    Binding,
-    NamedCType,
-    ConstRefCType,
-    BaseCType,
-    CType,
-    tensorT,
-    longT,
-    boolT,
-)
-from torchgen.api import dispatcher
-from typing import List, Optional
 
 
 # This file describes the translation of JIT schema to API's used

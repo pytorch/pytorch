@@ -426,7 +426,7 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     at::IntArrayRef size,
     bool implicit) {
-  CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(size.size(), self.dim());
   int64_t num_new_dimensions = size.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
@@ -442,7 +442,7 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     bool implicit) {
-  CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(size.size(), self.dim());
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
   int64_t num_new_dimensions = _sizes.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
@@ -499,14 +499,8 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_kl_div_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
-  return {Shape(self.scalar_type(), self.sizes().vec())};
+std::vector<Shape> compute_shape_isnan(const at::Tensor& self) {
+  return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
@@ -689,25 +683,25 @@ std::vector<Shape> compute_shape_native_dropout_backward(
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t from,
     c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
@@ -735,7 +729,7 @@ std::vector<Shape> compute_shape_sum(
   ;
 }
 
-std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
+std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -780,19 +774,20 @@ std::vector<Shape> compute_shape_slogdet(const at::Tensor& self) {
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_and(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
       c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
-std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor& self) {
+std::vector<torch::lazy::Shape> compute_shape_logical_not(
+    const at::Tensor& self) {
   return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_or(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -800,7 +795,7 @@ std::vector<torch::lazy::Shape> compute_shape_logical_or(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_xor(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -1048,7 +1043,7 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
 std::vector<Shape> compute_shape_repeat(
     const at::Tensor& self,
     at::IntArrayRef repeats) {
-  CHECK_GE(repeats.size(), self.dim());
+  TORCH_CHECK_GE(repeats.size(), self.dim());
   int64_t num_new_dimensions = repeats.size() - self.dim();
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(
@@ -1065,6 +1060,16 @@ std::vector<Shape> compute_shape_narrow_copy_symint(
     int64_t dim,
     int64_t start,
     c10::SymInt length) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_hardswish(const at::Tensor& self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_hardswish_backward(
+    const at::Tensor& grad_output,
+    const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
