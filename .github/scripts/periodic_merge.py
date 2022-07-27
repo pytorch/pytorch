@@ -33,7 +33,7 @@ PRS_WITH_LABEL_QUERY = (GH_PULL_REQUEST_FRAGMENT
                         + GH_PR_REVIEWS_FRAGMENT
                         + GH_CHECKSUITES_FRAGMENT
                         + GH_COMMIT_AUTHORS_FRAGMENT) + """
-query ($owner: String!, $name: String!, $labels: [String!], $with_labels: Boolean = false) {
+query ($owner: String!, $name: String!, $labels: [String!]) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: 10, labels: $labels, states: OPEN){
         nodes{
@@ -49,8 +49,7 @@ def fetch_land_pending_pr_numbers(org: str, project: str) -> Any:
     pr_query = gh_graphql(PRS_WITH_LABEL_QUERY,
                           owner=org,
                           name=project,
-                          labels=[LAND_PENDING_LABEL, LAND_QUEUED_LABEL],
-                          with_labels=True)
+                          labels=[LAND_PENDING_LABEL, LAND_QUEUED_LABEL])
     return pr_query['data']['repository']['pullRequests']['nodes']
 
 
