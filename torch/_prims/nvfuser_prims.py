@@ -190,7 +190,7 @@ for fname in _nvfuser_ternary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd, a, b, c):
-    return fd.ops.{fname}(a, b)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b, c)  # type: ignore[attr-defined]
 
 _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 """
