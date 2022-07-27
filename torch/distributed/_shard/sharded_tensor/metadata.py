@@ -59,7 +59,7 @@ class TensorProperties(object):
         self.memory_format = memory_format
 
     @staticmethod
-    def create_for_tensor(tensor: torch.Tensor) -> "TensorProperties":
+    def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
         return TensorProperties(
             dtype=tensor.dtype,
             layout=tensor.layout,

@@ -48,7 +48,7 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
     sharded_tensor_md = ShardedTensorMetadata(
         shards_metadata=shards_metadata,
         size=torch.Size([8 * len(shards_metadata)]),
-        tensor_properties=TensorProperties.create_for_tensor(torch.zeros(1))
+        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1))
     )
 
     return ShardedTensor._init_from_local_shards_and_global_metadata(

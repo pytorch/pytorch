@@ -6,6 +6,7 @@ from functools import (
 )
 
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 
 class MockProcessGroup(dist.ProcessGroup):
 
@@ -27,7 +28,8 @@ def mock_init_dist(rank, world_size):
     assert not dist.is_initialized()
     store = dist.HashStore()
     # Trick _store_based_barrier into believing everyone else already checked-in
-    store.add("store_based_barrier_key:0", world_size - 1)
+    # Zero is the group index
+    store.add(f"{c10d.STORE_BASED_BARRIER_PREFIX}:0", world_size - 1)
     dist.init_process_group(
         backend="mock_process_group",
         rank=rank,
@@ -58,5 +60,5 @@ def with_fake_comms(func=None, rank=0, world_size=2):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         with with_dist(rank, world_size):
-            func(self)
+            func(self, *args, **kwargs)
     return wrapper
