@@ -27,7 +27,7 @@ class ProcessedNodeWrapperBase {
         : container_(container), idx_(start_idx) {}
 
     ProcessedNodeWrapperBaseIter& operator++() {
-      DCHECK_NE(idx_, container_->size());
+      TORCH_DCHECK_NE(idx_, container_->size());
       ++idx_;
       return *this;
     }
@@ -51,7 +51,7 @@ class ProcessedNodeWrapperBase {
     friend bool operator==(
         ProcessedNodeWrapperBaseIter lhs,
         ProcessedNodeWrapperBaseIter rhs) {
-      DCHECK_EQ(lhs.container_, rhs.container_);
+      TORCH_DCHECK_EQ(lhs.container_, rhs.container_);
       return lhs.idx_ == rhs.idx_;
     }
 
