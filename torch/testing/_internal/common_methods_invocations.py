@@ -20707,14 +20707,6 @@ python_ref_db = [
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
         ),
-        decorators=(
-            DecorateInfo(
-                toleranceOverride({
-                    torch.float16: tol(atol=1e-02, rtol=1e-02)
-                }),
-                'TestCommon', device_type='cpu',
-            ),
-        ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
         supports_nvfuser=False,
@@ -20738,14 +20730,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
-        ),
-        decorators=(
-            DecorateInfo(
-                toleranceOverride({
-                    torch.float16: tol(atol=1e-02, rtol=1e-02),
-                }),
-                'TestCommon', device_type='cuda',
-            ),
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
