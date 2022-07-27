@@ -85,24 +85,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
   static NestedNode<A> function(
       F&& fn,
       const NestedNode<Args>&... nested_node) {
-    size_t degree = 0;
-    bool all_leaf = true;
-    c10::guts::tuple_map(
-        std::forward_as_tuple(nested_node...), [&all_leaf, &degree](auto n) {
-          all_leaf = all_leaf && (n.is_leaf());
-          if (degree > 1 && n.degree() > 1) {
-            TORCH_CHECK(degree == n.degree(), "NestedNodes must match in degree.");
-          }
-          if (n.degree() > degree) {
-            degree = n.degree();
-          }
-          return nullptr;
-        });
-    // All NestedNodes just wrap regular Tensors.
-    if (all_leaf) {
-      return NestedNode<A>(std::forward<F>(fn)(nested_node.payload()...));
-    }
-    // Some NestedNodes wrap NestedTensors
+    // Some NestedNodes wrap regular Tensors, some NestedTensors and some other types.
     std::vector<A> result;
     for (size_t i = 0; i < degree; i++) {
       std::tuple<Args...> children = c10::guts::tuple_map(
@@ -110,7 +93,8 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             static_assert(
                 c10::guts::is_instantiation_of<NestedNode, decltype(a)>::value,
                 "Internal error.");
-            // Broadcast regular Tensor arguments across NestedTensor constituents.
+            // Broadcast regular arguments across NestedTensor constituents.
+            // This could be a Tensor, integer or anything else really.
             if (a.is_leaf()) {
               return a.payload();
             }
