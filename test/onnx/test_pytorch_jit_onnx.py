@@ -92,6 +92,23 @@ class _TestJITIRToONNX:
             b = torch.randn(2, 3)
             self.run_test(graph_ir, (a, b, 2))
 
+    def test_native_layer_norm(self):
+        graph_ir = """
+        graph(%x : Float(2, 3, 2),
+              %w : Float(3, 2),
+              %b : Float(3, 2)):
+          %5 : int = prim::Constant[value=3]()
+          %6 : int = prim::Constant[value=2]()
+          %7 : int[] = prim::ListConstruct(%5, %6)
+          %10 : float = prim::Constant[value=1.0000000000000001e-05]()
+          %11 : Float(2, 3, 2), %12 : Float(2, 1, 1), %13 : Float(2, 1, 1) = aten::native_layer_norm(%x, %7, %w, %b, %10)
+          return (%11, %12, %13)
+        """
+        x = torch.randn(2, 3, 2)
+        w = torch.randn(3, 2)
+        b = torch.randn(3, 2)
+        self.run_test(graph_ir, (x, w, b))
+
     def test_convolution(self):
         graph_ir = """
         graph(%1 : Tensor,
@@ -130,6 +147,17 @@ class _TestJITIRToONNX:
         """
         x = torch.randn(5, 2).half().to("cuda")
         self.run_test(graph_ir, (x,))
+
+    def test_native_dropout(self):
+        graph_ir = """
+        graph(%1 : Float(2, 3)):
+          %2 : float = prim::Constant[value=0.0]()
+          %training : bool = prim::Constant[value=1]()
+          %3 : Tensor, %4 : Tensor = aten::native_dropout(%1, %2, %training)
+          return (%3, %4)
+        """
+        a = torch.randn(2, 3)
+        self.run_test(graph_ir, (a,))
 
 
 def MakeTestCase(opset_version: int) -> type:
