@@ -48,6 +48,7 @@ from torchgen.api.types import (
     scalarT,
     SpecialArgName,
     stringT,
+    symIntArrayRefT,
     tensorListT,
     tensorT,
     TupleCType,
@@ -98,6 +99,7 @@ from .gen_trace_type import (
 # not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
+    "empty_like",
     "ones_like",
     "zeros_like",
     "rand_like",
@@ -288,6 +290,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad2d",
     "replication_pad3d",
     "take",
+    "put",
     "put_",
     "_to_copy",
     "replication_pad1d_backward",
@@ -1088,6 +1091,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
+                expr = expr + ".vec()"
+            elif type == BaseCType(symIntArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"

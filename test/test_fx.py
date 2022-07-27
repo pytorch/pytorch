@@ -43,6 +43,8 @@ from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
+from fx.test_common_passes import TestCommonPass  # noqa: F401
+from fx.test_cse_pass import TestCSEPass  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -55,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4058,6 +4061,7 @@ TestFunctionalTracing.generate_tests()
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
+@skipIfSlowGradcheckEnv
 class TestVisionTracing(JitTestCase):
     def setUp(self):
         # Checking for mutable operations while tracing is feature flagged
