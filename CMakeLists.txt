@@ -181,6 +181,7 @@ option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks 
 option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
+option(BUILD_FAST "Build PyTorch with minimal depencies to reduce build time" OFF)
 option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
@@ -369,6 +370,21 @@ if(USE_CCACHE)
   else()
     message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
   endif()
+endif()
+
+
+if(BUILD_FAST)
+  set(REL_WITH_DEB_INFO ON)
+  set(USE_GOLD_LINKER ON)
+  set(BUILD_NVFUSER_BENCHMARK OFF)
+  set(BUILD_CAFFE2 OFF)
+  set(USE_NNPACK OFF)
+  set(USE_XNNPACK OFF)
+  set(USE_FBGEMM OFF)
+  set(USE_QNNPACK OFF)
+  set(USE_PYTORCH_QNNPACK OFF)
+  set(BUILD_TEST OFF)
+  set(DEBUG OFF)
 endif()
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
