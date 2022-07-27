@@ -1064,6 +1064,165 @@ def recv(tensor, src=None, group=None, tag=0):
         return src
 
 
+Tensordtype2ScalarTypes={
+    # dtype                 # corresponding to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS from `c10/core/ScalarType.h`
+    "torch.uint8"   : 0,    # _(uint8_t, Byte) /* 0 */
+    "torch.int8"    : 1,    # _(int8_t, Char) /* 1 */
+    "torch.int32"   : 3,    # _(int, Int) /* 3 */
+                            # 
+    "torch.int64"   : 4,    # _(int64_t, Long) /* 4 */
+                            # 
+    "torch.float16" : 5,    # _(at::Half, Half) /* 5 */
+    "torch.float32" : 6,    # _(float, Float) /* 6 */
+    "torch.float64" : 7,    # _(double, Double) /* 7 */
+    "torch.bfloat16": 15,   # _(at::BFloat16, BFloat16) /* 15 */
+}
+
+
+def adaptive_send(tensor, dst, group=None, tag=0):
+    """
+    Sends a tensor together with its `dtype` synchronously.
+
+    Args:
+        tensor (Tensor): Tensor to send.
+        dst (int): Destination rank.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        tag (int, optional): Tag to match send with remote recv
+
+    """
+    _check_single_tensor(tensor, "tensor")
+    if _rank_not_in_group(group):
+        _warn_not_in_group("send")
+        return
+
+    current_device=_get_pg_device(group=group) # cuda for NCCL and CPU for everything else
+
+    send_tensor_size=torch.tensor(tensor.size(),dtype=torch.int).to(current_device)
+    send_tensor_dtype=torch.tensor([Tensordtype2ScalarTypes[str(tensor.dtype)]],dtype=torch.int).to(current_device)
+    # send_tensor_info[0:-1] contains the shape of `tensor`
+    # send_tensor_info[-1] is the dtype of `tensor`
+    send_tensor_info=torch.cat((send_tensor_size,send_tensor_dtype))
+    send_len_tensor_info=torch.tensor(send_tensor_info.size(),dtype=torch.int).to(current_device)
+
+    if group is None or group is GroupMember.WORLD:
+        default_pg = _get_default_group()
+        default_pg.send([send_len_tensor_info], dst, tag=tag-1).wait()
+        # send `tensor`'s `dtype` first
+        default_pg.send([send_tensor_info], dst, tag=tag+1).wait()
+        default_pg.send([tensor], dst, tag).wait()
+    else:
+        group_dst_rank = _get_group_rank(group, dst)
+        group.send([send_len_tensor_info], group_dst_rank, tag=tag-1).wait()
+        # send `tensor`'s `dtype` first
+        group.send([send_tensor_info], group_dst_rank, tag=tag+1).wait()
+        group.send([tensor], group_dst_rank, tag).wait()
+
+
+# Reverse mapping of `Tensordtype2ScalarTypes`
+ScalarTypes2Tensordtype={
+    "0": torch.uint8,
+    "1": torch.int8,
+    "3": torch.int32,
+
+    "4": torch.int64,
+
+    "5": torch.float16,
+    "6": torch.float32,
+    "7": torch.float64,
+    "15": torch.bfloat16,
+}
+
+
+def adaptive_recv(src=None, group=None, tag=0):
+    """
+    Receives a tensor with self-adaptive `dtype` synchronously.
+
+    Args:
+        src (int, optional): Source rank. Will receive from any
+            process if unspecified.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        tag (int, optional): Tag to match recv with remote send
+
+    Returns:
+        Sender rank, Received tensor
+        `Sender rank`==-1, if not part of the group
+        `Received tensor` is identical to its corresponding src tensor in `adaptive_send()`
+
+    """
+    if _rank_not_in_group(group):
+        _warn_not_in_group("recv")
+        return -1
+
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
+
+    current_device=_get_pg_device(group=pg) # cuda for NCCL and CPU for everything else
+    if current_device!='cpu': # _get_pg_devic() always returns `cuda:0` on a dual-gpu node. Why?
+        current_device=torch.device('cuda',get_rank(pg)) # retrieve correct local rank
+
+    recv_len_tensor_info=torch.tensor([-1],dtype=torch.int).to(current_device)
+    recv_tensor_dtype=torch.tensor([-1],dtype=torch.int).to(current_device)
+
+    if src is None:
+        # recv src `tensor`'s info length first
+        pg.recv_anysource([recv_len_tensor_info], tag-1).wait()
+
+        # Then, recv src `tensor`'s info
+        # recv_tensor_info[0:-1] contains the shape of `tensor`
+        # recv_tensor_info[-1] is the dtype of `tensor`
+        recv_tensor_info=torch.zeros(size=(recv_len_tensor_info.item(),),dtype=torch.int).to(current_device)
+        pg.recv_anysource([recv_tensor_info], tag+1).wait()
+        recv_tensor_size=recv_tensor_info[:-1]
+        recv_tensor_dtype=recv_tensor_info[-1]
+
+        # Allocate container tensor. `torch.zeros` is compatible to both `int` and `float` dtypes.
+        container_tensor=torch.zeros(size=recv_tensor_size.tolist(),dtype=ScalarTypes2Tensordtype[str(recv_tensor_dtype.item())]).to(current_device)
+        work = pg.recv_anysource([container_tensor], tag)
+        work.wait()
+        src_rank = work._source_rank()
+        if group is None or group is GroupMember.WORLD:
+            return src_rank, container_tensor
+        else:
+            return _get_global_rank(pg, src_rank), container_tensor
+    else:
+        if group is None or group is GroupMember.WORLD:
+            # recv src `tensor`'s info length first
+            pg.recv([recv_len_tensor_info], src, tag-1).wait()
+
+            # Then, recv src `tensor`'s info
+            # recv_tensor_info[0:-1] contains the shape of `tensor`
+            # recv_tensor_info[-1] is the dtype of `tensor`
+            recv_tensor_info=torch.zeros(size=(recv_len_tensor_info.item(),),dtype=torch.int).to(current_device)
+            pg.recv([recv_tensor_info], src, tag+1).wait()
+            recv_tensor_size=recv_tensor_info[:-1]
+            recv_tensor_dtype=recv_tensor_info[-1]
+
+            # Allocate container tensor
+            container_tensor=torch.zeros(size=recv_tensor_size.tolist(),dtype=ScalarTypes2Tensordtype[str(recv_tensor_dtype.item())]).to(current_device)
+            pg.recv([container_tensor], src, tag).wait()
+        else:
+            group_src_rank = _get_group_rank(pg, src)
+            # recv src `tensor`'s info length first
+            pg.recv([recv_tensor_dtype], group_src_rank, tag-1).wait()
+
+            # Then, recv src `tensor`'s info
+            # recv_tensor_info[0:-1] contains the shape of `tensor`
+            # recv_tensor_info[-1] is the dtype of `tensor`
+            recv_tensor_info=torch.zeros(size=(recv_len_tensor_info.item(),),dtype=torch.int).to(current_device)
+            pg.recv([recv_tensor_info], group_src_rank, tag+1).wait()
+            recv_tensor_size=recv_tensor_info[:-1]
+            recv_tensor_dtype=recv_tensor_info[-1]
+
+            # Allocate container tensor
+            container_tensor=torch.zeros(size=recv_tensor_size.tolist(),dtype=ScalarTypes2Tensordtype[str(recv_tensor_dtype.item())]).to(current_device)
+            pg.recv([container_tensor], group_src_rank, tag).wait()
+        return src, container_tensor
+
+
 class P2POp(object):
     """
     A class to build point-to-point operations for ``batch_isend_irecv``.
