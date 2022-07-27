@@ -54,20 +54,30 @@ def enable_memory_history():
     _C._cuda_enableMemoryHistory()
 
 def _frame_fmt(f):
-    c, i = f
-    fname = c.co_filename.split('/')[-1]
-    func = c.co_name
+    i = f['line']
+    fname = f['filename'].split('/')[-1]
+    func = f['name']
     return f'{fname}:{i}:{func}'
 
-def save_memory_flamegraph(fname='memory.txt'):
-    ss = _C._cuda_memorySnapshot()
+def memory_snapshot():
+    return _C._cuda_memorySnapshot()
+
+def save_memory_flamegraph(fname='memory.txt', snapshot=None):
+    if snapshot is None:
+        snapshot = memory_snapshot()
     with open(fname, 'w') as f:
-        for x in ss:
+        for i, x in enumerate(snapshot):
+            accounted_for_size = 0
+            prefix = f'stream_{x["stream"]};seg_{i}'
             for b in x['blocks']:
                 if 'history' not in b:
                     continue
                 for h in b['history']:
                     sz = h['real_size']
+                    accounted_for_size += sz
                     frames = h['frames']
                     stuff = ';'.join([ _frame_fmt(f) for f  in reversed(frames) ])
-                    f.write(f'{b["state"]};{stuff} {sz}\n')
+                    f.write(f'{prefix};{b["state"]};{stuff} {sz}\n')
+            gaps = x['total_size'] - accounted_for_size
+            if gaps:
+                f.write(f'{prefix};<gaps> {gaps}\n')
