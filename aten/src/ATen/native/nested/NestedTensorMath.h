@@ -13,7 +13,7 @@ struct NestedTensorImpl;
 // TODO: cache this and only do it once per NestedTensor
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
 
-at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
+inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
   TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor));
