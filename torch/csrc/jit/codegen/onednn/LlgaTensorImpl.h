@@ -278,6 +278,11 @@ struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {
         false,
         "Internal error: sym_sizes_custom() not supported for LlgaTensorImpl.");
   }
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_strides_custom() not supported for LlgaTensorImpl.");
+  }
   c10::IntArrayRef strides_custom() const override {
     TORCH_CHECK(
         false,
