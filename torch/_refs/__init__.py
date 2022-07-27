@@ -2969,6 +2969,29 @@ def empty(
     )
 
 
+@register_decomposition(torch.ops.aten.new_empty)
+def new_empty(
+    a: TensorLikeType,
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+
+    dtype = a.dtype if dtype is None else dtype
+    device = a.device if device is None else device
+
+    return torch.empty(
+        size,
+        dtype=dtype,
+        device=device,
+        pin_memory=pin_memory,
+        layout=layout,
+    )
+
+
 # TODO: missing kwargs (e.g. layout)
 def empty_like(
     a: TensorLikeType,
