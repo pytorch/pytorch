@@ -19,7 +19,6 @@ import zipfile
 from typing import (
     Any,
     Callable,
-    cast,
     Collection,
     Dict,
     List,
@@ -29,6 +28,7 @@ from typing import (
     Tuple,
     Type,
     Union,
+    cast,
 )
 
 import torch
