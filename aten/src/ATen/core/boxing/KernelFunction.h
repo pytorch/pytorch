@@ -22,7 +22,6 @@ class KernelFunction;
  */
 class TORCH_API KernelFunction final {
 public:
-
   using InternalBoxedKernelFunction = BoxedKernel::InternalBoxedKernelFunction;
   using BoxedKernelFunction = BoxedKernel::BoxedKernelFunction;
   using BoxedKernelFunction_withDispatchKeys = BoxedKernel::BoxedKernelFunction_withDispatchKeys;
@@ -156,7 +155,6 @@ public:
    */
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
-
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();

@@ -1,9 +1,4 @@
-
-
-
-
-
-from caffe2.python import core, dyndep
+from caffe2.python import core
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu

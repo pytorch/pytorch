@@ -147,7 +147,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
         !std::is_same<T, Tensor>::value,
         "You should use Input<Tensor>(int, DeviceType) for "
         "Tensor.");
-    DCHECK_LT((size_t)idx, inputs_.size());
+    TORCH_DCHECK_LT((size_t)idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
@@ -168,7 +168,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
       static_assert(
           std::is_same<T, Tensor>::value,
           "Input(int, DeviceType) is only available for Tensor");
-      DCHECK_LT((size_t)idx, inputs_.size());
+      TORCH_DCHECK_LT((size_t)idx, inputs_.size());
       try {
         // TODO(jerryzh): We'll need to check device type in Get<T>() later
         // Get<T>() -> Get<T>(type)
@@ -183,7 +183,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    DCHECK_LT(0U, newstyle_inputs_.size());
+    TORCH_DCHECK_LT(0U, newstyle_inputs_.size());
     caffe2::Tensor tensor;
     if (newstyle_inputs_.isTensorList(0)) {
       // if the first input is a tensor list, we get input tensors by indexing
@@ -191,12 +191,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
       // are accessible as inputs. any hypothetical input tensors that come
       // after the list are not accessible.
       auto tensorList = newstyle_inputs_.toTensorVector(0);
-      DCHECK_LT((size_t)idx, tensorList.size());
+      TORCH_DCHECK_LT((size_t)idx, tensorList.size());
       tensor = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by
       // indexing into the inputs.
-      DCHECK_LT((size_t)idx, newstyle_inputs_.size());
+      TORCH_DCHECK_LT((size_t)idx, newstyle_inputs_.size());
       tensor = newstyle_inputs_.toTensor(idx);
     }
     tensor = caffe2::detail::contiguous(std::move(tensor));
