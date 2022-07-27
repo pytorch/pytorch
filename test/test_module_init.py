@@ -367,10 +367,6 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.Module,
         torch.nn.Container,  # deprecated
         torch.nn.NLLLoss2d,  # deprecated
-        # TODO: Remove these 2 from this list once the ASan issue is fixed.
-        # See https://github.com/pytorch/pytorch/issues/55396
-        torch.nn.quantized.Embedding,
-        torch.nn.quantized.EmbeddingBag,
         torch.nn.quantized.LSTM,
         torch.nn.quantized.MultiheadAttention,
     }
