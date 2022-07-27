@@ -2211,7 +2211,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_decomposition(torch.ops.aten.expand)
+@register_decomposition(torch.ops.aten.expand, disable_meta=True)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -2697,7 +2697,7 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
-@register_decomposition(torch.ops.aten.squeeze)
+@register_decomposition(torch.ops.aten.squeeze, disable_meta=True)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
         dim = utils.canonicalize_dim(a.ndim, dim)
@@ -2891,7 +2891,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     return tensor_split(a, sections, 2)
 
 
-@register_decomposition(torch.ops.aten.t.default)
+@register_decomposition(torch.ops.aten.t.default, disable_meta=True)
 def t(a: TensorLikeType):
     # TODO: Add sparse support
     # if a.is_sparse:
@@ -2925,7 +2925,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unsqueeze)
+@register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -2934,7 +2934,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(torch.ops.aten.view)
+@register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
