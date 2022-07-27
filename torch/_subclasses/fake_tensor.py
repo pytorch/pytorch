@@ -151,8 +151,7 @@ class FakeTensorConverter(object):
         return out
 
     def __call__(self, fake_mode, t, device=None):
-        assert t.device.type != "meta" or device is not None
-        if t.device.type != "meta":
+        if device is None:
             return self.from_real_tensor(fake_mode, t)
         else:
             return self.from_meta_and_device(fake_mode, t, device)
@@ -295,6 +294,7 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     has_sym_ints: bool
+    fake_is_meta: bool
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
@@ -304,24 +304,26 @@ class FakeTensor(torch.Tensor):
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
-        assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
         # normalize cuda device
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
         self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
+        self.fake_is_meta = elem.device.type == "meta"
 
     @staticmethod
     def from_tensor(t, fake_mode):
         existing_device = t.device
+        # TODO: this should use meta converter
         return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
 
     # TODO: resolve error in default __repr__
     def __repr__(self):
-        return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+        with in_kernel_invocation_manager(self.fake_mode):
+            self_repr = super().__repr__()
+        return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
 
     def stride(self):
         if self.has_sym_ints:
@@ -518,20 +520,15 @@ class FakeTensorMode(TorchDispatchMode):
             # TODO: apply as no_dispatch decorator
             converter = self.fake_tensor_converter
 
-            def wrap(e, device=None):
-                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-                    return converter(self, e, device)
-                else:
-                    return e
-
             # if we are in the dispatch mode, we will enter this function even if the inputs
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
             subclass_seen = False
+            non_meta_elem = False
 
             def check_non_fake_tensor(x):
-                nonlocal conversion_made, subclass_seen
+                nonlocal conversion_made, subclass_seen, non_meta_elem
                 conversion_made = conversion_made or (
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
                 )
@@ -539,6 +536,9 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(x, torch.Tensor)
                     and not isinstance(x, FakeTensor)
                     and type(x) is not torch.Tensor
+                )
+                non_meta_elem = non_meta_elem or (
+                    isinstance(x, FakeTensor) and not x.fake_is_meta
                 )
 
             tree_map(check_non_fake_tensor, args)
@@ -586,24 +586,48 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
+            is_fallback = False
+
             with in_kernel_invocation_manager(self):
                 try:
+                    if non_meta_elem:
+                        raise NotImplementedError(
+                            "one input is not representable as meta"
+                        )
                     r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
                         raise not_implemented_error
+                    is_fallback = True
                     r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
+            # Lazily initialized, in case there are no tensor returns
+            common_device = None
+
+            def wrap(e, device=None):
+                nonlocal common_device
+                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+                    if common_device is None:
+                        common_device = FakeTensor._find_common_device(
+                            func, args, kwargs
+                        )
+                    if is_fallback:
+                        # mikoHmm
+                        # assert torch.device(device or common_device) == e.device
+                        return converter(self, e)
+                    else:
+                        return converter(self, e, device or common_device)
+                else:
+                    return e
+
             # if device is specified, use that
             if kwargs.get("device", None):
                 return tree_map(partial(wrap, device=kwargs["device"]), r)
 
-            common_device = FakeTensor._find_common_device(func, args, kwargs)
-
-            return tree_map(partial(wrap, device=common_device), r)
+            return tree_map(partial(wrap), r)
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)

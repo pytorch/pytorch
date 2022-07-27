@@ -268,7 +268,7 @@ class FakeTensorTest(TestCase):
                 for ten in out:
                     if i == 1:
                         self.assertTrue(isinstance(ten, FakeTensor))
-                    self.assertTrue(ten.device.type == 'cuda')
+                    self.assertEqual(ten.device.type, 'cuda')
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
