@@ -405,11 +405,6 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   // backwards, user thread), this function is expected to exit once that
   // graph_task complete.
 
-#ifdef USE_ROCM
-  // Keep track of backward pass for rocblas.
-  at::ROCmBackwardPassGuard in_backward;
-#endif
-
   // local_ready_queue should already been initialized when we get into
   // thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
