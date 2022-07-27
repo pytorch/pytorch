@@ -489,12 +489,8 @@ class TestUnion(JitTestCase):
                 return str(y)
             else:
                 return "foo"
-
-        # TODO: There's currently an unrelated bug in
-        # `torch.jit.isinstance` that makes it fail for tuple literals.
-        # Posted here: https://github.com/pytorch/pytorch/issues/60095
-        # Change `assertEqual` to `checkScript` when the bug is fixed
-        self.assertEqual(fn(1), "2")
+        
+        self.checkScript(fn(1), "2")
 
     def test_union_type_refinement_statically_false(self):
         @torch.jit.script
