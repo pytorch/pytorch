@@ -101,12 +101,16 @@ torch.backends.mkl
 
 .. autofunction::  torch.backends.mkl.is_available
 
+.. autoclass::  torch.backends.mkl.verbose
+
 
 torch.backends.mkldnn
 ^^^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mkldnn
 
 .. autofunction::  torch.backends.mkldnn.is_available
+
+.. autoclass::  torch.backends.mkldnn.verbose
 
 
 torch.backends.openmp

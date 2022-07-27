@@ -918,6 +918,10 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
+namespace torch {
+void initVerboseBindings(PyObject* module);
+} // namespace torch
+
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1022,6 +1026,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
 #ifdef USE_CUDA
