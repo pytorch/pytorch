@@ -873,7 +873,7 @@ graph(%x : Tensor,
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
 
-All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
+All program execution starts with a graph executor. It's responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
 
 
 In this section, we use a running example program that computes one step of an LSTM to show how the graph is transformed:
