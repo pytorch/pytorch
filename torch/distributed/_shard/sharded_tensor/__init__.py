@@ -9,13 +9,15 @@ import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.partial_tensor import _PartialTensor
 
 from .api import (
-    _register_sharded_op,
+    _CUSTOM_SHARDED_OPS,
+    _SHARDED_OPS,
     Shard,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
 )
 from .metadata import ShardMetadata  # noqa: F401
+from torch.distributed._shard.op_registry_utils import _decorator_func
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,
@@ -397,7 +399,9 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     for submodule_name, submodule in module.named_modules():
         for attr_name, attr in submodule.__dict__.items():
             if isinstance(attr, ShardedTensor):
-                destination[prefix + submodule_name + '.' + attr_name] = attr
+                mod_prefix = prefix + submodule_name
+                key = mod_prefix + ('.' if mod_prefix else '') + attr_name
+                destination[key] = attr
 
 def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
     """
@@ -405,12 +409,13 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
     """
     for submodule_name, submodule in module.named_modules():
         for attr_name, attr in submodule.__dict__.items():
-            key = prefix + submodule_name + '.' + attr_name
+            mod_prefix = prefix + submodule_name
+            key = mod_prefix + ('.' if mod_prefix else '') + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
                     setattr(submodule, attr_name, state_dict[key])
 
-def sharded_op_impl(func):
+def custom_sharded_op_impl(func):
     """
     Provides a way for users to write their own custom sharded operator. This
     can be used to override existing ShardedTensor operators or write a new
@@ -419,7 +424,7 @@ def sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
-        >>> @sharded_op_impl(torch.nn.functional.linear)
+        >>> @custom_sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>   ....
         >>>
@@ -440,17 +445,21 @@ def sharded_op_impl(func):
         func(Callable): Torch function for which we want to provide a sharded
             implementation (ex: torch.nn.functional.linear)
     """
-    def decorator_sharded_func(wrapped_func):
-        from torch.distributed._shard.sharded_tensor._ops._common import _basic_validation
+    return functools.partial(
+        _decorator_func,
+        op=func,
+        op_table=_CUSTOM_SHARDED_OPS
+    )
 
-        @functools.wraps(wrapped_func)
-        def wrapper(types, args, kwargs, process_group):
-            _basic_validation(func, args, kwargs)
-            return wrapped_func(types, args, kwargs, process_group)
-
-        _register_sharded_op(func, wrapper)
-        return wrapper
-    return decorator_sharded_func
+def _sharded_op_impl(func):
+    """
+    Decorator to register a default sharded op.
+    """
+    return functools.partial(
+        _decorator_func,
+        op=func,
+        op_table=_SHARDED_OPS
+    )
 
 # Import all builtin sharded ops
 from ._ops import *  # noqa: F403

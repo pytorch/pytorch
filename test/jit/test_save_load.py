@@ -918,6 +918,34 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         output = m_loaded()
         self.assertEqual(output, None)
 
+    def test_module_info_flatbuffer(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.foo = torch.nn.Linear(2, 2)
+                self.bar = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        first_script_module = torch.jit.script(Foo())
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(
+            first_script_module, first_saved_module)
+        first_saved_module.seek(0)
+        expected = {
+            'bytecode_version': 4,
+            'operator_version': 4,
+            'function_names': {'__torch__.___torch_mangle_0.Foo.forward'},
+            'type_names': set(),
+            'opname_to_num_args': {'aten::linear': 3}}
+        self.assertEqual(
+            torch.jit._serialization.get_flatbuffer_module_info(first_saved_module),
+            expected)
+
+
     def test_save_load_params_buffers_submodules(self):
         """
         Check that parameters, buffers, and submodules are the same after loading.
@@ -966,3 +994,29 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             loaded_name, loaded_buffer = loaded_b
             self.assertEqual(m_name, loaded_name)
             self.assertEqual(m_buffer, loaded_buffer)
+
+
+    def test_save_load_with_extra_files(self):
+        """
+        Check that parameters, buffers, and submodules are the same after loading.
+        """
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Tensor):
+                return x
+
+        module = Module()
+        script_module = torch.jit.script(module)
+
+        script_module_io = io.BytesIO()
+        extra_files = {"abc.json": "[1,2,3]"}
+        script_module._save_for_lite_interpreter(script_module_io, _extra_files=extra_files, _use_flatbuffer=True)
+        script_module_io.seek(0)
+
+        re_extra_files = {}
+        torch._C._get_model_extra_files_from_buffer(script_module_io, _extra_files=re_extra_files)
+
+        self.assertEqual(extra_files, re_extra_files)

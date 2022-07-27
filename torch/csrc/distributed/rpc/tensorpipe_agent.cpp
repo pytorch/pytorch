@@ -113,7 +113,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
-    if (!tensor.is_cpu() && !tensor.is_meta()) {
+    if (!tensor.is_cpu()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
@@ -646,7 +646,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu() && !device.is_meta()) {
+      if (!device.is_cpu()) {
         GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
         if (std::find(devices_.begin(), devices_.end(), device) ==
             devices_.end()) {
@@ -1423,7 +1423,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   if (iter == deviceMaps.end()) {
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
-          t.device().is_cpu() || t.device().is_meta(),
+          t.device().is_cpu(),
           errStr,
           ", but found tensor on device: ",
           t.device());

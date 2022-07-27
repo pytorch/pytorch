@@ -248,9 +248,7 @@ class GitRepo:
                 else:
                     self._run_git("push", self.remote, branch)
             except RuntimeError as e:
-                # Check if push were rejected because branch is stale
-                if len(e.args) == 0 or re.search(r"\[rejected\].+\(fetch first\)\n", e.args[0]) is None:
-                    raise
+                print(f"{cnt} push attempt failed with {e}")
                 self.fetch()
                 self._run_git("rebase", f"{self.remote}/{branch}")
 
@@ -307,8 +305,8 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
     """
     pattern is glob-like, i.e. the only special sequences it has are:
       - ? - matches single character
-      - * - matches any non-folder separator characters
-      - ** - matches any characters
+      - * - matches any non-folder separator characters or no character
+      - ** - matches any characters or no character
       Assuming that patterns are free of braces and backslashes
       the only character that needs to be escaped are dot and plus
     """
@@ -326,9 +324,9 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
             elif c == "*":
                 if pattern_.peek() == "*":
                     next(pattern_)
-                    rc += ".+"
+                    rc += ".*"
                 else:
-                    rc += "[^/]+"
+                    rc += "[^/]*"
             else:
                 rc += c
     rc += ")"

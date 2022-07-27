@@ -12,7 +12,7 @@
 
 #include <sstream>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -66,9 +66,8 @@ static void NvFuserScheduler_Reduction(
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
   TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
-  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
   auto rparams = toString(compile_log.reduction_params.value());
-  auto lparams = toString(compile_log.launch_constraints.value());
+  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(rparams + lparams);
 
@@ -191,6 +190,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 512}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 512}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
@@ -212,6 +223,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 1024}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
