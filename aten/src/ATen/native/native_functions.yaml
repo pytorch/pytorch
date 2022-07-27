@@ -618,11 +618,11 @@
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: arange
+    CompositeExplicitAutograd: arange
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: arange
+    CompositeExplicitAutograd: arange
 
 # Note [arange.start_step schema]
 # We want `arange.start_step` to be grouped up with `arange.start_out`,
@@ -632,11 +632,11 @@
 # and kill arange.start_step.
 - func: arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: arange
+    CompositeExplicitAutograd: arange
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: arange_out
+    CompositeExplicitAutograd: arange_out
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -885,11 +885,11 @@
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: bartlett_window
+    CompositeExplicitAutograd: bartlett_window
 
 - func: bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: bartlett_window
+    CompositeExplicitAutograd: bartlett_window
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
@@ -1113,11 +1113,11 @@
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: blackman_window
+    CompositeExplicitAutograd: blackman_window
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: blackman_window
+    CompositeExplicitAutograd: blackman_window
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
   structured_delegate: bmm.out
@@ -1985,7 +1985,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: empty
+    CompositeExplicitAutograd: empty
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -2024,18 +2024,23 @@
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutogradNonFunctional: new_full
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_full
 
 - func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutogradNonFunctional: new_zeros
-    SparseCPU, SparseCUDA, SparseMeta: new_zeros
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_zeros
 
 - func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutogradNonFunctional: new_ones
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_ones
 
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
@@ -2224,11 +2229,11 @@
 # decomposes to eye.m
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: eye
+    CompositeExplicitAutograd: eye
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: eye
+    CompositeExplicitAutograd: eye
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2366,19 +2371,21 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: full
+    CompositeExplicitAutograd: full
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: full
+    CompositeExplicitAutograd: full
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: full_out
+    CompositeExplicitAutograd: full_out
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: full_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: full_like
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -2466,39 +2473,39 @@
 
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hann_window
+    CompositeExplicitAutograd: hann_window
 
 - func: hann_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hann_window
+    CompositeExplicitAutograd: hann_window
 
 - func: hamming_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hamming_window
+    CompositeExplicitAutograd: hamming_window
 
 - func: hamming_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hamming_window
+    CompositeExplicitAutograd: hamming_window
 
 - func: hamming_window.periodic_alpha(int window_length, bool periodic, float alpha, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hamming_window
+    CompositeExplicitAutograd: hamming_window
 
 - func: hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: hamming_window
+    CompositeExplicitAutograd: hamming_window
 
 - func: kaiser_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: kaiser_window
+    CompositeExplicitAutograd: kaiser_window
 
 - func: kaiser_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: kaiser_window
+    CompositeExplicitAutograd: kaiser_window
 
 - func: kaiser_window.beta(int window_length, bool periodic, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: kaiser_window
+    CompositeExplicitAutograd: kaiser_window
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
@@ -2882,7 +2889,7 @@
 
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: linspace
+    CompositeExplicitAutograd: linspace
 
 - func: linspace.out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3044,7 +3051,7 @@
 
 - func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: logspace
+    CompositeExplicitAutograd: logspace
 
 - func: logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3644,19 +3651,21 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: ones
+    CompositeExplicitAutograd: ones
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: ones
+    CompositeExplicitAutograd: ones
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: ones_out
+    CompositeExplicitAutograd: ones_out
 
 - func: ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: ones_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: ones_like
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
 
@@ -3809,104 +3818,110 @@
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: scalar_tensor
+    CompositeExplicitAutograd: scalar_tensor
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand
+    CompositeExplicitAutograd: rand
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand
+    CompositeExplicitAutograd: rand
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand
+    CompositeExplicitAutograd: rand
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand
+    CompositeExplicitAutograd: rand
 
 - func: rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand_out
+    CompositeExplicitAutograd: rand_out
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: rand_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: rand_like
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint
+    CompositeExplicitAutograd: randint
 
 - func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint
+    CompositeExplicitAutograd: randint
 
 - func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint
+    CompositeExplicitAutograd: randint
 
 - func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint
+    CompositeExplicitAutograd: randint
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_out
+    CompositeExplicitAutograd: randint_out
 
 - func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_out
+    CompositeExplicitAutograd: randint_out
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_out
+    CompositeExplicitAutograd: randint_out
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_out
+    CompositeExplicitAutograd: randint_out
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randint_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randn
+    CompositeExplicitAutograd: randn
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randn
+    CompositeExplicitAutograd: randn
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randn
+    CompositeExplicitAutograd: randn
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randn
+    CompositeExplicitAutograd: randn
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3915,20 +3930,22 @@
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randn_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randn_like
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randperm
+    CompositeExplicitAutograd: randperm
 
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randperm
+    CompositeExplicitAutograd: randperm
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: randperm_out
+    CompositeExplicitAutograd: randperm_out
 
 - func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3937,11 +3954,11 @@
 
 - func: range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: range
+    CompositeExplicitAutograd: range
 
 - func: range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: range
+    CompositeExplicitAutograd: range
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5315,7 +5332,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros
+    CompositeExplicitAutograd: zeros
 
 - func: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -5324,21 +5341,22 @@
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros
+    CompositeExplicitAutograd: zeros
 
 - func: zeros.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros_symint
+    CompositeExplicitAutograd: zeros_symint
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros_out
+    CompositeExplicitAutograd: zeros_out
     SparseCPU, SparseCUDA, SparseMeta: zeros_out
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros_like
-    SparseCPU, SparseCUDA, SparseMeta: zeros_like
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -5861,15 +5879,15 @@
 
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: sparse_coo_tensor
+    CompositeExplicitAutograd: sparse_coo_tensor
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: sparse_coo_tensor
+    CompositeExplicitAutograd: sparse_coo_tensor
 
 - func: sparse_coo_tensor.indices_size(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: sparse_coo_tensor
+    CompositeExplicitAutograd: sparse_coo_tensor
 
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -8661,11 +8679,11 @@
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: normal
+    CompositeExplicitAutograd: normal
 
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutogradNonFunctional: normal_out
+    CompositeExplicitAutograd: normal_out
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
@@ -11644,25 +11662,25 @@
   python_module: fft
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: fft_fftfreq
+    CompositeExplicitAutograd: fft_fftfreq
 
 - func: fft_fftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: fft_fftfreq_out
+    CompositeExplicitAutograd: fft_fftfreq_out
 
 - func: fft_rfftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   python_module: fft
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: fft_rfftfreq
+    CompositeExplicitAutograd: fft_rfftfreq
 
 - func: fft_rfftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: fft_rfftfreq_out
+    CompositeExplicitAutograd: fft_rfftfreq_out
 
 - func: fft_fftshift(Tensor self, int[1]? dim=None) -> Tensor
   python_module: fft

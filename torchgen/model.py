@@ -674,7 +674,7 @@ class NativeFunction:
                     and not func.arguments.has_tensor_arg()
                 )
             ), (
-                f"expected {name} to have a CompositeExplicitAutogradNonFunctional "
+                f"expected {name} to have a CompositeExplicitAutograd "
                 "dispatch entry, but there was no dispatch table.  Factory functions "
                 "should not have implicit dispatch as they should not be decomposed "
                 "for __torch_dispatch__"
