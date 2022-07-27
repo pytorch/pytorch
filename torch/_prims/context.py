@@ -34,6 +34,12 @@ def torch_to_refs_map():
         torch.Tensor.__and__: torch._refs.bitwise_and,
         torch.Tensor.__or__: torch._refs.bitwise_or,
         torch.Tensor.__eq__: torch._refs.eq,
+        torch.Tensor.new_empty: torch._refs.new_empty,
+        torch.Tensor.new_full: torch._refs.new_full,
+        torch.Tensor.new_zeros: torch._refs.new_zeros,
+        torch.Tensor.new_ones: torch._refs.new_ones,
+        torch.Tensor.fill_: torch._refs.fill_,
+        torch.Tensor.zero_: torch._refs.zero_,
         # TODO: Should these methods be mapped some other way?
         torch.Tensor.copy_: torch._prims.copy_to,
         torch.Tensor.resize: torch._prims.resize,

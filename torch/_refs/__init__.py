@@ -488,6 +488,18 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return prims.fill(a, value)
 
 
+def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+    r = prims.fill(a, value)
+    prims.copy_to(a, r)
+    return a
+
+
+def zero_(a: TensorLikeType) -> TensorLikeType:
+    r = prims.fill(a, 0)
+    prims.copy_to(a, r)
+    return a
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def floor(a):
     return prims.floor(a)
@@ -2949,7 +2961,9 @@ def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
 ) -> TensorLikeType:
     check(
@@ -2971,7 +2985,13 @@ def empty(
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -2998,13 +3018,66 @@ def new_empty(
     )
 
 
-# TODO: missing kwargs (e.g. layout)
+@register_decomposition(torch.ops.aten.new_zeros)
+def new_zeros(
+    a: TensorLikeType,
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.zero_()
+    return r
+
+
+@register_decomposition(torch.ops.aten.new_ones)
+def new_ones(
+    a: TensorLikeType,
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.fill_(1)
+    return r
+
+
+@register_decomposition(torch.ops.aten.new_full)
+def new_full(
+    a: TensorLikeType,
+    size: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.fill_(fill_value)  # type: ignore[arg-type]
+    return r
+
+
 def empty_like(
     a: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
 
@@ -3017,15 +3090,23 @@ def empty_like(
         return torch.empty(
             a.shape,
             dtype=dtype,
+            layout=layout,
             device=device,
             requires_grad=requires_grad,
+            pin_memory=pin_memory,
             memory_format=memory_format,
         )
 
     # memory_format == torch.preserve_format
     strides = utils.compute_elementwise_output_strides(a)
     return torch.empty_strided(
-        a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        a.shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3226,15 +3307,26 @@ def empty_strided(
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
+
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    if layout is not None and layout is not torch.strided:
+        raise NotImplementedError(f"PrimTorch doesn't support layout={layout}")
 
     shape = utils.extract_shape_from_varargs(shape)
     dtype = torch.get_default_dtype() if dtype is None else dtype
     device = torch.device("cpu") if device is None else device
 
     return prims.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        shape,
+        strides,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
 
 
