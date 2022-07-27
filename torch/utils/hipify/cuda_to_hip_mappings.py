@@ -33,8 +33,14 @@ rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/
 try:
     rocm_path = subprocess.check_output(["hipconfig", "--rocmpath"]).decode("utf-8")
 except subprocess.CalledProcessError:
-    print("Warining: hipconfig --rocmpath failed, assuming /opt/rocm")
+    print(f"Warning: hipconfig --rocmpath failed, assuming {rocm_path}")
+except FileNotFoundError:
+    # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
+    pass
+
+rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm_version.h"
+# The file could be missing due to 1) ROCm version < 5.0, or 2) no ROCm install.
 if os.path.isfile(rocm_version_h):
     RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
     RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
@@ -51,9 +57,6 @@ if os.path.isfile(rocm_version_h):
         if match:
             patch = int(match.group(1))
     rocm_version = (major, minor, patch)
-else:
-    print("Warning: failed to open {rocm_version_h}, assuming ROCm version < 5.0")
-    rocm_version = (0, 0, 0)
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict(
