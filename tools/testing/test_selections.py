@@ -1,9 +1,9 @@
 import os
 import subprocess
 
-from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
-
 from typing import Dict, List, Tuple
+
+from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
 
 def calculate_shards(

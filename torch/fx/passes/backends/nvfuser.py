@@ -79,7 +79,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # TODO: might need to update according to supported input types
             "torch.ops.aten.add": None,
             "torch.ops.aten.sub": None,
-            "torch.ops.aten.rsub": None,
+            # "torch.ops.aten.rsub": None,    # rsub decomp is supported at aten2aten level
             "torch.ops.aten.div": None,
             "torch.ops.aten.atan2": None,
             "torch.ops.aten.mul": None,
@@ -143,7 +143,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.isneginf": None,
             "torch.ops.aten.isposinf": None,
             "torch.ops.aten.isreal": None,
-            "torch.ops.aten.rand_like": None,
+            # "torch.ops.aten.rand_like": None,  # causing Node empty_like_default does not support nvfuser
             "torch.ops.aten.softplus": None,
             "torch.ops.aten.threshold": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
@@ -152,7 +152,10 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten.clone": None,
             # Failing with where(): incompatible function arguments: \
             # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
+            # failing with BERT_pytorch_forward_0, which has aten.where.ScalarSelf in the decomps
             # "torch.ops.aten.where": None,
+            # However, aten.where.self overload is fully supported
+            "torch.ops.aten.where.self": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
             # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
@@ -164,7 +167,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.batch_norm": None,
             "torch.ops.aten.cudnn_batch_norm": None,
             "torch.ops.aten._batch_norm_impl_index_backward": None,
-            "torch.ops.aten.native_batch_norm_backward": None,
+            # "torch.ops.aten.native_batch_norm_backward": None,    # should have been handled at aten2aten decomp
             "torch.ops.aten.native_layer_norm": None,
             "torch.ops.aten.layer_norm": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.div
@@ -174,7 +177,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.amax
             # "torch.ops.aten._softmax": None,
             "torch.ops.aten._log_softmax_backward_data": None,
-            "torch.ops.aten._softmax_backward_data": None,
+            # "torch.ops.aten._softmax_backward_data": None,  # Node _softmax_backward_data_default does not support nvfuser
             # "torch.ops.aten.var.dim": None,       # missing refs
             "torch.ops.aten.std.dim": None,
             "torch.ops.aten.sum": None,
@@ -187,7 +190,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten.type_as": None,       # missing refs
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
-            "torch.ops.aten.gelu_backward": None,
+            # "torch.ops.aten.gelu_backward": None,       # gelu_backward is handled at aten2aten decomp
             # "torch.ops.aten.hardtanh": None,        # has functional ref, using unsupported aten.clamp
             "torch.ops.aten.leaky_relu": None,
             "torch.ops.aten.square": None,
@@ -263,7 +266,8 @@ class NvFuserBackend:
             logging.debug("partitioner_cache hit!")
             fused_graph_module = self.partitioner_cache[graph_module]
         else:
-            partitioner = CapabilityBasedPartitioner(graph_module, self.supported_ops)
+            partitioner = CapabilityBasedPartitioner(
+                graph_module, self.supported_ops, allows_single_node_partition=False)
             fused_graph_module = partitioner.partition_and_fuse()
 
             self.partitioner_cache[graph_module] = fused_graph_module
@@ -271,7 +275,7 @@ class NvFuserBackend:
         # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
         for node in fused_graph_module.graph.nodes:
             # TODO: use a better way to identify fused submodule
-            if "fused_" in node.name:
+            if node.op == "call_module" and "fused_" in node.name:
                 fused_module = getattr(fused_graph_module, node.name)
                 fused_module._wrapped_call = self.lower_to_prims_and_execute
 

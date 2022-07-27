@@ -2,11 +2,11 @@ import dataclasses
 import typing
 import unittest
 
-from tools.autograd import gen_autograd_functions
-from tools.autograd import load_derivatives
+import torchgen.model
+
+from tools.autograd import gen_autograd_functions, load_derivatives
 from torchgen.gen import get_native_function_schema_registrations
 from torchgen.selective_build.selector import SelectiveBuilder
-import torchgen.model
 
 
 class TestCreateDerivative(unittest.TestCase):
