@@ -45,7 +45,7 @@ query ($owner: String!, $name: String!, $labels: [String!]) {
 """
 
 
-def fetch_land_pending_pr_numbers(org: str, project: str) -> Any:
+def fetch_land_pending_prs(org: str, project: str) -> Any:
     pr_query = gh_graphql(PRS_WITH_LABEL_QUERY,
                           owner=org,
                           name=project,
@@ -88,7 +88,7 @@ def main() -> None:
     # Find all the PRs that have land-pending label
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    pr_query = fetch_land_pending_pr_numbers(org, project)
+    pr_query = fetch_land_pending_prs(org, project)
     prs = get_github_prs(org, project, pr_query)
 
     pending_prs = ", ".join([str(pr.pr_num) for pr in prs])
