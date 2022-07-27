@@ -2192,9 +2192,12 @@
   device_check: NoCheck
   device_guard: False
 
+# decomposes to eye.m
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
