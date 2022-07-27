@@ -1,18 +1,17 @@
-from typing import Callable, Sequence, Any, Dict
 import functools
-
+from typing import Any, Callable, Dict, Sequence
 
 import torch
-import torch.overrides
 
-from torch._prims_common import torch_function_passthrough
+import torch._prims
 
 import torch._refs
 import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
+import torch.overrides
 
-import torch._prims
+from torch._prims_common import torch_function_passthrough
 
 
 @functools.lru_cache(None)
@@ -27,6 +26,7 @@ def torch_to_refs_map():
         (torch.nn.functional, torch._refs.nn.functional),
         (torch.special, torch._refs.special),
         (torch.fft, torch._refs.fft),
+        (torch.linalg, torch._refs.linalg),
     ]
     r: Dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
