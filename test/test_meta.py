@@ -833,7 +833,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    # @onlyCUDA
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
