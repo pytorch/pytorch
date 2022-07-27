@@ -108,16 +108,13 @@ Tensor empty_strided_symint_mps(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  check_size_nonnegative(size);
-  // empty memory formatempty
-  auto t = at::native::empty_mps(
-      {0},
+  return at::native::empty_strided_mps(
+      c10::asIntArrayRefSlow(size),
+      c10::asIntArrayRefSlow(stride),
       dtype_opt,
       layout_opt,
       device_opt,
       pin_memory_opt);
-  resize_impl_mps_(t.unsafeGetTensorImpl(), c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride));
-  return t;
 }
 
 const Tensor& resize_mps_(
