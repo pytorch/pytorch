@@ -136,6 +136,8 @@ struct C10_API PyInterpreter {
   using sym_sizes_sig =
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
+  using sym_strides_sig =
+      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -148,7 +150,8 @@ struct C10_API PyInterpreter {
       strides_sig* strides,
       sizes_sig* sizes,
       sym_sizes_sig* sym_sizes,
-      layout_sig* layout)
+      layout_sig* layout,
+      sym_strides_sig* sym_strides)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
@@ -159,7 +162,8 @@ struct C10_API PyInterpreter {
         strides_fn_(strides),
         sizes_fn_(sizes),
         sym_sizes_fn_(sym_sizes),
-        layout_fn_(layout) {}
+        layout_fn_(layout),
+        sym_strides_fn_(sym_strides) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -172,6 +176,7 @@ struct C10_API PyInterpreter {
   sizes_sig* sizes_fn_;
   sym_sizes_sig* sym_sizes_fn_;
   layout_sig* layout_fn_;
+  sym_strides_sig* sym_strides_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -234,6 +239,11 @@ struct C10_API PyInterpreter {
 
   __ubsan_ignore_function__ c10::Layout layout(const TensorImpl* self) const {
     return (*layout_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::SymIntArrayRef sym_strides(
+      const TensorImpl* self) const {
+    return (*sym_strides_fn_)(this, self);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

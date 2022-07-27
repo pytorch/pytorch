@@ -58,9 +58,19 @@ void size(Stack& stack) {
   pack(stack, t.sizes().vec());
 }
 
+void stride(Stack& stack) {
+  auto t = std::move(pop(stack)).toTensor();
+  pack(stack, t.strides().vec());
+}
+
 void sym_size(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();
   pack(stack, t.sym_sizes().vec());
+}
+
+void sym_stride(Stack& stack) {
+  auto t = std::move(pop(stack)).toTensor();
+  pack(stack, t.sym_strides().vec());
 }
 
 void device(Stack& stack) {

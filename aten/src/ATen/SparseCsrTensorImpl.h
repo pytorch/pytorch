@@ -84,8 +84,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   }
   bool is_contiguous_custom(MemoryFormat) const override {
     TORCH_CHECK(
-        false,
-        "Internal error: is_contiguous_custom() not supported for SparseCsrTensorImpl.");
+        false, "Tensors of type SparseCsrTensorImpl do not have is_contiguous");
   }
   IntArrayRef sizes_custom() const override {
     TORCH_CHECK(
@@ -96,6 +95,11 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     TORCH_CHECK(
         false,
         "Internal error: sym_sizes_custom() not supported for SparseCsrTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_strides_custom() not supported for SparseCsrTensorImpl.");
   }
   Device device_custom() const override {
     TORCH_CHECK(

@@ -262,6 +262,9 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+c10::SymIntArrayRef concrete_sym_strides_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -277,7 +280,8 @@ class PyInterpreterHolder {
             &concrete_strides_fn,
             &concrete_sizes_fn,
             &concrete_sym_sizes_fn,
-            &concrete_layout_fn)) {}
+            &concrete_layout_fn,
+            &concrete_sym_strides_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -573,6 +577,12 @@ static int THPVariable_clear(THPVariable* self) {
   }
   TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
   self->cdata = MaybeOwned<Variable>();
+  return 0;
+}
+
+int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(
+      false, "Tensor tp_traverse function was not overriden properly");
   return 0;
 }
 
@@ -1646,7 +1656,7 @@ PyTypeObject THPVariableType = {
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     // Also set by metaclass
-    nullptr, /* tp_traverse */
+    (traverseproc)THPFunction_traverse, /* tp_traverse */
     (inquiry)THPVariable_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
@@ -1693,7 +1703,7 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
@@ -1905,7 +1915,7 @@ static int traverse_slots(
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
@@ -2299,7 +2309,12 @@ c10::IntArrayRef concrete_strides_fn(
   auto out = torchDispatchFromTensorImpl(
       self,
       "stride",
-      py::module::import("torch").attr("ops").attr("aten").attr("stride").ptr(),
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("stride")
+          .attr("default")
+          .ptr(),
       "torch.ops.aten");
 
   if (out == Py_None) {
@@ -2424,7 +2439,6 @@ c10::Layout concrete_layout_fn(
     const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
   auto out = torchDispatchFromTensorImpl(
       self,
       "layout",
@@ -2443,6 +2457,46 @@ c10::Layout concrete_layout_fn(
       ", expected Layout");
 
   return toLayout(out.ptr());
+}
+
+c10::SymIntArrayRef concrete_sym_strides_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  HANDLE_TH_ERRORS
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_stride",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_stride")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    return self->sym_strides_default();
+  }
+  // We need to squeeze SymIntNodes and ints into `SymInts`
+  // since it's a format `sym_strides()` are stored in
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "Symshape must be a list or a tuple");
+  py::list symints;
+  for (auto it = out.begin(); it != out.end(); it++) {
+    auto elm = *it;
+    auto si = torch::is_symint_node(elm)
+        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+        : c10::SymInt{py::cast<int64_t>(elm)};
+    symints.append(si.data());
+  }
+
+  auto result = values_from_buffer(self, symints);
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // anonymous namespace

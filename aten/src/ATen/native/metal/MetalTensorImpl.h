@@ -50,6 +50,11 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
         false,
         "Internal error: sym_sizes_custom() not supported for MetalTensorImpl.");
   }
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_strides_custom() not supported for MetalTensorImpl.");
+  }
   Device device_custom() const override {
     TORCH_CHECK(
         false,
