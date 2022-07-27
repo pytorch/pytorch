@@ -13,7 +13,6 @@ function install_ucx() {
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
       --enable-profiling              \
-      --with-cuda=no                  \
       --enable-stats
   time make -j
   sudo make install
