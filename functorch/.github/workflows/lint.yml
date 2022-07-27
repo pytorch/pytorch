@@ -1,0 +1,63 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lintrunner:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+
+      - name: Install lintrunner
+        run: pip install lintrunner==0.8.*
+
+      - name: Initialize lint dependencies
+        run: lintrunner init
+
+      - name: Run lintrunner on all files
+        if: github.event_name == 'push'
+        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
+
+      - name: Run lintrunner on PR files
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set +e
+          if ! lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}" ; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+              echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+              exit 1
+          fi
+
+      - name: Store annotations
+        if: always() && github.event_name == 'pull_request'
+        # Don't show this as an error; the above step will have already failed.
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The easiest way to get annotations is to just run lintrunner again
+          # in JSON mode and use jq to massage the output into GitHub Actions
+          # workflow commands.
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --output=json | \
+            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
+
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
