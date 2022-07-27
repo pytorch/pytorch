@@ -373,10 +373,10 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [8]);  a_1 = None
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    arange = torch.ops.aten.arange.start_step(0, 4, 1, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'))
-    empty_1 = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    arange_1 = torch.ops.aten.arange.start_step(0, 4, 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
+    arange = torch.ops.aten.arange.start_step(0, 4, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'))
+    empty_1 = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    arange_1 = torch.ops.aten.arange.start_step(0, 4, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     index_put_default = torch.ops.aten.index_put.default(view_copy_default, [arange], arange_1);  view_copy_default = arange = arange_1 = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(index_put_default, [4, 2])
     return index_put_default
