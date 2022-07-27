@@ -70,11 +70,8 @@ with FusionDefinition(fusion3) as fd :
     t0 = fd.define_tensor([3, 1], [1, 1])
     t1 = fd.define_tensor(1)
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t1_b = fd.Ops.broadcast_in_dim(t1, [3, 3], [0])  # 1 -> 0
-    t2 = fd.Ops.add(t0, t1_b)
+    t1_b = fd.ops.broadcast_in_dim(t1, [3, 3], [0])  # 1 -> 0
+    t2 = fd.ops.add(t0, t1_b)
 
     fd.add_output(t2)
 
