@@ -5,6 +5,7 @@
 #include <Python.h>
 #include <ATen/ATen.h>
 
+#include <c10/core/SymbolicIntNode.h>
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include <torch/csrc/autograd/python_variable.h>
