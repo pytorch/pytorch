@@ -167,6 +167,16 @@ def forward(self, a_1):
             return y
         self.assert_functionalization(f, torch.arange(3, dtype=torch.float32))
 
+    def test_tensor_list_mixed_functional_nonfunctional(self):
+        nonfunctional_tensor = torch.ones(2, dtype=torch.long)
+
+        def f(x):
+            # simple test: 1 view op, 1 inplace op
+            functional_tensor = torch.ones(2, dtype=torch.long)
+            out = x[functional_tensor, nonfunctional_tensor]
+            return out
+        self.assert_functionalization(f, torch.ones(2, 2))
+
     def test_inplace_on_non_view(self):
         def f(x):
             # test for the case where we functionalize an inplace op on the other tensor - not a view.
