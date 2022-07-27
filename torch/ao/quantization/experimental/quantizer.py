@@ -60,8 +60,6 @@ class APoTQuantizer():
         orig_size = apot_tensor.data.size()
         apot_tensor_data = apot_tensor.data.flatten()
 
-        print(apot_tensor_data)
-
         # map apot_to_float over tensor2quantize elements
         result_temp = np.empty(shape=apot_tensor_data.size())
         for i in range(len(apot_tensor_data)):
@@ -69,8 +67,6 @@ class APoTQuantizer():
             result_temp[i] = new_ele
 
         result = torch.from_numpy(result_temp).reshape(orig_size)
-
-        print(result)
 
         return result
 
