@@ -17,6 +17,11 @@
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/eye.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -416,7 +421,7 @@ Tensor eye(int64_t n,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // the default value of `m` equals to `n`
-  return native::eye(n, n, dtype, layout, device, pin_memory);
+  return at::eye(n, n, dtype, layout, device, pin_memory);
 }
 
 Tensor eye(int64_t n, int64_t m,
@@ -1076,6 +1081,14 @@ Tensor zeros(IntArrayRef size,
 
   auto result = at::empty(size, options);
   return result.zero_();
+}
+
+Tensor zeros_symint(c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
