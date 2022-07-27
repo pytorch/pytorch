@@ -71,6 +71,7 @@ _like_tensor_constructors = (
     aten.new_ones.default,
 )
 
+
 @functools.lru_cache(None)
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
@@ -127,6 +128,11 @@ class FakeTensorConverter(object):
         if maybe_memo is not None:
             return maybe_memo
         existing_device = t.device
+        # not yet supported in metatensors
+        if t.is_complex():
+            raise UnsupportedFakeTensorException("complex nyi in meta tensors")
+        if t.is_quantized:
+            raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
             out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         if type(t) is torch.nn.Parameter:

@@ -604,6 +604,15 @@ class TestSparseCompressed(TestCase):
         if not count:
             raise ValueError("Expected at least one sample with keepdim and/or explicit mask for reductions.")
 
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_empty_like(self, layout, device, dtype):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout):
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            result = torch.empty_like(sparse)
+            self.assertEqual(sparse.shape, result.shape)
 
     @skipMeta
     @all_sparse_compressed_layouts()
