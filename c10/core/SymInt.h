@@ -45,9 +45,6 @@ class C10_API SymInt {
   bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
-  // Perhaps these should return symbolic bools?
-  bool operator==(SymInt p2) const;
-  bool operator!=(SymInt p2) const;
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
