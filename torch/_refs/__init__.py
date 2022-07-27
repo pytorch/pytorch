@@ -195,6 +195,7 @@ __all__ = [
     "conj",
     "constant_pad_nd",
     "contiguous",
+    "diag_embed",
     "diagonal",
     "dsplit",
     "dstack",
@@ -2969,6 +2970,48 @@ def diagonal(
     strides.append(self.stride()[dim1] + self.stride()[dim2])
 
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
+
+    return result
+
+
+@register_decomposition(torch.ops.aten.diag_embed)
+def diag_embed(
+    self: TensorLikeType,
+    offset: int = 0,
+    dim1: int = -2,
+    dim2: int = -1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.diag_embed
+    """
+    num_dims = self.dim() + 1
+    dim1 = _maybe_wrap_dim(dim1, num_dims)
+    dim2 = _maybe_wrap_dim(dim2, num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    import builtins
+
+    new_dim_len = builtins.abs(offset) + list(self.size())[-1]
+
+    sizes = list(self.size())
+
+    sizes.pop()
+    sizes.insert(min(dim1, dim2), new_dim_len)
+    sizes.insert(max(dim1, dim2), new_dim_len)
+
+    result = torch.zeros(
+        sizes,
+        dtype=self.dtype,
+        device=self.device,  # TODO: layout=self.layout
+        requires_grad=self.requires_grad,
+    )
+
+    diag = result.diagonal(offset, dim1, dim2)
+    # Note: the inplace copy_ method breaks forward dtype tests
+    copy_to(diag, self)
 
     return result
 
