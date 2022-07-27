@@ -1,15 +1,18 @@
+import operator
+import math
+import copy
+import os
 from typing import List, Tuple, Dict, Set
+
 import torch
 import torch.fx as fx
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.backends.nvfuser import NvFuserOperatorSupport
 from torch.fx.passes.tools_common import legalize_graph
-import operator
-import math
-import copy
 
 from .utilities import _size_of, ban_recomputation
 
+REMATERIALIZATION_DEBUG = bool(os.environ.get("REMATERIALIZATION_DEBUG", False))
 
 num_group_remat = 0  # used for analytical purpose
 memory_reduced = 0
@@ -244,7 +247,8 @@ def get_node_to_copy(non_reachable: Set[str], cut_nodes: Set[str]) -> Set[str]:
         node_name = get_nx_node_name(node_name)
         node_to_copy.add(node_name)
     node_to_copy = node_to_copy.difference(cut_nodes)  # cut nodes are handeled separately as placeholders
-
+    if REMATERIALIZATION_DEBUG:
+        print(node_to_copy)
     return node_to_copy
 
 

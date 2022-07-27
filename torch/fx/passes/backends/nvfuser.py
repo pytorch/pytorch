@@ -79,7 +79,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # TODO: might need to update according to supported input types
             "torch.ops.aten.add": None,
             "torch.ops.aten.sub": None,
-            # "torch.ops.aten.rsub": None,    # rsub decomp is supported at aten2aten level
+            "torch.ops.aten.rsub": None,    # rsub decomp is supported at aten2aten level
             "torch.ops.aten.div": None,
             "torch.ops.aten.atan2": None,
             "torch.ops.aten.mul": None,
@@ -143,7 +143,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.isneginf": None,
             "torch.ops.aten.isposinf": None,
             "torch.ops.aten.isreal": None,
-            # "torch.ops.aten.rand_like": None,  # causing Node empty_like_default does not support nvfuser
+            "torch.ops.aten.rand_like": None,  # causing Node empty_like_default does not support nvfuser
             "torch.ops.aten.softplus": None,
             "torch.ops.aten.threshold": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
@@ -153,25 +153,25 @@ class NvFuserOperatorSupport(OperatorSupport):
             # Failing with where(): incompatible function arguments: \
             # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
             # failing with BERT_pytorch_forward_0, which has aten.where.ScalarSelf in the decomps
-            # "torch.ops.aten.where": None,
+            "torch.ops.aten.where": None,
             # However, aten.where.self overload is fully supported
             "torch.ops.aten.where.self": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
-            # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
+            "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
             "torch.ops.aten.dropout": None,
-            # "torch.ops.aten.native_dropout_backward": None,   # missing refs for aten.type_as
+            "torch.ops.aten.native_dropout_backward": None,   # missing refs for aten.type_as
             "torch.ops.aten.instance_norm": None,
             "torch.ops.aten._batch_norm_impl_index": None,
-            # "torch.ops.aten.native_batch_norm": None,     # missing refs for aten.var
+            "torch.ops.aten.native_batch_norm": None,     # missing refs for aten.var
             "torch.ops.aten.batch_norm": None,
             "torch.ops.aten.cudnn_batch_norm": None,
             "torch.ops.aten._batch_norm_impl_index_backward": None,
-            # "torch.ops.aten.native_batch_norm_backward": None,    # should have been handled at aten2aten decomp
+            "torch.ops.aten.native_batch_norm_backward": None,    # should have been handled at aten2aten decomp
             "torch.ops.aten.native_layer_norm": None,
             "torch.ops.aten.layer_norm": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.div
-            # "torch.ops.aten.native_layer_norm_backward": None,
+            "torch.ops.aten.native_layer_norm_backward": None,
             "torch.ops.aten.softmax.int": None,
             "torch.ops.aten.log_softmax.int": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.amax
@@ -181,27 +181,27 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.to": None,
             "torch.ops.aten._log_softmax_backward_data": None,
             # "torch.ops.aten._softmax_backward_data": None,  # Node _softmax_backward_data_default does not support nvfuser
-            # "torch.ops.aten.var.dim": None,       # missing refs
+            "torch.ops.aten.var.dim": None,       # missing refs
             "torch.ops.aten.std.dim": None,
             "torch.ops.aten.sum": None,
-            # "torch.ops.aten.mean.dim": None,      # missing refs
+            "torch.ops.aten.mean.dim": None,      # missing refs
             "torch.ops.aten._grad_sum_to_size": None,
             "torch.ops.aten.sum_to_size": None,
             "torch.ops.aten._autocast_to_reduced_precision": None,
             "torch.ops.aten._autocast_to_full_precision": None,
-            # "torch.ops.aten.to.dtype": None,      # causing segfault
-            # "torch.ops.aten.type_as": None,       # missing refs
+            "torch.ops.aten.to.dtype": None,      # causing segfault
+            "torch.ops.aten.type_as": None,       # missing refs
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
-            # "torch.ops.aten.gelu_backward": None,       # gelu_backward is handled at aten2aten decomp
+            "torch.ops.aten.gelu_backward": None,       # gelu_backward is handled at aten2aten decomp
             # "torch.ops.aten.hardtanh": None,        # has functional ref, using unsupported aten.clamp
             "torch.ops.aten.leaky_relu": None,
             "torch.ops.aten.square": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
             "torch.ops.aten.tanh_backward": None,
-            # "torch.ops.aten.amax": None,      # missing prim decomp
-            # "torch.ops.aten.amin": None,      # missing prim decomp
-            # "torch.ops.aten.reshape": None,
+            "torch.ops.aten.amax": None,      # missing prim decomp
+            "torch.ops.aten.amin": None,      # missing prim decomp
+            "torch.ops.aten.reshape": None,
             # "torch.ops.aten.view": None,      # missing prim decomp
             "torch.ops.aten.flatten.using_ints": None,
 
