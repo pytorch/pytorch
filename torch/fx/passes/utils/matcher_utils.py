@@ -22,7 +22,7 @@ class SubgraphMatcher:
             match_output: If True, output node in the pattern graph will be treated as a part of the targeted pattern.
                 If False, output node is ignored during match.
             match_placeholder: If True, placeholder node in the pattern graph will be treated as a part of
-                the targeted pattern. If False, placeholder nodes are ignored during match.
+                the targeted pattern. If False, placeholder nodes will be used a wildcard.
             fully_contained: If True, nodes (except placeholder and output_link_nodes ) can only be consumed
                 by nodes within th pattern.
         """
@@ -42,14 +42,10 @@ class SubgraphMatcher:
 
         # TODO: assert pattern is a connected graph
 
-        placeholder_nodes = [n for n in pattern.nodes if n.op == "placeholder"]
-
-        # mapping from placeholder to user nodes
-        self.inlink_nodes: Dict[Node, List[Node]] = {n : list(n.users) for n in placeholder_nodes}
-
+        self.pattern_placeholder_nodes = [n for n in pattern.nodes if n.op == "placeholder"]
         output_node = next(iter(reversed(pattern.nodes)))
         # nodes returned by outputs
-        self.outlink_nodes: List[Node] = output_node.all_input_nodes
+        self.pattern_returning_nodes: List[Node] = output_node.all_input_nodes
 
         self.pattern_anchors: List[Node] = []
         if match_output:
@@ -59,9 +55,13 @@ class SubgraphMatcher:
             # and should be matched against as an anchor
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
-    @staticmethod
-    def _nodes_are_equal(pn: Node, gn: Node) -> bool:
+    def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
         # TODO: match args and kwargs
+
+        # if exact match for placeholder is not required, then use placeholder as a wildcard
+        if not self.match_placeholder and pn.op == "placeholder":
+            return True
+
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
                 return True
@@ -78,7 +78,7 @@ class SubgraphMatcher:
                 continue
 
             # nodes returned by output are allowed to be used in other areas of the graph
-            if pn in self.outlink_nodes:
+            if pn in self.pattern_returning_nodes:
                 continue
 
             for user in gn.users:
@@ -99,15 +99,14 @@ class SubgraphMatcher:
         if gn in match.nodes_map.values():
             return False
 
-        # skip matching placeholder if match_placeholder is False
-        if not self.match_placeholder and pn.op == "placeholder":
-            return True
-
-        if not SubgraphMatcher._nodes_are_equal(pn, gn):
+        if not self._nodes_are_equal(pn, gn):
             return False
 
         # Optimistically mark `pn` as a match for `gn`
         match.nodes_map[pn] = gn
+
+        if pn.op == "placeholder":
+            return True
 
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
@@ -126,13 +125,15 @@ class SubgraphMatcher:
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
-                if SubgraphMatcher._nodes_are_equal(pattern_anchor, node):
+                if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
         matches: List[Match] = []
 
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
+                match.placeholder_nodes = [match.nodes_map[pn] for pn in self.pattern_placeholder_nodes]
+                match.returning_nodes = [match.nodes_map[pn] for pn in self.pattern_returning_nodes]
                 matches.append(match)
                 return
 
@@ -149,7 +150,7 @@ class SubgraphMatcher:
                     match = copy.copy(saved_match)
 
         # TODO: anchor is set to the first of self.pattern_anchors for now, need to update the sematics of this field
-        match = Match(anchor=self.pattern_anchors[0], nodes_map={})
+        match = Match(anchor=self.pattern_anchors[0])
         backtracking(0, match)
 
         if self.fully_contained:
