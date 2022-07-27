@@ -153,6 +153,17 @@ def get_graph_being_compiled() -> str:
     return f"{model_name}_{graph_being_compiled}_{nth_graph}"
 
 
+@contextmanager
+def track_graph_compiling(graph_name, increment_index=False):
+    global graph_being_compiled
+    graph_being_compiled = graph_name
+    yield
+    if increment_index:
+        global nth_graph
+        nth_graph += 1
+    graph_being_compiled = None
+
+
 def create_aot_autograd_function(
     flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
 ):
@@ -221,22 +232,17 @@ def create_aot_autograd_function(
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
-                global graph_being_compiled
-                graph_being_compiled = "joint"
-                fw_module, bw_module = partition_fn(fx_g, joint_inputs)
+                with track_graph_compiling("joint"):
+                    fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
-                graph_being_compiled = "forward"
-                compiled_fw = fw_compiler(fw_module, flat_tensor_args)
+                with track_graph_compiling("forward"):
+                    compiled_fw = fw_compiler(fw_module, flat_tensor_args)
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
 
-                graph_being_compiled = "backward"
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-                compiled_bw = bw_compiler(bw_module, bw_args)
-
-                global nth_graph
-                nth_graph += 1
-                graph_being_compiled = None
+                with track_graph_compiling("backward", True):
+                    compiled_bw = bw_compiler(bw_module, bw_args)
             else:
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
