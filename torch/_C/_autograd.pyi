@@ -86,6 +86,7 @@ class _KinetoEvent:
     ...
 
 class _ProfilerEvent:
+    tag: _EventType
     id: int
     correlation_id: int
     start_tid: int
