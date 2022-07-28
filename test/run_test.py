@@ -32,11 +32,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.stats.import_test_stats import get_test_times
     from tools.testing.test_selections import (
-        export_S3_test_times,
-        get_shard_based_on_S3,
         get_reordered_tests,
         get_test_case_configs,
+        calculate_shards,
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -245,6 +245,7 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -315,6 +316,19 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
+
+
+def discover_functorch_tests():
+    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
+    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
+    result = discover_tests(pathlib.Path(functorch_test_dir))
+    result = [os.path.join(functorch_test_dir, r) for r in result]
+
+    # Sanity check
+    assert len(result) >= 8
+    return result
+
+FUNCTORCH_TESTS = discover_functorch_tests()
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -590,6 +604,16 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "--functorch",
+        "--functorch",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run functorch tests. "
+            "If this flag is not present, we will not run any functorch tests. "
+            "This requires functorch to already be installed."
+        )
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -675,13 +699,6 @@ def parse_args():
         nargs="*",
         help="additional arguments passed through to unittest, e.g., "
         "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
-    )
-    parser.add_argument(
-        "--export-past-test-times",
-        nargs="?",
-        type=str,
-        const=TEST_TIMES_FILE,
-        help="dumps test times from previous S3 stats into a file, format JSON",
     )
     parser.add_argument(
         "--shard",
@@ -777,6 +794,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    if options.functorch:
+        selected_tests = FUNCTORCH_TESTS
+
     # process reordering
     if options.bring_to_front:
         to_front = set(options.bring_to_front)
@@ -837,11 +857,21 @@ def get_selected_tests(options):
         assert num_shards <= len(
             selected_tests
         ), f"Number of shards must be less than {len(selected_tests)}"
-        # TODO: fix this to use test_times_filename, but currently this is not working
-        # because setting the export arg immeidately halts the test execution.
-        selected_tests = get_shard_based_on_S3(
-            which_shard, num_shards, selected_tests, TEST_TIMES_FILE
-        )
+
+        if num_shards == 1:
+            return selected_tests
+
+        # Download previous test times to make sharding decisions
+        test_file_times = get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
+        if len(test_file_times) == 0:
+            print(
+                "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+            )
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        else:
+            shards = calculate_shards(num_shards, selected_tests, test_file_times)
+            _, tests_from_shard = shards[which_shard - 1]
+            selected_tests = tests_from_shard
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
@@ -880,15 +910,6 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
 def main():
     options = parse_args()
-
-    # TODO: move this export & download function in tools/ folder
-    test_times_filename = options.export_past_test_times
-    if test_times_filename:
-        print(
-            f"Exporting past test times from S3 to {test_times_filename}, no tests will be run."
-        )
-        export_S3_test_times(test_times_filename)
-        return
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
