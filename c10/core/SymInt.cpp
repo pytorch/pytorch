@@ -5,13 +5,9 @@
 
 namespace c10 {
 
-std::array<std::shared_ptr<SymIntNodeImpl>, 2> normalize_symints(
-    SymInt a_,
-    SymInt b_) {
-  std::shared_ptr<SymIntNodeImpl> a =
-      a_.is_symbolic() ? a_.toSymIntNodeImpl() : nullptr;
-  std::shared_ptr<SymIntNodeImpl> b =
-      b_.is_symbolic() ? b_.toSymIntNodeImpl() : nullptr;
+std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
+  SymIntNode a = a_.is_symbolic() ? a_.toSymIntNodeImpl() : nullptr;
+  SymIntNode b = b_.is_symbolic() ? b_.toSymIntNodeImpl() : nullptr;
 
   SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
@@ -26,13 +22,13 @@ std::array<std::shared_ptr<SymIntNodeImpl>, 2> normalize_symints(
   return {a, b};
 }
 
-std::shared_ptr<SymIntNodeImpl> SymInt::toSymIntNodeImpl() const {
+SymIntNode SymInt::toSymIntNodeImpl() const {
   auto& st = getSymIntTable();
   TORCH_CHECK(is_symbolic());
   return st.getNode(static_cast<uint64_t>(data_) & ~MASK);
 }
 
-c10::SymInt SymInt::toSymInt(std::shared_ptr<SymIntNodeImpl> sin_sp) {
+c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto& sit = getSymIntTable();
   uint64_t idx = sit.addNode(sin_sp);
   TORCH_CHECK(idx < MAX_SYM_IDX, "SymIntNodeImpl index overflow: ", idx);

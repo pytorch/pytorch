@@ -3,9 +3,12 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#include <memory>
+
 namespace c10 {
 
 class SymIntNodeImpl;
+using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -51,8 +54,8 @@ class C10_API SymInt {
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
 
-  std::shared_ptr<SymIntNodeImpl> toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(std::shared_ptr<SymIntNodeImpl> sin);
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
     return data_;

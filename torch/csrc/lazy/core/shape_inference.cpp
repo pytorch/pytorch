@@ -451,8 +451,7 @@ std::vector<Shape> compute_shape_expand(
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
     if (_sizes[idx].is_symbolic()) {
-      std::shared_ptr<c10::SymIntNodeImpl> symbolicIntNode =
-          _sizes[idx].toSymIntNodeImpl();
+      c10::SymIntNode symbolicIntNode = _sizes[idx].toSymIntNodeImpl();
       auto lazySymIntNode =
           std::dynamic_pointer_cast<torch::lazy::SymIntNodeImpl>(
               symbolicIntNode);
