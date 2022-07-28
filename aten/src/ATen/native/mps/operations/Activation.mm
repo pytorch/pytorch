@@ -1753,7 +1753,6 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
   int64_t weight_num = weight_.numel();
   Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
   Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
-  Tensor weight_grad_collector = at::empty_like(self, at::MemoryFormat::Contiguous);
 
   if (weight_num != 1) {
     int64_t input_ndim = self.dim();
@@ -1783,7 +1782,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
   };
   Tensor w = weight_.defined() ? as_nd(weight_) : at::detail::scalar_tensor_static(1, self.scalar_type(), kMPS);
 
-  NSMutableArray<NSNumber*> * reduce_dims = [NSMutableArray<NSNumber*> init];
+  NSMutableArray<NSNumber*> * reduce_dims = [NSMutableArray<NSNumber*> new];
   int64_t input_ndim = self.dim();
 
   for (const auto i : c10::irange(input_ndim)) {
@@ -1818,9 +1817,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
             @autoreleasepool {
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
-              //scalar_t input_grad = (input > scalar_t(0)) ? grad_out : weight * grad_out;
-              //scalar_t weight_grad_collector = (input > scalar_t(0)) ? scalar_t(0) : input * grad_out;
-              //return std::tuple<scalar_t, scalar_t>(input_grad, weight_grad_collector);
+
               MPSGraphTensor *gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
               MPSGraphTensor *inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -1866,7 +1863,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
         Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
         Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, w);
         Placeholder gradInputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
-        Placeholder weightedGradPlaceholder = Placeholder(cachedGraph->weightedGradTensor_, weight_grad_collector);
+        Placeholder weightedGradPlaceholder = Placeholder(cachedGraph->weightedGradTensor_, weight_grad);
 
         // Create dictionary of inputs and outputs
         NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -1880,7 +1877,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
         };
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
       }
-  return std::tuple<Tensor, Tensor>{grad_input, weight_grad_collector};
+  return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
 }
 
 TORCH_IMPL_FUNC(silu_out_mps) (
