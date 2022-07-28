@@ -1696,6 +1696,22 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    def test_profiler_conv2d_bias_followed_by_batchnorm2d_pattern(self):
+        x = torch.randn((1, 3, 32, 32))
+        cases = (
+            (1, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1), nn.BatchNorm2d(3))),
+            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1, bias=False), nn.BatchNorm2d(3))),
+            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1)))
+        )
+        num_matched = []
+        for _, model in cases:
+            with profile(with_stack=True, record_shapes=True) as prof:
+                model(x)
+            pattern = Conv2dBiasFollowedByBatchNorm2dPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_matmul_dim_fp16_pattern(self):
         cases = (
@@ -1709,24 +1725,6 @@ aten::mm""")
             with profile(with_stack=True, record_shapes=True) as prof:
                 x @ x
             pattern = MatMulDimInFP16Pattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_conv2d_bias_followed_by_batchnorm2d_pattern(self):
-        x = torch.randn((1, 3, 32, 32), device='cuda')
-        cases = (
-            (1, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1), nn.BatchNorm2d(3)).to("cuda")),
-            (1, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1), nn.BatchNorm2d(3)).to("cuda")),
-            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1, bias=False), nn.BatchNorm2d(3)).to("cuda")),
-            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1)).to("cuda"))
-        )
-        num_matched = []
-        for _, model in cases:
-            with profile(with_stack=True) as prof:
-                model(x)
-            pattern = Conv2dBiasFollowedByBatchNorm2dPattern(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
