@@ -1614,7 +1614,7 @@ def all_gather_multigpu(
 
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
-    torch.save(obj,f,pickle_module=pickle,pickle_protocol=4)
+    torch.save(obj,f,pickle_protocol=4)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
