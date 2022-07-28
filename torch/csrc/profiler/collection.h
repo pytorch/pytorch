@@ -153,7 +153,7 @@ using strong_t = strong::
 
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
-using PyCFunction = strong_t<PyObject*, struct PyCFunction_>;
+using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 
 struct NNModuleInfo {
   PyModuleSelf self_;
