@@ -797,6 +797,8 @@ class OpInfo(object):
 
     supports_expanded_weight: bool = False
 
+    is_factory_function: bool = False
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
@@ -3084,6 +3086,9 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
         else:
             yield SampleInput(start, args=(end, step), kwargs={"dtype": dtype, "device": device})
 
+    yield SampleInput(2)
+    yield SampleInput(1, args=(3, 1))
+
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
@@ -3101,6 +3106,8 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
+    yield SampleInput(1, args=(3, 1))
+
 
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
@@ -3117,6 +3124,8 @@ def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
+
+    yield SampleInput(1, args=(3, 1, 2.))
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
@@ -10780,6 +10789,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
            supports_autograd=False,
+           is_factory_function=True,
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
@@ -13056,6 +13066,7 @@ op_db: List[OpInfo] = [
         )),
     OpInfo('linspace',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_linspace,
@@ -13102,6 +13113,7 @@ op_db: List[OpInfo] = [
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_linspace,
