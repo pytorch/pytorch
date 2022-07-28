@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -29,69 +28,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-// Update the HaloInfo mappings for a reference tensor by propagating
-// the halo information from the consumer tensor.
-void updateHaloInfoForReference(
-    const ReferenceTensor& reference,
-    const TensorView* consumer_tv) {
-  const auto gpu_lower = GpuLower::current();
-
-  auto& halo_info = gpu_lower->haloInfo();
-
-  auto reference_domain = reference.domain;
-
-  // First, propagate the halo information of the consumer root domain
-  // to the reference root domain.
-  for (auto consumer_root_id : consumer_tv->getRootDomain()) {
-    auto consumer_index_concrete_id = gpu_lower->caMap()->getConcreteMappedID(
-        consumer_root_id, IdMappingMode::EXACT);
-    auto reference_it =
-        reference.concrete_to_id.find(consumer_index_concrete_id);
-    if (reference_it == reference.concrete_to_id.end()) {
-      // This happens when consumer_root_id is a broadcast or an
-      // initialization of a reduction buffer. In those cases, since
-      // the domain is not going to be predicated, it's not necessary
-      // to propagate halo information to the reference tensor.
-      continue;
-    }
-    auto reference_id = reference_it->second;
-    halo_info.setRootAxisInfo(
-        reference_id, halo_info.getRootAxisInfo(consumer_root_id));
-  }
-
-  // Now that the reference root has halo information copied from
-  // the cosumer, propagate it down to non-root domains.
-  halo_info.build(reference_domain);
-
-  return;
-}
-
-// Get a map of IterDomains to halo-extended extents of corresponding
-// reference IterDomains.
-//
-// ref_map: ref-to-consumer in consumer indexing; ref-to-producer in
-// producer indexing
-std::unordered_map<IterDomain*, Val*> getReferenceHaloExtentMap(
-    const ReferenceTensor& reference,
-    const std::unordered_map<IterDomain*, IterDomain*>& index_map_from_ref) {
-  const auto& halo_info = GpuLower::current()->haloInfo();
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map;
-
-  // Propagate halo extents of the reference to the consumer or
-  // producer tensor
-  for (auto kv : index_map_from_ref) {
-    auto ref_id = kv.first;
-    auto producer_or_consumer_id = kv.second;
-    auto extent = halo_info.getExtent(ref_id);
-    if (extent != nullptr) {
-      reference_halo_extent_map[producer_or_consumer_id] = extent;
-    }
-  }
-
-  return reference_halo_extent_map;
-}
 
 //! Offset of an index of a producer axis with respect to its
 //! corresponding consumer index
@@ -575,10 +511,36 @@ void IndexCompute::handle(Merge* merge) {
   }
 }
 
+void IndexCompute::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = maybeGetExactMapConcreteID(swizzle_2d->outX());
+  auto out_y_id = maybeGetExactMapConcreteID(swizzle_2d->outY());
+  auto in_x_id = maybeGetExactMapConcreteID(swizzle_2d->inX());
+  auto in_y_id = maybeGetExactMapConcreteID(swizzle_2d->inY());
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  if (out_x_it == index_map_.end() || out_y_it == index_map_.end()) {
+    return;
+  }
+
+  const auto out_x_ind = out_x_it->second;
+  const auto out_y_ind = out_y_it->second;
+
+  // Actual swizzle operation is handled via IndexSwizzle pass
+  //  all behavior in this pass is directly forward through the
+  //  index and extent.
+  index_map_[in_x_id] = out_x_ind;
+  index_map_[in_y_id] = out_y_ind;
+  extent_map_[in_y_id] = getExtent(out_y_id);
+  extent_map_[in_x_id] = getExtent(out_x_id);
+}
+
 void IndexCompute::handle(Expr* e) {
   switch (e->getExprType().value()) {
     case (ExprType::Split):
     case (ExprType::Merge):
+    case (ExprType::Swizzle2D):
       break;
     default:
       TORCH_INTERNAL_ASSERT(
@@ -804,6 +766,16 @@ class UpdateLeafIndices : public IterVisitor {
       return;
     }
 
+    if (!index_map_.count(in_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          in_id->isReduction(), "Undefined index for ", in_id->toString());
+      return;
+    }
+
     auto factor = split->factor();
     index_map_[inner_id] =
         SimplifyingIrBuilder::modExpr(index_map_[in_id], factor);
@@ -819,6 +791,20 @@ class UpdateLeafIndices : public IterVisitor {
     auto outer_id = merge->outer();
     auto inner_id = merge->inner();
 
+    if (!index_map_.count(outer_id) || !index_map_.count(inner_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          outer_id->isReduction() && inner_id->isReduction(),
+          "Undefined index for ",
+          outer_id->toString(),
+          " and ",
+          inner_id->toString());
+      return;
+    }
+
     // Nothing need to be done when mappings for the output axes
     // already exist.
     if (index_map_.find(out_id) != index_map_.end()) {
@@ -830,13 +816,29 @@ class UpdateLeafIndices : public IterVisitor {
     TORCH_INTERNAL_ASSERT(
         index_map_.find(inner_id) != index_map_.end(), "Inner ID not found");
 
-    index_map_[out_id] = SimplifyingIrBuilder::mulExpr(
+    index_map_[out_id] = SimplifyingIrBuilder::addExpr(
         index_map_[inner_id],
         SimplifyingIrBuilder::mulExpr(
             index_map_[outer_id], getExtent(inner_id)));
 
     extent_map_[out_id] =
         SimplifyingIrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+  }
+
+  void handle(Swizzle2D* swizzle_2d) override {
+    auto in_x = swizzle_2d->inX();
+    auto in_y = swizzle_2d->inY();
+    auto out_x = swizzle_2d->outX();
+    auto out_y = swizzle_2d->outY();
+
+    // Forward propagation pass still just forward
+    //  through the indices and the actual swizzle
+    //  will be applied on the backward pass in
+    //  IndexSwizzle class implementation.
+    index_map_[out_x] = index_map_.at(in_x);
+    extent_map_[out_x] = getExtent(in_x);
+    index_map_[out_y] = index_map_.at(in_y);
+    extent_map_[out_y] = getExtent(in_y);
   }
 
   // return extent_map_[id] if exists, else return id->extent()
@@ -889,6 +891,23 @@ IndexSwizzle::IndexSwizzle(
       swizzle_type_(tv->swizzleType()),
       ids_to_swizzle_(tv->axesToSwizzle()) {}
 
+IndexSwizzle::IndexSwizzle(
+    const TensorView* tv,
+    const TensorDomain* domain,
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_map<IterDomain*, Val*> extent_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> zero_merged_in)
+    : IndexCompute(
+          domain,
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_domains),
+          std::move(zero_merged_in)),
+      tv_(tv),
+      swizzle_type_(tv->swizzleType()),
+      ids_to_swizzle_(tv->axesToSwizzle()) {}
+
 void IndexSwizzle::run() {
   TORCH_INTERNAL_ASSERT(
       swizzle_type_ == SwizzleType::NoSwizzle ||
@@ -922,15 +941,35 @@ void IndexSwizzle::run() {
       swizzled_ids_.insert(id_to_swizzle_j);
       IndexCompute::run();
     }
+  } else if (tv_->hasSwizzleOp()) {
+    // Propagate backward for the annotated swizzle path.
+    // TODO:
+    //  eventually will unify the two swizzling implementation
+    //  code path in a follow up. Currently just focusing on
+    //  getting the necessary implementation of the swizzle
+    //  operator ready.
+    //
+    // At this intermediate state, the legacy swizzle implementation
+    //  takes precedence, i.e. whenever swizzle_type_ is not NoSwizzle,
+    //  the new swizzle op pass is disabled.
+    UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
+    index_map_ = update_leaves.indexMap();
+    extent_map_ = update_leaves.extentMap();
+    IndexCompute::run();
   }
 }
 
 void IndexSwizzle::handle(Expr* e) {
   auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
   bool needs_update =
-      std::any_of(out_ids.begin(), out_ids.end(), [this](IterDomain* id) {
-        return swizzled_ids_.find(id) != swizzled_ids_.end();
-      });
+      std::any_of(
+          out_ids.begin(),
+          out_ids.end(),
+          [this](IterDomain* id) {
+            return swizzled_ids_.find(id) != swizzled_ids_.end();
+          }) ||
+      (e->isA<Swizzle2D>() &&
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle);
   if (!needs_update) {
     return;
   }
@@ -938,6 +977,48 @@ void IndexSwizzle::handle(Expr* e) {
   IndexCompute::handle(e);
   for (auto input : ir_utils::filterByType<IterDomain>(e->inputs())) {
     swizzled_ids_.insert(input);
+  }
+}
+
+void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = swizzle_2d->outX();
+  auto out_y_id = swizzle_2d->outY();
+  auto in_x_id = swizzle_2d->inX();
+  auto in_y_id = swizzle_2d->inY();
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  // TODO: unify the legacy path in all usage
+  TORCH_INTERNAL_ASSERT(
+      swizzle_type_ == SwizzleType::NoSwizzle,
+      "Cannot mix usage of two swizzle implementations");
+
+  TORCH_INTERNAL_ASSERT(
+      out_x_it != index_map_.end() && out_y_it != index_map_.end(),
+      "Swizzle output indices were not propagated through");
+
+  const auto out_x_ind = out_x_it->second;
+  const auto out_y_ind = out_y_it->second;
+
+  // Can propagate zero only for a few
+  //  swizzle types (TODO)
+
+  if (swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle) {
+    auto out_pair = IrBuilder::swizzle2DIntExpr(
+        out_x_ind,
+        out_y_ind,
+        getExtent(out_x_id),
+        getExtent(out_y_id),
+        swizzle_2d->swizzleType());
+
+    index_map_[in_x_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
+    index_map_[in_y_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
+
+    swizzled_ids_.insert(in_x_id);
+    swizzled_ids_.insert(in_y_id);
   }
 }
 
@@ -1129,45 +1210,6 @@ void ensureStaticIndexing(
 
 namespace {
 
-// Map everything we can from reference to provided tv using the provided
-// compute at map. If root_only is true, only root domains are included.
-// We can't simply try to use the provided tv root domains and
-// map those to the reference as the provided tv may have root domains that
-// don't exist in reference. This can happen when the provided tv is from before
-// a view, but all the loops are generated from TVs generated after the view
-// operation.
-std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
-    const TensorView* tv,
-    const std::unique_ptr<ComputeAtMap>& ca_map,
-    const std::unordered_map<IterDomain*, IterDomain*>&
-        reference_concrete_to_id_map,
-    bool root_only = false) {
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
-
-  auto gen_map = [&](const auto& pids) {
-    for (auto p_id : pids) {
-      auto concrete_id =
-          ca_map->getConcreteMappedID(p_id, IdMappingMode::EXACT);
-      auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
-      if (ref_id_it != reference_concrete_to_id_map.end()) {
-        index_map_ref_to_producer[ref_id_it->second] = p_id;
-      }
-    }
-  };
-
-  if (root_only) {
-    gen_map(tv->getRootDomain());
-  } else {
-    auto all_pid_vals = DependencyCheck::getAllValsBetween(
-        {tv->getRootDomain().begin(), tv->getRootDomain().end()},
-        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-    auto all_pids = ir_utils::filterByType<IterDomain>(all_pid_vals);
-    gen_map(all_pids);
-  }
-
-  return index_map_ref_to_producer;
-}
-
 //! Returns an iterdomain that corresponds to the
 //!  indexing sub-expression to hoist or a nullopt
 //!  if the index should not be hoisted.
@@ -1183,6 +1225,11 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
   // The old swizzle interface, which should be deprecated, is not
   // supported.
   if (tv->swizzleType() != SwizzleType::NoSwizzle) {
+    return c10::nullopt;
+  }
+
+  // New swizzle interface not yet supported
+  if (tv->hasSwizzleOp()) {
     return c10::nullopt;
   }
 
@@ -1613,7 +1660,32 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
   index_swizzle.run();
 
-  const auto& index_map = index_swizzle.indexMap();
+  auto producer_swizzled_index = index_swizzle;
+
+  if (producer_tv->hasSwizzleOp()) {
+    // Special handling needed on the new swizzle
+    //  op pass:
+    //  each swizzle op is local to the tensor,
+    //  so ReplayPasC will not include the swizzle
+    //  ops on the producer iterdomain. So would
+    //  need to traverse forward the producer domain
+    //  before the replay to get the swizzle ops.
+    IndexSwizzle producer_swizzle2d(
+        producer_tv,
+        domain_guard.prevDomain(),
+        producer_indexing.indexMap(),
+        producer_indexing.extentMap(),
+        producer_indexing.zeroDomains(),
+        producer_indexing.zeroMergedIn());
+    producer_swizzle2d.run();
+    producer_swizzled_index = producer_swizzle2d;
+  }
+
+  // TODO: merge the two swizzle compute logic once the new one is ready.
+  //  will need to replace cyclic shift swizzle with xor since swizzle2d
+  //  doesn't have cyclic shift.
+  const auto& index_map = producer_swizzled_index.indexMap();
+
   const auto& extent_map = producer_indexing.extentMap();
   const auto& zero_domain_map = producer_indexing.zeroDomains();
   // Indices should now be mapped onto IterDomains in producer, so just grab
@@ -2250,10 +2322,11 @@ bool needsPadding(TensorView* tv) {
 }
 
 // Get an additional offset of a stop index when building a predicate
-// for unswitch. Initial stop indices generated at getPredicateReferenceIndexing
-// do not take halo into account, and the adjustment for halo is done as an
-// additional offset to the final index value so that unswitch predicates can be
-// compared with each other by just looking at the additional offsets.
+// for unswitch. Initial stop indices generated at
+// getPredicateIndexingFromIdGraph do not take halo into account, and the
+// adjustment for halo is done as an additional offset to the final index value
+// so that unswitch predicates can be compared with each other by just looking
+// at the additional offsets.
 //
 // consumer_root_id: the domain for which a stop predicate is being built.
 int getUnswitchStopOffset(
@@ -2477,206 +2550,11 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
   return {start_limit, stop_limit};
 }
 
-// Return an IndexCompute for a predicate reference tensor. Two different
-// maps are used when generating predicates for unswitched expressions
-// as start and stop conditions need to use different loop-to-index
-// mappings.
-auto getPredicateReferenceIndexing(
-    const std::vector<kir::ForLoop*>& loops,
-    const ReferenceTensor& reference,
-    kir::ForLoop* unswitch_or_vec_loop,
-    IterDomain* double_buffer_axis,
-    bool start) {
-  auto reference_domain = reference.domain;
-
-  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
-
-  std::transform(
-      loops.begin(),
-      loops.end(),
-      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
-      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
-
-  // If unswitch don't directly use indices from for loop, use zero
-  // and for loop extent minus 1
-  if (unswitch_or_vec_loop != nullptr) {
-    // Vectorized predicates are different from unswitch. Unswitch predicates
-    // all loops within the unswitch (the outer most unswitch) are generated
-    // with loop->extent-1 as the index. With vectorized predicates, only the
-    // vectorized loop should be like this.
-
-    bool vectorized_pred =
-        unswitch_or_vec_loop->iter_domain()->getParallelType() ==
-        ParallelType::Vectorize;
-
-    TORCH_INTERNAL_ASSERT(
-        loops.size() <= reference_domain->nDims(),
-        "Invalid reference generated.");
-
-    bool within_unswitch = false;
-
-    for (const auto loop_i : c10::irange(loops.size())) {
-      auto loop = loops[loop_i];
-      auto loop_id = loop->iter_domain();
-      auto loop_pt = loop_id->getParallelType();
-      auto ref_id = reference_domain->axis(loop_i);
-
-      if (loop == unswitch_or_vec_loop) {
-        within_unswitch = true;
-      }
-
-      if (within_unswitch) {
-        // Rely on the reference to check broadcasting. The for loop could be
-        // broadcasted on a constant value from an unroll split. Since reference
-        // may convert this to an iter domain, that for loop could be valid to
-        // generate predication from.
-
-        // Note that loop->stop() is not used below. Instead,
-        // loop->iter_domain()->extent() is used, which is uniform
-        // across the mapped domains irrespective of halo. Predicates are
-        // compared with each to pick the most restrictive ones. The
-        // comparison is done by only using the offset, which is the
-        // term added to the index. So, the index term must be the
-        // same among all predicates, otherwise the comparison would
-        // be invalid. The effect by halo is added to the offset
-        // term. See getUnswitchStopOffset.
-
-        if (ref_id->isBroadcast()) {
-          // Ignore indexing into broadcasted dimensions.
-          continue;
-        } else if (loop_id->isThread()) {
-          // When parallelized, if the loop stop is the same as the
-          // extent of the associated IterDomain, i.e., no extra
-          // iterations for halo, predicating with the threading index
-          // is sufficient for both the start and stop
-          // predicates. That isn't the case if the loop has halo, and
-          // in the case either the minimum and maximum values of the
-          // iteration domain needs to be used.
-          //
-          // Note: Better performance was obtained if using
-          // threadIdx in unswitch predicates was avoided. More
-          // specifically, in the Hdiff stencil example, instead of
-          // predicating with threadIdx.x for both the start and stop
-          // predicates, using zero and (blockDim.x - 1) for the start
-          // and stop predicates, respectively, resulted in less
-          // register pressure. The alternative codegen can be done by
-          // adding this to the first if condition:
-          // loop_id->isBlockDim(). This would not be a concern if the
-          // else part could be omitted, so canOmitElseClause should
-          // be used as well.
-          if (loop->stop() == loop_id->extent()) {
-            loop_to_ind_map[loop] = loop->start();
-          } else if (start) {
-            loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-          } else {
-            // Note that the parallel dimension is used rather than
-            // loop-stop(). See the above comment.
-            loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-                GpuLower::current()->parallelDimensionMap().get(loop_pt),
-                GpuLower::current()->kernel()->zeroVal());
-          }
-        } else if (start) {
-          loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-        } else {
-          // Similar to the above, loop_id()->extent() is
-          // used here instead of loop->stop(). See the above comment.
-          loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-              loop_id->extent(), GpuLower::current()->kernel()->oneVal());
-        }
-      }
-
-      // If a vectorized predicate, bail after the vectorized loop was found.
-      // Don't continue unswitching loops.
-      if (vectorized_pred && within_unswitch) {
-        break;
-      }
-    }
-  }
-
-  for (const auto loop : loops) {
-    auto& idx = loop_to_ind_map.at(loop);
-    // If the loop is trivial, the loop index can only be the loop
-    // start value.
-    if (idx == loop->index() && loop->isTrivial()) {
-      idx = loop->start();
-    }
-  }
-
-  if (double_buffer_axis != nullptr) {
-    auto db_loop = GpuLower::current()->doubleBufferInfo().getDoubleBufferLoop(
-        double_buffer_axis, loops, true);
-    if (db_loop != nullptr) {
-      auto loop_to_ind_map_it = loop_to_ind_map.find(db_loop);
-      TORCH_INTERNAL_ASSERT(loop_to_ind_map_it != loop_to_ind_map.end());
-      auto cur_index = loop_to_ind_map_it->second;
-      // if cur_index is not the same as the index of db_loop, it must
-      // be true that that index has been modified to support
-      // unswitch. In that case, it is not necessary to move ahead the
-      // index for double buffering.
-      if (cur_index == db_loop->index()) {
-        loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
-            cur_index, GpuLower::current()->kernel()->oneVal());
-      }
-    }
-  }
-
-  // Add magic zero to a loop pretty far inside in indexing
-  IterDomain* magic_zero_loop = nullptr;
-  std::unordered_map<IterDomain*, Val*> ref_id_to_ind_map;
-  // Due to rfactor/initialization reference_domain may be bigger than loop nest
-  // structure
-  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (const auto loop_i : c10::irange(loops.size())) {
-    auto loop = loops[loop_i];
-    auto ind = loop_to_ind_map[loops[loop_i]];
-    auto ref_axis = reference_domain->axis(loop_i);
-
-    if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
-      magic_zero_loop = ref_axis;
-    }
-
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loop];
-  }
-
-  if (ref_id_to_ind_map.count(magic_zero_loop)) {
-    auto& ind = ref_id_to_ind_map[magic_zero_loop];
-    if (!ind->isConstScalar()) {
-      ind = SimplifyingIrBuilder::addExpr(
-          ind, GpuLower::current()->kernel()->magicZeroVal());
-    }
-  }
-
-  std::unordered_map<IterDomain*, IterDomain*> ref_self_map;
-  auto all_vals = DependencyCheck::getAllValsBetween(
-      {reference_domain->getRootDomain().begin(),
-       reference_domain->getRootDomain().end()},
-      {reference_domain->domain().begin(), reference_domain->domain().end()});
-  auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
-  std::for_each(all_ids.begin(), all_ids.end(), [&ref_self_map](auto id) {
-    ref_self_map.insert({id, id});
-  });
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, ref_self_map);
-
-  // Index into the reference tensor
-  auto index_compute = getReferenceIndexing(
-      loops,
-      reference_domain,
-      ref_id_to_ind_map,
-      {},
-      {},
-      reference_halo_extent_map);
-
-  return index_compute;
-}
-
 // Get the offsets for the start and stop predicates. The offsets
 // are to be added to the index.
 std::pair<Val*, Val*> getStartAndStopOffsets(
     IterDomain* consumer_id,
     TensorView* consumer_tv,
-    const ReferenceTensor& reference,
     const std::unordered_map<IterDomain*, Val*>& consumer_start_index_map,
     const std::unordered_map<IterDomain*, Val*>& consumer_stop_index_map,
     bool padding_predicate,
@@ -2720,7 +2598,7 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
 
     // If generating a predicate for unswitch, adjust the stop offset to
     // accommodate the addition of halo to the loop stop. See the
-    // comment in getPredicateReferenceIndexing as well.
+    // comment in getPredicateIndexingFromIdGraph as well.
     if (unswitch) {
       TORCH_INTERNAL_ASSERT(
           !padding_predicate, "Unswitch should not use the padding predicate");
@@ -2842,12 +2720,12 @@ std::pair<Val*, Val*> hoistPredicates(
     Val* start_index,
     Val* stop_index,
     const std::vector<kir::ForLoop*>& loops,
+    std::vector<IterDomain*> loop_domains,
+    const std::unordered_map<IterDomain*, Val*> start_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*> stop_initial_loop_index_map,
     kir::ForLoop* unswitch_or_vec_loop,
     IterDomain* predicated_consumer_id,
-    TensorView* predicated_consumer_tv,
-    TensorDomain* ref_td,
-    const std::unordered_map<IterDomain*, Val*>& ref_start_index_map,
-    const std::unordered_map<IterDomain*, Val*>& ref_stop_index_map) {
+    TensorView* predicated_consumer_tv) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
 
   if (isDisabled(DisableOption::IndexHoist)) {
@@ -2867,8 +2745,8 @@ std::pair<Val*, Val*> hoistPredicates(
         GpuLower::current()->commonIndexMap().insert(
             predicated_consumer_id,
             predicated_consumer_tv->domain(),
-            ref_td,
-            ref_stop_index_map,
+            loop_domains,
+            stop_initial_loop_index_map,
             loops,
             stop_index);
   }
@@ -2884,8 +2762,8 @@ std::pair<Val*, Val*> hoistPredicates(
         GpuLower::current()->commonIndexMap().insert(
             predicated_consumer_id,
             predicated_consumer_tv->domain(),
-            ref_td,
-            ref_start_index_map,
+            loop_domains,
+            start_initial_loop_index_map,
             loops,
             start_index);
   }
@@ -2896,12 +2774,11 @@ std::pair<Val*, Val*> hoistPredicates(
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
-    getReferenceRootPredicates(
-        TensorView* consumer_tv,
-        const std::vector<kir::ForLoop*>& loops,
-        kir::ForLoop* unswitch_or_vec_loop,
-        bool shift_padding) {
+std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    kir::ForLoop* unswitch_or_vec_loop,
+    bool shift_padding) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
@@ -2910,21 +2787,8 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
   // Nothing needs to be done when padding is not required.
   if (shift_padding && !needsPadding(consumer_tv)) {
-    return {{RootPredicateInfo::getFalseInfo()}, ReferenceTensor{}};
+    return {RootPredicateInfo::getFalseInfo()};
   }
-
-  // Get a reference tensor replayed as existing loop structure
-  ReferenceTensor reference =
-      IndexReferenceReplay::getReference(loops, consumer_tv);
-
-  // Generate halo information for reference.
-  updateHaloInfoForReference(reference, consumer_tv);
-
-  const auto ref_2_consumer = indexMapReferenceTo(
-      consumer_tv, gpu_lower->caMap(), reference.concrete_to_id);
-
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, ref_2_consumer);
 
   auto db_axis = gpu_lower->doubleBufferInfo().getDoubleBufferAxis(consumer_tv);
 
@@ -2936,38 +2800,27 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
       std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
       {});
 
+  // Generate start and stop indexing from idgraph.
+  //
   // Both start and stop positions may need to be predicated. Indexing
   // differs when generating predicates for unswitch.
   // NOTE: If we could find-and-replace KIR nodes, we could just
   // generate one index map, clone it and replace the loop-to-index
   // mappings of unswitched loops for the start predicate.
-  auto ref_stop_indexing = getPredicateReferenceIndexing(
-      loops, reference, unswitch_or_vec_loop, db_axis, false);
-  const auto consumer_stop_indexing = ref_stop_indexing.updateIndexCompute(
-      consumer_tv->domain(),
-      ref_2_consumer,
-      contig_finder,
-      reference_halo_extent_map);
+
+  auto stop_indexing_from_idgraph = getPredicateIndexingFromIdGraph(
+      loops, consumer_tv, unswitch_or_vec_loop, db_axis, false);
+  const auto consumer_stop_indexing = stop_indexing_from_idgraph.index;
   const auto& consumer_stop_index_map = consumer_stop_indexing.indexMap();
 
   // If not unswitch, share the same indexing map as the stop index
   // map
-  const auto& ref_start_indexing = is_unswitch
-      ? getPredicateReferenceIndexing(
-            loops, reference, unswitch_or_vec_loop, db_axis, true)
-      : ref_stop_indexing;
-
-  std::unordered_map<IterDomain*, Val*> consumer_start_index_map;
-  if (is_unswitch) {
-    const auto consumer_start_indexing = ref_start_indexing.updateIndexCompute(
-        consumer_tv->domain(),
-        ref_2_consumer,
-        contig_finder,
-        reference_halo_extent_map);
-    consumer_start_index_map = consumer_start_indexing.indexMap();
-  } else {
-    consumer_start_index_map = consumer_stop_index_map;
-  }
+  const auto start_indexing_from_idgraph = is_unswitch
+      ? getPredicateIndexingFromIdGraph(
+            loops, consumer_tv, unswitch_or_vec_loop, db_axis, true)
+      : stop_indexing_from_idgraph;
+  const auto consumer_start_indexing = start_indexing_from_idgraph.index;
+  const auto& consumer_start_index_map = consumer_start_indexing.indexMap();
 
   // Get the contiguous ids we need to generate predicates for
   auto contig_id_infos =
@@ -3024,7 +2877,6 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     std::tie(info.start_offset_, info.stop_offset_) = getStartAndStopOffsets(
         contig_id,
         consumer_tv,
-        reference,
         consumer_start_index_map,
         consumer_stop_index_map,
         shift_padding,
@@ -3038,12 +2890,12 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
         start_index,
         stop_index,
         loops,
+        stop_indexing_from_idgraph.resolved_loop_domains,
+        start_indexing_from_idgraph.initial_concrete_index_map,
+        stop_indexing_from_idgraph.initial_concrete_index_map,
         unswitch_or_vec_loop,
         contig_id,
-        consumer_tv,
-        reference.domain,
-        ref_start_indexing.indexMap(),
-        ref_stop_indexing.indexMap());
+        consumer_tv);
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0
@@ -3080,7 +2932,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     pred_info_vec.emplace_back(info);
   }
 
-  return {pred_info_vec, reference};
+  return pred_info_vec;
 }
 
 bool Index::protectWithMagicZero(
