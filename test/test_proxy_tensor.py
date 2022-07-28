@@ -138,6 +138,12 @@ class TestProxyTensor(TestCase):
         def is_any_sum(gm):
             return any(node.target == torch.ops.aten.sum.default for node in gm.graph.nodes)
 
+        def is_any_digamma(gm):
+            return any(node.target == torch.ops.aten.digamma.default for node in gm.graph.nodes)
+
+        def is_any_sigmoid(gm):
+            return any(node.target == torch.ops.aten.sigmoid.default for node in gm.graph.nodes)
+
         def inner(x):
             return torch.sum(x)
 
@@ -150,6 +156,30 @@ class TestProxyTensor(TestCase):
         # by the outer make_fx call
         traced = make_fx(f)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
+
+        # when factory functions are used, they should not be traced
+        # by the outer make_fx call
+        def inner_with_factory():
+            val = torch.tensor(float(1))
+            val.add_(2)
+            return torch.full((10, 10), val).sum()
+
+        def f1(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2(x):
+            gm = get_isolated_graphmodule(f1, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2)(torch.randn(3))
+        traced.graph.print_tabular()
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
