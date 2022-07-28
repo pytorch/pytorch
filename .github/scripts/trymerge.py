@@ -876,6 +876,9 @@ class GitHubPR:
 class MandatoryChecksMissingError(Exception):
     pass
 
+class PostCommentError(Exception):
+    pass
+
 
 @dataclass
 class MergeRule:
@@ -1048,21 +1051,17 @@ def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
     return pr_get_checks_with_lambda(pr, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *,
-               dry_run: bool = False,
-               comment_id: Optional[int] = None,
-               reason: Optional[str] = None) -> None:
-    def post_comment(msg: str) -> None:
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
+def validate_revert(repo: GitRepo, pr: GitHubPR, *,
+                    comment_id: Optional[int] = None) -> Tuple[str, str]:
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
-        return post_comment("Don't want to revert based on edited command")
+        raise PostCommentError("Don't want to revert based on edited command")
     author_association = comment.author_association
     author_login = comment.author_login
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
     if author_association != expected_association and author_association != "OWNER":
-        return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
+        raise PostCommentError(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
@@ -1071,12 +1070,25 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
         if len(commits) == 0:
-            raise RuntimeError("Can't find any commits resolving PR")
+            raise PostCommentError("Can't find any commits resolving PR")
         commit_sha = commits[0]
     msg = repo.commit_message(commit_sha)
     rc = RE_DIFF_REV.search(msg)
     if rc is not None and not can_skip_internal_checks:
-        raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+        raise PostCommentError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+    return (author_login, commit_sha)
+
+
+def try_revert(repo: GitRepo, pr: GitHubPR, *,
+               dry_run: bool = False,
+               comment_id: Optional[int] = None,
+               reason: Optional[str] = None) -> None:
+    def post_comment(msg: str) -> None:
+        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
+    try:
+        author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
+    except PostCommentError as e:
+        return post_comment(str(e))
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
     revert_msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.checkout(pr.default_branch())
