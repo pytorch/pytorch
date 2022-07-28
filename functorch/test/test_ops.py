@@ -1,3 +1,5 @@
+# Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -559,7 +561,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
-        xfail('put'),
         xfail('quantile'),  # checks q via a .item() call
         xfail('stft'),
         xfail('view_as_complex'),
@@ -649,7 +650,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
 
-        xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
         # erroring because running_mean and running_var aren't differentiable
@@ -717,6 +717,7 @@ class TestOperators(TestCase):
         xfail('linalg.cholesky_ex'),
         xfail('masked_scatter'),
         xfail('index_fill'),
+        xfail('put'),
         xfail('take'),
         xfail('linalg.eigvals'),
         xfail('linalg.qr'),
@@ -1277,10 +1278,10 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
-        xfail('take'),  # inplace
 
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
@@ -1291,14 +1292,15 @@ class TestOperators(TestCase):
 
         # numerical inconsistencies, look like bugs
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
-        skip('__rmatmul__', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('matmul', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('nn.functional.conv_transpose3d', dtypes=(torch.float32,)),  # only fails on cpu only linux
+        skip('__rmatmul__'),  # flaky needs investigation
+        skip('matmul'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose3d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose2d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose1d'),  # flaky needs investigation
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
     })
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
