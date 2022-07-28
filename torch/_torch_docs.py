@@ -7258,7 +7258,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7318,7 +7318,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}

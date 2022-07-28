@@ -248,7 +248,7 @@ class EmbeddingBag(Module):
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  ``"sum"`` computes the weighted sum, taking :attr:`per_sample_weights`
                                  into consideration. ``"mean"`` computes the average of the values
                                  in the bag, ``"max"`` computes the max value over each bag.
@@ -415,7 +415,7 @@ class EmbeddingBag(Module):
             max_norm (float, optional): See module initialization documentation. Default: ``None``
             norm_type (float, optional): See module initialization documentation. Default ``2``.
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
-            mode (string, optional): See module initialization documentation. Default: ``"mean"``
+            mode (str, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
             include_last_offset (bool, optional): See module initialization documentation. Default: ``False``.
             padding_idx (int, optional): See module initialization documentation. Default: ``None``.

@@ -418,7 +418,7 @@ def pretty_str(envinfo):
             return replacement
         return text
 
-    def maybe_start_on_next_line(string):
+    def maybe_start_on_next_line(str):
         # If `string` is multiline, prepend a \n to it.
         if string is not None and len(string.split('\n')) > 1:
             return '\n{}\n'.format(string)

@@ -188,12 +188,12 @@ class SummaryWriter(object):
         to the event file.
 
         Args:
-            log_dir (string): Save directory location. Default is
+            log_dir (str): Save directory location. Default is
               runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each run.
               Use hierarchical folder structure to compare
               between runs easily. e.g. pass in 'runs/exp1', 'runs/exp2', etc.
               for each new experiment to compare across them.
-            comment (string): Comment log_dir suffix appended to the default
+            comment (str): Comment log_dir suffix appended to the default
               ``log_dir``. If ``log_dir`` is assigned, this argument has no effect.
             purge_step (int):
               When logging crashes at step :math:`T+X` and restarts at step :math:`T`,
@@ -205,7 +205,7 @@ class SummaryWriter(object):
               Default is ten items.
             flush_secs (int): How often, in seconds, to flush the
               pending events and summaries to disk. Default is every two minutes.
-            filename_suffix (string): Suffix added to all event filenames in
+            filename_suffix (str): Suffix added to all event filenames in
               the log_dir directory. More details on filename construction in
               tensorboard.summary.writer.event_file_writer.EventFileWriter.
 
@@ -357,7 +357,7 @@ class SummaryWriter(object):
         """Add scalar data to summary.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             scalar_value (float or string/blobname): Value to save
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
@@ -394,7 +394,7 @@ class SummaryWriter(object):
         """Adds many scalar data to summary.
 
         Args:
-            main_tag (string): The parent name for the tags
+            main_tag (str): The parent name for the tags
             tag_scalar_dict (dict): Key-value pair storing the tag and corresponding values
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
@@ -450,10 +450,10 @@ class SummaryWriter(object):
         """Add histogram to summary.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             values (torch.Tensor, numpy.array, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
-            bins (string): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
+            bins (str): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -501,7 +501,7 @@ class SummaryWriter(object):
         """Adds histogram with raw data.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             min (float or int): Min value
             max (float or int): Max value
             num (int): Number of values
@@ -568,12 +568,12 @@ class SummaryWriter(object):
         Note that this requires the ``pillow`` package.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
-            dataformats (string): Image data format specification of the form
+            dataformats (str): Image data format specification of the form
               CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
@@ -623,12 +623,12 @@ class SummaryWriter(object):
         Note that this requires the ``pillow`` package.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
-            dataformats (string): Image data format specification of the form
+            dataformats (str): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
@@ -677,7 +677,7 @@ class SummaryWriter(object):
         """Add image and draw bounding boxes on the image.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)
               box should be represented as [x1, y1, x2, y2].
@@ -685,7 +685,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             rescale (float): Optional scale override
-            dataformats (string): Image data format specification of the form
+            dataformats (str): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
             labels (list of string): The label to be shown for each bounding box.
         Shape:
@@ -728,7 +728,7 @@ class SummaryWriter(object):
         Note that this requires the ``matplotlib`` package.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             figure (matplotlib.pyplot.figure) or list of figures: Figure or a list of figures
             global_step (int): Global step value to record
             close (bool): Flag to automatically close the figure
@@ -759,7 +759,7 @@ class SummaryWriter(object):
         Note that this requires the ``moviepy`` package.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             vid_tensor (torch.Tensor): Video data
             global_step (int): Global step value to record
             fps (float or int): Frames per second
@@ -779,7 +779,7 @@ class SummaryWriter(object):
         """Add audio data to summary.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             snd_tensor (torch.Tensor): Sound data
             global_step (int): Global step value to record
             sample_rate (int): sample rate in Hz
@@ -801,8 +801,8 @@ class SummaryWriter(object):
         """Add text data to summary.
 
         Args:
-            tag (string): Data identifier
-            text_string (string): String to save
+            tag (str): Data identifier
+            text_string (str): String to save
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -886,7 +886,7 @@ class SummaryWriter(object):
             metadata (list): A list of labels, each element will be convert to string
             label_img (torch.Tensor): Images correspond to each data point
             global_step (int): Global step value to record
-            tag (string): Name for the embedding
+            tag (str): Name for the embedding
         Shape:
             mat: :math:`(N, D)`, where N is number of data and D is feature dimension
 
@@ -986,7 +986,7 @@ class SummaryWriter(object):
         will let you choose the threshold interactively.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             labels (torch.Tensor, numpy.array, or string/blobname):
               Ground truth data. Binary label for each element.
             predictions (torch.Tensor, numpy.array, or string/blobname):
@@ -1033,7 +1033,7 @@ class SummaryWriter(object):
         """Adds precision recall curve with raw data.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             true_positive_counts (torch.Tensor, numpy.array, or string/blobname): true positive counts
             false_positive_counts (torch.Tensor, numpy.array, or string/blobname): false positive counts
             true_negative_counts (torch.Tensor, numpy.array, or string/blobname): true negative counts
@@ -1141,7 +1141,7 @@ class SummaryWriter(object):
         advanced usage.
 
         Args:
-            tag (string): Data identifier
+            tag (str): Data identifier
             vertices (torch.Tensor): List of the 3D coordinates of vertices.
             colors (torch.Tensor): Colors for each vertex
             faces (torch.Tensor): Indices of vertices within each triangle. (Optional)
