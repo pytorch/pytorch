@@ -87,8 +87,6 @@ class LinearAPoT(WeightedQuantizedModule):
 
                 if int(ele):
                     curr_block_result += r << place
-                else:
-                    curr_block_result += 0
 
                 place += 1
 
