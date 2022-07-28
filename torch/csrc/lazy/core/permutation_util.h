@@ -24,7 +24,11 @@ std::vector<typename Container::value_type> PermuteDimensions(
   using T = typename Container::value_type;
   TORCH_CHECK(
       dimensions.size() == permutation.size(),
-      "Invalid permutation specified. dimensions.size() != permutation.size()  (", dimensions.size(), " vs. ", permutation.size(), ")");
+      "Invalid permutation specified. dimensions.size() != permutation.size()  (",
+      dimensions.size(),
+      " vs. ",
+      permutation.size(),
+      ")");
   TORCH_CHECK(
       IsPermutation(permutation),
       "Invalid permutation specified. Permutation is not permutation");

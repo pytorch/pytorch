@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 
-#include <aten/src/ATen/AccumulateType.h>
+#include <ATen/AccumulateType.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -253,17 +253,14 @@ class NaiveTypePropagator {
       }
       case aten::_batch_norm_impl_index_backward:
       case aten::native_batch_norm_backward: {
-        int weight_index = -1;
         int mask_index = -1;
         if (node->kind() ==
             c10::Symbol::fromQualString(
                 "aten::_batch_norm_impl_index_backward")) {
-          weight_index = 3;
           mask_index = 10;
         } else if (
             node->kind() ==
             c10::Symbol::fromQualString("aten::native_batch_norm_backward")) {
-          weight_index = 2;
           mask_index = 9;
         } else {
           TORCH_INTERNAL_ASSERT(
@@ -448,6 +445,8 @@ class NaiveTypePropagator {
         break;
       }
       case prim::unsqueeze_copy:
+      case prim::expand_copy:
+      case prim::expand_as_copy:
       case prim::squeeze_copy:
       case prim::reshape_copy:
       case prim::view_copy:
@@ -463,12 +462,20 @@ class NaiveTypePropagator {
             type0->withScalarType(type1->scalarType()), node);
         break;
       }
-      case aten::to: {
+      case aten::to:
+      case aten::_to_copy: {
         const auto type0 = getInputTensorType(node, 0);
         const auto out_dtype = toIValue(node->input(1));
-        TORCH_CHECK(out_dtype, "No output type specified");
-        copyScalarTypeAndDeviceToOutput(
-            type0->withScalarType(out_dtype->toScalarType()), node);
+        if (out_dtype.has_value() && out_dtype->isInt()) {
+          copyScalarTypeAndDeviceToOutput(
+              type0->withScalarType(out_dtype->toScalarType()), node);
+        } else {
+          TORCH_CHECK(
+              !out_dtype.has_value() || out_dtype->isNone(),
+              "dtype for cast unrecognized ",
+              out_dtype->tagKind());
+          copyScalarTypeAndDeviceToOutput(type0, node);
+        }
         break;
       }
       case prim::add_optional: {

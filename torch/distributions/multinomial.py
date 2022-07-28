@@ -6,6 +6,7 @@ from torch.distributions import Categorical
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Multinomial']
 
 class Multinomial(Distribution):
     r"""

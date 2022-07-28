@@ -2228,7 +2228,8 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_OBJECT_TYPES = 18,
     VT_JIT_SOURCES = 20,
     VT_JIT_CONSTANTS = 22,
-    VT_OPERATOR_VERSION = 24
+    VT_OPERATOR_VERSION = 24,
+    VT_MOBILE_IVALUE_SIZE = 26
   };
   uint32_t bytecode_version() const {
     return GetField<uint32_t>(VT_BYTECODE_VERSION, 0);
@@ -2296,6 +2297,12 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_operator_version(uint32_t _operator_version = 0) {
     return SetField<uint32_t>(VT_OPERATOR_VERSION, _operator_version, 0);
   }
+  uint32_t mobile_ivalue_size() const {
+    return GetField<uint32_t>(VT_MOBILE_IVALUE_SIZE, 0);
+  }
+  bool mutate_mobile_ivalue_size(uint32_t _mobile_ivalue_size = 0) {
+    return SetField<uint32_t>(VT_MOBILE_IVALUE_SIZE, _mobile_ivalue_size, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION) &&
@@ -2321,6 +2328,7 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyOffset(verifier, VT_JIT_CONSTANTS) &&
            verifier.VerifyVector(jit_constants()) &&
            VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION) &&
+           VerifyField<uint32_t>(verifier, VT_MOBILE_IVALUE_SIZE) &&
            verifier.EndTable();
   }
 };
@@ -2362,6 +2370,9 @@ struct ModuleBuilder {
   void add_operator_version(uint32_t operator_version) {
     fbb_.AddElement<uint32_t>(Module::VT_OPERATOR_VERSION, operator_version, 0);
   }
+  void add_mobile_ivalue_size(uint32_t mobile_ivalue_size) {
+    fbb_.AddElement<uint32_t>(Module::VT_MOBILE_IVALUE_SIZE, mobile_ivalue_size, 0);
+  }
   explicit ModuleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -2385,8 +2396,10 @@ inline flatbuffers::Offset<Module> CreateModule(
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources = 0,
     flatbuffers::Offset<flatbuffers::Vector<uint32_t>> jit_constants = 0,
-    uint32_t operator_version = 0) {
+    uint32_t operator_version = 0,
+    uint32_t mobile_ivalue_size = 0) {
   ModuleBuilder builder_(_fbb);
+  builder_.add_mobile_ivalue_size(mobile_ivalue_size);
   builder_.add_operator_version(operator_version);
   builder_.add_jit_constants(jit_constants);
   builder_.add_jit_sources(jit_sources);
@@ -2413,7 +2426,8 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types = nullptr,
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources = nullptr,
     const std::vector<uint32_t> *jit_constants = nullptr,
-    uint32_t operator_version = 0) {
+    uint32_t operator_version = 0,
+    uint32_t mobile_ivalue_size = 0) {
   auto extra_files__ = extra_files ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*extra_files) : 0;
   auto methods__ = methods ? _fbb.CreateVector<uint32_t>(*methods) : 0;
   auto ivalues__ = ivalues ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>(*ivalues) : 0;
@@ -2433,7 +2447,8 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
       object_types__,
       jit_sources__,
       jit_constants__,
-      operator_version);
+      operator_version,
+      mobile_ivalue_size);
 }
 
 inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {

@@ -1191,8 +1191,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     obj = py::getattr(obj, "op");
   }
 
+#ifdef USE_RPC
   bool isRpcAvailable = py::cast<bool>(
       py::module::import("torch.distributed.rpc").attr("is_available")());
+#endif
 
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);

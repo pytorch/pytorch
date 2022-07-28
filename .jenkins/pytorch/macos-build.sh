@@ -3,9 +3,11 @@
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 # Build PyTorch
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
@@ -65,6 +67,10 @@ elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
   build_lite_interpreter
 else
   compile_x86_64
+fi
+
+if which sccache > /dev/null; then
+  print_sccache_stats
 fi
 
 assert_git_not_dirty

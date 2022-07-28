@@ -85,8 +85,9 @@ bool Function::initialize_operators(bool should_check_operators) {
   if (should_check_operators) {
     TORCH_CHECK(
         unsupported_op_names.empty(),
-        "Following ops cannot be found. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/",
-        c10::Join(", ", unsupported_op_names));
+        "Following ops cannot be found: [",
+        c10::Join(", ", unsupported_op_names),
+        "]. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/c/mobile/");
   }
   code_.initialized = all_ops_supported;
   return all_ops_supported;
@@ -211,13 +212,13 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
           out_args.push_back(stack.back());
           stack.pop_back();
         }
-        size_t start_index = num_specified_args.value() - out_args.size();
         TORCH_CHECK(
-            start_index >= 0,
+            num_specified_args.value() >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
             ", which is more then the number of specified arguments: ",
             num_specified_args.value());
+        size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
           TORCH_CHECK(
               args[i].default_value().has_value(),
