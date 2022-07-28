@@ -17,7 +17,6 @@ __all__ = [
     "cross_entropy_loss",
     "dropout",
     "einsum",
-    "einsum_helper",
     "ge",
     "le",
     "native_dropout",
@@ -31,7 +30,7 @@ __all__ = [
 ]
 
 
-def einsum_helper(g, equation, tensors):
+def _einsum_helper(g, equation, tensors):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
     # ONNX does not support bool for Einsum inputs.
@@ -52,7 +51,7 @@ def einsum_helper(g, equation, tensors):
 @symbolic_helper.parse_args("s", "v")
 def einsum(g, equation, tensor_list):
     tensors = symbolic_helper._unpack_list(tensor_list)
-    return einsum_helper(g, equation, tensors)
+    return _einsum_helper(g, equation, tensors)
 
 
 @symbolic_helper.parse_args("v", "v")
@@ -64,7 +63,7 @@ def outer(g, input, other):
             other,
             to_i=symbolic_helper.cast_pytorch_to_onnx[input.type().scalarType()],
         )
-    return einsum_helper(g, "i,j->ij", [input, other])
+    return _einsum_helper(g, "i,j->ij", [input, other])
 
 
 def _dropout_returns_masked_input_and_mask(
