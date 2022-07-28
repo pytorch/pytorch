@@ -13864,8 +13864,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # AssertionError: Shapes torch.Size([]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -14159,7 +14157,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=2e-05), }),
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
                    active_if=TEST_CUDNN)],
            skips=(
@@ -20688,6 +20686,9 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # See https://github.com/pytorch/pytorch/issues/82364
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
         ),
         supports_nvfuser=False,
     ),
@@ -21427,6 +21428,21 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.rsub",
+        torch_opinfo_name="rsub",
+        # https://github.com/pytorch/pytorch/issues/76944
+        skips=(
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
         # https://github.com/pytorch/pytorch/issues/76944
@@ -21930,6 +21946,51 @@ python_ref_db = [
             # Fixme: should not compare results of empty_like
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.new_empty",
+        torch_opinfo_name="new_empty",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestMathBits',
+                         'test_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestMathBits',
+                         'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestMathBits',
+                         'test_neg_view'),
+            # Fixme: should not compare results of empty_like
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.new_full",
+        torch_opinfo_name="new_full",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_ones",
+        torch_opinfo_name="new_ones",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_zeros",
+        torch_opinfo_name="new_zeros",
+        supports_nvfuser=False,
     ),
     #
     # Conditional Reference OpInfos
