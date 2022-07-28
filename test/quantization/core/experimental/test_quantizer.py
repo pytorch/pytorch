@@ -193,7 +193,7 @@ class TestQuantizer(unittest.TestCase):
          * b: 4
          * k: 2
     """
-    def test_dequantize_quantize_rand_b6(self):
+    def test_dequantize_dim(self):
         # make observer
         observer = APoTObserver(4, 2)
 

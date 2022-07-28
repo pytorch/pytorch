@@ -24,15 +24,15 @@ class LinearAPoT(WeightedQuantizedModule):
         weight_transposed: transposed weight tensor, used in linear transformation calculation (y = x * A^T + b)
     """
 
-    def __init__(self, weight2quantize: torch.Tensor):
+    def __init__(self, weight2quantize: torch.Tensor, b: int, k: int):
         assert weight2quantize.dim() == 2
+        assert b % k == 0
 
         super().__init__()
 
-        # hard code b, k to match uniform quantization: b=4, k=1
-        self.b = 8
-        self.k = 1
-        self.n = 8
+        self.b = b
+        self.k = k
+        self.n = self.b // self.k
 
         observer = APoTObserver(b=self.b, k=self.k)
 
@@ -40,16 +40,13 @@ class LinearAPoT(WeightedQuantizedModule):
 
         self.alpha, self.gamma, self.quantization_levels, self.level_indices = observer.calculate_qparams(signed=False)
 
-        quantized = quantize_APoT(weight2quantize, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
-        self.weight = quantized.data
+        quantized_weight = quantize_APoT(weight2quantize, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
+        self.weight = quantized_weight.data
         self.weight_transposed = torch.transpose(self.weight, 0, 1)
-
-        self.weight_transposed = self.weight_transposed.reshape(weight2quantize.shape)
-        self.weight_transposed = self.weight_transposed.reshape(weight2quantize.shape[1], weight2quantize.shape[0])
 
     def decompose_APoT(self, x):
         r"""
-        Decompose APoT quantized terms into binary digits
+        Decompose binary representation of APoT values into list of k-sized blocks
         Args:
             x (Tensor): binary representation of APoT quantized tensor
         """
@@ -65,9 +62,35 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return blocks
 
-    def bitshift_mul(self, decomposed_weight, activation):
+    def bitshift_mul(self, weight_val, r):
         r"""
-        Compute matrix multiplication result of input weight and activation using bitshifting
+        Compute multiplication of weight_val * r using bitshifting
+        method discussed in APoT paper: https://arxiv.org/pdf/1909.13144.pdf
+        Args:
+            weight_val: list of binary digits representing APoT quantized weight value
+            r: int representing uniformly quantized activation value
+        """
+        product = 0
+
+        for idx in range(len(weight_val)):
+            ele = int(weight_val[idx])
+
+            x = len(weight_val) - 1 - idx
+
+            if ele:
+                curr_result = r << x
+            else:
+                curr_result = 0
+
+            product += curr_result
+
+        return product
+
+
+    def matmul(self, decomposed_weight, activation):
+        r"""
+        Perform matrix multiplication between decomposed_weight and
+        activation by calling bitshift_mul function for each value
         Args:
             decomposed_weight (Tensor): APoT quantized weight decomposed into binary
             activation (Tensor): uniformly quantized activation
@@ -87,30 +110,13 @@ class LinearAPoT(WeightedQuantizedModule):
                     weight_val = decomposed_weight[k][j]
                     r = int(activation[i][k])
 
-                    for idx in range(len(weight_val)):
-                        ele = int(weight_val[idx])
+                    product = self.bitshift_mul(weight_val, r)
 
-                        x = len(weight_val) - 1 - idx
-
-                        if ele:
-                            curr_result = r << x
-                        else:
-                            curr_result = 0
-                        result[i][j] += curr_result
+                    result[i][j] += product
 
         return result
 
-    def matmul(self, decomposed_weight, activation):
-        r"""
-        Call bitshift_mul function to perform matrix multiplication between
-        decomposed_weight and activation.
-        Args:
-            decomposed_weight (Tensor): APoT quantized weight decomposed into binary
-            activation (Tensor): uniformly quantized activation
-        """
-        return self.bitshift_mul(decomposed_weight, activation)
-
-    def linear_APoT_fn(self, activation: torch.Tensor) -> torch.FloatTensor:
+    def forward(self, activation: torch.Tensor) -> torch.FloatTensor:
         r"""
         Multiply APoT quantized weight and uniformly quantized activation (dtype: quint8)
         with bitshifting instead of matrix multiplication.
@@ -138,14 +144,6 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return result
 
-    def forward(self, activation: torch.Tensor) -> torch.FloatTensor:
-        r"""
-        Call linear_APoT_fn to multiply activation with an APoT quantized weight.
-        Args:
-            activation (Tensor): uniformly quantized activation tensor
-        """
-        return self.linear_APoT_fn(activation)
-
     @classmethod
     def from_reference(cls,  # type: ignore[override]
                        ref_qlinear,
@@ -153,16 +151,4 @@ class LinearAPoT(WeightedQuantizedModule):
                        gamma: torch.Tensor,
                        quantization_levels: torch.Tensor,
                        level_indices: torch.Tensor):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
-
-        Args:
-            ref_qlinear (Module): a reference quantized linear module, either
-                                  produced by torch.ao.quantization.experimental
-                                  utilities or provided by the user
-        """
-        qlinear = ref_qlinear
-        qlinear.alpha = alpha
-        qlinear.gamma = gamma
-        qlinear.quantization_levels = quantization_levels
-        qlinear.level_indices = level_indices
-        return qlinear
+        raise NotImplementedError

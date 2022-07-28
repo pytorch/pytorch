@@ -18,7 +18,7 @@ class TestNonUniformObserver(unittest.TestCase):
         activation = torch.randint(low=0, high=255, size=(4, 4), dtype=torch.float)
 
         # calculate result from calling linear forward method
-        apot_linear = LinearAPoT(weight)
+        apot_linear = LinearAPoT(weight, 8, 1)
         apot_linear_result = apot_linear(activation)
 
         # calculate expected results
