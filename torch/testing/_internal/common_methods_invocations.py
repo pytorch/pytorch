@@ -13864,8 +13864,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # AssertionError: Shapes torch.Size([]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -21975,6 +21973,21 @@ python_ref_db = [
             # Fixme: should not compare results of empty_like
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.new_full",
+        torch_opinfo_name="new_full",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_ones",
+        torch_opinfo_name="new_ones",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_zeros",
+        torch_opinfo_name="new_zeros",
+        supports_nvfuser=False,
     ),
     #
     # Conditional Reference OpInfos
