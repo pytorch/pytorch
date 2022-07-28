@@ -33,7 +33,8 @@ from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              ForLoopIndexingPattern,
                                              FP32MatMulPattern,
                                              OptimizerSingleTensorPattern,
-                                             SynchronizedDataLoaderPattern)
+                                             SynchronizedDataLoaderPattern,
+                                             GradNotSetToNonePattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1666,6 +1667,33 @@ aten::mm""")
         pattern = SynchronizedDataLoaderPattern(prof)
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, 1)
+
+    def test_profiler_grad_not_set_to_none_pattern(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+        optimizer = torch.optim.Adam(model.parameters())
+        cases = (
+            (1, lambda: optimizer.zero_grad()),
+            (1, lambda: model.zero_grad()),
+            (0, lambda: optimizer.zero_grad(set_to_none=True)),
+            (0, lambda: model.zero_grad(set_to_none=True))
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                y_hat = model(x)
+                loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+                loss.backward()
+                optimizer.step()
+                fn()
+            pattern = GradNotSetToNonePattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
 
 if __name__ == '__main__':
     run_tests()

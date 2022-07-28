@@ -38,20 +38,15 @@ class Pattern:
         return False
 
     def report(self, event: _ProfilerEvent):
-        msg = f"{self.description}\n{source_code_location(event)}"
+        msg = f"{self.description}\n[Source Code Location] {source_code_location(event)}"
         return msg
 
     def eventTreeTraversal(self):
         '''
-        Standard DFS traversal of the event tree.
-        Override this method to customize the traversal order.
+        Traverse the event tree and yield all events.
+        Override this method in subclass to customize the traversal.
         '''
-        stack = deque(self.event_tree)
-        while stack:
-            curr_event = stack.pop()
-            yield curr_event
-            for child_event in curr_event.children:
-                stack.append(child_event)
+        yield from eventTreeDFS(self.event_tree)
 
     def summary(self, events: List[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
@@ -216,12 +211,7 @@ class ForLoopIndexingPattern(Pattern):
         '''
         We need to use BFS traversal order to avoid duplicate match.
         '''
-        stack = deque(self.event_tree)
-        while stack:
-            curr_event = stack.popleft()
-            yield curr_event
-            for child_event in curr_event.children:
-                stack.append(child_event)
+        yield from eventTreeBFS(self.event_tree)
 
     def match(self, event: _ProfilerEvent):
         if event.name() != "aten::select":
@@ -397,6 +387,46 @@ class SynchronizedDataLoaderPattern(Pattern):
         # TODO: We should also check if the loader is bottleneck.
 
 
+class GradNotSetToNonePattern(Pattern):
+    '''
+    This pattern identifies if we are not setting grad to None in zero_grad.
+    example:
+    optimizer.zero_grad()
+    By setting set_to_none=True, we can gain speedup
+
+    Pattern:
+    XXXXX: _zero_grad
+        NOT aten::zeros
+            aten::zero_
+
+    # aten::zero_ is called on each parameter in the model.
+    # We also want to make sure it is not called by aten::zeros.
+
+    Algorithm:
+    String match
+    '''
+
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
+        self.name = "Gradient Set To Zero Instead of None Pattern"
+        self.description = (
+            "Detected gradient set to zero instead of None. "
+            "Please add 'set_to_none=True' when calling zero_grad().")
+
+    def match(self, event: _ProfilerEvent):
+        if not event.name().endswith(": zero_grad"):
+            return False
+        if not event.children:
+            return False
+
+        for sub_event in eventTreeDFS(event.children):
+            if sub_event.name(
+            ) == "aten::zero_" and sub_event.parent.name() != "aten::zeros":
+                return True
+        # TODO: We should also check if the optimizer's numerical behavior will change.
+        return False
+
+
 def source_code_location(event: _ProfilerEvent):
     while event:
         if event_type(event) == _EventType.PyCall or event_type(
@@ -415,13 +445,38 @@ def input_shapes(event: _ProfilerEvent):
     return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
 
 
+def eventTreeDFS(event_tree: List[_ProfilerEvent]):
+    '''
+    Standard DFS traversal of the event tree.
+    '''
+    stack = deque(event_tree)
+    while stack:
+        curr_event = stack.pop()
+        yield curr_event
+        for child_event in curr_event.children:
+            stack.append(child_event)
+
+
+def eventTreeBFS(event_tree: List[_ProfilerEvent]):
+    '''
+    Standard BFS traversal of the event tree.
+    '''
+    stack = deque(event_tree)
+    while stack:
+        curr_event = stack.popleft()
+        yield curr_event
+        for child_event in curr_event.children:
+            stack.append(child_event)
+
+
 def report_all_anti_patterns(prof, should_benchmark: bool = False):
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         ForLoopIndexingPattern(prof, should_benchmark),
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
-        SynchronizedDataLoaderPattern(prof, should_benchmark)
+        SynchronizedDataLoaderPattern(prof, should_benchmark),
+        GradNotSetToNonePattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
