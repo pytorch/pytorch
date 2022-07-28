@@ -451,7 +451,7 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            values (torch.Tensor, numpy.array, or string/blobname): Values to build histogram
+            values (torch.Tensor, numpy.ndarray, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
             bins (str): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
@@ -507,9 +507,9 @@ class SummaryWriter(object):
             num (int): Number of values
             sum (float or int): Sum of all values
             sum_squares (float or int): Sum of squares for all values
-            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket.
+            bucket_limits (torch.Tensor, numpy.ndarray): Upper value per bucket.
               The number of elements of it should be the same as `bucket_counts`.
-            bucket_counts (torch.Tensor, numpy.array): Number of values per bucket
+            bucket_counts (torch.Tensor, numpy.ndarray): Number of values per bucket
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -569,7 +569,7 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
+            img_tensor (torch.Tensor, numpy.ndarray, or string/blobname): Image data
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -624,7 +624,7 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
+            img_tensor (torch.Tensor, numpy.ndarray, or string/blobname): Image data
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -678,8 +678,8 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
-            box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)
+            img_tensor (torch.Tensor, numpy.ndarray, or string/blobname): Image data
+            box_tensor (torch.Tensor, numpy.ndarray, or string/blobname): Box data (for detected objects)
               box should be represented as [x1, y1, x2, y2].
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
@@ -692,7 +692,7 @@ class SummaryWriter(object):
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
 
-            box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
+            box_tensor: (torch.Tensor, numpy.ndarray, or string/blobname): NX4,  where N is the number of
             boxes and each 4 elements in a row represents (xmin, ymin, xmax, ymax).
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
@@ -882,7 +882,7 @@ class SummaryWriter(object):
         """Add embedding projector data to summary.
 
         Args:
-            mat (torch.Tensor or numpy.array): A matrix which each row is the feature vector of the data point
+            mat (torch.Tensor or numpy.ndarray): A matrix which each row is the feature vector of the data point
             metadata (list): A list of labels, each element will be convert to string
             label_img (torch.Tensor): Images correspond to each data point
             global_step (int): Global step value to record
@@ -987,9 +987,9 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            labels (torch.Tensor, numpy.array, or string/blobname):
+            labels (torch.Tensor, numpy.ndarray, or string/blobname):
               Ground truth data. Binary label for each element.
-            predictions (torch.Tensor, numpy.array, or string/blobname):
+            predictions (torch.Tensor, numpy.ndarray, or string/blobname):
               The probability that an element be classified as true.
               Value should be in [0, 1]
             global_step (int): Global step value to record
@@ -1034,12 +1034,12 @@ class SummaryWriter(object):
 
         Args:
             tag (str): Data identifier
-            true_positive_counts (torch.Tensor, numpy.array, or string/blobname): true positive counts
-            false_positive_counts (torch.Tensor, numpy.array, or string/blobname): false positive counts
-            true_negative_counts (torch.Tensor, numpy.array, or string/blobname): true negative counts
-            false_negative_counts (torch.Tensor, numpy.array, or string/blobname): false negative counts
-            precision (torch.Tensor, numpy.array, or string/blobname): precision
-            recall (torch.Tensor, numpy.array, or string/blobname): recall
+            true_positive_counts (torch.Tensor, numpy.ndarray, or string/blobname): true positive counts
+            false_positive_counts (torch.Tensor, numpy.ndarray, or string/blobname): false positive counts
+            true_negative_counts (torch.Tensor, numpy.ndarray, or string/blobname): true negative counts
+            false_negative_counts (torch.Tensor, numpy.ndarray, or string/blobname): false negative counts
+            precision (torch.Tensor, numpy.ndarray, or string/blobname): precision
+            recall (torch.Tensor, numpy.ndarray, or string/blobname): recall
             global_step (int): Global step value to record
             num_thresholds (int): Number of thresholds used to draw the curve.
             walltime (float): Optional override default walltime (time.time())
