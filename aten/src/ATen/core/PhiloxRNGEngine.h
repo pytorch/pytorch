@@ -71,7 +71,7 @@ public:
   C10_HOST_DEVICE inline explicit philox_engine(uint64_t seed = 67280421310721,
                                  uint64_t subsequence = 0,
                                  uint64_t offset = 0) {
-    
+
     reset_state(seed, subsequence);
     incr_n(offset);
   }
@@ -207,7 +207,7 @@ private:
     #ifdef __CUDA_ARCH__
       // We use std:: below, and thus need a separate impl for CUDA.
       TORCH_INTERNAL_ASSERT(false, "PhiloxRNGEngine normalize_pair_uniform is not yet implemented for CUDA");
-    #endif 
+    #endif
     float u1 = in[0];
     float u2 = in[1];
 
@@ -217,7 +217,7 @@ private:
     float u2eps = std::max(u2, epsilon);
 
     float mag = std::sqrt(-2.0 * std::log(u1));
-    
+
     detail::FLOAT2 ret;
 
     ret[0] = mag * std::cos(two_pi * u2eps);
@@ -235,4 +235,3 @@ private:
 typedef philox_engine Philox4_32;
 
 } // namespace at
-
