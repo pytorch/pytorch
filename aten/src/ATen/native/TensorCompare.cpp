@@ -742,7 +742,7 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-// [Note] assert_all_true 
+// [Note] assert_all_true
 // For a TensorSubclass, calling `item` in an CompositeImplicit Op
 // may not make sense (eg. what does `item` do on BatchTensor?)
 // However a common anti-pattern used in such ops is
