@@ -199,12 +199,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         def _fn(*args, out=None, **kwargs):
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
+                    out_attr = getattr(out, k)
                     if k not in kwargs:
-                        kwargs[k] = getattr(out, k)
-                    else:
-                        assert kwargs[k] == out.device, (
-                            f"{k} {kwargs[k]} does not match {k} of out parameter ({out.device})"
-                        )
+                        kwargs[k] = out_attr
 
             result = fn(*args, **kwargs)
             assert (
