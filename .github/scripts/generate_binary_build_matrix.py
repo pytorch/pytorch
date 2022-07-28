@@ -176,20 +176,21 @@ def generate_libtorch_matrix(os: str, abi_version: str,
 def generate_wheels_matrix(os: str,
                            arches: Optional[List[str]] = None,
                            python_versions: Optional[List[str]] = None) -> List[Dict[str, str]]:
-    if python_versions is None:
-        # Define default python version
-        # Add 3.11 only for wheels as it is not available on conda
-        python_versions = FULL_PYTHON_VERSIONS
-        if os == "macos-arm64":
-            python_versions = list_without(python_versions, ["3.7"])
-
     package_type = "wheel"
     if os == "linux":
         # NOTE: We only build manywheel packages for linux
         package_type = "manywheel"
-        # NOTE: We only build 3.11 wheel on linux as 3.11 is not
-        # available on conda right now
-        python_versions.append("3.11")
+
+    if python_versions is None:
+        # Define default python version
+        python_versions = list(FULL_PYTHON_VERSIONS)
+        if os == "macos-arm64":
+            python_versions = list_without(python_versions, ["3.7"])
+
+        if os == "linux":
+            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
+            # available on conda right now
+            python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures
