@@ -21,7 +21,6 @@ from trymerge import (find_matching_merge_rule,
                       GitHubPR,
                       MergeRule,
                       MandatoryChecksMissingError,
-                      PostCommentError,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
