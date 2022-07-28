@@ -3378,15 +3378,16 @@ def empty_strided(
     )
 
 
-# TODO: missing kwargs (e.g. layout)
-# CompositeImplicitAutograd - don't register decomp
+@register_decomposition(torch.ops.aten.eye)
 @out_wrapper()
 def eye(
     n: int,
     m: Optional[int] = None,
     *,
     dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,  # TODO: unused, see below
     device: Optional[torch.device] = None,
+    pin_memory: bool = False,  # TODO: unused, see below
     requires_grad: bool = False,
 ) -> TensorLikeType:
     """
@@ -3407,6 +3408,9 @@ def eye(
 
     cond = range_n.unsqueeze(-1) == range_m
     tmp = torch.where(cond, 1, 0)
+    # TODO: TypeError: empty() got an unexpected keyword argument:
+    # pin_memory=pin_memory,
+    # layout=layout,
     result = torch.empty(
         (n, m), dtype=dtype, device=device, requires_grad=requires_grad
     )
