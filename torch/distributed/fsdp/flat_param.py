@@ -1,4 +1,5 @@
 import contextlib
+from enum import Enum, auto
 from itertools import accumulate, chain
 from typing import (
     Dict,
@@ -68,6 +69,37 @@ class FlatParamShardMetadata(NamedTuple):
     param_shapes: Tuple[torch.Size, ...]
     param_numels: Tuple[int, ...]
     param_offsets: Tuple[Tuple[int, int], ...]
+
+
+class HandleMode(Enum):
+    """
+    A handle's ``FlatParameter`` can be unsharded or sharded, and the module(s)
+    can register the ``FlatParameter`` or the original parameters. Each enum
+    describes one of the four possible settings.
+
+    UNSHARDED_FLAT_PARAM: The ``FlatParameter`` is unsharded, and the
+        ``FlatParameter`` is registered. The original parameters are ``Tensor``
+        views into the ``FlatParameter`` (and not ``nn.Parameter`` s). This is
+        used during forward and backward computation.
+    UNSHARDED_ORIG_PARAMS: The ``FlatParameter`` is unsharded, and the original
+        parameters are registered (as ``nn.Parameter`` s). This is used in
+        :meth:`summon_full_params`.
+    SHARDED_FLAT_PARAM: The ``FlatParameter`` is sharded, and the
+        ``FlatParameter`` is registered. This is used outside the forward and
+        backward computation.
+    SHARDED_ORIG_PARAMS: The ``FlatParameter`` is sharded, and the original
+        parameters are registered. This is used outside the forward and
+        backward computation to support different hyperparameters for the
+        original parameters in the ``FlatParameter``. This is not yet
+        implemented.
+    UNINITIALIZED: The handle is uninitialized. This forces the views to be
+        reconstructed when unflattening.
+    """
+    UNSHARDED_FLAT_PARAM = auto()
+    UNSHARDED_ORIG_PARAMS = auto()
+    SHARDED_FLAT_PARAM = auto()
+    SHARDED_ORIG_PARAMS = auto()
+    UNINITIALIZED = auto()
 
 
 class FlatParameter(nn.Parameter):
@@ -219,6 +251,7 @@ class FlatParamHandle:
         module: nn.Module,
     ) -> None:
         super().__init__()
+        self._mode: HandleMode = HandleMode.UNINITIALIZED
         self._init_flat_param(module, params)
         self._unflatten(as_params=False)
 
@@ -349,6 +382,14 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
+        if not as_params:
+            if self._mode == HandleMode.UNSHARDED_FLAT_PARAM:
+                return  # no-op
+            self._mode = HandleMode.UNSHARDED_FLAT_PARAM
+        else:
+            if self._mode == HandleMode.UNSHARDED_ORIG_PARAMS:
+                return  # no-op
+            self._mode = HandleMode.UNSHARDED_ORIG_PARAMS
         views = self._get_unflat_views(self.flat_param)
         for view, (param_name, module, _) in zip(views, self.flat_param._param_infos):
             if hasattr(module, param_name):

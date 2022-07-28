@@ -346,7 +346,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         self.assertEqual(len(fsdp_model._handles), len(correct_prefixed_param_names))
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("iters", [1, 3])
+    @parametrize("iters", [3])
     def test_reconstruct_reverse_gradient_ready_order(self, iters: int):
         """
         Tests that ``FlatParameter`` s are reconstructed following reverse gradient
