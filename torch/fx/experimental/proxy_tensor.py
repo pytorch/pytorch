@@ -3,6 +3,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import contextlib
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -573,6 +574,8 @@ def get_isolated_graphmodule(func, args, kwargs):
         if isinstance(a, ProxyTensor) else a for a in all_args
     ]
 
-    with maybe_disable_proxy_tensor_mode():
+    with contextlib.ExitStack() as stack:
+        while torch._C._get_torch_dispatch_mode() is not None:
+            stack.enter_context(maybe_disable_proxy_tensor_mode())
         gm = make_fx(wrapped)(detached_all_args)
     return gm

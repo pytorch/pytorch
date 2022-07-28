@@ -157,7 +157,7 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
 
-        # when factory functions are used, they should not be traced
+        # When factory functions are used, they should not be traced
         # by the outer make_fx call
         def inner_with_factory():
             val = torch.tensor(float(1))
@@ -178,6 +178,19 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f2)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
         self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify nested make_fx calls don't make factory functions to be leaked
+        # into the outer graph
+        def f2(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertTrue(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
