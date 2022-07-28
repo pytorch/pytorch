@@ -145,7 +145,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   virtual SymIntNode wrap(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap")(num);
-    return std::make_shared<PythonSymIntNodeImpl>(r);
+    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
   }
 
   virtual bool bool_() override {
@@ -166,11 +166,11 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   virtual SymIntNode dispatch_common_(
       const char* fname,
       const SymIntNode& other) {
-    auto pother = std::dynamic_pointer_cast<PythonSymIntNodeImpl>(other);
+    auto* pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return std::make_shared<PythonSymIntNodeImpl>(r);
+    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
   }
 
   virtual SymIntNode add(const SymIntNode& other) override {
@@ -1182,12 +1182,12 @@ void initJITBindings(PyObject* module) {
       .def_static(
           "new_symint",
           [](py::object obj) -> c10::SymIntNode {
-            return std::make_shared<PythonSymIntNodeImpl>(obj);
+            return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
           })
       .def(
           "get_pyobj",
           [](c10::SymIntNode a) -> py::object {
-            if (auto psn = std::dynamic_pointer_cast<PythonSymIntNodeImpl>(a)) {
+            if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
               return py::reinterpret_borrow<py::object>(psn->getPyObj());
             }
             return py::none();

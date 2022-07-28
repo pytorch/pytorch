@@ -48,10 +48,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 return f"lazy_{arg.name}_tensorlist"
             elif arg.is_symint_or_list:
                 cpp_type = arg.lazy_type.cpp_type()
-                return (
-                    f"{cpp_type}(std::dynamic_pointer_cast<torch::lazy::SymIntNodeImpl>"
-                    f"({arg.name}.toSymIntNodeImpl())->node_, 0)"
-                )
+                return f"{cpp_type}(dynamic_cast<torch::lazy::SymIntNodeImpl*>({arg.name}.toSymIntNodeImpl().get())->node_, 0)"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
