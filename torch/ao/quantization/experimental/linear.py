@@ -84,10 +84,8 @@ class LinearAPoT(WeightedQuantizedModule):
             curr_block_result = 0
 
             for ele in block:
-
                 if int(ele):
                     curr_block_result += r << place
-
                 place += 1
 
             idx -= 1
