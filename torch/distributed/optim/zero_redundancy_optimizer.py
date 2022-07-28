@@ -528,7 +528,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     )
                 else:
                     # Receive the optimizer state from the source rank
-                    local_state_dict = torch.distributed.broadcast_object_list(
+                    local_state_dict = _broadcast_object(
                         empty_messenger,
                         src_rank=global_rank,
                         group=self.process_group,
@@ -540,7 +540,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             else:
                 if rank == self.rank:
                     # Send the optimizer state to the target rank
-                    _ = torch.distributed.broadcast_object_list(
+                    _ = _broadcast_object(
                         self.optim.state_dict(),
                         src_rank=self.global_rank,
                         group=self.process_group,
@@ -549,7 +549,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 elif rank != to:
                     # Discard the received object; `broadcast()` is used for
                     # compatibility reasons
-                    _ = torch.distributed.broadcast_object_list(
+                    _ = _broadcast_object(
                         empty_messenger,
                         src_rank=global_rank,
                         group=self.process_group,
