@@ -69,7 +69,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.* functions and Tensor methods to
     use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
 
-    >>> with TorchRefsMode.push():
+    >>> with TorchRefsMode():
     ...     torch.add(x, y)  # calls torch._refs.add(x, y)
 
     By default, this context manager will fall back on the torch.* if the
@@ -131,5 +131,5 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 TorchRefsNvfuserCapabilityMode = functools.partial(
-    TorchRefsMode.push, should_fallback_fn=_is_func_unsupported_nvfuser
+    TorchRefsMode, should_fallback_fn=_is_func_unsupported_nvfuser
 )
