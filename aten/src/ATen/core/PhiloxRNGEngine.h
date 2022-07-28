@@ -195,12 +195,12 @@ private:
     int32_t x = (int32_t)value;
     float scale = 4.6566127342e-10;
     if (x < 0) {
-      x = -x - 1;      
+      x = -x - 1;
     }
     return 1.0f - static_cast<float>(x * scale);
   }
 
-  
+
 
   C10_HOST_DEVICE inline detail::UINT4 rand(detail::UINT4& counter, detail::UINT2& key, uint32_t n_rounds) {
     for (uint32_t round = 0; round < (n_rounds - 1); round++) {
