@@ -354,10 +354,8 @@ Bool* PredicateCompute::getInlinePredicate(
         ->as<Bool>();
   }
 
-  auto pred_info_vec =
-      Index::getReferenceRootPredicates(
-          out_tv, loops, nullptr, pred_type == PredicateType::Padding)
-          .first;
+  auto pred_info_vec = Index::getReferenceRootPredicates(
+      out_tv, loops, nullptr, pred_type == PredicateType::Padding);
 
   std::vector<Bool*> preds;
 
@@ -466,7 +464,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   // temporarily placed in the predicated_keys map and the final
   // predicates are generated in the finalize function.
 
-  for (const auto& pred_info : ref_pred_info.first) {
+  for (const auto& pred_info : ref_pred_info) {
     TORCH_INTERNAL_ASSERT(pred_info.startPredicate() != nullptr);
     TORCH_INTERNAL_ASSERT(pred_info.stopPredicate() != nullptr);
 
