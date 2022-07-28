@@ -58,6 +58,24 @@ class Pattern:
                 self, 'benchmark') else default_summary
         return default_summary
 
+    def benchmark_summary(self, events: List[_ProfilerEvent]):
+        def format_time(time_ns: int):
+            unit_lst = ["ns", "us", "ms", "s"]
+            for unit in unit_lst:
+                if time_ns < 1000:
+                    return f"{time_ns:.2f} {unit}"
+                time_ns //= 1000
+
+        assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
+        shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
+        original_time = sum(event.duration_time_ns for event in events)
+        new_time = sum(shapes_factor_map[input_shapes(event)] *
+                       event.duration_time_ns for event in events)
+        return (
+            f"{self.name}: {len(events)} events matched. "
+            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time/new_time, 2)}X)"
+        )
+
     def match(self, event: _ProfilerEvent):
         '''
         Return True if the event matches the pattern.
@@ -571,7 +589,9 @@ def report_all_anti_patterns(prof,
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
-        GradNotSetToNonePattern(prof, should_benchmark)
+        GradNotSetToNonePattern(prof, should_benchmark),
+        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark),
+        MatMulDimInFP16Pattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
