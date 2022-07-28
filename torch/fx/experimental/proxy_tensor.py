@@ -566,15 +566,24 @@ def get_isolated_graphmodule(func, args, kwargs):
     new_tracer = PythonKeyTracer()
     new_tracer.graph = graph
 
-    try:
-        for arg in all_args:
-            if isinstance(arg, ProxyTensor):
-                arg.proxy.tracer = new_tracer
+    # detach proxy tensors from the current tracer
+    detached_all_args = [
+        ProxyTensor(
+            a.elem,
+            torch.fx.Proxy(
+                graph.create_node(
+                    a.proxy.node.op,
+                    a.proxy.node.target,
+                    a.proxy.node.args,
+                    a.proxy.node.kwargs,
+                    a.proxy.node.name,
+                ),
+                tracer=new_tracer,
+            ),
+        )
+        if isinstance(a, ProxyTensor) else a for a in all_args
+    ]
 
-        with maybe_disable_proxy_tensor_mode():
-            gm = make_fx(wrapped)(all_args)
-    finally:
-        for arg in all_args:
-            if isinstance(arg, ProxyTensor):
-                arg.proxy.tracer = old_tracer
+    with maybe_disable_proxy_tensor_mode():
+        gm = make_fx(wrapped)(detached_all_args)
     return gm
