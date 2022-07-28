@@ -203,17 +203,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
-      .def("__str__", &AliasDb::toString)
-      .def(
-          "move_after_topologically_valid",
-          [](AliasDb& db, Node* n, Node* movePoint) {
-            return db.moveAfterTopologicallyValid(n, movePoint);
-          })
-      .def(
-          "move_before_topologically_valid",
-          [](AliasDb& db, Node* n, Node* movePoint) {
-            return db.moveBeforeTopologicallyValid(n, movePoint);
-          });
+      .def("__str__", &AliasDb::toString);
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
