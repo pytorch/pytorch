@@ -147,6 +147,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "isin",
     # Functions return none are not differentiable
     "record_stream",
+    "assert_all_true",
     # These functions are not differentiable
     "logical_and",
     "logical_xor",

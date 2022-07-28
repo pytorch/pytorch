@@ -445,6 +445,10 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+    # NotImplementedError: Could not run 'aten::_local_scalar_dense'
+    # with arguments from the 'Meta' backend.
+    xfail('nanquantile'),
+    xfail('quantile'),
 }
 
 symbolic_tensor_failures = {
