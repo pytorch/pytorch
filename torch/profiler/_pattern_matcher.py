@@ -415,8 +415,9 @@ class GradNotSetToNonePattern(Pattern):
     def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Gradient Set To Zero Instead of None Pattern"
-        self.description = ("Detected gradient set to zero instead of None. "
-        "Please add 'set_to_none=True' when calling zero_grad().")
+        self.description = (
+            "Detected gradient set to zero instead of None. "
+            "Please add 'set_to_none=True' when calling zero_grad().")
 
     def match(self, event: _ProfilerEvent):
         if not event.name().endswith(": zero_grad"):
