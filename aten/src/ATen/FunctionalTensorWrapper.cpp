@@ -29,7 +29,20 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // All of the keys corresponding to functorch transforms should not be copied over.
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
-  key_set_ = key_set_ - c10::functorch_transforms_ks;
+  key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
+  // For better error handling,
+  // we also don't want our wrapper tensor to be able to dispatch directly
+  // to a backend kernel.
+  // Dispatching directly to e.g. a CPU kernel would always segfault,
+  // because wrapper tensors don't have any real data.
+  // (This should never happen because we should always hit a functionalization kernel,
+  // but can help make bugs less nasty).
+  // Here, we defensively remove any backend keys from the wrapper's keyset.
+  // We don't want to remove actual backend bits though (say we're redispatching to autograd;
+  // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
+  // Instead, it's sufficient to remove the `Dense` dispatch key,
+  // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
+  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -190,6 +203,8 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     set_storage_offset(value_.storage_offset());
   }
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
+    // .to() should not re-entrantly go through functionalization.
+    at::AutoDispatchSkipFunctionalize guard;
     value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
