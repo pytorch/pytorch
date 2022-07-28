@@ -2971,20 +2971,7 @@ class FullyShardedDataParallel(nn.Module):
                         # This is a two-step process to avoid potential underflow and overflow.
                         output.div_(self.gradient_postdivide_factor)
 
-                    # Note that we need to cast grads back to the full precision if
-                    # 1) parameters were in reduced precision during fwd, as grads
-                    # would thus be in this reduced precision, or
-                    # 2) parameters did not have precision reduced, but grads
-                    # had reduced precision for communication.
-                    if (
-                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
-                    ):
-                        # Cast gradients back to the full parameter precision so that
-                        # optimizer.step() happens in full precision.
-                        orig_param_grad_data = output
-                        output.data = output.data.to(dtype=param.data.dtype)
-                        # Don't let this memory get reused until after the transfer.
-                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    self._cast_grad_to_param_dtype(output, param)
 
                     # To support gradient accumulation outside `no_sync()`, we save
                     # the gradient data to `param._saved_grad_shard` before the
@@ -3021,25 +3008,7 @@ class FullyShardedDataParallel(nn.Module):
                         # then a default hook (`all_reduce`) will be used
                         self.communication_hook(self.communication_hook_state, param.grad)
 
-                    # Note that we need to cast grads back to the full precision if
-                    # 1) parameters were in reduced precision during fwd, as grads
-                    # would thus be in this reduced precision, or
-                    # 2) parameters did not have precision reduced, but grads
-                    # had reduced precision for communication.
-                    # If a lower precision hook is registered, gradients are casted
-                    # back by the hook.
-                    # However, if a low precision hook is attached to the model.
-                    # casting happens inside the hook.
-                    if (
-                        not self._low_precision_hook_enabled() and
-                        (self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce())
-                    ):
-                        # Cast gradients back to the full parameter precision so that
-                        # optimizer.step() happens in full precision.
-                        orig_param_grad_data = param.grad.data
-                        param.grad.data = param.grad.data.to(dtype=param.data.dtype)
-                        # Don't let this memory get reused until after the transfer.
-                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    self._cast_grad_to_param_dtype(param.grad, param)
 
                 # Regardless of sharding or not, offload the grad to CPU if we are
                 # offloading params. This is so param and grad reside on same device
@@ -3060,6 +3029,35 @@ class FullyShardedDataParallel(nn.Module):
                 # are underway in the post_backward stream. See:
                 # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
                 orig_grad_data.record_stream(self._streams["post_backward"])
+
+    def _cast_grad_to_param_dtype(
+        self,
+        grad: torch.Tensor,
+        param: FlatParameter,
+    ):
+        """
+        Casts gradient ``grad`` back to the full parameter dtype so that the
+        optimizer step runs with that dtype. This performs an actual cast if
+        1. parameters were in reduced precision during the forward since then
+        gradients would be in that reduced precision, or
+        2. parameters were not in reduced precision but gradients were in
+        reduced precision for communication.
+        However, if a low precision communication hook is registered, then this
+        dtype cast happens in the hook instead.
+        """
+        self._assert_state(TrainingState_.BACKWARD_POST)
+        if (
+            not self._low_precision_hook_enabled()
+            and (
+                self._mixed_precision_enabled_for_params()
+                or self._mixed_precision_enabled_for_reduce()
+            )
+        ):
+            low_prec_grad_data = grad.data
+            grad.data = grad.data.to(dtype=param.dtype)
+            # Do not let the low precision gradient memory get reused until
+            # the cast to full parameter precision completes
+            low_prec_grad_data.record_stream(torch.cuda.current_stream())
 
     def _queue_wait_for_post_backward(self) -> None:
         """Try to queue a `wait_for_post_backward` callback.
