@@ -130,9 +130,9 @@ std::string getMPSTypeString(ScalarType scalar_type) {
     case ScalarType::Short:
       return "Int16";
     case ScalarType::Char:
-      return "UInt8";
-    case ScalarType::Byte:
       return "Int8";
+    case ScalarType::Byte:
+      return "UInt8";
     case ScalarType::Bool:
       return "Bool";
     default:
