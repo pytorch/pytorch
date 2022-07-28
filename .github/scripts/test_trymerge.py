@@ -323,12 +323,10 @@ class TestGitHubPR(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_revert_rules(self, mock_gql: Any) -> None:
-        """ Tests that reverts from collaborators are not allowed, Zain to change it soon """
+        """ Tests that reverts from collaborators are allowed """
         pr = GitHubPR("pytorch", "pytorch", 79694)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(PostCommentError,
-                               ".*is not a MEMBER, but COLLABORATOR.*",
-                               lambda: validate_revert(repo, pr, comment_id=1189459845))
+        self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
 
 if __name__ == "__main__":
     main()
