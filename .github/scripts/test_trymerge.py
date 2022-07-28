@@ -195,7 +195,7 @@ class TestGitHubPR(TestCase):
     def test_checksuites_pagination(self, mocked_gql: Any) -> None:
         "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
-        self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 104)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_comments_pagination(self, mocked_gql: Any) -> None:
@@ -259,6 +259,7 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
+        self.assertEqual(len(conclusions), 83)
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -275,7 +276,7 @@ class TestGitHubPR(TestCase):
         """ Tests that all checkruns can be fetched for a commit
         """
         conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
-        self.assertGreater(len(conclusions), 100)
+        self.assertEqual(len(conclusions), 101)
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
