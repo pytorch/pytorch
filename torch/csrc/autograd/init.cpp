@@ -219,16 +219,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def(
-          "shapes",
-          [](const KinetoEvent& e) {
-            return e.shapes().vec();
-          })
-      .def(
-          "dtypes",
-          [](const KinetoEvent& e) {
-            return e.dtypes().vec();
-          })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
       .def(
           "stack",

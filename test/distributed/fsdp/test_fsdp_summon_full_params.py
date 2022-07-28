@@ -7,12 +7,10 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload, FlatParameter
+from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel,
-)
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -148,7 +146,7 @@ class TestSummonFullParams(FSDPTest):
         with model.summon_full_params(model):
             self.assertEqual(raw_model_size, self.get_model_param_count(model))
             parameters = list(model.parameters())
-            all_shards = FlatParameter(parameters, requires_grad=False)
+            all_shards = FlatParamHandle.flatten_params(parameters, requires_grad=False)
             my_slice = torch.chunk(all_shards, self.world_size)[self.rank]
 
             # shards are padded but the full_param tensor is not
@@ -353,7 +351,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
         params_to_compare = list(model_no_fsdp.parameters())
-        with FullyShardedDataParallel.summon_full_params(model_fsdp):
+        with FSDP.summon_full_params(model_fsdp):
             fsdp_params = [p.clone() for p in model_fsdp.parameters()]
 
         self.assertEqual(params_to_compare, fsdp_params)

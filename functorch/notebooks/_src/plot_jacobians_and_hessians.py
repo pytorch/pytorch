@@ -9,7 +9,6 @@ efficiently using a standard autodiff system like PyTorch Autograd; functorch
 provides ways of computing various higher-order autodiff quantities efficiently.
 """
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
 torch.manual_seed(0)

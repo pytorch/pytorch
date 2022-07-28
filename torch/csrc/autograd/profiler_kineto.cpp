@@ -119,8 +119,7 @@ struct EventFieldsVisitor {
   }
 
   void operator()(const ExtraFields<EventType::Allocation>& alloc) {
-    kineto_event_.get()
-        .deviceIndex(alloc.device_index_);
+    kineto_event_.get().deviceIndex(alloc.device_index_);
 
     addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
     addMetadata("Device Id", std::to_string(alloc.device_index_));

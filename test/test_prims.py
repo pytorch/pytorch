@@ -146,7 +146,7 @@ class TestPrims(TestCase):
         # This test is not intended to test the correctness of the nvfuser implementation
         from torch._C._nvfuser import FusionDefinition as fd
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {
             name
             for name in prim_nvfuser_ops
@@ -170,7 +170,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.sigmoid(a)
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a)
 
         # First run to create the cache
@@ -203,7 +203,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -227,7 +227,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
