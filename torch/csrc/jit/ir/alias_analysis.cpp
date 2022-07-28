@@ -913,25 +913,22 @@ void AliasDb::analyzeImpl(Node* node) {
       continue;
     }
 
+    bool inputs_has_alias = false;
     for (const auto& formalAlias : formal->beforeSets()) {
-      // If we encounter an alias annotation that wasn't in the inputs:
-      if (!formalToActual.count(formalAlias)) {
-        // If this alias is not seen elsewhere and is the only annotation on
-        // the output, it's equivalent to being fresh:
-        //   e.g. foo(Tensor(a) self) -> Tensor(b)
-        if (formal->beforeSets().size() == 1) {
-          giveFreshAlias(actual);
-        }
-        // Or it is the form of a|fresh, which we can ignore, taking the
-        // conservative assumption that the output must alias `a`, e.g
-        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
-
-        // Don't assign an alias set in that case.
-        continue;
+      if (formalToActual.count(formalAlias)) {
+        inputs_has_alias = true;
+        auto toAlias = formalToActual.at(formalAlias);
+        makePointerTo(actual, toAlias);
       }
-
-      auto toAlias = formalToActual.at(formalAlias);
-      makePointerTo(actual, toAlias);
+    }
+    // If all the alias annotation that we encounter weren't in the inputs:
+    //   e.g. foo(Tensor(a) self) -> Tensor(b)
+    //   or foo(Tensor(a) self) -> Tensor(b|c)
+    // Otherwise it is the form of a|fresh, which we can ignore, taking the
+    // conservative assumption that the output must alias `a`, e.g
+    //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
+    if (!inputs_has_alias && formal->beforeSets().size()) {
+      giveFreshAlias(actual);
     }
   }
 }
