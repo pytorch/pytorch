@@ -387,8 +387,8 @@ class GradNotSetToNonePattern(Pattern):
         NOT aten::zeros
             aten::zero_
 
-    # aten::zero_ is called on each parameter in the model.
-    # We also want to make sure it is not called by aten::zeros.
+    aten::zero_ is called on each parameter in the model.
+    We also want to make sure it is not called by aten::zeros.
 
     Algorithm:
     String match
@@ -422,9 +422,8 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
     Pattern:
     nn.Module: Conv2d            | nn.Module: BatchNorm2d
         ...
-            aten::_convolution
-                ... | aten::add_
-    # This pattern only works when using CUDA
+            aten::conv2d AND dtype of third argument is not null
+    The third argument is the bias
     Algorithm:
     String match
     '''
@@ -434,13 +433,14 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
         self.name = "Enabling Bias in Conv2d Followed By BatchNorm Pattern"
         self.description = "Detected bias enabled in Conv2d that is followed by BatchNorm2d. Please set 'bias=False' in Conv2d."
 
+    @property
+    def skip(self):
+        return self.prof.record_shapes is False or super().skip
+
     def match(self, event: _ProfilerEvent):
-        if event.name() != "aten::_convolution":
+        if event.name() != "aten::conv2d":
             return False
-        if not event.children:
-            return False
-        event = event.children[-1]
-        if event.name() != "aten::add_":
+        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] == "":
             return False
         # This means bias=True
         event = self.go_up_until(
