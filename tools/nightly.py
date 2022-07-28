@@ -24,25 +24,26 @@ well. This can be done with
 Pulling will reinstalle the conda dependencies as well as the nightly binaries into
 the repo directory.
 """
+import contextlib
+import datetime
+import functools
+import glob
+import json
+import logging
 import os
 import re
+import shutil
+import subprocess
 import sys
-import json
-import glob
+import tempfile
 import time
 import uuid
-import shutil
-import logging
-import datetime
-import tempfile
-import functools
-import contextlib
-import subprocess
-from ast import literal_eval
 from argparse import ArgumentParser
+from ast import literal_eval
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -53,7 +54,6 @@ from typing import (
     Set,
     Tuple,
     TypeVar,
-    cast,
 )
 
 LOGGER: Optional[logging.Logger] = None

@@ -9,6 +9,8 @@ from ..._jit_internal import Optional
 from typing import List, Tuple, Union, Iterable
 
 
+__all__ = ['PackedSequence', 'invert_permutation', 'pack_padded_sequence', 'pad_packed_sequence', 'pad_sequence',
+           'unpad_sequence', 'pack_sequence', 'unpack_sequence']
 
 PackedSequence_ = namedtuple('PackedSequence_',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
@@ -331,7 +333,7 @@ def pad_packed_sequence(
     unsorted_indices = sequence.unsorted_indices
     if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
-        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices]
+        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices.cpu()]
     return padded_output, lengths
 
 

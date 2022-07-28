@@ -1825,7 +1825,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_grad_layout_1devicemodule_1replicaperprocess(self):
         dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         # Tells DDP to use just one device.
@@ -2183,7 +2182,7 @@ class DistributedDataParallelTest(
             process_group, allreduce_with_then_hook
         )
 
-        # check whether the grads are equal to what allreduce returns multuplied by 5.
+        # check whether the grads are equal to what allreduce returns multiplied by 5.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
 
@@ -2242,6 +2241,15 @@ class DistributedDataParallelTest(
                             try_set_to_none, use_bucket_view
                         ),
                     )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_channels_last_contig(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(memory_format=torch.channels_last)
+        process_group.broadcast([tensor]).wait()
 
 
 

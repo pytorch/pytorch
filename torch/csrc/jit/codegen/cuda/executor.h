@@ -74,6 +74,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     LaunchParams launch_params;
     std::vector<std::pair<int, int>> io_alias_indices;
     std::vector<std::vector<int64_t>> output_sizes;
+    std::vector<std::vector<int64_t>> output_strides;
     std::vector<at::ScalarType> output_types;
     std::vector<std::vector<int64_t>> buffer_sizes;
     std::vector<at::ScalarType> buffer_types;
@@ -157,6 +158,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   struct GlobalBuffers {
     std::vector<at::Tensor> buffers;
     std::vector<bool> zero_init;
+    at::Tensor profile_buffer;
   };
 
   static std::string kernelNamespace() {

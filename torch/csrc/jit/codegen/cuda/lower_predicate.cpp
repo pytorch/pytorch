@@ -56,7 +56,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
             "Expecting predicated body to only have one vectorized expression.");
         auto vec_expr = ite->thenBody()[0];
         TORCH_INTERNAL_ASSERT(
-            vec_expr->isA<UnaryOp>(),
+            vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
             "Vectorize predicate exprs only supported on set operations.");
         TORCH_INTERNAL_ASSERT(
             ir_utils::isTvOp(vec_expr),
@@ -75,7 +75,52 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       setWritePredicate(expr, conditional);
     }
 
+    // Note: [Predicate Inversion for CpAsync]
+    // Today for vectorized support the pattern is:
+    // Initialize buffer -> predicated load
+    // For memcpy async:
+    //    If we initialized and then loaded (without sync) it would be undefined
+    //    behavior.
+    // Initialize only the "virtual out of boundary" accesses.
+    //  Memory allocated, but outside the virtual tensor space.
+    //  Virtual tensor space today is effectively what would be allocated in
+    //  global memory. Then only copy the "within bound" accesses.
+    // This is a WAR today based on how our system is set up.
+    //    We would want to have a separate concept of SMEM space from Virtual or
+    //    GMEM space, so that we know we're only working with the allocated
+    //    SMEM.
+    //  If we hit outside the allocated SMEM bad things happen.
+    // Today asserting in predicate removal making sure that the virtual and
+    // SMEM boundaries line up based on the IterDomains.
+    //
+    // TODO: in a follow up we need to extend the predicate
+    //  infrastructure to generate predicate for both gmem
+    //  and smem, and the predicate removal will need to
+    //  be extended as well for the perf critical regions.
+    if (isPredicatedInitForCpAsync(expr)) {
+      invertPredicateForGmemToSharedMemInitialize(expr);
+    }
+
     kir::IrVisitor::handle(expr);
+  }
+
+  // Invert the predicate of given expr.
+  void invertPredicateForGmemToSharedMemInitialize(Expr* expr) {
+    auto pred = expr->predicate()->value();
+    auto invert = SimplifyingIrBuilder::notExpr(pred);
+    expr->predicate()->setValue(invert->as<Bool>());
+  }
+
+  // Detect if this expr is an initialization for vectorized
+  //  cp asyc with predicates.
+  bool isPredicatedInitForCpAsync(Expr* expr) {
+    // Match the pattern:
+    //  If(pred)
+    //    TV = 0;
+    //  where TV is the output of cp async.
+    auto maybe_init = ir_utils::getMaybePredicatedSingleton(expr);
+    return maybe_init.has_value() &&
+        ir_utils::isCpAsyncInit(maybe_init.value());
   }
 
   void setWritePredicate(Expr* expr, Bool* read_cond) {

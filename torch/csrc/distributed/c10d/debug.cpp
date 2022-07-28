@@ -29,10 +29,11 @@ DebugLevel loadDebugLevelFromEnvironment() {
 
   std::string level_str{env_value};
 
-  std::transform(level_str.begin(), level_str.end(), level_str.begin(),
-    [](unsigned char c) {
-      return toupper(c);
-    });
+  std::transform(
+      level_str.begin(),
+      level_str.end(),
+      level_str.begin(),
+      [](unsigned char c) { return toupper(c); });
 
   if (level_str == "OFF") {
     level = DebugLevel::Off;
@@ -41,7 +42,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw C10dError{"The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};
+    throw C10dError{
+        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};
   }
 
   C10D_INFO("The debug level is set to {}.", level_str);

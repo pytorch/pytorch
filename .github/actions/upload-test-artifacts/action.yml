@@ -36,6 +36,20 @@ runs:
         rm -f test-reports-*.zip
         zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 
+    - name: Zip usage log for upload
+      if: runner.os != 'Windows' && !inputs.use-gha
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # Remove any previous test reports if they exist
+        rm -f usage-log-*.zip
+        # this workflow is also run in bazel build test, but we dont generate usage reports for it
+        # so check to see if the file exists first
+        if [ -f 'usage_log.txt' ]; then
+            zip "usage-log-${FILE_SUFFIX}.zip" 'usage_log.txt'
+        fi
+
     # Windows zip
     - name: Zip JSONs for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -55,11 +69,22 @@ runs:
         # -ir => recursive include all files in pattern
         7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
 
+    - name: Zip usage log for upload
+      if: runner.os == 'Windows' && !inputs.use-gha
+      shell: powershell
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # -ir => recursive include all files in pattern
+        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt'
+
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: warn
         path: test-jsons-*.zip
@@ -68,9 +93,21 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: error
         path: test-reports-*.zip
+
+    - name: Store Usage Logs on S3
+      uses: seemethere/upload-artifact-s3@v5
+      if: ${{ !inputs.use-gha }}
+      with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: usage-log-*.zip
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github

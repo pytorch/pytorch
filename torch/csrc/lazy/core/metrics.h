@@ -204,8 +204,7 @@ class TORCH_API Counter {
     __counter->AddValue(value);                \
   } while (0)
 
-#define TORCH_LAZY_FN_COUNTER(ns) \
-  TORCH_LAZY_COUNTER(c10::str(ns, __func__), 1)
+#define TORCH_LAZY_FN_COUNTER(ns) TORCH_LAZY_COUNTER(c10::str(ns, __func__), 1)
 
 #define TORCH_LAZY_VALUE_METRIC(name, value)                         \
   do {                                                               \
