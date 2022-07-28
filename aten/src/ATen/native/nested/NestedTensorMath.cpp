@@ -679,8 +679,8 @@ Tensor NestedTensor_sum__dim(
   );
   auto dim = maybe_wrap_dim(dims[0], self.dim());
   TORCH_CHECK(
-      dim == self.dim(),
-      "NestedTensor can only be reduced across the last dimension for now",
+      dim == self.dim() - 1,
+      "NestedTensor can only be reduced across the last dimension for now ",
       "got dimension ",
       dim,
       " instead.");
@@ -706,9 +706,9 @@ Tensor NestedTensor_sum__dim(
   auto output_sizemat = sizemat.clone();
   output_sizemat.select(1, -1).fill_(1);
 
-  auto num_segments = at::cumprod(output_sizemat, -1);
+  auto num_segments = at::prod(output_sizemat, -1);
   auto segment_lengths = sizemat.select(1, -1);
-  const int64_t new_numel = at::prod(output_sizemat).item<int64_t>();
+  const int64_t new_numel = at::sum(num_segments).item<int64_t>();
   auto output_buffer = buffer.new_empty(IntArrayRef(new_numel));
 
   // This logic assumes for now that
@@ -718,14 +718,17 @@ Tensor NestedTensor_sum__dim(
     ScalarType::Half, ScalarType::BFloat16, buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
     auto* output_data = output_buffer.data_ptr<scalar_t>();
     const auto* input_data = buffer.data_ptr<scalar_t>();
-    int64_t out_idx = 0;
+    int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      scalar_t res = 0;
       for (const auto j : c10::irange(segments)) {
+        (void)j;
+        scalar_t res = 0;
         for (const auto k : c10::irange(segment_length)) {
-          res += input_data[j * segment_length + k];
+          (void)k;
+          res += input_data[in_idx];
+          in_idx += 1;
         }
         output_data[out_idx] = res;
         out_idx += 1;
