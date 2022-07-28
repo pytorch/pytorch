@@ -3616,6 +3616,15 @@ class TestSparse(TestCase):
                     d = make_tensor(empty_dense_shape, dtype=dtype, device=device)
                     check(self, s, d)
 
+            # check scalar multiplication
+            s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            for scalar in (True, 1, 1.0):
+                res_sparse = s * scalar
+                res_dense = s.to_dense() * scalar
+                # check correctness and dtype
+                self.assertEqual(s.to(res_sparse.dtype), res_sparse)
+                self.assertEqual(res_sparse.dtype, res_dense.dtype)
+
             # Case 1: sparse broadcasts over dense
             s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             d = make_tensor(shape, dtype=dtype, device=device)

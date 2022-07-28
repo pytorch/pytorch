@@ -773,12 +773,9 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   // Short-circuit if either s_ or d is empty.
   if (!s_._nnz() || !s_.numel() || !d.numel()) {
-    auto common_dtype = promoteTypes(d.scalar_type(), s_.scalar_type());
-    TORCH_CHECK(canCast(common_dtype, res.scalar_type()),
-        op_name, "(): can't convert result type ", common_dtype, " to output ", res.scalar_type(), ".");
     const auto sparse_dim = static_cast<int64_t>(res_shape.size());
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
-    const auto values = at::empty({0}, s_._values().options().dtype(common_dtype));
+    const auto values = at::empty({0}, s_._values().options().dtype(res.scalar_type()));
     get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*shape=*/res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
     get_sparse_impl(res)->set_nnz_and_narrow(0);
@@ -800,9 +797,10 @@ Tensor& intersection_binary_op_sparse_dense_out(
   const auto s_values = s._values();
 
   const auto apply_op = [&](const Tensor& d_filtered) -> Tensor& {
+    const auto res_indices = s_indices.clone();
     const auto res_values = op(d_filtered, s_values);
     get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
-    get_sparse_impl(res)->set_indices_and_values_unsafe(s_indices, res_values);
+    get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
     get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
     return res._coalesced_(s.is_coalesced());
   };
