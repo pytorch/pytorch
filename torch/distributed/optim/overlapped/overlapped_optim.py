@@ -9,6 +9,10 @@ class OverlappedOptimizer(object):
         self._functional_optim = functional_optim
         self.grad_scaler = grad_scaler
         self.zero_grad = zero_grad
+
+        # Dummpy param_groups to cooperate with LRScheduler
+        self.param_groups = [{'lr': functional_optim.defaults['lr']}]
+
         self.is_overlapped = True
         
     def step_param(self, param: Tensor, grad: Optional[Tensor]):
@@ -18,9 +22,10 @@ class OverlappedOptimizer(object):
 
     def set_lr(self, lr):
         self._functional_optim.defaults['lr'] = lr
+        self.param_groups[0]['lr'] = lr
 
-    def get_lr(self, lr):
-        return self._functional_optim.defaults['lr']
+    def get_lr(self):
+        return self.param_groups[0]['lr']
 
     def _pre_step(self, param, grad):
         if self.grad_scaler is not None:
