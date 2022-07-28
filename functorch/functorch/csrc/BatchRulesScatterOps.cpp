@@ -314,8 +314,8 @@ std::tuple<Tensor,optional<int64_t>> index_batch_rule(
   return std::make_tuple(swap_regions(res, max_index_dim, num_leading_nones), 0);
 }
 
-// plumbing done since we don't support List<optional<Tensor>> in codegen
-Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indices
+// plumbing done since we don't support IOptTensorListRef in codegen
+Tensor index_plumbing(const Tensor & self, const IOptTensorListRef& indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -329,8 +329,8 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   std::vector<optional<Tensor>> indices_value;
   std::vector<optional<int64_t>> indices_bdims;
-  for (const auto&& indRef : indices) {
-      optional<Tensor> ind = indRef;
+  for (const auto& indRef : indices) {
+      optional<Tensor> ind = to_c10_optional(indRef);
       optional<Tensor> index;
       optional<int64_t> index_bdim;
       if (ind.has_value()) {

@@ -18,7 +18,7 @@ std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, option
 
 // Returns True if ANY tensor in tensors is batched at level
 bool isBatchedAtLevel(TensorList tensors, int64_t level);
-bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>> maybe_tensors, int64_t level);
+bool isBatchedAtLevel(IOptTensorListRef maybe_tensors, int64_t level);
 bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level);
 
