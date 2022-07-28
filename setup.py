@@ -1079,7 +1079,6 @@ if __name__ == '__main__':
                 'include/torch/csrc/deploy/interpreter/*.hpp',
                 'include/torch/csrc/distributed/c10d/exception.h',
                 'include/torch/csrc/distributed/rpc/*.h',
-                'include/torch/csrc/generic/utils.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
