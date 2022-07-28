@@ -192,8 +192,15 @@ private:
   }
 
   C10_HOST_DEVICE constexpr float normalize(uint32_t value) {
-      return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
+    int32_t x = (int32_t)value;
+    float scale = 4.6566127342e-10;
+    if (x < 0) {
+      x = -x - 1;      
+    }
+    return 1.0f - static_cast<float>(x * scale);
   }
+
+  
 
   C10_HOST_DEVICE inline detail::UINT4 rand(detail::UINT4& counter, detail::UINT2& key, uint32_t n_rounds) {
     for (uint32_t round = 0; round < (n_rounds - 1); round++) {
@@ -206,7 +213,7 @@ private:
   C10_HOST_DEVICE inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
     #ifdef __CUDA_ARCH__
       // We use std:: below, and thus need a separate impl for CUDA.
-      TORCH_INTERNAL_ASSERT(false, "PhiloxRNGEngine normalize_pair_uniform is not yet implemented for CUDA");
+      AT_ASSERT(false, "PhiloxRNGEngine normalize_pair_uniform is not yet implemented for CUDA");
     #endif
     float u1 = in[0];
     float u2 = in[1];
