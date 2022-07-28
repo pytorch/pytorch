@@ -144,6 +144,7 @@ GENERATED_H = [
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
+    "VmapGeneratedPlumbing.h",
 ]
 
 GENERATED_H_CORE = [
@@ -193,6 +194,9 @@ GENERATED_CPP = [
     "RegisterCompositeImplicitAutograd.cpp",
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
+    "RegisterQuantizedMeta.cpp",
+    "RegisterNestedTensorMeta.cpp",
+    "RegisterSparseMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
     "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
