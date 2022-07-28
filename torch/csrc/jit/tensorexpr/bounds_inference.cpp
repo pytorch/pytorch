@@ -325,18 +325,27 @@ bool hasConflictingOverlap(
     auto bIndexBounds = bIndexBoundsInfo[bIt->first];
     auto aTABIs = aBound.second;
     auto bTABIs = bIt->second;
-    for (size_t i = 0; i < aTABIs.size(); ++i) {
-      for (size_t j = 0; j < bTABIs.size(); ++j) {
-        auto aTABI = aTABIs[i];
-        auto bTABI = bTABIs[j];
-        if (aTABI.kind == kLoad && bTABI.kind == kLoad) {
+    size_t aIndexBoundIter = 0;
+    for (const auto& aTABI: aTABIs) {
+      if (aFilter != kMutate && aTABI.kind != aFilter) {
+        continue;
+      }
+      size_t bIndexBoundIter = 0;
+      for (const auto& bTABI: bTABIs) {
+        if (bFilter != kMutate && bTABI.kind != bFilter) {
           continue;
         }
-        auto overlap = overlaps(aIndexBounds[i], bIndexBounds[j]);
+        if (aTABI.kind == kLoad && bTABI.kind == kLoad) {
+          bIndexBoundIter++;
+          continue;
+        }
+        auto overlap = overlaps(aIndexBounds[aIndexBoundIter], bIndexBounds[bIndexBoundIter]);
         if (overlap != OverlapKind::NoOverlap) {
           return true;
         }
+        bIndexBoundIter++;
       }
+      aIndexBoundIter++;
     }
   }
   return false;

@@ -1871,6 +1871,9 @@ bool LoopNest::hasLoopCarriedDependence(ForPtr loop) {
   //
   // For every pair of statements, S1 and S2, in the loop:
   //  * Get the loads and stores in S1 and S2.
+  //  * For every store in S1 and load in S1 to the same buffer, if the index
+  //    expressions are invariant to the loop var and there is an overlap in
+  //    accesses, return true to indicate a loop-carried dependence.
   //  * For every store in S1 and load in S2 to the same buffer, if the index
   //    expressions are not equal and there is an overlap in accesses, return
   //    true to indicate a loop-carried dependence.
@@ -1881,9 +1884,24 @@ bool LoopNest::hasLoopCarriedDependence(ForPtr loop) {
   //    expressions are not equal and there is an overlap in accesses, return
   //    true to indicate a loop-carried dependence.
   for (auto it1 = loop->body()->begin(); it1 != loop->body()->end(); ++it1) {
+    auto aStores = NodeFinder<Store>::find(*it1);
+    auto aLoads = NodeFinder<Load>::find(*it1);
+
+    // WriteAfterRead
+    for (auto& aStore : aStores) {
+      for (auto& aLoad : aLoads) {
+        if (aStore->buf() == aLoad->buf()) {
+          if (areIndicesLoopIndependent(
+                  aStore->indices(), aLoad->indices(), outer_loop_vars)) {
+            if (isOverlapping(analyzer, aStore, aLoad)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+
     for (auto it2 = std::next(it1); it2 != loop->body()->end(); ++it2) {
-      auto aStores = NodeFinder<Store>::find(*it1);
-      auto aLoads = NodeFinder<Load>::find(*it1);
       auto bStores = NodeFinder<Store>::find(*it2);
       auto bLoads = NodeFinder<Load>::find(*it2);
       // ReadAfterWrite
