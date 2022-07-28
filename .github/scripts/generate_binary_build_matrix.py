@@ -71,7 +71,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10", "3.11"]
+FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -183,7 +183,8 @@ def generate_wheels_matrix(os: str,
 
     if python_versions is None:
         # Define default python version
-        python_versions = FULL_PYTHON_VERSIONS
+        # Add 3.11 only for wheels as it is not available on conda
+        python_versions = FULL_PYTHON_VERSIONS + ["3.11"]
         if os == "macos-arm64":
             python_versions = list_without(python_versions, ["3.7"])
 
