@@ -1976,6 +1976,13 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+# all calls to empty() in python used to go through the symint overload
+# even if all arguments were concerete integers.
+# adding symint overloads of kernels for every dispatch key allowed us
+# to skip redispatching to `empty.memory_format` and hit backend kernels directly
+# we recently updated signature parsing to dispath `empty()` calls in python
+# to `empty.SymInt` iff there's is a symint node argument
+# hopefully, we could simplify this entry soon
 - func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
     CPU: empty_symint_cpu
@@ -1994,6 +2001,11 @@
   dispatch:
     CompositeExplicitAutograd: new_empty
 
+- func: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: new_empty_symint
+
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
@@ -2001,12 +2013,24 @@
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_full
 
 - func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_zeros
 
 - func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_ones
 
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
@@ -2192,19 +2216,22 @@
   device_check: NoCheck
   device_guard: False
 
+# decomposes to eye.m
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: eye_out_cpu
+    CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
 - func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: eye_out_cpu
+    CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
@@ -2337,6 +2364,10 @@
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: full_like
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3437,6 +3468,7 @@
   dispatch:
     CompositeExplicitAutograd: mul
     SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Scalar
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3444,6 +3476,7 @@
   dispatch:
     CompositeExplicitAutograd: mul_
     SparseCsrCPU, SparseCsrCUDA: mul__scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Scalar
   autogen: mul.Scalar_out
 
 # multiply, alias for mul
@@ -3585,6 +3618,10 @@
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: ones_like
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
 
@@ -3756,6 +3793,10 @@
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: rand_like
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -3777,9 +3818,17 @@
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -3800,6 +3849,10 @@
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randn_like
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -3901,9 +3954,6 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: reshape
-    NestedTensorCPU, NestedTensorCUDA: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4385,6 +4435,9 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4409,8 +4462,6 @@
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   structured_delegate: _softmax_backward_data.out
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: nested_softmax_backward
 
 - func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -4580,6 +4631,12 @@
   dispatch:
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
+
+- func: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: sum_symint
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
@@ -4859,7 +4916,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
-    NestedTensorCPU, NestedTensorCUDA: transpose_nested
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
@@ -5190,9 +5246,15 @@
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
+- func: zeros.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -6361,7 +6423,6 @@
 # TODO: this should have a view annotation
 # TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
-  variants: method
   dispatch:
     CompositeExplicitAutograd: lift
 
@@ -6440,6 +6501,14 @@
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
+
+- func: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: view_symint
+    MkldnnCPU: mkldnn_view_symint
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
@@ -12326,6 +12395,13 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _neg_view_copy_out
+
+
+- func: view_copy.SymInt(Tensor self, SymInt[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_copy_SymInt
+  tags: view_copy
 
 
 - func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
