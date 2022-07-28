@@ -176,7 +176,6 @@ class TestProxyTensor(TestCase):
             return torch.digamma(x)
 
         traced = make_fx(f2)(torch.randn(3))
-        traced.graph.print_tabular()
         self.assertFalse(is_any_sum(traced))
         self.assertFalse(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
