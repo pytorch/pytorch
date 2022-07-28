@@ -671,7 +671,7 @@ Tensor NestedTensor_sum_dim_CPU(
     OptionalIntArrayRef opt_dims,
     bool keepdim,
     c10::optional<ScalarType> dtype) {
-  // Only allow reductions across the ragged (last) dim
+  // Only allow reductions across the last dim
   auto dims = opt_dims.value_or(IntArrayRef{});
   TORCH_CHECK(
       dims.size() == 1,
