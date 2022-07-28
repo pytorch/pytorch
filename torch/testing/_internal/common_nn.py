@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from copy import deepcopy
-from functools import reduce
+from functools import reduce, partial, wraps
 from itertools import product
 from operator import mul
 from math import pi
@@ -499,22 +499,22 @@ def bce_with_logistic_no_reduce_scalar_test():
 
 
 def kldivloss_with_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_with_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none')),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none')),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_no_reduce',
         constructor=wrap_functional(
@@ -530,7 +530,7 @@ def kldivloss_no_reduce_test():
 
 
 def kldivloss_no_reduce_scalar_test():
-    t = torch.randn(())
+    t = torch.rand(())
     return dict(
         fullname='KLDivLoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -545,22 +545,22 @@ def kldivloss_no_reduce_scalar_test():
 
 
 def kldivloss_with_log_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_with_log_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none', log_target=True)),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_log_target_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_no_reduce_log_target',
         constructor=wrap_functional(
@@ -576,7 +576,7 @@ def kldivloss_no_reduce_log_target_test():
 
 
 def kldivloss_no_reduce_scalar_log_target_test():
-    t = torch.randn(())
+    t = torch.rand(()).log()
     return dict(
         fullname='KLDivLoss_no_reduce_scalar_log_target',
         constructor=wrap_functional(
@@ -4340,9 +4340,7 @@ for non_linear_activation in non_linear_activations_no_batch:
 
 
 def kldivloss_reference(input, target, reduction='mean'):
-    safe_target = target * (target > 0).type_as(target)
-    safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
-    result = safe_target * (safe_target_log - input)
+    result = target * (target.log() - input)
     if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':
@@ -4854,10 +4852,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(10, 10).log(),
-        target_fn=lambda: torch.rand(10, 10),
+        target_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='log_target',
     ),
@@ -5451,10 +5451,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(()).log(),
-        target_fn=lambda: torch.rand(()),
+        target_fn=lambda: torch.rand(()).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='scalar_log_target',
     ),
@@ -5651,7 +5653,7 @@ def single_batch_reference_criterion_fn(*args):
 
 # Check that regression criterion work with no batch dimensions
 regression_criterion_no_batch = [
-    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
@@ -5660,6 +5662,18 @@ for name, reduction in product(regression_criterion_no_batch, reductions):
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
+
+
+for reduction in reductions:
+    regression_test_info = dict(
+        fullname=f"KLDivLoss_no_batch_dim_{reduction}",
+        constructor=lambda: nn.KLDivLoss(reduction=reduction),
+        input_fn=lambda: torch.rand((3,)).log(),
+        target_fn=lambda: torch.rand((3,)),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )

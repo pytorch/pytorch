@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -844,7 +845,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
   auto size = asIntArrayRefSlow(packed_size);
-  return expand(self, size, implicit);
+  return self.expand(size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
@@ -1329,7 +1330,8 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
       if (new_values.size(0) == 1) {
         return new_values[0];
       } else {
-        return new_values.sum(0);
+        // sum promotes integral type to int64 when dtype is not specified.
+        return at::sum(new_values, 0, false, new_values.scalar_type());
       }
     } else {
       auto dimIndices = (arange(
@@ -3105,6 +3107,11 @@ Tensor view(const Tensor& self,
   return view_impl(self, size);
 }
 
+Tensor view_symint(const Tensor& self,
+            c10::SymIntArrayRef size) {
+  return self.view(c10::asIntArrayRefSlow(size));
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
@@ -3404,6 +3411,11 @@ at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at:
 // If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
 // then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
 at::Tensor lift(const at::Tensor& self) {
+    return self;
+}
+
+// See notes in native_functions.yaml
+at::Tensor lift_fresh(const at::Tensor& self) {
     return self;
 }
 

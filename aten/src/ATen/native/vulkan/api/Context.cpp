@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/vulkan/Context.h>
 
@@ -10,11 +9,9 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Context::Context(
-    const VkInstance instance, size_t adapter_i, const ContextConfig config)
+Context::Context(size_t adapter_i, const ContextConfig& config)
     : config_(config),
       // Important handles
-      instance_(instance),
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
@@ -22,10 +19,10 @@ Context::Context(
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
       descriptor_pool_(device_, config_.descriptorPoolConfig),
       fences_(device_),
-      querypool_(
-        device_,
-        adapter_p_->timestamp_compute_and_graphics(),
-        adapter_p_->timestamp_period()),
+// Diagnostics
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+      querypool_(device_, config_.queryPoolConfig),
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
       cmd_(VK_NULL_HANDLE),
@@ -45,26 +42,23 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
+  const VkDescriptorSetLayout shader_layout =
+      shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
 
-  const VkDescriptorSetLayout shader_layout = \
-      shader_layout_cache().retrieve(shader_layout_signature);
-
-  const VkPipelineLayout pipeline_layout = \
+  const VkPipelineLayout pipeline_layout =
       pipeline_layout_cache().retrieve(shader_layout);
 
-  const VkPipeline pipeline = pipeline_cache().retrieve({
-      pipeline_layout_cache().retrieve(shader_layout),
-      shader_cache().retrieve(shader_descriptor),
-      local_workgroup_size});
+  const VkPipeline pipeline = pipeline_cache().retrieve(
+      {pipeline_layout_cache().retrieve(shader_layout),
+       shader_cache().retrieve(shader_descriptor),
+       local_workgroup_size});
 
-  command_buffer.bind_pipeline(
-      pipeline, pipeline_layout, local_workgroup_size);
+  command_buffer.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
 
   return descriptor_pool().get_descriptor_set(
-      shader_layout, shader_layout_signature);
+      shader_layout, shader_descriptor.kernel_layout);
 }
 
 void Context::submit_compute_epilogue(
@@ -96,10 +90,22 @@ void Context::submit_texture_copy(
 
   set_cmd();
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_,
+      "copy_texture_to_texture",
+      create_extent3d({0, 0, 0}),
+      create_extent3d({0, 0, 0}));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   cmd_.insert_barrier(pipeline_barrier);
 
   cmd_.copy_texture_to_texture(
       source, destination, copy_range, src_offset, dst_offset);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
@@ -136,41 +142,47 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
+      const uint32_t submit_frequency = 16u;
+
       const CommandPoolConfig cmd_config{
-        32u,  // cmdPoolInitialSize
-        8u,  // cmdPoolBatchSize
+          32u, // cmdPoolInitialSize
+          8u, // cmdPoolBatchSize
       };
 
       const DescriptorPoolConfig descriptor_pool_config{
-        1024u,  // descriptorPoolMaxSets
-        1024u,  // descriptorUniformBufferCount
-        1024u,  // descriptorStorageBufferCount
-        1024u,  // descriptorCombinedSamplerCount
-        1024u,  // descriptorStorageImageCount
-        32u,  // descriptorPileSizes
+          1024u, // descriptorPoolMaxSets
+          1024u, // descriptorUniformBufferCount
+          1024u, // descriptorStorageBufferCount
+          1024u, // descriptorCombinedSamplerCount
+          1024u, // descriptorStorageImageCount
+          32u, // descriptorPileSizes
+      };
+
+      const QueryPoolConfig query_pool_config{
+          4096u, // maxQueryCount
+          256u, // initialReserveSize
       };
 
       const ContextConfig config{
-        16u,  // cmdSubmitFrequency
-        cmd_config,  // cmdPoolConfig
-        descriptor_pool_config,  // descriptorPoolConfig
+          submit_frequency, // cmdSubmitFrequency
+          cmd_config, // cmdPoolConfig
+          descriptor_pool_config, // descriptorPoolConfig
+          query_pool_config, // queryPoolConfig
       };
-      return new Context(
-          runtime()->instance(), runtime()->default_adapter_i(), config);
-    }
-    catch (const std::exception& e) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
-    }
-    catch (...) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
+
+      return new Context(runtime()->default_adapter_i(), config);
+    } catch (const std::exception& e) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: ", e.what());
+    } catch (...) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: Unknown");
     }
 
     return nullptr;
   }());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      context,
-      "Invalid Vulkan context!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(context, "Invalid Vulkan context!");
 
   return context.get();
 }
