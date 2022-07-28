@@ -190,10 +190,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
 
   return std::make_tuple(tensor_, other_);
 }
-
-std::tuple<Tensor, Tensor> _binary_pointwise_helper(
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim) {
-  return _binary_pointwise_helper(tensor, tensor_batch_dim, other, other_batch_dim, true);
-}
 }}
