@@ -22,7 +22,7 @@ struct RecordFunctor {
 
   //! The base virtual equality operator is defined so all child
   //! classes can utilize the check for the same args and outputs.
-  virtual bool operator==(const RecordFunctor& other) {
+  virtual bool operator==(const RecordFunctor& other) const {
     auto result = (args.size() == other.args.size()) &&
         (outputs.size() == other.outputs.size());
     if (result) {
@@ -72,6 +72,25 @@ struct OpRecord : RecordFunctor {
       : RecordFunctor(std::move(_args), std::move(_outputs)),
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    // A succesfull cast indicates a RecordFunctor of the same child class
+    if (auto child_ptr = dynamic_cast<const OpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        // Match the nvFuser arith function types
+        result = (fusion_op_.target_type() ==
+            child_ptr->fusion_op_.target_type());
+        if (result) {
+          // Match the nvFuser arith function pointers
+          result = (fusion_op_.template target<OutType(*)(ArgTypes...)>() ==
+              child_ptr->fusion_op_.template target<OutType(*)(ArgTypes...)>());
+        }
+      }
+    }
+    return result; 
+  }
 
   //! The variadic set of indices for the number of args for this op are
   //! deduced by providing the index_sequence as a parameter.  Similarly,
