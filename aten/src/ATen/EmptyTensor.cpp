@@ -109,13 +109,11 @@ SymInt computeStorageNbytesSymInt(
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   SymInt size = storage_offset + 1;
-  // `sizes[i] - 1` seems to fail on some builds.
-  SymInt one = 1;
   for (const auto i : c10::irange(sizes.size())) {
     // Note: the non-symint version of this code includes overflow checks.
     // The code that eventually materialized the SymInt will need to be
     // in charge of handling overflow.
-    size = size + (strides[i] * (sizes[i] - one));
+    size = size + (strides[i] * (sizes[i].operator-(1)));
   }
   size = size * itemsize_bytes;
   return size;
