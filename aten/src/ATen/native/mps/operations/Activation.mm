@@ -1787,7 +1787,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
   int64_t input_ndim = self.dim();
 
   for (const auto i : c10::irange(input_ndim)) {
-    if (weight_num == 1 && i == 1) continue;
+    if (weight_num != 1 && i == 1) continue;
     [reduce_dims addObject:[NSNumber numberWithInt:i]];
   }
 
