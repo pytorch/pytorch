@@ -33,7 +33,7 @@ r"""Converts floating point input into
     reduced precision floating point value
     based on quantization levels
 """
-def float_to_reduced_precision(x, levels, indices):
+def quant_dequant_util(x, levels, indices):
     levels_lst = list(levels)
     indices_lst = list(indices)
 
