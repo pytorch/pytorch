@@ -54,7 +54,7 @@ class Pattern:
         default_summary = f"{self.name}: {len(events)} events matched."
         if self.should_benchmark:
             # If benchmark summary is not empty, use it.
-            return self.benchmark_summary(events) if hasattr(
+            return self.benchmark_summary(events) if hasattr(  # type: ignore[attr-defined]
                 self, 'benchmark') else default_summary
         return default_summary
 
@@ -101,25 +101,6 @@ class Pattern:
         while event.parent and not predicate(event):
             event = event.parent
         return event
-
-    def benchmark_summary(self, events: List[_ProfilerEvent]):
-
-        def format_time(time_ns: int):
-            unit_lst = ["ns", "us", "ms", "s"]
-            for unit in unit_lst:
-                if time_ns < 1000:
-                    return f"{time_ns:.2f} {unit}"
-                time_ns //= 1000
-
-        assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
-        shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
-        original_time = sum(event.duration_time_ns for event in events)
-        new_time = sum(shapes_factor_map[input_shapes(event)] *
-                       event.duration_time_ns for event in events)
-        return (
-            f"{self.name}: {len(events)} events matched. "
-            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time/new_time, 2)}X)"
-        )
 
 
 # Patterns
@@ -438,14 +419,12 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
     '''
     This pattern identifies if we are enabling bias in Conv2d which is followed by BatchNorm2d.
     Bias doesn't do anything when followed by batchnorm.
-
     Pattern:
     nn.Module: Conv2d            | nn.Module: BatchNorm2d
         ...
             aten::_convolution
                 ... | aten::add_
     # This pattern only works when using CUDA
-
     Algorithm:
     String match
     '''
@@ -592,9 +571,7 @@ def report_all_anti_patterns(prof,
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
-        GradNotSetToNonePattern(prof, should_benchmark),
-        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark),
-        MatMulDimInFP16Pattern(prof, should_benchmark)
+        GradNotSetToNonePattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
