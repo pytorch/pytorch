@@ -570,38 +570,6 @@ command = [
 ]
 
 [[linter]]
-code = 'BLACK'
-include_patterns = [
-    'torchgen/**/*.py',
-    'tools/**/*.py',
-    'torch/package/**/*.py',
-    'torch/onnx/**/*.py',
-    'torch/_refs/**/*.py',
-    'torch/_prims/**/*.py',
-    'torch/_meta_registrations.py',
-    'torch/_decomp/**/*.py',
-    'test/onnx/**/*.py',
-    'test/test_dynamo_cudagraphs.py',
-]
-exclude_patterns = [
-    'tools/gen_vulkan_spv.py',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/black_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    '--no-binary',
-    'black==22.3.0',
-]
-is_formatter = true
-
-[[linter]]
 code = 'CALL_ONCE'
 include_patterns = [
     'c10/**',
@@ -666,9 +634,7 @@ init_command = [
     'PyYAML==6.0',
 ]
 
-# This also provides the same functionality as BLACK formatter. Just to be
-# on the safe side, we will run both BLACK and UFMT for a while to make sure
-# that nothing breaks before removing the former
+# Black + usort
 [[linter]]
 code = 'UFMT'
 include_patterns = [
