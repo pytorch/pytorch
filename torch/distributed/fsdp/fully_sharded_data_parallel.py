@@ -799,24 +799,16 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn = lambda k: not isinstance(k, FullyShardedDataParallel)  # noqa: E731
                 deferred_init.materialize_module(module, check_fn=check_fn)
 
-        # Check that module was placed onto a single device.
-        module_devices = set(
-            p.device for p in module.parameters() if p not in ignored_params and not isinstance(p, FlatParameter)
-        )
-
-        if len(module_devices) > 1:
-            raise RuntimeError(
-                f"FSDP only supports single device modules, but got params on {module_devices}"
-            )
-
-        # Move module appropriately depending on device_id and whether module is on CPU.
-        self._move_module_if_needed(module)
-
-        # device for computation, if module is on GPU, use module.device;
-        # if module is on CPU, use current device;
+        self._check_single_device_module(module, ignored_params)
+        # TODO (awgu): investigate if this can also be delayed in the same way
+        # for existing recursive wrapping to make these two code paths unified
+        # For `ParamExecOrderPolicy`, `module` is the entire model, so we delay
+        # moving it to GPU to avoid hitting OOM. Instead, we move parameters
+        # to GPU by `FlatParameter` groups right before the `FlatParameter`
+        # construction and shard immediately after.
+        if not self._use_param_exec_order_policy:
+            self._move_module_to_device_id(module)
         self.compute_device = _get_default_cuda_device(module)
-
-        # if device_id is specified, ensure it is the same
         assert (
             self.device_id is None or self.compute_device == self.device_id
         ), f"Inconsistent compute_device and device_id: {self.compute_device} vs {self.device_id}"
@@ -1121,7 +1113,8 @@ class FullyShardedDataParallel(nn.Module):
     ) -> FlatParamHandle:
         """
         Constructs a :class:`FlatParamHandle` from ``params`` and registers it
-        to this FSDP instance.
+        to this FSDP instance. ``params`` are moved to ``self.device_id``
+        before :class:`FlatParamHandle` construction for faster initializtion.
 
         Args:
             params (List[nn.Parameter]): The parameters to use to construct a
@@ -1135,6 +1128,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         if len(params) == 0:
             return
+        self._move_params_to_device_id(params)
         handle = FlatParamHandle(params, root_module)
         self._register_param_handle(handle)
         print(f"[Rank {self.rank}] registered handle for {handle.flat_param._prefixed_param_names}")
@@ -1238,65 +1232,91 @@ class FullyShardedDataParallel(nn.Module):
             "Every handle should only map to a single module",
         )
 
-    def _move_module_if_needed(self, module) -> None:
+    def _check_single_device_module(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+    ) -> None:
+        """Raises an error if ``module`` has parameters on multiple devices
+        (ignoring the parameters in ``ignored_params``)."""
+        devices = set(
+            param.device for param in module.parameters()
+            if param not in ignored_params and not isinstance(param, FlatParameter)
+        )
+        if len(devices) > 1:
+            raise RuntimeError(
+                f"FSDP only supports single device modules, but got params on {devices}"
+            )
+
+    def _check_param_device_with_device_id(
+        self,
+        param: nn.Parameter,
+        device_id: torch.device,
+    ):
+        """Raises an error if ``param`` is on a non-CPU device that does not
+        match ``device_id``."""
+        if param.device != torch.device("cpu") and param.device != device_id:
+            raise RuntimeError(
+                f"Module on rank {self.rank} is given device_id argument "
+                f"{self.device_id}, but is on {param.device}. "
+                " Either move module before FSDP init or omit device_id argument."
+            )
+
+    def _warn_cpu_init(self):
+        warnings.warn(
+            "Module is put on CPU and will thus have flattening and sharding"
+            " run on CPU, which is less efficient than on GPU. We recommend passing in "
+            "`device_id` argument which will enable FSDP to put module on GPU device,"
+            " module must also be on GPU device to work with `sync_module_states=True` flag"
+            " which requires GPU communication."
+        )
+
+    def _move_module_to_device_id(self, module: nn.Module) -> None:
         """
-        Moves module if module is on CPU and device_id is specified.
-        If device_id is not specified and module is on CPU, we log a
-        warning to user mentioning to use ``device_id`` argument to speed
-        up initialization performance.
+        Moves ``module`` appropriately depending on ``self.device_id`` and
+        whether ``module`` is on CPU.
+        
+        - If a ``device_id`` was specified to the constructor, then this moves
+        ``module`` to the corresponding device. This should be done before
+        setting ``self.compute_device`` to ensure they align.
+        - If no ``device_id`` was specified to the constructor, then we warn the
+        user, asking for a ``device_id`` for faster FSDP initialization.
         """
-        # Move module to device specified. Note that this is done prior to
-        # setting compute_device to ensure that they align.
+        param_gen = module.parameters()
+        try:
+            while True:
+                param = next(param_gen)
+                if not isinstance(param, FlatParameter):
+                    break
+        except StopIteration:
+            # `module` has no original parameters, so this FSDP instance does
+            # not manage any `FlatParameter`s
+            return
+        cpu_device = torch.device("cpu")
         if self.device_id is not None:
-            param = None
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
+            self._check_param_device_with_device_id(param, self.device_id)
+            if param.device == cpu_device:
+                module = module.to(self.device_id)
+        elif param.device == cpu_device:
+            self._warn_cpu_init()
 
-                if param.device == torch.device("cpu"):
-                    module = module.to(self.device_id)
-            except StopIteration:
-                # this FSDP instance manages no parameters.
-                pass
-
-            # For GPU modules, module device should match device_id.
-            if (
-                param is not None
-                and not isinstance(param, FlatParameter)
-                and param.device != self.device_id
-            ):
-                raise RuntimeError(
-                    f"Module on rank {self.rank} is given device_id argument "
-                    f"{self.device_id}, but is on {param.device}. "
-                    " Either move module before FSDP init or omit device_id argument."
-                )
-        else:
-            # device_id argument is not specified
-            # If module is on CPU, log a warning asking user to use `device_id` for faster
-            # GPU init.
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
-
-                if param.device == torch.device("cpu"):
-                    warnings.warn(
-                        "Module is put on CPU and will thus have flattening and sharding"
-                        " run on CPU, which is less efficient than on GPU. We recommend passing in "
-                        "`device_id` argument which will enable FSDP to put module on GPU device,"
-                        " module must also be on GPU device to work with `sync_module_states=True` flag"
-                        " which requires GPU communication."
-                    )
-            except StopIteration:
-                # this FSDP instance manages no parameters
-                pass
+    def _move_params_to_device_id(self, params: List[nn.Parameter]) -> None:
+        """
+        Moves ``params`` appropriately depending on ``self.device_id`` and
+        whether each parameter in ``params`` is on CPU. This has the same
+        semantics as :meth:`_move_module_to_device_id`, only at the parameter
+        granularity.
+        """
+        warned = False
+        cpu_device = torch.device("cpu")
+        for param in params:
+            if self.device_id is not None:
+                self._check_param_device_with_device_id(param)
+                if param.device == cpu_device:
+                    param = param.to(self.device_id)
+            elif param.device == cpu_device and not warned:
+                self._warn_cpu_init()
+                warned = True
 
     def _init_reshard_after_forward(self):
         # TODO (awgu): `reshard_after_forward` is not used for non-recursive

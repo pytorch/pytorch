@@ -260,11 +260,12 @@ class TestFSDPExecOrderPolicy(FSDPTest):
             model_class, optim_class, HANDLE_INIT_MAPPING[handle_init_mode],
         )
         inp_shape = model_class.get_inp_shape()
-        fsdp_optim = self._warmup_fsdp(fsdp_model, optim_class, inp_shape)
-
-        self._check_fsdp_train_parity(
-            fsdp_model, fsdp_optim, ddp_model, ddp_optim, inp_shape, num_iters,
-        )
+        # Use deterministic convolution algorithms for numerical stability
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            fsdp_optim = self._warmup_fsdp(fsdp_model, optim_class, inp_shape)
+            self._check_fsdp_train_parity(
+                fsdp_model, fsdp_optim, ddp_model, ddp_optim, inp_shape, num_iters,
+            )
 
     # TODO (awgu): `_sharded_pre_load_state_dict_hook()` needs some work to
     # support non-recursive wrapping
