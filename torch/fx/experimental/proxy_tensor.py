@@ -532,12 +532,6 @@ a bug if you need this)""")
     return wrapped
 
 
-def _find_proxy_tensor(*objects_to_search):
-    # return first proxy tensor found or None
-    proxy_tensors = (o for o in objects_to_search if isinstance(o, ProxyTensor))
-    return next(proxy_tensors, None)
-
-
 maybe_disable_proxy_tensor_mode = functools.partial(maybe_disable_tensor_mode, ProxyTorchDispatchMode)
 
 
@@ -555,11 +549,6 @@ def get_isolated_graphmodule(func, args, kwargs):
     def wrapped(args):
         fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
         return func(*fn_args, **fn_kwargs)
-
-    # extract old tracer object
-    proxy_tensor = _find_proxy_tensor(*all_args)
-    if proxy_tensor is not None:
-        old_tracer = proxy_tensor.proxy.tracer
 
     # create a new tracer object
     graph = torch.fx.Graph()
