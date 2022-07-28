@@ -129,8 +129,6 @@ class FakeTensorConverter(object):
             return maybe_memo
         existing_device = t.device
         # not yet supported in metatensors
-        if t.is_complex():
-            raise UnsupportedFakeTensorException("complex nyi in meta tensors")
         if t.is_sparse:
             raise UnsupportedFakeTensorException("sparse nyi in meta tensors")
         if t.is_quantized:
