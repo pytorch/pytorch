@@ -14,8 +14,7 @@ namespace lazy {
 class TORCH_API SymIntNodeImpl : public c10::SymIntNodeImpl {
  public:
   SymIntNodeImpl(NodePtr ptr) : node_(std::move(ptr)){};
-  std::shared_ptr<c10::SymIntNodeImpl> add(
-      const std::shared_ptr<c10::SymIntNodeImpl>& other) override {
+  c10::SymIntNode add(const c10::SymIntNode& other) override {
     TORCH_CHECK(false, "NYI");
   }
   NodePtr node_;

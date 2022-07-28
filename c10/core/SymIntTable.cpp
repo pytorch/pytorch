@@ -2,13 +2,13 @@
 
 namespace c10 {
 
-uint64_t SymIntTable::addNode(std::shared_ptr<SymIntNodeImpl> sin) {
+uint64_t SymIntTable::addNode(SymIntNode sin) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto index = nodes_.size();
   nodes_.push_back(sin);
   return index;
 }
-std::shared_ptr<SymIntNodeImpl> SymIntTable::getNode(size_t index) {
+SymIntNode SymIntTable::getNode(size_t index) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_CHECK(index < nodes_.size());
   return nodes_[index];

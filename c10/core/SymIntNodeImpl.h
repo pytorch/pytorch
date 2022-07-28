@@ -3,10 +3,14 @@
 #include <c10/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <memory>
 #include <mutex>
 #include <vector>
 
 namespace c10 {
+
+class SymIntNodeImpl;
+using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
 
 class C10_API SymIntNodeImpl
     : public std::enable_shared_from_this<SymIntNodeImpl> {
@@ -14,51 +18,40 @@ class C10_API SymIntNodeImpl
   c10::SymInt toSymInt();
   virtual ~SymIntNodeImpl(){};
   // these could be pure virtual when we implement LTC versions
-  virtual std::shared_ptr<SymIntNodeImpl> add(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode add(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> sub(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode sub(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> mul(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode mul(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> div(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode div(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> mod(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode mod(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> eq(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode eq(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> ne(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode ne(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> gt(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode gt(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> lt(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode lt(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> le(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode le(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> ge(
-      const std::shared_ptr<SymIntNodeImpl>& other) {
+  virtual SymIntNode ge(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::shared_ptr<SymIntNodeImpl> wrap(int64_t num) {
+  virtual SymIntNode wrap(int64_t num) {
     TORCH_CHECK(false, "NYI");
   };
   virtual bool bool_() {
@@ -78,11 +71,11 @@ class C10_API SymIntNodeImpl
 
 class C10_API SymIntTable {
  public:
-  uint64_t addNode(std::shared_ptr<SymIntNodeImpl> sin);
-  std::shared_ptr<SymIntNodeImpl> getNode(size_t index);
+  uint64_t addNode(SymIntNode sin);
+  SymIntNode getNode(size_t index);
 
  private:
-  std::vector<std::shared_ptr<SymIntNodeImpl>> nodes_;
+  std::vector<SymIntNode> nodes_;
   std::mutex mutex_;
 };
 
