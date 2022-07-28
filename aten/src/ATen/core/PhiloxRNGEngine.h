@@ -107,8 +107,8 @@ public:
     detail::UINT2 key = key_;
     detail::UINT4 i = rand(counter, key, n_rounds);
     detail::FLOAT2 prenorm;
-    prenorm[0] = normalize(i[0]);
-    prenorm[1] = normalize(i[1]);
+    prenorm[0] = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
+    prenorm[1] = 1 - uint32_to_uniform_float(i[1]);
     detail::FLOAT2 ret = normalize_pair_uniform(prenorm);
     return ret[0];
   }
@@ -191,13 +191,10 @@ private:
     return ret;
   }
 
-  C10_HOST_DEVICE constexpr float normalize(uint32_t value) {
-    int32_t x = (int32_t)value;
-    float scale = 4.6566127342e-10;
-    if (x < 0) {
-      x = -x - 1;
-    }
-    return 1.0f - static_cast<float>(x * scale);
+  C10_HOST_DEVICE constexpr float uint32_to_uniform_float(uint32_t value) {
+      // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
+      constexpr float scale = 4.6566127342e-10;
+      return static_cast<float>(value & 0x7FFFFFFF) * scale;
   }
 
 
