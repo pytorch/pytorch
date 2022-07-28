@@ -23,7 +23,7 @@ def create_contiguous(shape):
 
 
 def is_symbolic_op(func):
-    return func in [aten.sym_size.default, aten.dim.default, aten.is_contiguous.default, aten.stride]
+    return func in [aten.sym_size.default, aten.dim.default, aten.is_contiguous.default, aten.stride.default]
 
 
 def handle_symbolic_op(func, args, kwargs):
@@ -36,7 +36,7 @@ def handle_symbolic_op(func, args, kwargs):
     if func == torch.ops.aten.is_contiguous.default:
         return True
     # TODO: hack, we don't currently support symbolic strides properly
-    if func == torch.ops.aten.stride:
+    if func == torch.ops.aten.stride.default:
         return create_contiguous(args[0].shape)
 
 # TODO: An incomplete list
@@ -133,7 +133,7 @@ class ShapeEnv(object):
             if not isinstance(x, torch.Tensor):
                 return x
 
-            out_shape = [self.create_symint(f"s_{arg_cnt}^{idx}", sz, shape_env) for idx, sz in enumerate(x.shape)]
+            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz, shape_env) for idx, sz in enumerate(x.shape)]
             arg_cnt += 1
             return out_shape
         return list(map(create_shape, pytree.tree_flatten(args)[0]))
