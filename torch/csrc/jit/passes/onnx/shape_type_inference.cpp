@@ -1524,7 +1524,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update the shape reliability for each node before processing
   // ConstantValueMap to prevent unreliable nodes from producing static
   // shapes
-  // UpdateReliable(n);
+  UpdateReliable(n);
 
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i : c10::irange(n->outputs().size())) {

@@ -4,9 +4,9 @@ import io
 
 import numpy as np
 import onnx
+import onnx.numpy_helper
 
 import torch
-from onnx import numpy_helper
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
 from torch.testing._internal import common_utils
@@ -326,15 +326,15 @@ class TestONNXShapeInference(common_utils.TestCase):
         )
         model = onnx.load(io.BytesIO(f.getvalue()))
 
+        # If there is a constant node with dim=3 and max_position_embeddings,
+        # batch_size, hidden_size as shape, it means the shape becomes static.
+        # Normally, with dynamic batch size, this constant node should not exist.
         const_node = [n for n in model.graph.node if n.op_type == "Constant"]
         self.assertNotEqual(len(const_node), 0)
         for node in const_node:
             for a in node.attribute:
                 if a.name == "value":
-                    shape = numpy_helper.to_array(a.t)
-                    # If there is a constant node with dim=3 and these values,
-                    # it means the shape becomes static. Normally, should be with
-                    # dynamic batch size
+                    shape = onnx.numpy_helper.to_array(a.t)
                     self.assertNotEqual(
                         shape.tolist(),
                         [max_position_embeddings, batch_size, hidden_size],
