@@ -550,7 +550,11 @@ def _is_in_type_group(value, scalar_types: Set[_type_utils.ScalarType]) -> bool:
             "Type cannot be inferred, which might cause exported graph to produce incorrect results."
         )
         return False
-    return _type_utils.ScalarType.from_name(scalar_type) in scalar_types
+    try:
+        return _type_utils.ScalarType.from_name(scalar_type) in scalar_types
+    except ValueError:
+        # scalar_type is not a known ScalarType
+        return False
 
 
 def _is_fp(value) -> bool:
