@@ -936,7 +936,7 @@ def extract_arguments(start, string):
     argument_start_pos = current_position + 1
 
     # Search for final parenthesis
-    while current_position < len(str):
+    while current_position < len(string):
         if string[current_position] == "(":
             closures["("] += 1
         elif string[current_position] == ")":
