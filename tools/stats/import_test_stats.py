@@ -81,13 +81,12 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times(dirpath: str, filename: str) -> Dict[str, float]:
+def get_test_times(dirpath: str, filename: str) -> Dict[str, Dict[str, float]]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
 
     def process_response(the_response: Dict[str, Any]) -> Any:
         build_environment = os.environ["BUILD_ENVIRONMENT"]
-        test_config = os.environ["TEST_CONFIG"]
-        return the_response[build_environment][test_config]
+        return the_response[build_environment]
 
     try:
         return fetch_and_cache(dirpath, filename, url, process_response)
