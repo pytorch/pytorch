@@ -2801,3 +2801,38 @@ Example::
             [ 1,  3,  9],
             [ 1,  5, 25]])
 """)
+
+vecdot = _add_docstr(_linalg.linalg_vecdot, r"""
+linalg.vecdot(x, y, *, dim=-1, out=None) -> Tensor
+
+Computes the dot product of two batches of vectors along a dimension.
+
+In symbols, this function computes
+
+.. math::
+
+    \sum_{i=1}^n \overline{x_i}y_i.
+
+over the dimension :attr:`dim` where :math:`\overline{x_i}` denotes the conjugate for complex
+vectors, and it is the identity for real vectors.
+
+Supports input of half, bfloat16, float, double, cfloat, cdouble and integral dtypes.
+It also supports broadcasting.
+
+Args:
+    x (Tensor): first batch of vectors of shape `(*, n)`.
+    y (Tensor): second batch of vectors of shape `(*, n)`.
+
+Keyword args:
+    dim (int): Dimension along which to compute the dot product. Default: `-1`.
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> v1 = torch.randn(3, 2)
+    >>> v2 = torch.randn(3, 2)
+    >>> linalg.vecdot(v1, v2)
+    tensor([ 0.3223,  0.2815, -0.1944])
+    >>> torch.vdot(v1[0], v2[0])
+    tensor(0.3223)
+""")

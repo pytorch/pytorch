@@ -1,9 +1,9 @@
 import argparse
 import concurrent.futures
-import os
-import re
 import json
 import logging
+import os
+import re
 import subprocess
 import time
 from enum import Enum

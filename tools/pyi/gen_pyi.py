@@ -1,21 +1,22 @@
 import argparse
 import collections
 from pprint import pformat
+from typing import Dict, List, Sequence
 
-from torchgen.model import Variant
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
 from torchgen.gen import parse_native_yaml
+
+from torchgen.model import Variant
 from torchgen.utils import FileManager
-from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import (
-    should_generate_py_binding,
-    load_signatures,
     group_overloads,
+    load_signatures,
+    should_generate_py_binding,
 )
 
 """
@@ -111,6 +112,7 @@ blocklist = [
     "chain_matmul",
     "stft",
     "tensordot",
+    "split",
     "unique_consecutive",
     "atleast_1d",
     "atleast_2d",
@@ -431,6 +433,12 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_from_functional_tensor": [
+                "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
+            "_to_functional_tensor": [
+                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -690,6 +698,10 @@ def gen_pyi(
             "set_": [
                 "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+            ],
+            "split": [
+                "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
