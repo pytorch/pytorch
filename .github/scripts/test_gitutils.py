@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from gitutils import PeekableIterator
+from gitutils import PeekableIterator, patterns_to_regex
 from unittest import TestCase, main
 
 class TestPeekableIterator(TestCase):
@@ -21,6 +21,18 @@ class TestPeekableIterator(TestCase):
             else:
                 self.assertTrue(iter_.peek() is None)
 
+
+class TestPattern(TestCase):
+    def test_double_asterisks(self) -> None:
+        allowed_patterns = [
+            "aten/src/ATen/native/**LinearAlgebra*",
+        ]
+        patterns_re = patterns_to_regex(allowed_patterns)
+        fnames = [
+            "aten/src/ATen/native/LinearAlgebra.cpp",
+            "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp"]
+        for filename in fnames:
+            self.assertTrue(patterns_re.match(filename))
 
 
 if __name__ == '__main__':

@@ -19,7 +19,8 @@ inputs:
     required: false
   skip_push:
     description: If set to true value, skip will be pushed, default is to skip so that pushing will be explicit
-    required: true
+    required: false
+    default: "true"
   force_push:
     description: If set to any value, always run the push
     required: false
@@ -40,7 +41,7 @@ runs:
       id: calculate-tag
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
-        XLA_IMAGE_TAG: v0.2
+        XLA_IMAGE_TAG: v0.4
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
         if [ -n "${IS_XLA}" ]; then

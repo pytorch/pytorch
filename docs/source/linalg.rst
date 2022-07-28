@@ -84,6 +84,7 @@ Matrix Products
 
     cross
     matmul
+    vecdot
     multi_dot
     householder_product
 

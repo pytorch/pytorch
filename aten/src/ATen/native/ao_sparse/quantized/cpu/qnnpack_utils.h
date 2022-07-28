@@ -17,7 +17,7 @@ namespace sparse {
 struct TORCH_API PackedLinearWeightQnnp
     : public LinearPackedParamsBase {
   PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
-  at::Tensor orig_weight_;
+  explicit PackedLinearWeightQnnp(const BCSRSerializationType& serialized);
   c10::optional<at::Tensor> orig_bias_;
   // Seperate copy of bias exist so that we can fill in zeros when
   // optional bias does not exist. This is to compy with qnnpack operator that
@@ -32,6 +32,15 @@ struct TORCH_API PackedLinearWeightQnnp
   std::vector<float> requantization_scales_;
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       sparse_linear_op_{nullptr};
+  int64_t output_channels_;
+  int64_t input_channels_;
+  // Deserialized Tensors are stored to maintain the lifetime of underlying
+  // BCSR data.
+  // These are left empty if PackedLinearWeightQnnp is created via prepacking
+  // rather than deserializing.
+  at::Tensor deserialized_bcsr_row_block_indices_;
+  at::Tensor deserialized_bcsr_col_block_indices_;
+  at::Tensor deserialized_bcsr_weight_values_;
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -52,6 +61,11 @@ struct TORCH_API PackedLinearWeightQnnp
   at::Tensor apply_dynamic_relu(const at::Tensor& input) override;
 
   LinearPackedSerializationType unpack() override;
+
+  BCSRSerializationType serialize() override;
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> deserialize(
+      const BCSRSerializationType& serialized);
 
   c10::optional<at::Tensor> bias() override {
     return orig_bias_;
