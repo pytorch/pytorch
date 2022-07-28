@@ -36,7 +36,7 @@ class _LRScheduler(object):
         self.is_overlapped = hasattr(optimizer, 'is_overlapped') and optimizer.is_overlapped
 
         if self.is_overlapped:
-            self.base_lrs = [optimizer.defaults['lr']]
+            self.base_lrs = [optimizer.get_lr()]
         else:  
             # Initialize epoch and base learning rates
             if last_epoch == -1:
@@ -177,8 +177,8 @@ class _LRScheduler(object):
                     values = self.get_lr()
 
         # Compitiable with customized reseting
-        if hasattr(self.optimizer, 'reset_lr'):
-            self.optimizer.reset_lr(values[0])
+        if self.is_overlapped:
+            self.optimizer.set_lr(values[0])
             self._last_lr = [values[0]]
         else:
             for i, data in enumerate(zip(self.optimizer.param_groups, values)):

@@ -18,7 +18,7 @@ class OverlappedSGD(OverlappedOptimizer):
         grad_scaler=None,
         zero_grad=False
     ):
-        self._functional_sgd = _FunctionalSGD(None,
+        self._functional_sgd = _FunctionalSGD([],
                                               lr,
                                               momentum,
                                               dampening,

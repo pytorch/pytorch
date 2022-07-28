@@ -16,8 +16,11 @@ class OverlappedOptimizer(object):
         self._step_param(param=param, grad=grad)
         self._post_step(param=param, grad=grad)
 
-    def reset_lr(self, lr):
+    def set_lr(self, lr):
         self._functional_optim.defaults['lr'] = lr
+
+    def get_lr(self, lr):
+        return self._functional_optim.defaults['lr']
 
     def _pre_step(self, param, grad):
         if self.grad_scaler is not None:
