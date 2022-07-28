@@ -1,6 +1,19 @@
-from typing import List, Callable, Optional, Union, TypeVar, cast
+from typing import List, Callable, Optional, Union, TypeVar, cast, Any
 import torch.distributed as dist
 from .api import CheckpointException
+
+import torch
+
+from torch.distributed._shard.sharded_tensor import (
+    ShardedTensor,
+)
+
+from torch.distributed._shard.sharded_tensor.shard import Shard
+
+from .metadata import (
+    STATE_DICT_TYPE,
+    MetadataIndex,
+)
 
 T = TypeVar('T')
 R = TypeVar('R')
@@ -227,3 +240,28 @@ class _DistWrapper:
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
+
+def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
+    if index.offset is None:
+        raise ValueError(f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided")
+
+    shards = tensor.local_shards()
+    # index fast path
+    if index.index is not None:
+        if len(shards) > index.index and torch.Size(shards[index.index].metadata.shard_offsets) == index.offset:
+            return shards[index.index]
+
+    for shard in shards:
+        if torch.Size(shard.metadata.shard_offsets) == index.offset:
+            return shard
+    raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
+
+def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) -> Any:
+    if index.fqn not in state_dict:
+        raise ValueError(f"Could not find FQN: '{index.fqn}'")
+    obj = state_dict[index.fqn]
+    if isinstance(obj, ShardedTensor):
+        return _find_shard(obj, index).tensor
+    if index.offset is not None:
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset")
+    return obj
