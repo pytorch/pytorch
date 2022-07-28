@@ -4077,7 +4077,7 @@ possible to return a view.
 See :func:`torch.reshape`
 
 Args:
-    shape (tuple of ints or int...): the desired shape
+    shape (str, optional): or int...): the desired shape
 
 """,
 )
