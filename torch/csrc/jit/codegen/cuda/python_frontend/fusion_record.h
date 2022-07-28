@@ -80,16 +80,15 @@ struct OpRecord : RecordFunctor {
       result = RecordFunctor::operator==(other);
       if (result) {
         // Match the nvFuser arith function types
-        result = (fusion_op_.target_type() ==
-            child_ptr->fusion_op_.target_type());
-        if (result) {
-          // Match the nvFuser arith function pointers
-          result = (fusion_op_.template target<OutType(*)(ArgTypes...)>() ==
-              child_ptr->fusion_op_.template target<OutType(*)(ArgTypes...)>());
-        }
+        result = result &&
+            (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        // Match the nvFuser arith function pointers
+        result = result &&
+            (fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
+             child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
       }
     }
-    return result; 
+    return result;
   }
 
   //! The variadic set of indices for the number of args for this op are
@@ -140,6 +139,35 @@ struct BroadcastOpRecord : RecordFunctor {
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastOpRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const BroadcastOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result =
+            ((output_shape_.size() == child_ptr->output_shape_.size()) &&
+             (broadcast_dims_.size() == child_ptr->broadcast_dims_.size()));
+        if (result) {
+          for (size_t i = 0; i < output_shape_.size(); ++i) {
+            if (output_shape_[i] != child_ptr->output_shape_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+        if (result) {
+          for (size_t i = 0; i < broadcast_dims_.size(); ++i) {
+            if (broadcast_dims_[i] != child_ptr->broadcast_dims_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
@@ -194,6 +222,23 @@ struct CastOpRecord : RecordFunctor {
         dtype_(dtype) {}
   virtual ~CastOpRecord() = default;
 
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const CastOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = result &&
+            (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        result = result &&
+            (fusion_op_.template target<OutType (*)(NvfDataType, ArgType)>() ==
+             child_ptr->fusion_op_
+                 .template target<OutType (*)(NvfDataType, ArgType)>());
+        result = result && (dtype_ == child_ptr->dtype_);
+      }
+    }
+    return result;
+  }
+
   void operator()(FusionDefinition& fd) final {
     auto arg = dynamic_cast<ArgType>(fd.getFusionState(args.at(0)));
     auto output = fusion_op_(dtype_, arg);
@@ -215,6 +260,15 @@ struct ConstantRecord : RecordFunctor {
       : RecordFunctor({}, std::move(_outputs)), value_(val) {}
   virtual ~ConstantRecord() = default;
 
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const ConstantRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result = result && (value_ == child_ptr->value_);
+    }
+    return result;
+  }
+
   void operator()(FusionDefinition& fd) final {
     NvfVal* output = IrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs.at(0), output);
@@ -234,32 +288,63 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<bool> _contiguous_info,
       NvfDataType _dtype)
       : RecordFunctor({}, std::move(_outputs)),
-        symbolic_sizes(std::move(_symbolic_sizes)),
-        contiguous_info(std::move(_contiguous_info)),
-        dtype(_dtype) {}
+        symbolic_sizes_(std::move(_symbolic_sizes)),
+        contiguous_info_(std::move(_contiguous_info)),
+        dtype_(_dtype) {}
   virtual ~InputTensorRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const InputTensorRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result = result && (dtype_ == child_ptr->dtype_);
+      if (result) {
+        result =
+            ((symbolic_sizes_.size() == child_ptr->symbolic_sizes_.size()) &&
+             (contiguous_info_.size() == child_ptr->contiguous_info_.size()));
+        if (result) {
+          for (size_t i = 0; i < symbolic_sizes_.size(); ++i) {
+            if (symbolic_sizes_[i] != child_ptr->symbolic_sizes_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+        if (result) {
+          for (size_t i = 0; i < contiguous_info_.size(); ++i) {
+            if (contiguous_info_[i] != child_ptr->contiguous_info_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
     auto tv = TensorViewBuilder()
-                  .ndims(symbolic_sizes.size())
-                  .contiguity(contiguous_info)
-                  .shape(symbolic_sizes)
-                  .dtype(dtype)
+                  .ndims(symbolic_sizes_.size())
+                  .contiguity(contiguous_info_)
+                  .shape(symbolic_sizes_)
+                  .dtype(dtype_)
                   .build();
 
     fd.setFusionState(outputs.at(0), tv);
     fd.addInput(tv);
   }
 
+ private:
   //! A vector of tensor dimension sizes.
   //! This vector only captures sizes of -1 or 1 to indicate a symbolic
   //! dimension (-1) or a broadcast dimension (1).
-  std::vector<int64_t> symbolic_sizes;
+  std::vector<int64_t> symbolic_sizes_;
   //! A vector to indicate whether the a tensor dimension is contiguous
   //! with the dimension just to its right.
-  std::vector<bool> contiguous_info;
+  std::vector<bool> contiguous_info_;
   //! Tensor data type.
-  NvfDataType dtype;
+  NvfDataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
@@ -269,6 +354,14 @@ struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<size_t> _args)
       : RecordFunctor(std::move(_args), {}) {}
   virtual ~OutputRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const OutputRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
     auto input = fd.getFusionState(args.at(0));
@@ -301,6 +394,36 @@ struct ReductionOpRecord : RecordFunctor {
         dtype_(dtype) {}
   virtual ~ReductionOpRecord() = default;
 
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const ReductionOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = result &&
+            (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        result = result &&
+            (fusion_op_.template target<
+                 NvfTensorView* (*)(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>() ==
+             child_ptr->fusion_op_.template target<
+                 NvfTensorView* (*)(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>());
+        result = result && (keep_dim_ == child_ptr->keep_dim_);
+        result = result && (dtype_ == child_ptr->dtype_);
+        if (result) {
+          result = (axes_.size() == child_ptr->axes_.size());
+          if (result) {
+            for (size_t i = 0; i < axes_.size(); ++i) {
+              if (axes_[i] != child_ptr->axes_[i]) {
+                result = false;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<NvfTensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
@@ -326,6 +449,15 @@ struct ScalarRecord : RecordFunctor {
   ScalarRecord(std::vector<size_t> _outputs, NvfDataType dtype)
       : RecordFunctor({}, std::move(_outputs)), dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const ScalarRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result = result && (dtype_ == child_ptr->dtype_);
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
     NvfVal* output = nullptr;
@@ -363,6 +495,27 @@ struct VarianceOpRecord : RecordFunctor {
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~VarianceOpRecord() = default;
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const VarianceOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result = result && (correction_ == child_ptr->correction_);
+      result = result && (keep_dim_ == child_ptr->keep_dim_);
+      if (result) {
+        result = (axes_.size() == child_ptr->axes_.size());
+        if (result) {
+          for (size_t i = 0; i < axes_.size(); ++i) {
+            if (axes_[i] != child_ptr->axes_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
