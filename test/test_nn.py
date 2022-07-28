@@ -19505,12 +19505,12 @@ torch.cuda.synchronize()
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, weight_memory_format):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, input_format, weight_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
-                .to(memory_format=torch.channels_last)
+                .to(memory_format=input_format)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=weight_memory_format)
+                .to(device='cpu', dtype=dtype, memory_format=weight_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
@@ -19537,16 +19537,29 @@ torch.cuda.synchronize()
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         with torch.backends.mkldnn.flags(enabled=False):
-            for mf in [torch.contiguous_format, torch.channels_last]:
+            formats = [[torch.channels_last, torch.channels_last],
+                       [torch.channels_last, torch.contiguous_format],
+                       [torch.contiguous_format, torch.channels_last]]
+            for input_format, weight_format in formats:
                 # non-dilated conv: thnn_conv2d normal path (with im2col)
-                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
-                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
+                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8,
+                       input_format=input_format, weight_format=weight_format)
+                # test when input chanels is 1 and not converted to channels last
+                helper(2, 1, 10, 10, out_channels=8, kernel_size=3, dilation=1, groups=1,
+                       input_format=torch.contiguous_format, weight_format=torch.channels_last)
                 # non-dilated conv: thnn_conv2d fast path (skip im2col)
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                # ic == oc == 1 here, so need to stick input to CL to activate channels last
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16,
+                       input_format=torch.channels_last, weight_format=weight_format)
                 # dilated conv: slow_conv_dilated2d
-                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1, weight_memory_format=mf)
-                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16, weight_memory_format=mf)
+                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16,
+                       input_format=input_format, weight_format=weight_format)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
