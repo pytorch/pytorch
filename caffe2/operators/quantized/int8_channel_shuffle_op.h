@@ -42,10 +42,10 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale =
         this->template GetSingleArgument<float>("Y_scale", 1.0f);
-    CHECK_EQ(Y_offset, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
-    CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_EQ(Y_offset, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());
+    TORCH_CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
 
     const auto C = X.t.dim32(3);
     const auto G = this->group_;
