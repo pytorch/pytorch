@@ -666,7 +666,7 @@ Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
 }
 
 // Very rudimentary sum_dim for prototyping with torch_scatter.segment_reduce.
-Tensor NestedTensor_sum__dim(
+Tensor NestedTensor_sum_dim_CPU(
     const Tensor& self,
     OptionalIntArrayRef opt_dims,
     bool keepdim,
@@ -687,7 +687,7 @@ Tensor NestedTensor_sum__dim(
   // Always keep reduced dim for now
   // This is to avoid the case where the nested tensors are 1D and keepdim=False
   // making the nested tensors -> elements (e.g. sum(nt([1, 2 ,3], [4, 5]), -1) -> nt(6, 9))
-  TORCH_CHECK(keepdim, "NestedTensor always keeps the reduced dimension for now.");
+  TORCH_CHECK(keepdim, "NestedTensor always requires keepdim=True for now.");
   // acc_dtype is not supported for now
   TORCH_CHECK(!dtype, "NestedTensor does not support dtype argument for now.");
 
@@ -722,11 +722,9 @@ Tensor NestedTensor_sum__dim(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (const auto j : c10::irange(segments)) {
-        (void)j;
+      for (auto j = 0; j < segments; j++) {
         scalar_t res = 0;
-        for (const auto k : c10::irange(segment_length)) {
-          (void)k;
+        for (auto k = 0; k < segment_length; k++) {
           res += input_data[in_idx];
           in_idx += 1;
         }
