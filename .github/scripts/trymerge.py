@@ -1061,9 +1061,12 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
     allowed_reverters = ["COLLABORATOR", "MEMBER", "OWNER"]
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     if pr.is_base_repo_private():
-      allowed_reverters.append("CONTRIBUTOR")
+        allowed_reverters.append("CONTRIBUTOR")
     if author_association not in allowed_reverters:
-        raise PostCommentError(f"Will not revert as @{author_login} is not one of [{', '.join(allowed_reverters)}], but instead is {author_association}.")
+        raise PostCommentError((
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
+        ))
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
