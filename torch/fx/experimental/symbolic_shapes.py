@@ -133,7 +133,7 @@ class ShapeEnv(object):
             if not isinstance(x, torch.Tensor):
                 return x
 
-            out_shape = [self.create_symint(f"s_{arg_cnt}^{idx}", sz, shape_env) for idx, sz in enumerate(x.shape)]
+            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz, shape_env) for idx, sz in enumerate(x.shape)]
             arg_cnt += 1
             return out_shape
         return list(map(create_shape, pytree.tree_flatten(args)[0]))
