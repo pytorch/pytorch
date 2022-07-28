@@ -57,7 +57,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
-      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
       if (torch::jit::tracer::isTracing()) {

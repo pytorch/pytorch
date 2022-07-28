@@ -165,11 +165,11 @@ class Future(object):
 
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
 
-class SymbolicIntNode(object):
+class SymIntNode(object):
     def get_pyobj(self) -> Any: ...
 
     @staticmethod
-    def new_symint(self) -> SymbolicIntNode: ...
+    def new_symint(self) -> SymIntNode: ...
 
 # Defined in torch/csrc/jit/passes/xnnpack_rewrite.h
 class MobileOptimizerType:

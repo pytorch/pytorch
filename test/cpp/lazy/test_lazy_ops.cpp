@@ -91,7 +91,7 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   auto y = torch::rand({Y_DIM}).to(kLazy);
   auto ly = torch::lazy::TryGetLtcTensor(y);
   auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
-  auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+  auto lmn = std::make_shared<torch::lazy::SymIntNodeImpl>(dim_node);
   auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, lmn->toSymInt());
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }

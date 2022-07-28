@@ -287,7 +287,7 @@ PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
     if (si.is_symbolic()) {
-      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
     } else {
        PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.data()));

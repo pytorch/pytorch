@@ -13,7 +13,7 @@ aten = torch.ops.aten
 __all__ = ["has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv"]
 
 def has_symbolic_sizes_strides(elem):
-    return any([isinstance(i, torch._C.SymbolicIntNode) for i in elem.shape])
+    return any([isinstance(i, torch._C.SymIntNode) for i in elem.shape])
 
 def create_contiguous(shape):
     strides = [1]
@@ -93,7 +93,7 @@ for method, _func in magic_methods.items():
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
-    # this should be wrapped transparently into torch._C.SymbolicIntNode
+    # this should be wrapped transparently into torch._C.SymIntNode
     setattr(PySymInt, method_name, _create_magic_impl(_func))
 
 class ShapeEnv(object):
@@ -111,7 +111,7 @@ class ShapeEnv(object):
             return val
         sympy_expr = sympy.Symbol(name, positive=True)
         py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch._C.SymbolicIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         shape_env[sympy_expr] = val
         return cpp_sym_int
 

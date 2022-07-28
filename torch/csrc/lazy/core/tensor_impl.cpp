@@ -95,7 +95,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   for (auto i : c10::irange(rank)) {
     auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
         this->tensor_->GetIrValue(), i);
-    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+    auto sn = std::make_shared<torch::lazy::SymIntNodeImpl>(dim_node);
     sym_sizes_.push_back(sn->toSymInt());
   }
 }
