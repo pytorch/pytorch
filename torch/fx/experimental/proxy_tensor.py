@@ -109,14 +109,17 @@ def wrap_output(inner_res, proxy_res, **kwargs):
         return inner_res
 
 
-def maybe_disable_fake_tensor_mode():
+def maybe_disable_tensor_mode(tensor_mode_class):
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mb_fake_mode = torch._C._get_torch_dispatch_mode()
-    if isinstance(mb_fake_mode, FakeTensorMode):
-        return enable_torch_dispatch_mode(mb_fake_mode.inner, replace=mb_fake_mode)
+    mode = torch._C._get_torch_dispatch_mode()
+    if isinstance(mode, tensor_mode_class):
+        return enable_torch_dispatch_mode(mode.inner, replace=mode)
     else:
         return nullcontext()
+
+
+maybe_disable_fake_tensor_mode = functools.partial(maybe_disable_tensor_mode, FakeTensorMode)
 
 
 def proxy_call(func_overload, args, kwargs=None):
@@ -535,6 +538,9 @@ def _find_proxy_tensor(*objects_to_search):
     return next(proxy_tensors, None)
 
 
+maybe_disable_proxy_tensor_mode = functools.partial(maybe_disable_tensor_mode, ProxyTorchDispatchMode)
+
+
 def get_isolated_graphmodule(func, args, kwargs):
     """A helper function used to get the GraphModule for the given func.
 
@@ -565,7 +571,8 @@ def get_isolated_graphmodule(func, args, kwargs):
             if isinstance(arg, ProxyTensor):
                 arg.proxy.tracer = new_tracer
 
-        gm = make_fx(wrapped)(all_args)
+        with maybe_disable_proxy_tensor_mode():
+            gm = make_fx(wrapped)(all_args)
     finally:
         for arg in all_args:
             if isinstance(arg, ProxyTensor):
