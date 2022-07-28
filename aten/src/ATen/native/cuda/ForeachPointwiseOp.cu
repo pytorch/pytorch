@@ -196,7 +196,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
             }                                                                                              \
             return c;};                                                                                    \
         multi_tensor_apply<3>(tensor_lists,                                                                \
-                              BinaryOpListAlphaFunctor<scalar_t, 3, 2, 1>(),                               \
+                              BinaryOpListAlphaFunctor<scalar_t, 3, 2, 2>(),                               \
                               op,                                                                          \
                               opmath_t(1));                                                                \
     });                                                                                                    \

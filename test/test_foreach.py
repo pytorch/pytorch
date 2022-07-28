@@ -44,7 +44,7 @@ def getScalarLists(N):
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
-# TODO(crcrpar): [refactoring] for inplace case, call a native function with `out` specified.
+# TODO(crcrpar): refactor for inplace case, call a native function with `out` specified.
 class RegularFuncWrapper:
 
     def __init__(self, func, arg_out_not_inplace: bool = False):
