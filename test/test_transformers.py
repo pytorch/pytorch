@@ -7,7 +7,8 @@ import torch.nn.functional as F
 import unittest
 
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TEST_FAIRSEQ, run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    TEST_FAIRSEQ, run_tests, parametrize, instantiate_parametrized_tests, freeze_rng_state)
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 if TEST_FAIRSEQ:
@@ -650,6 +651,62 @@ class TestTransformers(NNTestCase):
         self.assertEqual(result.shape, ref_output.shape)
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
+    @parametrize("attn_mask_dim,is_causal",
+                 [(None, False), (2, False), (2, True), (3, False), (3, True)],
+                 name_fn=lambda dim, is_causal: (f"{dim}D_{'causal_' if is_causal else ''}attn_mask"
+                                                 if dim is not None else "no_attn_mask"))
+    @parametrize("dropout_p", [0.0, 0.2, 0.5])
+    @parametrize("device", device_list)
+    def test_scaled_dot_product_attention(self, device, attn_mask_dim, is_causal, dropout_p):
+        # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
+        dtypes = [torch.double, torch.float]
+        for dtype in dtypes:
+            # This test compares python and C++ implementations of SDP.
+            N, L, S, E = 5, 4, 3, 6
+            query = torch.randn(N, L, E, device=device, dtype=dtype)
+            key = torch.randn(N, S, E, device=device, dtype=dtype)
+            value = torch.randn(N, S, E, device=device, dtype=dtype)
+
+            attn_mask = None
+            if attn_mask_dim is not None:
+                assert attn_mask_dim in [2, 3]
+                mask_size = (L, S) if attn_mask_dim == 2 else (N, L, S)
+                attn_mask = (torch.ones(mask_size, device=device, dtype=torch.bool).tril() if is_causal
+                             else torch.randint(0, 2, size=mask_size, device=device, dtype=torch.bool))
+
+            with freeze_rng_state():
+                # Python impl only supports float mask.
+                attn_mask_float = attn_mask
+                if attn_mask_float is not None:
+                    attn_mask_float = torch.zeros_like(attn_mask, dtype=query.dtype)
+                    attn_mask_float.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                expected = F._scaled_dot_product_attention(
+                    query, key, value, attn_mask=attn_mask_float, dropout_p=dropout_p)
+
+            need_attn_weights: bool = True
+            with freeze_rng_state():
+                if is_causal:
+                    # NB: Don't pass attn_mask here
+                    actual = torch.ops.aten._scaled_dot_product_attention(
+                        query, key, value, None, dropout_p, need_attn_weights, is_causal)
+
+                    # Error case: both explicit attn_mask and is_causal are set
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "Explicit attn_mask should not be set when is_causal=True"):
+                        torch.ops.aten._scaled_dot_product_attention(
+                            query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+                else:
+                    actual = torch.ops.aten._scaled_dot_product_attention(
+                        query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+
+            # freeze_rng_state() doesn't seem to work outside of CPU, so dropout makes the results incomparable.
+            # TODO: Do this skipping in a nicer way once the granular test skipping logic lands.
+            if dropout_p == 0.0 or device == 'cpu':
+                self.assertEqual(actual, expected)
+
+
+# TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
+# cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
 
 if __name__ == '__main__':
