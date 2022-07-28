@@ -890,11 +890,8 @@ class FullyShardedDataParallel(nn.Module):
             if self._fsdp_wrapped_module.has_params:
                 self.params.append(self._fsdp_wrapped_module.flat_param)
                 self._register_param_handle(self._fsdp_wrapped_module.handle)
-
+                self._shard_parameters(self._handles)
         assert getattr(self, FSDP_WRAPPED_MODULE) is self._fsdp_wrapped_module
-
-        # Shard module parameters in place
-        self._shard_parameters(self._handles)
 
         # Check that the sharding logic was applied to all parameters by
         # checking that the original module parameters have been replaced by
@@ -1136,6 +1133,7 @@ class FullyShardedDataParallel(nn.Module):
         handle = FlatParamHandle(params, root_module)
         self._register_param_handle(handle)
         print(f"[Rank {self.rank}] registered handle for {handle.flat_param._prefixed_param_names}")
+        self._shard_parameters([handle])
         return handle
 
     def _register_param_handles_from_handles(
@@ -1173,12 +1171,15 @@ class FullyShardedDataParallel(nn.Module):
                 prefixed_param_names.extend(old_handle.flat_param._prefixed_param_names)
                 flat_params.append(old_handle.flat_param)
             self._rebuild_full_params(flat_params)
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
             # For each parameter in `flat_params`, its sharded tensors will
             # not be used anymore. We explicitly free their storage for better
-            # memory efficiency.
+            # memory efficiency. We do so after the all-gather finishes since
+            # it uses the sharded data.
             for flat_param in flat_params:
                 self._free_sharded_param_attributes(flat_param)
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                # Synchronize to free the memory immediately
+                torch.cuda.current_stream().synchronize()
             with contextlib.ExitStack() as stack:
                 for ctx in (old_handle.unflatten_as_params() for old_handle in old_handles):
                     stack.enter_context(ctx)
@@ -1190,13 +1191,14 @@ class FullyShardedDataParallel(nn.Module):
                     self._register_param_handle_from_params(orig_params, self._fsdp_wrapped_module)
                 )
                 stack.close()
-                # For each parameter in `orig_params`, its data will not be used
-                # anymore. We explicitly free the storage for better memory
-                # efficiency.
-                for p in orig_params:
-                    _free_storage(p)
+                # For each parameter in `orig_params`, its data will not be
+                # used anymore. We explicitly free the storage for better
+                # memory efficiency.
+                for param in orig_params:
+                    _free_storage(param)
+                    # Synchronize to free the memory immediately
+                    torch.cuda.current_stream().synchronize()
             self.params.append(new_handle.flat_param)
-            self._shard_parameters([new_handle])
         for handle in self._handles:
             self._init_param_attributes(handle.flat_param)
             handle._mode = HandleMode.UNINITIALIZED
@@ -3468,7 +3470,7 @@ class FullyShardedDataParallel(nn.Module):
                     assert (
                         self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
                     ), "Currently the way for _is_sharded to be False is \
-                        world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                        world_size == 1 or sharding_strategy is set to be NO_SHARD"
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
                         # if a communication hook was not registered,
                         # then a default hook (`all_reduce`) will be used
@@ -4669,6 +4671,10 @@ def _free_storage(data: torch.Tensor) -> None:
             data.storage_offset() == 0
         ), "The tensor is not the sole occupant of the storage."
         data.storage().resize_(0)  # type: ignore[attr-defined]
+        # TODO (awgu): free the memory immediately, which is useful for
+        # reducing peak and reserved memory usage -- we need to decide whether
+        # to have this configurable or default this or neither
+        torch.cuda.current_stream().synchronize()
 
 
 @torch.no_grad()
