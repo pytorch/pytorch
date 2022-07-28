@@ -253,10 +253,11 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       }
     }
 
-    static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count = size()) {
-        if (count == size()) {
-          return Vectorized<c10::qint32>(ptr);
-        }
+    static Vectorized<c10::qint32> loadu(const void* ptr) {
+        return Vectorized<c10::qint32>(ptr);
+    }
+
+    static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
         __at_align__ value_type tmp_values[size()];
         // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
         // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
@@ -444,10 +445,11 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
         }
     }
 
-    static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count = size()) {
-        if (count == size()) {
-          return Vectorized<c10::qint8>(ptr);
-        }
+    static Vectorized<c10::qint8> loadu(const void* ptr) {
+        return Vectorized<c10::qint8>(ptr);
+    }
+
+    static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
         __at_align__ value_type tmp_values[size()];
         // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
         // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
@@ -621,10 +623,11 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
         }
     }
 
-    static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count = size()) {
-        if (count == size()) {
-          return Vectorized<c10::quint8>(ptr);
-        }
+    static Vectorized<c10::quint8> loadu(const void* ptr) {
+        return Vectorized<c10::quint8>(ptr);
+    }
+
+    static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
         __at_align__ value_type tmp_values[size()];
         // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
         // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
@@ -852,10 +855,11 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
             std::array<Vectorized<c10::qint32>, 1>,
             8>(ptr) {}
 
-  static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size()) {
-      return Vectorized<c10::qint32>(ptr);
-    }
+  static Vectorized<c10::qint32> loadu(const void* ptr) {
+    return Vectorized<c10::qint32>(ptr);
+  }
+
+  static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
@@ -996,10 +1000,11 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
             std::array<Vectorized<c10::qint32>, 4>,
             32>(ptr) {}
 
-  static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size()) {
-      return Vectorized<c10::qint8>(ptr);
-    }
+  static Vectorized<c10::qint8> loadu(const void* ptr) {
+    return Vectorized<c10::qint8>(ptr);
+  }
+
+  static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
@@ -1128,10 +1133,11 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
             std::array<Vectorized<c10::qint32>, 4>,
             32>(ptr) {}
 
-  static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size()) {
-      return Vectorized<c10::quint8>(ptr);
-    }
+  static Vectorized<c10::quint8> loadu(const void* ptr) {
+    return Vectorized<c10::quint8>(ptr);
+  }
+
+  static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
