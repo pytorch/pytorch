@@ -307,7 +307,7 @@ def processKernelLaunches(string, stats):
                         # Finished
                         return [(pos["kernel_name"]), (pos["template"]), (pos["kernel_launch"])]
 
-    def find_kernel_bounds(str):
+    def find_kernel_bounds(string):
         """Finds the starting and ending points for all kernel launches in the string."""
         kernel_end = 0
         kernel_positions = []
@@ -331,7 +331,7 @@ def processKernelLaunches(string, stats):
     # Replace comments and string literals from the code so that find_kernel_bounds does not
     # wrongly capture kernels in comments and string literals.
     # This function replaces them with "x" to keep positions.
-    def mask_comments(str):
+    def mask_comments(string):
         in_comment = ''
         prev_c = ''
         new_string = ''
