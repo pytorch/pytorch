@@ -529,6 +529,22 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
   return uniqueEntries<Val>(consumer_vals);
 }
 
+// Return immediate siblings of val
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val) {
+  std::vector<Val*> sibling_vals;
+  auto def = val->definition();
+  if (def != nullptr) {
+    auto outs = def->outputs();
+    for (auto sibling_val : outs) {
+      if (sibling_val == val) {
+        continue;
+      }
+      sibling_vals.emplace_back(sibling_val);
+    }
+  }
+  return sibling_vals;
+}
+
 // Return immediate producers of val
 TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
     const std::vector<Val*>& vals) {
@@ -556,22 +572,21 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
 }
 
 std::vector<TensorView*> producerTvsOf(TensorView* tv) {
-  if (tv->definition() == nullptr) {
-    return {};
-  }
-  auto producer_vals =
-      ir_utils::filterByType<TensorView>(tv->definition()->inputs());
-  return uniqueEntries<TensorView>(
-      {producer_vals.begin(), producer_vals.end()});
+  auto producer_vals = producerValsOf(tv);
+  auto producer_tvs = ir_utils::filterByType<TensorView>(producer_vals);
+  return {producer_tvs.begin(), producer_tvs.end()};
 }
 
 std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
-  std::vector<TensorView*> consumer_tvs;
-  for (auto use_expr : tv->uses()) {
-    auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
-    consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
-  }
-  return uniqueEntries<TensorView>(consumer_tvs);
+  auto consumer_vals = consumerValsOf(tv);
+  auto consumer_tvs = ir_utils::filterByType<TensorView>(consumer_vals);
+  return {consumer_tvs.begin(), consumer_tvs.end()};
+}
+
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv) {
+  auto sibling_vals = siblingValsOf(tv);
+  auto sibling_tvs = ir_utils::filterByType<TensorView>(sibling_vals);
+  return {sibling_tvs.begin(), sibling_tvs.end()};
 }
 
 std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
@@ -752,7 +767,7 @@ Val* getReductionInitValOf(TensorView* tv) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
     int output_idx = -1;
-    for (const auto i : c10::irange(grop->numReductions())) {
+    for (const auto i : c10::irange(grop->numExprs())) {
       if (tv == grop->output(i)) {
         output_idx = static_cast<int>(i);
         break;

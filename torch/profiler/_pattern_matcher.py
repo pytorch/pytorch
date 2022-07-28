@@ -1,4 +1,5 @@
 from collections import deque
+import os
 import re
 from typing import Dict, List, Set
 
@@ -37,20 +38,15 @@ class Pattern:
         return False
 
     def report(self, event: _ProfilerEvent):
-        msg = f"{self.description}\n{source_code_location(event)}"
+        msg = f"{self.description}\n[Source Code Location] {source_code_location(event)}"
         return msg
 
     def eventTreeTraversal(self):
         '''
-        Standard DFS traversal of the event tree.
-        Override this method to customize the traversal order.
+        Traverse the event tree and yield all events.
+        Override this method in subclass to customize the traversal.
         '''
-        stack = deque(self.event_tree)
-        while stack:
-            curr_event = stack.pop()
-            yield curr_event
-            for child_event in curr_event.children:
-                stack.append(child_event)
+        yield from eventTreeDFS(self.event_tree)
 
     def summary(self, events: List[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
@@ -99,6 +95,13 @@ class Pattern:
     def prev_of(self, event: _ProfilerEvent):
         prev_events, _ = self.siblings_of(event)
         return prev_events[-1] if prev_events else None
+
+    def go_up_until(self, event: _ProfilerEvent, predicate):
+        if not event:
+            return None
+        while event.parent and not predicate(event):
+            event = event.parent
+        return event
 
 
 # Patterns
@@ -215,12 +218,7 @@ class ForLoopIndexingPattern(Pattern):
         '''
         We need to use BFS traversal order to avoid duplicate match.
         '''
-        stack = deque(self.event_tree)
-        while stack:
-            curr_event = stack.popleft()
-            yield curr_event
-            for child_event in curr_event.children:
-                stack.append(child_event)
+        yield from eventTreeBFS(self.event_tree)
 
     def match(self, event: _ProfilerEvent):
         if event.name() != "aten::select":
@@ -340,18 +338,140 @@ class OptimizerSingleTensorPattern(Pattern):
     def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Optimizer Single Tensor Pattern"
-        self.optimizers_with_foreach = [
-            "adam", "sgd", "adamw"
-        ]
+        self.optimizers_with_foreach = ["adam", "sgd", "adamw"]
         self.description = (
             "Deteced optimizer running with single tensor implementation. "
-            "Please enable multi tensor implementation by passing 'foreach=True' into optimizer.")
+            "Please enable multi tensor implementation by passing 'foreach=True' into optimizer."
+        )
 
     def match(self, event: _ProfilerEvent):
         for optimizer in self.optimizers_with_foreach:
             if event.name().endswith(f"_single_tensor_{optimizer}"):
                 return True
         return False
+
+
+class SynchronizedDataLoaderPattern(Pattern):
+    '''
+    This pattern identifies if we are using num_workers=0 in DataLoader.
+    example:
+    torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+    Add num_workers=N to the arguments. N depends on system configuration.
+
+    Pattern:
+    dataloader.py(...): __iter__
+        dataloader.py(...): _get_iterator
+            NOT dataloader.py(...): check_worker_number_rationality
+
+    Algorithm:
+    If we don't see check_worker_number_rationality call in the dataloader __iter__,
+    It is not an asynchronous dataloader.
+
+    '''
+
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
+        self.name = "Synchronized DataLoader Pattern"
+        self.description = (
+            "Detected DataLoader running with synchronized implementation. "
+            "Please enable asynchronous dataloading by setting num_workers > 0 when initializing DataLoader."
+        )
+
+    def match(self, event: _ProfilerEvent):
+        def is_dataloader_function(name: str, function_name: str):
+            return name.startswith(os.path.join("torch", "utils", "data", "dataloader.py")) and name.endswith(function_name)
+        if not is_dataloader_function(event.name(), "__iter__"):
+            return False
+        if not event.children:
+            return False
+        event = event.children[0]
+        if not is_dataloader_function(event.name(), "_get_iterator"):
+            return False
+        if not event.children:
+            return False
+        event = event.children[0]
+        return not is_dataloader_function(event.name(), "check_worker_number_rationality")
+        # TODO: We should also check if the loader is bottleneck.
+
+
+class GradNotSetToNonePattern(Pattern):
+    '''
+    This pattern identifies if we are not setting grad to None in zero_grad.
+    example:
+    optimizer.zero_grad()
+    By setting set_to_none=True, we can gain speedup
+
+    Pattern:
+    XXXXX: _zero_grad
+        NOT aten::zeros
+            aten::zero_
+
+    # aten::zero_ is called on each parameter in the model.
+    # We also want to make sure it is not called by aten::zeros.
+
+    Algorithm:
+    String match
+    '''
+
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
+        self.name = "Gradient Set To Zero Instead of None Pattern"
+        self.description = (
+            "Detected gradient set to zero instead of None. "
+            "Please add 'set_to_none=True' when calling zero_grad().")
+
+    def match(self, event: _ProfilerEvent):
+        if not event.name().endswith(": zero_grad"):
+            return False
+        if not event.children:
+            return False
+
+        for sub_event in eventTreeDFS(event.children):
+            if sub_event.name(
+            ) == "aten::zero_" and sub_event.parent.name() != "aten::zeros":
+                return True
+        # TODO: We should also check if the optimizer's numerical behavior will change.
+        return False
+
+
+class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
+    '''
+    This pattern identifies if we are enabling bias in Conv2d which is followed by BatchNorm2d.
+    Bias doesn't do anything when followed by batchnorm.
+
+    Pattern:
+    nn.Module: Conv2d            | nn.Module: BatchNorm2d
+        ...
+            aten::_convolution
+                ... | aten::add_
+    # This pattern only works when using CUDA
+
+    Algorithm:
+    String match
+    '''
+
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
+        self.name = "Enabling Bias in Conv2d Followed By BatchNorm Pattern"
+        self.description = "Detected bias enabled in Conv2d that is followed by BatchNorm2d. Please set 'bias=False' in Conv2d."
+
+    def match(self, event: _ProfilerEvent):
+        if event.name() != "aten::_convolution":
+            return False
+        if not event.children:
+            return False
+        event = event.children[-1]
+        if event.name() != "aten::add_":
+            return False
+        # This means bias=True
+        event = self.go_up_until(
+            event, lambda e: e.name().startswith("nn.Module: Conv2d"))
+        if not event:
+            return False
+        event = self.next_of(event)
+        if not event:
+            return False
+        return event.name().startswith("nn.Module: BatchNorm2d")
 
 
 def source_code_location(event: _ProfilerEvent):
@@ -361,7 +481,7 @@ def source_code_location(event: _ProfilerEvent):
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
-            if not event.extra_fields.caller.file_name.startswith("torch/"):
+            if not event.extra_fields.caller.file_name.startswith("torch" + os.sep):
                 return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
         event = event.parent
     return "No source code location found"
@@ -372,12 +492,39 @@ def input_shapes(event: _ProfilerEvent):
     return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
 
 
+def eventTreeDFS(event_tree: List[_ProfilerEvent]):
+    '''
+    Standard DFS traversal of the event tree.
+    '''
+    stack = deque(event_tree)
+    while stack:
+        curr_event = stack.pop()
+        yield curr_event
+        for child_event in curr_event.children:
+            stack.append(child_event)
+
+
+def eventTreeBFS(event_tree: List[_ProfilerEvent]):
+    '''
+    Standard BFS traversal of the event tree.
+    '''
+    stack = deque(event_tree)
+    while stack:
+        curr_event = stack.popleft()
+        yield curr_event
+        for child_event in curr_event.children:
+            stack.append(child_event)
+
+
 def report_all_anti_patterns(prof, should_benchmark: bool = False):
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         ForLoopIndexingPattern(prof, should_benchmark),
         FP32MatMulPattern(prof, should_benchmark),
-        OptimizerSingleTensorPattern(prof, should_benchmark)
+        OptimizerSingleTensorPattern(prof, should_benchmark),
+        SynchronizedDataLoaderPattern(prof, should_benchmark),
+        GradNotSetToNonePattern(prof, should_benchmark),
+        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
