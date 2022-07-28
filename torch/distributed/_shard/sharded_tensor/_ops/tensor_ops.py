@@ -176,11 +176,14 @@ _register_sharded_op_on_local_shards(
 @_sharded_op_impl(torch.Tensor.requires_grad_)
 def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
     self_st = args[0]
-    requires_grad = args[1]
     # Validate types
     if not isinstance(self_st, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
 
+    if kwargs is None:
+        kwargs = {}
+
+    requires_grad = args[1] if len(args) > 1 else kwargs.get("requires_grad", True)
     if requires_grad == self_st.requires_grad:
         return self_st
 
