@@ -96,12 +96,6 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
-  TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_size_tensor));
-}
-
 inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
@@ -270,15 +264,6 @@ Tensor nested_tensor(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  TensorOptions options_ =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  if (list.size() == 0) {
-    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
-  }
-  std::vector<Tensor> sizes;
-  std::vector<Tensor> flat_tensors;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       int64_t dim_i = list[i].dim();
@@ -296,15 +281,13 @@ Tensor nested_tensor(
           i - 1,
           ".");
     }
-    // TODO: Remove call to contiguous once we support strides.
-    flat_tensors.push_back(list[i].reshape(-1).contiguous());
-    sizes.push_back(tensor(c10::IntArrayRef(list[i].sizes())));
   }
-
-  TensorOptions options = flat_tensors[0].options().merge_in(options_);
-
-  return wrap_buffer(
-      at::cat(flat_tensors).to(options), at::native::stack(sizes));
+  return impl::wrap_tensor_node(
+      impl::TensorNode(list),
+      dtype,
+      layout,
+      device,
+      pin_memory);
 }
 
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
@@ -791,7 +774,10 @@ Tensor& dropout_nested_(Tensor& input, double p, bool train) {
   return input;
 }
 
-Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to_float) {
+Tensor softmax_nested(
+    const Tensor& input,
+    const int64_t dim,
+    const bool half_to_float) {
   auto input_ptr = get_nested_tensor_impl(input);
   int64_t ntensors = input_ptr->size(0);
   if (ntensors == 0) {
@@ -799,81 +785,52 @@ Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to
   }
   int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
   TORCH_CHECK(
-      positive_dim >= 1,
-      "Cannot apply softmax across nested dimension 0");
-  const Tensor& buffer = input_ptr->get_buffer(),
-      & sizemat = input_ptr->get_nested_size_tensor();
-  Tensor output_buffer = buffer.new_empty(buffer.sizes());
-  // split buffer into original tensors
-  std::vector<int64_t> offsets = NestedTensor_get_offsets(input_ptr);
-  std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(input_ptr);
-  // call tensor softmax
-  // TODO: for cpu, maybe use `parallel_for` if benchmarks show necessity
-  //       to do that, have to merge `aten/src/ATen/native/cpu/SoftMaxKernel.cpp/softmax_kernel`
-  //       1. it has `parallel_for` and we cannot multi-thread in multi-thread
-  //       2. cannot dispatch in multi-thread (in this case at::_softmax_out)
-  for (int64_t i = 0; i < ntensors; i++) {
-    Tensor out = output_buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
-    at::_softmax_out(
-        out,
-        buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]),
-        positive_dim - 1,
-        half_to_float);
-  }
-  return wrap_buffer(output_buffer, sizemat.clone());
+      positive_dim >= 1, "Cannot apply softmax across nested dimension 0");
+  return map_nested_tensor(
+      [&positive_dim, &half_to_float](Tensor input_i) -> Tensor {
+        return at::_softmax(input_i, positive_dim - 1, half_to_float);
+      },
+      input);
 }
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
-  auto self_ptr = get_nested_tensor_impl(self),
-      mat2_ptr = get_nested_tensor_impl(mat2);
+  auto self_ptr = get_nested_tensor_impl(self);
+  auto mat2_ptr = get_nested_tensor_impl(mat2);
   TORCH_CHECK(self_ptr->dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(mat2_ptr->dim() == 3, "batch2 must be a 3D tensor");
-  int64_t ntensors = self_ptr->size(0),
-      ntensors2 = mat2_ptr->size(0);
-  TORCH_CHECK(ntensors == ntensors2,
-      "Expected size for the 1st dimension of batch2 tensor to be: ", ntensors,
-      " but got: ", ntensors2, ".");
-  std::vector<int64_t> self_offsets = NestedTensor_get_offsets(self_ptr),
-      mat2_offsets = NestedTensor_get_offsets(mat2_ptr);
-  std::vector<IntArrayRef> self_shapes = NestedTensor_get_shapes(self_ptr),
-      mat2_shapes = NestedTensor_get_shapes(mat2_ptr);
-  const Tensor& self_buffer = self_ptr->get_buffer(),
-      & mat2_buffer = mat2_ptr->get_buffer();
-  // determine output size
-  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
-  Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
-  int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
-  std::vector<int64_t> out_offsets(ntensors + 1);
-  std::vector<IntArrayRef> out_shapes(ntensors);
-  out_offsets[0] = 0;
-  for (int64_t i = 0; i < ntensors; i++) {
-    const IntArrayRef& self_shape = self_shapes[i],
-        & mat2_shape = mat2_shapes[i];
-    const int64_t& self_size0 = self_shape[0], & self_size1 = self_shape[1],
-        & mat2_size0 = mat2_shape[0], & mat2_size1 = mat2_shape[1];
-    TORCH_CHECK(self_size1 == mat2_size0,
-        i, "-th nested matrices in batch cannot be multiplied (",
-        self_size0, "x", self_size1, " and ",
-        mat2_size0, "x", mat2_size1, ")");
-    out_sizemat_ptr[0] = self_size0;
-    out_sizemat_ptr[1] = mat2_size1;
-    out_shapes[i] = IntArrayRef(out_sizemat_ptr, out_sizemat_ptr + 2);
-    out_sizemat_ptr += 2;
-    out_offsets[i + 1] = out_offsets[i] + self_size0 * mat2_size1;
+  TORCH_CHECK(
+      self.size(0) == mat2.size(0),
+      "Expected size for the 1st dimension of batch2 tensor to be: ",
+      self.size(0),
+      " but got: ",
+      mat2.size(0),
+      ".");
+
+  // TODO: In the future we might want to add a similar utility
+  // such as map_nested_size, but for nested_sizes.
+  auto self_shapes = NestedTensor_get_shapes(self_ptr);
+  auto mat2_shapes = NestedTensor_get_shapes(mat2_ptr);
+  for (int64_t i = 0; i < self.size(0); i++) {
+    TORCH_CHECK(
+        self_shapes[i][1] == mat2_shapes[i][0],
+        i,
+        "-th nested matrices in batch cannot be multiplied (",
+        self_shapes[i][0],
+        "x",
+        self_shapes[i][1],
+        " and ",
+        mat2_shapes[i][0],
+        "x",
+        mat2_shapes[i][1],
+        ")");
   }
-  Tensor out_buffer = self_buffer.new_empty(out_offsets.back());
-  // call tensor mm
-  // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
-  //       until we have specialized nested tensor bmm kernel
-  //       useful resource: `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
-  //                        `aten/src/ATen/native/cuda/Blas.cpp/baddbmm_out_cuda_impl`
-  for (int64_t i = 0; i < ntensors; i++) {
-    Tensor out = out_buffer.slice(0, out_offsets[i], out_offsets[i + 1]).view(out_shapes[i]);
-    at::mm_out(out,
-               self_buffer.slice(0, self_offsets[i], self_offsets[i + 1]).view(self_shapes[i]),
-               mat2_buffer.slice(0, mat2_offsets[i], mat2_offsets[i + 1]).view(mat2_shapes[i]));
-  }
-  return wrap_buffer(out_buffer, out_sizemat);
+
+  return map_nested_tensor(
+      [](Tensor self_i, Tensor mat2_i) -> Tensor {
+        return at::mm(self_i, mat2_i);
+      },
+      self,
+      mat2);
 }
 
 } // namespace native
