@@ -976,6 +976,89 @@ std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape__adaptive_avg_pool3d(
+    const at::Tensor& self,
+    at::IntArrayRef output_size) {
+  // Checks based on `aten/src/ATen/native/AdaptiveAveragePooling.cpp`
+  // and on `aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp`
+  TORCH_CHECK(
+      output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK(
+      (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
+      "adaptive_avg_pool3d: elements of output_size must be greater than or equal to 0 ",
+      "but received {",
+      output_size[0],
+      ", ",
+      output_size[1],
+      ", ",
+      output_size[2],
+      "}");
+  int64_t ndim = self.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(
+        self.size(i) > 0,
+        "adaptive_avg_pool3d(): Expected self to have non-zero size for non-batch dimensions, "
+        "but Tensor has sizes ",
+        self.sizes(),
+        " with dimension ",
+        i,
+        " being "
+        "empty");
+  }
+  TORCH_CHECK(
+      (ndim == 4 || ndim == 5),
+      "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
+      self.sizes());
+
+  int64_t channels = self.size(-3);
+  int64_t output_depth = output_size[0];
+  int64_t output_height = output_size[1];
+  int64_t output_width = output_size[2];
+
+  if (ndim == 4) {
+    return {Shape(
+        self.scalar_type(),
+        {channels, output_depth, output_height, output_width})};
+  } else {
+    int64_t nbatch = self.size(0);
+    return {Shape(
+        self.scalar_type(),
+        {nbatch, channels, output_depth, output_height, output_width})};
+  }
+}
+
+std::vector<Shape> compute_shape__adaptive_avg_pool3d_backward(
+    const at::Tensor& grad_output,
+    const at::Tensor& self) {
+  // Checks based on `aten/src/ATen/native/AdaptiveAveragePooling.cpp`
+  int64_t ndim = grad_output.ndimension();
+
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(
+        grad_output.size(i) > 0,
+        "adaptive_avg_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+        "but grad_output has sizes ",
+        grad_output.sizes(),
+        " with dimension ",
+        i,
+        " being "
+        "empty");
+  }
+
+  TORCH_CHECK(
+      (ndim == 4 || ndim == 5),
+      "adaptive_avg_pool3d_backward(): Expected 4D or 5D tensor, but got ",
+      self.sizes());
+  TORCH_CHECK(
+      self.dtype() == grad_output.dtype(),
+      "expected dtype ",
+      self.dtype(),
+      " for `grad_output` but got dtype ",
+      grad_output.dtype());
+
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_glu_backward(
     const at::Tensor& grad_output,
     const at::Tensor& self,
@@ -1069,6 +1152,10 @@ std::vector<Shape> compute_shape_hardswish(const at::Tensor& self) {
 std::vector<Shape> compute_shape_hardswish_backward(
     const at::Tensor& grad_output,
     const at::Tensor& self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_selu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
