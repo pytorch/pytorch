@@ -1695,6 +1695,7 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_conv2d_bias_followed_by_batchnorm2d_pattern(self):
         x = torch.randn((1, 3, 32, 32), device='cuda')

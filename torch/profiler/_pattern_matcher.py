@@ -438,14 +438,12 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
     '''
     This pattern identifies if we are enabling bias in Conv2d which is followed by BatchNorm2d.
     Bias doesn't do anything when followed by batchnorm.
-
     Pattern:
     nn.Module: Conv2d            | nn.Module: BatchNorm2d
         ...
             aten::_convolution
                 ... | aten::add_
     # This pattern only works when using CUDA
-
     Algorithm:
     String match
     '''
@@ -523,8 +521,7 @@ def report_all_anti_patterns(prof, should_benchmark: bool = False):
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
-        GradNotSetToNonePattern(prof, should_benchmark),
-        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark)
+        GradNotSetToNonePattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
