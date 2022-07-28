@@ -665,6 +665,78 @@ Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
   return NestedTensor_mul__Tensor(self, wrapped_scalar_tensor(other));
 }
 
+// Very rudimentary sum_dim for prototyping with torch_scatter.segment_reduce.
+Tensor NestedTensor_sum_dim_CPU(
+    const Tensor& self,
+    OptionalIntArrayRef opt_dims,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
+  // Only allow reductions across the last dim
+  auto dims = opt_dims.value_or(IntArrayRef{});
+  TORCH_CHECK(
+      dims.size() == 1,
+      "NestedTensor only allows reduction of a single dimension for now."
+  );
+  auto dim = maybe_wrap_dim(dims[0], self.dim());
+  TORCH_CHECK(
+      dim == self.dim() - 1,
+      "NestedTensor can only be reduced across the last dimension for now ",
+      "got dimension ",
+      dim,
+      " instead.");
+  // Always keep reduced dim for now
+  // This is to avoid the case where the nested tensors are 1D and keepdim=False
+  // making the nested tensors -> elements (e.g. sum(nt([1, 2 ,3], [4, 5]), -1) -> nt(6, 9))
+  TORCH_CHECK(keepdim, "NestedTensor always requires keepdim=True for now.");
+  // acc_dtype is not supported for now
+  TORCH_CHECK(!dtype, "NestedTensor does not support dtype argument for now.");
+
+  auto nt_input = get_nested_tensor_impl(self);
+  TORCH_CHECK(
+      nested_tensor_impl_is_contiguous(nt_input),
+      "NestedTensor does not support reductions when the input is noncontiguous for now.");
+  int64_t ntensors = nt_input->size(0);
+  if (ntensors == 0) {
+    return self;
+  }
+  const Tensor& buffer = nt_input->get_buffer();
+
+  auto sizemat = nt_input->get_nested_size_tensor();
+  // create output size tensor for keepdim=True
+  auto output_sizemat = sizemat.clone();
+  output_sizemat.select(1, -1).fill_(1);
+
+  auto num_segments = at::prod(output_sizemat, -1);
+  auto segment_lengths = sizemat.select(1, -1);
+  const int64_t new_numel = at::sum(num_segments).item<int64_t>();
+  auto output_buffer = buffer.new_empty(IntArrayRef(new_numel));
+
+  // This logic assumes for now that
+  // (1) all the nested tensors are contiguous
+  // (2) the nested tensors are stored contiguously in the buffer
+  AT_DISPATCH_ALL_TYPES_AND2(
+    ScalarType::Half, ScalarType::BFloat16, buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
+    auto* output_data = output_buffer.data_ptr<scalar_t>();
+    const auto* input_data = buffer.data_ptr<scalar_t>();
+    int64_t out_idx = 0, in_idx = 0;
+    for (const auto i : c10::irange(ntensors)) {
+      int64_t segments = num_segments[i].item<int64_t>();
+      int64_t segment_length = segment_lengths[i].item<int64_t>();
+      for (auto j = 0; j < segments; j++) {
+        scalar_t res = 0;
+        for (auto k = 0; k < segment_length; k++) {
+          res += input_data[in_idx];
+          in_idx += 1;
+        }
+        output_data[out_idx] = res;
+        out_idx += 1;
+      }
+    }
+  });
+
+  return wrap_buffer(output_buffer, output_sizemat);
+}
+
 Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   auto self_ptr = get_nested_tensor_impl(self);
   int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());

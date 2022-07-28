@@ -8,6 +8,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     skipMeta,
+    onlyCPU
 )
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
 from torch import nested_tensor
@@ -522,6 +523,35 @@ class TestNestedTensorDeviceType(TestCase):
             "Expected both self and other to be nested, but got a non-nested self and nested other",
             lambda: vector.mul_(nt1)
         )
+
+    @onlyCPU
+    @skipMeta
+    @dtypes(torch.float)
+    def test_nested_tensor_sum_dim(self, device, dtype):
+        params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
+
+        def test_sum(nt, dim, keepdim=True):
+            nt2 = nt.clone()
+            nt = nt.sum(dim=dim, keepdim=keepdim)
+            ub2 = nt2.unbind()
+            ub2 = [t.sum(-1, keepdim=keepdim) for t in ub2]
+            nt2 = torch.nested_tensor(ub2)
+            self.nt_equal(nt, nt2)
+            return
+
+        for ntensors, max_sizes in params:
+            test_sum(self.random_nt(device, dtype, ntensors, max_sizes), len(max_sizes))
+
+        # Test error inputs
+        with self.assertRaisesRegex(RuntimeError, "NestedTensor can only be reduced across the last"):
+            torch.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(0, keepdim=True)
+
+        with self.assertRaisesRegex(RuntimeError, "NestedTensor only allows reduction of a single"):
+            torch.nested_tensor([torch.tensor([[3, 4, 5]]), torch.tensor([[1, 2]])]).sum([0, 1], keepdim=True)
+
+        with self.assertRaisesRegex(RuntimeError, "NestedTensor always requires keepdim=True for now."):
+            torch.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(-1)
+
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
