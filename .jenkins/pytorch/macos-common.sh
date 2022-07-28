@@ -8,18 +8,31 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 sysctl -a | grep machdep.cpu
 
 # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
-retry conda install -y \
-  mkl=2021.2.0 \
-  mkl-include=2021.2.0 \
-  numpy \
-  pyyaml \
-  setuptools \
-  cmake=3.19 \
-  cffi \
-  ninja \
-  typing_extensions \
-  dataclasses \
-  pip
+if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
+  retry conda install -y \
+    numpy \
+    pyyaml \
+    setuptools \
+    cmake=3.19 \
+    cffi \
+    ninja \
+    typing_extensions \
+    dataclasses \
+    pip
+else
+  retry conda install -y \
+    mkl=2021.2.0 \
+    mkl-include=2021.2.0 \
+    numpy=1.18.5 \
+    pyyaml=5.3 \
+    setuptools=46.0.0 \
+    cmake=3.19 \
+    cffi \
+    ninja \
+    typing_extensions \
+    dataclasses \
+    pip
+fi
 
 # The torch.hub tests make requests to GitHub.
 #
