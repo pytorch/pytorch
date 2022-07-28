@@ -9,12 +9,6 @@
 
 #include <c10/util/irange.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/_to_copy.h>
-#endif
-
 namespace at {
 
 void FunctionalTensorWrapper::set_constructor_metadata() {
@@ -211,9 +205,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
-    // and we want _to_copy() to show up in the graph, not the composite .to() operator
-    // (this can happen if autograd has already run by the time we enter this code)
-    value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
+    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
 
