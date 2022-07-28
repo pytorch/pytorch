@@ -313,6 +313,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
+        .def_property_readonly("tag", &Result::tag)
         .def_readonly("extra_fields", &Result::extra_fields_)
         .def_property_readonly(
             "id",
