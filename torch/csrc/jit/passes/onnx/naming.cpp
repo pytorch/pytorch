@@ -87,6 +87,7 @@ class NodeNameGenerator {
   virtual void CreateNodeName(Node* n) = 0;
   void PopulateNodeNames(Block*);
   void UpdateOutputsNames(Node* n);
+  bool IsGraphOutput(const Value* v, const std::shared_ptr<Graph> graph) const;
 
  protected:
   std::string UpdateBaseName(
@@ -126,14 +127,27 @@ std::string NodeNameGenerator::UpdateBaseName(
   return base_name;
 }
 
+bool NodeNameGenerator::IsGraphOutput(
+    const Value* v,
+    const std::shared_ptr<Graph> graph) const {
+  for (const auto* graph_output : graph->outputs()) {
+    if (v == graph_output) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void NodeNameGenerator::UpdateOutputsNames(Node* n) {
   if (node_names_.find(n) != node_names_.end()) {
     auto node_name = node_names_[n];
     for (auto i : c10::irange(n->outputs().size())) {
       auto output = n->output(i);
-      auto output_name = node_name;
-      output_name.append("_output_").append(std::to_string(i));
-      output->setDebugName(output_name);
+      if (!IsGraphOutput(output, graph_)) {
+        auto output_name = node_name;
+        output_name.append("_output_").append(std::to_string(i));
+        output->setDebugName(output_name);
+      }
     }
   }
 }
@@ -181,7 +195,7 @@ std::string ScopedNodeNameGenerator::GetFullScopeName(ScopePtr scope) {
 
 } // namespace
 
-void AssignNodeAndValueNames(std::shared_ptr<Graph>& graph) {
+void AssignScopedNamesForNodeAndValue(std::shared_ptr<Graph>& graph) {
   auto node_name_generator = std::make_unique<ScopedNodeNameGenerator>(graph);
   node_name_generator->PopulateNodeNames();
 }

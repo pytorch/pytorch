@@ -883,13 +883,12 @@ void GraphEncoder::EncodeNode(
   const auto node_name_attribute_symbol =
       Symbol::attr(::torch::onnx::OnnxNodeNameAttribute);
   if (add_node_names) {
+    std::string node_name =
+        node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
     if (node->hasAttribute(node_name_attribute_symbol)) {
-      auto node_name = node->s(node_name_attribute_symbol);
-      node_proto->set_name(node_name);
-    } else {
-      auto node_name =
-          node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+      node_name = node->s(node_name_attribute_symbol);
     }
+    node_proto->set_name(node_name);
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);

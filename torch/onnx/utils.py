@@ -1106,6 +1106,10 @@ def _model_to_graph(
     params_dict = _C._jit_pass_filter_non_tensor_arguments(params_dict)
     _C._jit_decay_packed_param_input_types(graph)
 
+    # If output names lack a proper name and are identified only by their unique
+    # give them a legible name for debugging purposes
+    _apply_friendly_debug_names(graph, params_dict)
+
     return graph, params_dict, torch_out
 
 
@@ -1254,11 +1258,26 @@ def _setup_trace_module_map(
             m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
     def __unqualified_variable_name(qualified_name: str):
+        """
+        Parse qualified variable name and return the unqualified version.
+
+        Pure numeric atoms are considered inadequate, so this function will look past them,
+        and start from the first non-numeric atom.
+
+        Example:
+            >>> __unqualified_variable_name('__main__.Foo.bar')
+            'bar'
+            >>> __unqualified_variable_name('__main__.Foo.bar.0')
+            'bar.0'
+        """
         name_atoms = qualified_name.split(".")
         idx = next(
-            i
-            for i, atom in reversed(list(enumerate(name_atoms)))
-            if not atom.isnumeric()
+            (
+                i
+                for i, atom in reversed(list(enumerate(name_atoms)))
+                if not atom.isnumeric()
+            ),
+            0,
         )
         return ".".join(name_atoms[idx:])
 
@@ -1426,9 +1445,7 @@ def _export(
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
-            _C._jit_pass_onnx_assign_node_and_value_names(graph)
-            # Override generated graph output names with user-provided names
-            _set_input_and_output_names(graph, input_names, output_names)
+            _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
                     proto,
