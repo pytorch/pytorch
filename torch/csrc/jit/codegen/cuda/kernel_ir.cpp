@@ -114,6 +114,57 @@ UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey)
       "IR type only valid for Kernel container.");
 }
 
+namespace {
+
+bool isIntegralScalar(const Val* val) {
+  return val->isScalar() && val->getDataType().has_value() &&
+      isIntegralType(val->getDataType().value());
+}
+
+} // namespace
+
+IntPair::IntPair(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::IntPair, DataType::Index) {}
+
+PairSelect::PairSelect(
+    IrBuilderPasskey passkey,
+    Val* out,
+    IntPair* in,
+    PairSelect::Selection selection)
+    : Expr(passkey, ExprType::PairSelect),
+      out_{out},
+      in_{in},
+      selection_(selection) {
+  addOutput(out);
+  addInput(in);
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(out), "Integer only for this op");
+}
+
+Swizzle2DInt::Swizzle2DInt(
+    IrBuilderPasskey passkey,
+    IntPair* out,
+    Val* in_x,
+    Val* in_y,
+    Val* extent_x,
+    Val* extent_y,
+    Swizzle2DType swizzle_type)
+    : Expr(passkey, ExprType::Swizzle2DInt),
+      out_{out},
+      in_x_{in_x},
+      in_y_{in_y},
+      extent_x_(extent_x),
+      extent_y_(extent_y),
+      swizzle_type_(swizzle_type) {
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_x), "Integer only for this op");
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_y), "Integer only for this op");
+
+  addOutput(out);
+  addInput(in_x);
+  addInput(in_y);
+  addInput(extent_x);
+  addInput(extent_y);
+}
+
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
   exprs_.insert(pos, expr);
 }
@@ -475,6 +526,7 @@ GroupedGridReduction::GroupedGridReduction(
     Allocate* sync_buffer,
     Val* entrance_index,
     Val* entrances,
+    Val* buffer_stride,
     bool is_allreduce)
     : GroupedReductionOp(
           passkey,
@@ -487,7 +539,8 @@ GroupedGridReduction::GroupedGridReduction(
       reduction_buffers_(std::move(reduction_buffers)),
       sync_buffer_(sync_buffer),
       entrance_index_(entrance_index),
-      entrances_(entrances) {
+      entrances_(entrances),
+      buffer_stride_(buffer_stride) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

@@ -983,9 +983,8 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
   // Cache inputs if unrolled
   auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);
 
-  // Cache and fork  outputs
-  std::vector<std::pair<TensorView*, TensorView*>> cached_outputs =
-      scheduler_utils::cacheAndForkOutputs(fusion, unroll);
+  // Cache and fork outputs
+  auto cached_outputs = scheduler_utils::cacheAndForkOutputs(fusion, unroll);
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation

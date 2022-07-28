@@ -460,7 +460,7 @@ bool GroupedReductionOp::sameAs(const Statement* other) const {
     return false;
   }
 
-  for (const auto i : c10::irange(numReductions())) {
+  for (const auto i : c10::irange(numExprs())) {
     if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
       return false;
     }
@@ -1290,6 +1290,40 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
   return split_out;
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    IterDomain* in_x,
+    IterDomain* in_y) {
+  TORCH_CHECK(
+      !in_x->extent()->isZeroInt() && !in_y->extent()->isZeroInt(),
+      "Invalid swizzling of a empty dimension.");
+
+  // TODO: reduction check on swizzle:
+  TORCH_CHECK(
+      !in_x->isReduction() && !in_y->isReduction(),
+      "swizzled reduction not yet supported");
+
+  for (auto input : InputsOf::outputs(in_x->fusion(), {in_x, in_y})) {
+    TORCH_CHECK(
+        !input->as<IterDomain>()->isBroadcast(),
+        "swizzling broadcast axes not yet supported");
+  }
+
+  // TODO: gather and shift check on swizzle
+  TORCH_INTERNAL_ASSERT(
+      !in_x->isGather() && !in_y->isGather(),
+      "Swizzled gather not yet supported");
+
+  IterDomain* out_x = IterDomainBuilder(in_x).build();
+
+  IterDomain* out_y = IterDomainBuilder(in_y).build();
+
+  IrBuilder::create<Swizzle2D>(
+      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type);
+
+  return std::make_pair(out_x, out_y);
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
@@ -1300,15 +1334,23 @@ void IterDomain::parallelize(ParallelType t) {
     return;
   }
 
-  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t) ||
+      t == ParallelType::Group) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, unswitching and grouping are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
         extent(),
         " .");
+  }
+
+  if (t == ParallelType::Group) {
+    TORCH_CHECK(
+        getIterType() == IterType::Iteration,
+        "Grouping IterDomain of non Iteration type is not allowed. ",
+        getIterType());
   }
 
   if (isMmaSwizzled()) {
@@ -1748,6 +1790,35 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   return reordered_domain;
 }
 
+void TensorDomain::swizzle(Swizzle2DType swizzle_type, int x, int y) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
+
+  TORCH_CHECK(
+      x >= 0 && (unsigned int)x < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  TORCH_CHECK(
+      y >= 0 && (unsigned int)y < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  IterDomain* axis_x = axis(x);
+  IterDomain* axis_y = axis(y);
+
+  IterDomain* axis_out_x = nullptr;
+  IterDomain* axis_out_y = nullptr;
+
+  std::tie(axis_out_x, axis_out_y) =
+      IterDomain::swizzle(swizzle_type, axis_x, axis_y);
+
+  domain_.erase(domain_.begin() + x);
+  domain_.insert(domain_.begin() + x, axis_out_x);
+
+  domain_.erase(domain_.begin() + y);
+  domain_.insert(domain_.begin() + y, axis_out_y);
+
+  resetDomains();
+}
+
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
@@ -1961,6 +2032,46 @@ bool Merge::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other);
 }
+
+Swizzle2D::Swizzle2D(
+    IrBuilderPasskey passkey,
+    IterDomain* out_x,
+    IterDomain* out_y,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    Swizzle2DType swizzle_type)
+    : Expr(passkey, ExprType::Swizzle2D),
+      out_x_{out_x},
+      out_y_{out_y},
+      in_x_{in_x},
+      in_y_{in_y},
+      swizzle_type_(swizzle_type) {
+  addOutput(out_x);
+  addOutput(out_y);
+  addInput(in_x);
+  addInput(in_y);
+}
+
+bool Swizzle2D::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Swizzle2D>()) {
+    return false;
+  }
+  if (!(swizzle_type_ == other->as<Swizzle2D>()->swizzle_type_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+Swizzle2D::Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_x_(ir_cloner->clone(src->out_x_)),
+      out_y_(ir_cloner->clone(src->out_y_)),
+      in_x_(ir_cloner->clone(src->in_x_)),
+      in_y_(ir_cloner->clone(src->in_y_)),
+      swizzle_type_(src->swizzle_type_) {}
 
 NamedScalar::NamedScalar(
     IrBuilderPasskey passkey,
