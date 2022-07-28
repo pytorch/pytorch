@@ -5,18 +5,15 @@ import sys
 import torch
 from torch.utils._pytree import tree_map
 
+from torch.testing._internal.common_utils import run_tests
 from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
-
+from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
 # This TorchDispatchTensor Subclass is used to simulate an incorrect schema
 # which is then used to test that SchemaCheckMode behaves as expected
@@ -403,8 +400,8 @@ class TestSchemaCheck(JitTestCase):
     def test_overlaps_empty_container(self):
         x = []
         y = [torch.rand((3, 3), requires_grad=True)]
-        # Anything overlaps nothing
-        self.assertTrue(torch._C._overlaps(y, x))
+        # Empty containers return false
+        self.assertFalse(torch._C._overlaps(y, x))
         self.assertTrue(torch._C._overlaps(y, y))
 
     # Tests that SchemaInfo Bindings work as expected
@@ -443,3 +440,20 @@ class TestSchemaCheck(JitTestCase):
         schemaInfoCheck = SchemaInfoBindTestMode(self)
         with enable_torch_dispatch_mode(schemaInfoCheck):
             x.add(x)
+
+
+class TestSchemaCheckModeOpInfo(JitTestCase):
+    @ops(op_db, dtypes=OpDTypes.supported)
+    def test_schema_correctness(self, device, dtype, op):
+        # Currently torch.equal isn't supported with torch.complex32
+        # There's also errors with complex64 and complex128
+        if (dtype == torch.complex32):
+            return
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            with enable_torch_dispatch_mode(SchemaCheckMode()):
+                op(sample.input, *sample.args, **sample.kwargs)
+
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
+
+if __name__ == '__main__':
+    run_tests()

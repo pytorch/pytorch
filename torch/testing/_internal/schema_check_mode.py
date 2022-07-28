@@ -41,9 +41,11 @@ class SchemaCheckMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         def has_mutated(before, after, md):
-            if type(before) == torch.Tensor and type(after) == torch.Tensor:
+            are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
+            if are_tensors and before.layout != torch.sparse_csr and after.layout != torch.sparse_csr:
                 return not (
-                    torch.equal(before, after) and
+                    before.size() == after.size() and
+                    torch.all(torch.isclose(before, after, equal_nan=True)) and
                     md[0] == after.stride() and
                     md[1] == after.storage()._cdata
                 )
@@ -77,7 +79,7 @@ class SchemaCheckMode(TorchDispatchMode):
                         return (deepcopy(current.stride()), current.storage()._cdata)
                     except AttributeError as t:
                         return None
-                else:
+                elif (e.layout != torch.sparse_csr):
                     return (deepcopy(e.stride()), e.storage()._cdata)
             return None
 
@@ -112,7 +114,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 md = cloned_metadata.get(name)
                 after = arguments.get(name)
                 for j in range(len(tuple_out)):
-                    if has_aliased(tuple_out[j], after):
+                    if has_aliased(tuple_out[j], after) and func._schema.name != 'aten::_unsafe_view':
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
                                 SchemaArgument(SchemaArgType.input, i)):
