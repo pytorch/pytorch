@@ -2368,7 +2368,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage._TypedStorage,
+                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
