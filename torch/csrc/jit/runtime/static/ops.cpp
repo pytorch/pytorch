@@ -1338,19 +1338,19 @@ ToArgs extract_to_args(ProcessedNode* p_node) {
     const auto& other = p_node->Input(1).toTensor();
     result.dtype = other.scalar_type();
     result.layout = other.layout();
-    DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
   } else {
     const auto& self = p_node->Input(0).toTensor();
     result.dtype = p_node->Input(1).toOptional<at::ScalarType>();
     result.layout = self.layout();
     // Static runtime only works with CPU tensors; don't need to read this.
-    DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
     result.know_to_will_alias = has_constant_non_tensor_dtype_and_flags &&
         (!result.dtype.has_value() ||
          result.dtype.value() == self.dtype().toScalarType());
   }
   if (has_memory_format) {
-    DCHECK_EQ(p_node->num_inputs(), 5);
+    TORCH_DCHECK_EQ(p_node->num_inputs(), 5);
     result.memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
     result.know_to_will_alias = result.know_to_will_alias &&
         (result.memory_format.value_or(c10::MemoryFormat::Preserve) ==
