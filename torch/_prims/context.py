@@ -2,7 +2,6 @@ import functools
 from typing import Any, Callable, Dict, Sequence
 
 import torch
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 
 import torch._prims
 
@@ -13,6 +12,7 @@ import torch._refs.special
 import torch.overrides
 
 from torch._prims_common import torch_function_passthrough
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 
 
 @functools.lru_cache(None)
