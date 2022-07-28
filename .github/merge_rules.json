@@ -188,8 +188,8 @@
          "Lint",
          "pull"
       ]
-    },
-    {
+   },
+   {
       "name": "IDEEP",
       "patterns": [
         "third_party/ideep",
@@ -202,8 +202,8 @@
         "Lint",
         "pull"
       ]
-    },
-    {
+   },
+   {
       "name": "oneDNN graph",
       "patterns": [
         "torch/csrc/jit/codegen/onednn/**",
@@ -215,8 +215,8 @@
         "Lint",
         "pull"
       ]
-    },
-    {
+   },
+   {
       "name": "CPU ATen backend",
       "patterns": [
         "aten/src/ATen/cpu/**",
@@ -231,8 +231,8 @@
         "Lint",
         "pull"
       ]
-    },
-    {
+   },
+   {
       "name": "CPU frontend",
       "patterns": [
         "torch/cpu/**",
@@ -245,8 +245,8 @@
         "Lint",
         "pull"
       ]
-    },
-    {
+   },
+   {
       "name": "Autocast",
       "patterns": [
         "torch/amp/**",
@@ -255,18 +255,6 @@
         "test/test_autocast.py"
       ],
       "approved_by": ["leslie-fang-intel", "CaoE"],
-      "mandatory_checks_name": [
-        "Facebook CLA Check",
-        "Lint",
-        "pull"
-      ]
-    },
-    {
-      "name": "NNC",
-      "patterns": [
-        "torch/csrc/jit/tensorexpr/**"
-      ],
-      "approved_by": ["EikanWang", "chunyuan-w"],
       "mandatory_checks_name": [
         "Facebook CLA Check",
         "Lint",
