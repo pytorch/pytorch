@@ -668,10 +668,11 @@ Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
 // Very rudimentary sum_dim for prototyping with torch_scatter.segment_reduce.
 Tensor NestedTensor_sum__dim(
     const Tensor& self,
-    IntArrayRef dims,
+    OptionalIntArrayRef opt_dims,
     bool keepdim,
     c10::optional<ScalarType> dtype) {
   // Only allow reductions across the ragged (last) dim
+  auto dims = opt_dims.value_or(IntArrayRef{});
   TORCH_CHECK(
       dims.size() == 1,
       "NestedTensor only allows reduction of a single dimension for now."
