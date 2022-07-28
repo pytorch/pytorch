@@ -19483,7 +19483,7 @@ torch.cuda.synchronize()
                        input_format=input_format, weight_format=weight_format)
                 # test when input chanels is 1 and not converted to channels last
                 helper(2, 1, 10, 10, out_channels=8, kernel_size=3, dilation=1, groups=1,
-                        input_format=torch.contiguous_format, weight_format=torch.channels_last)
+                       input_format=torch.contiguous_format, weight_format=torch.channels_last)
                 # non-dilated conv: thnn_conv2d fast path (skip im2col)
                 helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
                        input_format=input_format, weight_format=weight_format)
