@@ -526,7 +526,8 @@ def report_all_anti_patterns(prof, should_benchmark: bool = False):
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
-        GradNotSetToNonePattern(prof, should_benchmark)
+        GradNotSetToNonePattern(prof, should_benchmark),
+        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
