@@ -253,3 +253,13 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibilityRandN) {
   at::Philox4_32 engine2(0, 0, 4);
   ASSERT_EQ(engine1.randn(1), engine2.randn(1));
 }
+
+TEST(CPUGeneratorImpl, TestPhiloxDeterministic) {
+  at::Philox4_32 engine1(0, 0, 4);
+  ASSERT_EQ(engine1(), 4013802324);  // Determinism!
+  ASSERT_EQ(engine1(), 2979262830);  // Determinism!
+
+  at::Philox4_32 engine2(10, 0, 1);
+  ASSERT_EQ(engine2(), 2007330488);  // Determinism!
+  ASSERT_EQ(engine2(), 2354548925);  // Determinism!
+}
