@@ -330,7 +330,7 @@ at::Tensor std_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim);
 Tensor var_mean_backward(

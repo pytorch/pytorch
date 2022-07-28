@@ -27,10 +27,12 @@ const std::vector<std::string> functions = {
 
         def AD_sum_backward(grad,
                             sizes: List[int],
-                            dims: List[int],
+                            dims: Optional[List[int]],
                             keepdim: bool):
             if not keepdim and len(sizes) > 0:
-                if len(dims) == 1:
+                if dims is None:
+                    return grad.expand(sizes)
+                elif len(dims) == 1:
                     return grad.unsqueeze(dims[0]).expand(sizes)
                 else:
                     res = AD_unsqueeze_multiple(grad, dims, len(sizes))
@@ -57,7 +59,7 @@ const std::vector<std::string> functions = {
             return torch.mean(self, dtype=dtype), backward
 
         def mean_1(self,
-                   dim: List[int],
+                   dim: Optional[List[int]],
                    keepdim: bool,
                    *,
                    dtype: Optional[int]):
@@ -93,14 +95,20 @@ const std::vector<std::string> functions = {
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
-                         dims: List[int]):
+                         dims: Optional[List[int]]):
             if len(sizes) == 0:
                 return 1
 
             size = 1
-            for i in range(len(dims)):
-                d = dims[i]
-                size *= sizes[d]
+
+            if dims is None:
+              for s in sizes:
+                size *= s
+
+            else:
+              for i in range(len(dims)):
+                  d = dims[i]
+                  size *= sizes[d]
 
             return size
 
