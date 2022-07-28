@@ -72,17 +72,24 @@ class LinearAPoT(WeightedQuantizedModule):
         """
         product = 0
 
-        for idx in range(len(weight_val)):
-            ele = int(weight_val[idx])
+        idx = len(weight_val) - 1
+        place = 0
 
-            x = len(weight_val) - 1 - idx
+        while idx >= 0:
+            block = weight_val[idx]
 
-            if ele:
-                curr_result = r << x
-            else:
-                curr_result = 0
+            # reverse digits in block
+            block = block[::-1]
 
-            product += curr_result
+            curr_block_result = 0
+
+            for ele in block:
+                if int(ele):
+                    curr_block_result += r << place
+                place += 1
+
+            idx -= 1
+            product += curr_block_result
 
         return product
 
@@ -95,18 +102,18 @@ class LinearAPoT(WeightedQuantizedModule):
             decomposed_weight (Tensor): APoT quantized weight decomposed into binary
             activation (Tensor): uniformly quantized activation
         """
-        rows2 = activation.size(dim=0)
-        cols2 = activation.size(dim=1)
+        rows1 = activation.size(dim=0)
+        cols1 = activation.size(dim=1)
 
-        rows1 = decomposed_weight.shape[0]
-        cols1 = decomposed_weight.shape[1]
+        rows2 = decomposed_weight.shape[0]
+        cols2 = decomposed_weight.shape[1]
 
         result = torch.zeros(rows1, cols2)
 
         # compute matrix multiplication with bitshifts
-        for i in range(rows2):
+        for i in range(rows1):
             for j in range(cols2):
-                for k in range(rows1):
+                for k in range(rows2):
                     weight_val = decomposed_weight[k][j]
                     r = int(activation[i][k])
 
