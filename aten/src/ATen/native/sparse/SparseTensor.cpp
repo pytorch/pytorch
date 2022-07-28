@@ -524,7 +524,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(
+    auto sparse = new_with_dims_sparse(
         sparse_dim,
         dims - sparse_dim,
         sizes,
@@ -532,6 +532,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
         sparse_options.layout_opt(),
         sparse_options.device_opt(),
         sparse_options.pinned_memory_opt());
+    return sparse._coalesced_(true);
   }
   Tensor indices;
   if (sparse_dim == dims) {
