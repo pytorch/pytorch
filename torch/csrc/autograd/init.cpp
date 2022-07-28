@@ -298,6 +298,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
     py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+        .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
         .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
     py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
         .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
