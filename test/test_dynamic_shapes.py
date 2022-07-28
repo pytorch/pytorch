@@ -230,6 +230,9 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[1] == 4)
         self.assertTrue(z.shape[2] == 3)
 
+        z = y.expand((y.shape[1],))
+        z = y.expand(y.shape[1])
+
     @skipIfNoSympy
     def test_size_expressions(self):
         shape_env = ShapeEnv()
