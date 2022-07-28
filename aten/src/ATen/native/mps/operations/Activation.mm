@@ -1641,7 +1641,7 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
     Tensor result = at::empty_like(self, self.suggest_memory_format());
     TORCH_INTERNAL_ASSERT(weight_.defined());
 
-    if (self.numel() == 0){
+    if (result.numel() == 0){
       return result;
     }
 
@@ -1784,11 +1784,10 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
   Tensor w = weight_.defined() ? as_nd(weight_) : at::detail::scalar_tensor_static(1, self.scalar_type(), kMPS);
 
   NSMutableArray<NSNumber*> * reduce_dims = [NSMutableArray<NSNumber*> init];
-  [reduce_dims addObject:[NSNumber numberWithInt:0]];
   int64_t input_ndim = self.dim();
 
   for (const auto i : c10::irange(input_ndim)) {
-    if (weight_num == 1 && (i == 0 || i == 1)) continue;
+    if (weight_num == 1 && i == 1) continue;
     [reduce_dims addObject:[NSNumber numberWithInt:i]];
   }
 
