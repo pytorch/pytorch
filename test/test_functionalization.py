@@ -5,6 +5,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorc
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.reinplace import reinplace
 
 import unittest
 
@@ -17,59 +18,72 @@ def are_aliased(x, y):
         return y._base is x
     return x._base is y._base
 
+# We can unify testing and use functionalize() here instead
+# if/when functorch moves into core.
+# This is basically a crappy version of `functionalize()` for single-tensor-arg inputs.
+def _functionalize(f, *, reapply_views: bool):
+    def wrapped(a):
+        input_functional = torch._to_functional_tensor(a)
+        torch._enable_functionalization(reapply_views=reapply_views)
+        try:
+            out = f(input_functional)
+        finally:
+            torch._disable_functionalization()
+        torch._sync(input_functional)
+        inpt_new = torch._from_functional_tensor(input_functional)
+        if inpt_new is not a:
+            # Existing deficiency in functionalize():
+            # we don't correctly mutate input metadata (yet?)
+            if inpt_new.shape == a.shape:
+                a.copy_(inpt_new)
+        tree_map(torch._sync, out)
+        out_unwrapped = tree_map(torch._from_functional_tensor, out)
+        return out_unwrapped
+
+    return wrapped
 
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
-    # We can unify testing and use functionalize() here instead
-    # if/when functorch moves into core.
-    def _functionalize(self, f, *, reapply_views: bool):
-        def wrapped(a):
-            input_functional = torch._to_functional_tensor(a)
-            torch._enable_functionalization(reapply_views=reapply_views)
-            try:
-                out = f(input_functional)
-            finally:
-                torch._disable_functionalization()
-            torch._sync(input_functional)
-            tree_map(torch._sync, out)
-            out_unwrapped = tree_map(torch._from_functional_tensor, out)
-            return out_unwrapped
 
-        return wrapped
-
-    def get_logs(self, func, inpt, *, reapply_views=False):
-        traced_f = make_fx(self._functionalize(func, reapply_views=reapply_views))(inpt)
+    def get_logs(self, func, inpt, *, reapply_views=False, run_reinplace=False):
+        inpt_clone = inpt.clone()
+        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views))(inpt)
+        if run_reinplace:
+            traced_f = reinplace(traced_f, inpt_clone)
         return traced_f.code
 
-    def assert_functionalization(self, func, inpt, *, reapply_views=False):
+    def assert_functionalization(self, func, inpt, *, reapply_views=False, mutated_input_metadata=False):
         input_clone = inpt.clone()
         input_clone2 = inpt.clone()
-        input_functional = torch._to_functional_tensor(input_clone2)
+        input_clone3 = inpt.clone()
 
         # Compare outputs (and mutated inputs), with and without functionalization.
         out_ref = func(inpt)
+        out_functional = _functionalize(func, reapply_views=reapply_views)(input_clone)
+        # The reinplacing pass is only valid to run with reapply_views=True.
+        functional_func = make_fx(_functionalize(func, reapply_views=True))(input_clone2)
+        reinplace_func = reinplace(make_fx(_functionalize(func, reapply_views=True))(input_clone2), input_clone2)
 
-        torch._enable_functionalization(reapply_views=reapply_views)
-        try:
-            out_functional = func(input_functional)
-        finally:
-            torch._disable_functionalization()
+        # NOTE: for now, need to pass in fresh inputs here, because make_fx
+        # will directly mutate the inputs that you trace with.
+        # Once this is fixed we can clean this up.
+        out_reinplace = reinplace_func(input_clone3)
 
-        # We need to sync the input tensors first, in case there are any queued mutations left.
-        torch._sync(input_functional)
-        self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
+        # functionalize() deficiency: input metadata mutations aren't propagated properly,
+        # so we just need to skip checks here for the tests that exercise that.
+        if not mutated_input_metadata:
+            self.assertEqual(inpt, input_clone)  # input mutations should still occur
+            self.assertEqual(inpt, input_clone3)
 
         # Handle tests with multi-tensor outputs
-        if isinstance(out_ref, tuple) and isinstance(out_functional, tuple):
-            out_refs, out_functionals = list(out_ref), list(out_functional)
+        if isinstance(out_ref, tuple):
+            out_refs, out_functionals, out_reinplaces = list(out_ref), list(out_functional), list(out_reinplace)
         else:
-            out_refs, out_functionals = [out_ref], [out_functional]
+            out_refs, out_functionals, out_reinplaces = [out_ref], [out_functional], [out_reinplace]
 
-        for out_ref_, out_functional_ in zip(out_refs, out_functionals):
-            self.assertEqual(out_ref_.size(), out_functional_.size())
-            torch._sync(out_functional_)
-            out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
-            self.assertEqual(out_ref_, out_functional_unwrapped)
+        for out_ref_, out_functional_, out_reinplace_ in zip(out_refs, out_functionals, out_reinplaces):
+            self.assertEqual(out_ref_, out_functional_)
+            self.assertEqual(out_ref_, out_reinplace_)
 
     def test_save_for_backwards_segfault(self):
         inp = torch._to_functional_tensor(LoggingTensor(torch.randn(2, 2))).requires_grad_(True)
@@ -104,10 +118,27 @@ class TestFunctionalization(TestCase):
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
-    view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2])
-    mul_tensor = torch.ops.aten.mul.Tensor(view_copy_default_1, view_copy_default_1);  view_copy_default_1 = None
+    mul_tensor = torch.ops.aten.mul.Tensor(view_copy_default_1, view_copy_default_1)
+    copy__default = torch.ops.aten.copy_.default(a_1, view_copy_default_1);  a_1 = view_copy_default_1 = None
+    return add_tensor
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill_.Scalar(empty, 1.0)
+    view_default = torch.ops.aten.view.default(a_1, [4, 2])
+    add_tensor = torch.ops.aten.add.Tensor(view_default, empty);  view_default = empty = None
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2])
+    mul_tensor = torch.ops.aten.mul.Tensor(view_default_1, view_default_1)
+    copy__default = torch.ops.aten.copy_.default(a_1, view_default_1);  a_1 = view_default_1 = None
     return add_tensor
     """)
 
@@ -130,8 +161,23 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
-    empty_1 = torch.ops.aten.empty.SymInt([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
+    mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
+    return mul_tensor
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill_.Scalar(empty, 1.0)
+    view_default = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
+    empty_1 = torch.ops.aten.empty.SymInt([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    add_tensor = torch.ops.aten.add.Tensor(view_default, empty);  view_default = empty = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
     """)
@@ -151,6 +197,20 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
+    getitem = aminmax_default[0]
+    getitem_1 = aminmax_default[1];  aminmax_default = None
+    return getitem
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.arange(8, dtype=torch.float32), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
     empty = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     empty_1 = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
@@ -165,7 +225,38 @@ def forward(self, a_1):
             z = y.view(-1)
             z.add_(1)
             return y
-        self.assert_functionalization(f, torch.arange(3, dtype=torch.float32))
+
+        inpt = torch.arange(3, dtype=torch.float32)
+        self.assert_functionalization(f, inpt)
+
+        logs = self.get_logs(f, inpt)
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    view_copy_default = torch.ops.aten.view_copy.default(lift_fresh, [-1]);  lift_fresh = None
+    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, 1);  view_copy_default = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [3]);  add_tensor = None
+    return view_copy_default_1
+    """)
+
+        reinplaced_logs = self.get_logs(f, inpt, reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    view_default = torch.ops.aten.view.default(lift_fresh, [-1]);  lift_fresh = None
+    add_tensor = torch.ops.aten.add_.Tensor(view_default, 1)
+    view_default_1 = torch.ops.aten.view.default(view_default, [3]);  view_default = None
+    return view_default_1
+    """)
+
 
     def test_inplace_on_non_view(self):
         def f(x):
@@ -185,9 +276,25 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
-    add_tensor = torch.ops.aten.add.Tensor(a_1, fill_scalar);  a_1 = fill_scalar = None
+    add_tensor = torch.ops.aten.add.Tensor(a_1, fill_scalar);  fill_scalar = None
+    copy__default = torch.ops.aten.copy_.default(a_1, add_tensor);  a_1 = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
     return view_copy_default_1
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill_.Scalar(empty, 1.0)
+    view_default = torch.ops.aten.view.default(a_1, [4, 2])
+    add_tensor = torch.ops.aten.add.Tensor(a_1, empty);  empty = None
+    copy__default = torch.ops.aten.copy_.default(a_1, add_tensor);  a_1 = None
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
+    return view_default_1
     """)
 
     # Some ops that are mutable are neither inplace nor out= ops.
@@ -202,13 +309,14 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    _fused_moving_avg_obs_fq_helper_functional_default = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0);  a_1 = None
+    _fused_moving_avg_obs_fq_helper_functional_default = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0)
     getitem = _fused_moving_avg_obs_fq_helper_functional_default[0]
     getitem_1 = _fused_moving_avg_obs_fq_helper_functional_default[1]
     getitem_2 = _fused_moving_avg_obs_fq_helper_functional_default[2]
     getitem_3 = _fused_moving_avg_obs_fq_helper_functional_default[3]
     getitem_4 = _fused_moving_avg_obs_fq_helper_functional_default[4]
     getitem_5 = _fused_moving_avg_obs_fq_helper_functional_default[5];  _fused_moving_avg_obs_fq_helper_functional_default = None
+    copy__default = torch.ops.aten.copy_.default(a_1, getitem_5);  a_1 = getitem_5 = None
     return (getitem, getitem_1)
     """)  # noqa: B950
 
@@ -226,7 +334,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     as_strided_copy_default = torch.ops.aten.as_strided_copy.default(a_1, [2], [2], 1)
     add_tensor = torch.ops.aten.add.Tensor(as_strided_copy_default, 1);  as_strided_copy_default = None
-    as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(a_1, add_tensor, [2], [2], 1);  a_1 = add_tensor = None
+    as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(a_1, add_tensor, [2], [2], 1);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(a_1, as_strided_scatter_default);  a_1 = None
     return as_strided_scatter_default
     """)
 
@@ -258,16 +367,28 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
+    return cat_default
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
     empty = torch.ops.aten.empty.SymInt([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
     """)
 
+
     def test_diagonal(self):
         def f(x):
             # test: view ops that take a subset of the original tensor (select/diagonal)
             tmp = torch.ones(2)
-            y = x.diagonal()
+            y = x.clone().diagonal()
             y.add_(tmp)
             z = x * x
             return z
@@ -280,10 +401,25 @@ def forward(self, a_1):
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(a_1)
+    clone_default = torch.ops.aten.clone.default(a_1)
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(clone_default);  clone_default = None
     add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, fill_scalar);  diagonal_copy_default = fill_scalar = None
-    diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(a_1, add_tensor);  a_1 = add_tensor = None
-    mul_tensor = torch.ops.aten.mul.Tensor(diagonal_scatter_default, diagonal_scatter_default);  diagonal_scatter_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(a_1, a_1);  a_1 = None
+    return mul_tensor
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill_.Scalar(empty, 1.0)
+    clone_default = torch.ops.aten.clone.default(a_1)
+    diagonal_default = torch.ops.aten.diagonal.default(clone_default);  clone_default = None
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, empty);  diagonal_default = empty = None
+    mul_tensor = torch.ops.aten.mul.Tensor(a_1, a_1);  a_1 = None
     return mul_tensor
     """)
 
@@ -296,6 +432,20 @@ def forward(self, a_1):
             return x
         x = torch.ones(2, 2)
         self.assert_functionalization(f, x)
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(a_1)
+    add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, fill_scalar);  diagonal_copy_default = fill_scalar = None
+    diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(a_1, add_tensor);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(a_1, diagonal_scatter_default);  a_1 = None
+    return diagonal_scatter_default
+    """)
 
     def test_split(self):
         def f(x):
@@ -324,8 +474,9 @@ def forward(self, a_1):
     getitem_2 = split_copy_tensor_1[0]
     getitem_3 = split_copy_tensor_1[1];  split_copy_tensor_1 = None
     diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(getitem_3, add_tensor);  getitem_3 = None
-    slice_scatter_default = torch.ops.aten.slice_scatter.default(a_1, diagonal_scatter_default, 0, 2, 4);  a_1 = diagonal_scatter_default = None
-    mul_tensor = torch.ops.aten.mul.Tensor(slice_scatter_default, slice_scatter_default);  slice_scatter_default = None
+    slice_scatter_default = torch.ops.aten.slice_scatter.default(a_1, diagonal_scatter_default, 0, 2, 4);  diagonal_scatter_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(slice_scatter_default, slice_scatter_default)
+    copy__default = torch.ops.aten.copy_.default(a_1, slice_scatter_default);  a_1 = slice_scatter_default = None
     return add_tensor
     """)  # noqa: B950
 
@@ -337,7 +488,7 @@ def forward(self, a_1):
             y = x[0]
             y.add_(tmp)
             return x
-        self.assert_functionalization(f, torch.ones(4, 2))
+        self.assert_functionalization(f, torch.ones(4, 2), mutated_input_metadata=True)
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline(logs, """\
 
@@ -372,13 +523,14 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    view_copy_default = torch.ops.aten.view_copy.default(a_1, [8]);  a_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(a_1, [8])
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     arange = torch.ops.aten.arange.start_step(0, 4, 1, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'))
     empty_1 = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     arange_1 = torch.ops.aten.arange.start_step(0, 4, 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     index_put_default = torch.ops.aten.index_put.default(view_copy_default, [arange], arange_1);  view_copy_default = arange = arange_1 = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(index_put_default, [4, 2])
+    copy__default = torch.ops.aten.copy_.default(a_1, view_copy_default_1);  a_1 = view_copy_default_1 = None
     return index_put_default
     """)  # noqa: B950
 
@@ -400,11 +552,12 @@ def forward(self, a_1):
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
-    view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, 1);  view_copy_default = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, 2)
     div_tensor = torch.ops.aten.div.Tensor(mul_tensor, 1);  mul_tensor = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(a_1, view_copy_default_1);  a_1 = view_copy_default_1 = None
     return div_tensor
     """)
 
@@ -413,7 +566,9 @@ def forward(self, a_1):
         def f(x):
             # ops like ge_() are allowed to change the dtype of the input.
             # functionalization should pick up on that.
-            return x.ge_(0)
+            y = x.clone()
+            out = y.ge_(0)
+            return out
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline(logs, """\
@@ -421,10 +576,23 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ge_scalar = torch.ops.aten.ge.Scalar(a_1, 0);  a_1 = None
-    to_dtype_layout = torch.ops.aten.to.dtype_layout(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
-    return to_dtype_layout
+    clone_default = torch.ops.aten.clone.default(a_1);  a_1 = None
+    ge_scalar = torch.ops.aten.ge.Scalar(clone_default, 0);  clone_default = None
+    _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
+    return _to_copy_default
     """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    clone_default = torch.ops.aten.clone.default(a_1);  a_1 = None
+    ge_scalar = torch.ops.aten.ge_.Scalar(clone_default, 0)
+    _to_copy_default = torch.ops.aten._to_copy.default(clone_default, dtype = torch.float32, layout = torch.strided);  clone_default = None
+    return _to_copy_default
+    """)  # noqa: B950
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_metadata_change_out_op(self):
@@ -514,6 +682,44 @@ def forward(self, a_1):
     return add_tensor_1
     """)  # noqa: B950
 
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    fill_scalar = torch.ops.aten.fill_.Scalar(empty, 1.0)
+    add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    view_default = torch.ops.aten.view.default(add_tensor, [8])
+    _reshape_alias_default = torch.ops.aten._reshape_alias.default(view_default, [2, 4], [4, 1]);  view_default = None
+    transpose_int = torch.ops.aten.transpose.int(_reshape_alias_default, 1, 0)
+    unsqueeze_default = torch.ops.aten.unsqueeze.default(transpose_int, 0);  transpose_int = None
+    squeeze_default = torch.ops.aten.squeeze.default(unsqueeze_default);  unsqueeze_default = None
+    split_tensor = torch.ops.aten.split.Tensor(squeeze_default, 2);  squeeze_default = None
+    getitem = split_tensor[0]
+    getitem_1 = split_tensor[1];  split_tensor = None
+    add_tensor_1 = torch.ops.aten.add_.Tensor(getitem, empty);  empty = None
+    select_int = torch.ops.aten.select.int(_reshape_alias_default, 0, 0);  _reshape_alias_default = None
+    clone_default = torch.ops.aten.clone.default(getitem, memory_format = torch.contiguous_format)
+    _unsafe_view_default = torch.ops.aten._unsafe_view.default(clone_default, [4]);  clone_default = None
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [8]);  add_tensor = None
+    _reshape_alias_default_1 = torch.ops.aten._reshape_alias.default(view_default_1, [2, 4], [4, 1]);  view_default_1 = None
+    transpose_int_1 = torch.ops.aten.transpose.int(_reshape_alias_default_1, 1, 0);  _reshape_alias_default_1 = None
+    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(transpose_int_1, 0);  transpose_int_1 = None
+    squeeze_default_1 = torch.ops.aten.squeeze.default(unsqueeze_default_1);  unsqueeze_default_1 = None
+    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(squeeze_default_1, 0);  squeeze_default_1 = None
+    squeeze_dim = torch.ops.aten.squeeze.dim(unsqueeze_default_2, 0);  unsqueeze_default_2 = None
+    transpose_int_2 = torch.ops.aten.transpose.int(squeeze_dim, 1, 0);  squeeze_dim = None
+    _reshape_alias_default_2 = torch.ops.aten._reshape_alias.default(transpose_int_2, [8], [1]);  transpose_int_2 = None
+    view_default_2 = torch.ops.aten.view.default(_reshape_alias_default_2, [4, 2]);  _reshape_alias_default_2 = None
+    view_default_3 = torch.ops.aten.view.default(view_default_2, [8]);  view_default_2 = None
+    _reshape_alias_default_3 = torch.ops.aten._reshape_alias.default(view_default_3, [2, 4], [4, 1]);  view_default_3 = None
+    select_int_1 = torch.ops.aten.select.int(_reshape_alias_default_3, 0, 0);  _reshape_alias_default_3 = None
+    add_tensor_2 = torch.ops.aten.add.Tensor(select_int_1, _unsafe_view_default);  select_int_1 = _unsafe_view_default = None
+    return getitem
+    """)
+
     def test_reapply_views_simple(self):
         def f(x):
             tmp = torch.ones(4, 2)
@@ -530,10 +736,11 @@ def forward(self, a_1):
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
-    view_default = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
+    view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, fill_scalar);  view_default = fill_scalar = None
     view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2])
-    mul_tensor = torch.ops.aten.mul.Tensor(view_default_1, view_default_1);  view_default_1 = None
+    mul_tensor = torch.ops.aten.mul.Tensor(view_default_1, view_default_1)
+    copy__default = torch.ops.aten.copy_.default(a_1, view_default_1);  a_1 = view_default_1 = None
     return add_tensor
     """)
 
@@ -564,8 +771,6 @@ def forward(self, a_1):
     def test_copy_(self):
         def f(x):
             tmp = torch.zeros(2, 2)
-            # NOTE: LoggingTensor isn't a mode, which means that the diagonal call
-            # will not be logged. This is fine for testing.
             tmp_slice = tmp.diagonal()
             y = tmp_slice.copy_(x)
             z = y.add_(x)
@@ -589,6 +794,21 @@ def forward(self, a_1):
     return add_tensor
     """)
 
+        reinplaced_logs = self.get_logs(f, torch.ones(2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero_.default(empty)
+    diagonal_default = torch.ops.aten.diagonal.default(empty)
+    diagonal_default_1 = torch.ops.aten.diagonal.default(empty);  empty = None
+    copy_default = torch.ops.aten.copy_.default(diagonal_default_1, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default_1, a_1);  a_1 = None
+    return diagonal_default_1
+    """)
+
         # Test 2: copy_() with same dtype, different shape
         self.assert_functionalization(f, torch.ones(1))
         logs = self.get_logs(f, torch.ones(1))
@@ -604,6 +824,21 @@ def forward(self, a_1):
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(1), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero_.default(empty)
+    diagonal_default = torch.ops.aten.diagonal.default(empty)
+    diagonal_default_1 = torch.ops.aten.diagonal.default(empty);  empty = None
+    copy_default = torch.ops.aten.copy_.default(diagonal_default_1, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default_1, a_1);  a_1 = None
+    return diagonal_default_1
     """)
 
         # Test 3: copy_() with different dtype, same shape
@@ -623,6 +858,21 @@ def forward(self, a_1):
     return add_tensor
     """)
 
+        reinplaced_logs = self.get_logs(f, torch.ones(2, dtype=torch.long), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero_.default(empty)
+    diagonal_default = torch.ops.aten.diagonal.default(empty)
+    diagonal_default_1 = torch.ops.aten.diagonal.default(empty);  empty = None
+    copy_default = torch.ops.aten.copy_.default(diagonal_default_1, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default_1, a_1);  a_1 = None
+    return diagonal_default_1
+    """)
+
         # Test 4: copy_() with different dtype, different shape
         self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
         logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
@@ -640,6 +890,21 @@ def forward(self, a_1):
     return add_tensor
     """)
 
+        reinplaced_logs = self.get_logs(f, torch.ones(1, dtype=torch.long), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero_.default(empty)
+    diagonal_default = torch.ops.aten.diagonal.default(empty)
+    diagonal_default_1 = torch.ops.aten.diagonal.default(empty);  empty = None
+    copy_default = torch.ops.aten.copy_.default(diagonal_default_1, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default_1, a_1);  a_1 = None
+    return diagonal_default_1
+    """)
+
     def test_expand_symint(self):
         # Once some existing SymInt bugs are ironed out, we should update
         # this test to plumb FakeSymbolicTensors through it
@@ -653,8 +918,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    expand_copy_sym_int = torch.ops.aten.expand_copy.SymInt(a_1, [2, 2]);  a_1 = None
-    return expand_copy_sym_int
+    expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2, 2]);  a_1 = None
+    return expand_copy_default
     """)
 
     def test_fill_(self):
@@ -676,6 +941,18 @@ def forward(self, a_1):
     fill_scalar = torch.ops.aten.fill.Scalar(diagonal_copy_default, 0);  diagonal_copy_default = None
     diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(add_tensor, fill_scalar);  add_tensor = fill_scalar = None
     return diagonal_scatter_default
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    diagonal_default = torch.ops.aten.diagonal.default(add_tensor)
+    fill_scalar = torch.ops.aten.fill_.Scalar(diagonal_default, 0);  diagonal_default = None
+    return add_tensor
     """)
 
     def test_resize_smaller(self):
@@ -713,6 +990,28 @@ def forward(self, a_1):
     return add_tensor_2
     """)  # noqa: B950
 
+        reinplaced_logs = self.get_logs(f, torch.ones(8, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    view_default = torch.ops.aten.view.default(add_tensor, [4, 4])
+    resize_default = torch.ops.aten.resize.default(view_default, [3, 3])
+    as_strided_default = torch.ops.aten.as_strided.default(view_default, [3, 3], [3, 1]);  view_default = None
+    view_default_1 = torch.ops.aten.view.default(as_strided_default, [-1]);  as_strided_default = None
+    add_tensor_1 = torch.ops.aten.add_.Tensor(view_default_1, 1)
+    view_default_2 = torch.ops.aten.view.default(add_tensor, [4, 4]);  add_tensor = None
+    as_strided_default_1 = torch.ops.aten.as_strided.default(view_default_2, [3, 3], [3, 1])
+    view_default_3 = torch.ops.aten.view.default(view_default_1, [3, 3]);  view_default_1 = None
+    view_default_4 = torch.ops.aten.view.default(view_default_2, [8, 2]);  view_default_2 = None
+    view_default_5 = torch.ops.aten.view.default(view_default_4, [4, 4]);  view_default_4 = None
+    as_strided_default_2 = torch.ops.aten.as_strided.default(view_default_5, [3, 3], [3, 1]);  view_default_5 = None
+    add_tensor_2 = torch.ops.aten.add_.Tensor(as_strided_default_2, 1)
+    return as_strided_default_2
+    """)
+
     def test_resize_larger_valid(self):
         def f(x):
             y = x + 1
@@ -744,6 +1043,21 @@ def forward(self, a_1):
     view_copy_default_1 = torch.ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
     add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1)
     return (view_copy_default_1, add_tensor_1)
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.ones(8, 2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    resize_default = torch.ops.aten.resize_.default(add_tensor, [5, 5])
+    view_default = torch.ops.aten.view.default(add_tensor, [25]);  add_tensor = None
+    fill_scalar = torch.ops.aten.fill_.Scalar(view_default, 1)
+    view_default_1 = torch.ops.aten.view.default(view_default, [5, 5]);  view_default = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_default_1, 1)
+    return (view_default_1, add_tensor_1)
     """)
 
     def test_resize_larger_invalid(self):
@@ -808,6 +1122,41 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):
             x1_not_functional.add_(x2_functional)
+
+    def test_index_mutation_on_non_input(self):
+        def f(x):
+            tmp = torch.zeros(10)
+            tmp[5].fill_(1)
+            return tmp
+        self.assert_functionalization(f, torch.ones(2))
+        logs = self.get_logs(f, torch.ones(2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([10], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero.default(empty);  empty = None
+    select_copy_int = torch.ops.aten.select_copy.int(zero_default, 0, 5)
+    select_copy_int_1 = torch.ops.aten.select_copy.int(zero_default, 0, 5)
+    fill_scalar = torch.ops.aten.fill.Scalar(select_copy_int_1, 1);  select_copy_int_1 = None
+    select_scatter_default = torch.ops.aten.select_scatter.default(zero_default, fill_scalar, 0, 5);  zero_default = fill_scalar = None
+    return select_scatter_default
+    """)  # noqa: B950
+
+        reinplaced_logs = self.get_logs(f, torch.ones(2), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    empty = torch.ops.aten.empty.memory_format([10], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zero_default = torch.ops.aten.zero_.default(empty)
+    select_int = torch.ops.aten.select.int(empty, 0, 5)
+    select_int_1 = torch.ops.aten.select.int(empty, 0, 5)
+    fill_scalar = torch.ops.aten.fill_.Scalar(select_int_1, 1);  select_int_1 = None
+    return empty
+    """)
 
 if __name__ == '__main__':
     run_tests()
