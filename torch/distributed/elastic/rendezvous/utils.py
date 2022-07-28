@@ -14,13 +14,13 @@ import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 __all__ = ['parse_rendezvous_endpoint']
 
 
 # From https://stackoverflow.com/a/27494105.
-def nic_ip_address(nic_name):
+def nic_ip_address(nic_name: str) -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(fcntl.ioctl(
         s.fileno(),
@@ -30,7 +30,7 @@ def nic_ip_address(nic_name):
 
 
 # Adapted from https://stackoverflow.com/a/27494105.
-def nic_info():
+def nic_info() -> List[Tuple[str, str]]:
     """Return a list of tuples containing each NIC's hostname and its IPv4."""
     nics = []
     try:
