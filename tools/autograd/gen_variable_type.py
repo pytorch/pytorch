@@ -97,12 +97,20 @@ from .gen_trace_type import (
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
 # not examine or modify requires_grad or grad_fn.
+# NB: this does NOT include overload name
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
+    "empty_like",
     "ones_like",
+    "full_like",
     "zeros_like",
     "rand_like",
     "randn_like",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_zeros",
+    "new_ones",
     # These are only implemented on integral types
     "__and__",
     "__iand__",
@@ -289,6 +297,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad2d",
     "replication_pad3d",
     "take",
+    "put",
     "put_",
     "_to_copy",
     "replication_pad1d_backward",
