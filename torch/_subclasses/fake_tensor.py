@@ -471,7 +471,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
-        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors]) or any([isinstance(i, torch._C.SymbolicIntNode) for i in tree_flatten((args, kwargs))[0]])
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
@@ -493,10 +493,12 @@ class FakeTensorMode(TorchDispatchMode):
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
-                    raise RuntimeError(
-                        "Trying to call aten.size on a tensor with symbolic shapes. "
-                        "It's likely that this is from calling tensor.shape in C++"
-                    )
+                    # Returning None here allows for a better error message with TORCH_SHOW_CPP_STACKTRACES=1
+                    return None
+                    # raise RuntimeError(
+                    #     "Trying to call aten.size on a tensor with symbolic shapes. "
+                    #     "It's likely that this is from calling tensor.shape in C++"
+                    # )
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
@@ -504,7 +506,6 @@ class FakeTensorMode(TorchDispatchMode):
         if "prims::" in func._schema.name:
             with no_dispatch():
                 return func(*args, **kwargs)
-
         if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]
             if func not in constructors:

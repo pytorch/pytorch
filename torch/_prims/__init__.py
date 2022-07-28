@@ -456,8 +456,10 @@ def _make_prim(
             raise RuntimeError("backwards not supported on prim")
 
     def _autograd_impl(*args, **kwargs):
-        flat_args, args_spec = tree_flatten((args, kwargs))
-        return BackwardsNotSupported.apply(args_spec, *flat_args)
+        g = torch._C._AutoDispatchBelowAutograd()
+        return _prim(*args, **kwargs)
+        # flat_args, args_spec = tree_flatten((args, kwargs))
+        # return BackwardsNotSupported.apply(args_spec, *flat_args)
 
     _meta_impl = _wrap_tensor_meta(meta)
 

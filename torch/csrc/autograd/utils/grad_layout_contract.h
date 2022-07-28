@@ -26,7 +26,8 @@ inline bool obeys_layout_contract(
     return false;
   } else if (variable.is_non_overlapping_and_dense()) {
     // Only look at stride for dimensions that are not of size 1.
-    const auto& grad_sizes = grad.sizes();
+    const auto& grad_sizes = grad.sym_sizes();
+    // We don't support symbolic strides yet.
     const auto& grad_strides = grad.strides();
     const auto& variable_strides = variable.strides();
     for (const auto idx : c10::irange(grad_sizes.size())) {

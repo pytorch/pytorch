@@ -1519,7 +1519,7 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes())
+  self: grad.expand_symint(self.sym_sizes())
   result: auto_linear
 
 - name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
