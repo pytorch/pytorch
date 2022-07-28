@@ -296,7 +296,6 @@ if IS_WINDOWS:
         sysconfig.get_config_var("prefix"),
         sysconfig.get_config_var("VERSION"))
     # Fix virtualenv builds
-    # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
             sys.base_prefix,

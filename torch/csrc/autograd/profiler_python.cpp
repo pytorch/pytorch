@@ -21,6 +21,7 @@
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
 
 namespace py = pybind11;
@@ -38,25 +39,33 @@ using no_ephemeral_t = std::tuple<>;
 // ============================================================================
 struct CodeLocation {
   CodeLocation() = default;
-  explicit CodeLocation(const PyFrameObject* frame)
-      : code_{frame->f_code}, lasti_{frame->f_lasti} {}
-
-  bool operator==(const CodeLocation& other) const {
-    return code_ == other.code_ && lasti_ == other.lasti_;
+  explicit CodeLocation(PyFrameObject* frame)
+      : line_number_{PyFrame_GetLineNumber(frame)} {
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+    filename_ = THPUtils_unpackStringView(code->co_filename).data();
+    name_ = THPUtils_unpackStringView(code->co_name).data();
   }
 
-  PyCodeObject* code_{nullptr};
-  int lasti_{0};
+  bool operator==(const CodeLocation& other) const {
+    return filename_ == other.filename_ && name_ == other.name_ &&
+        line_number_ == other.line_number_;
+  }
+
+  const char* filename_{nullptr};
+  const char* name_{nullptr};
+  int line_number_{0};
 };
 
-PyObject* nnModuleCode() {
+PyCodeObject* nnModuleCode() {
   static auto module_call_code = []() {
     pybind11::gil_scoped_acquire gil;
-    return py::module::import("torch.nn")
-        .attr("Module")
-        .attr("__call__")
-        .attr("__code__")
-        .ptr();
+    auto res = py::module::import("torch.nn")
+                   .attr("Module")
+                   .attr("__call__")
+                   .attr("__code__")
+                   .ptr();
+    TORCH_INTERNAL_ASSERT(PyCode_Check(res));
+    return (PyCodeObject*)res;
   }();
   return module_call_code;
 }
@@ -69,7 +78,7 @@ PyObject* nnModuleCode() {
 template <>
 struct std::hash<torch::profiler::impl::CodeLocation> {
   size_t operator()(const torch::profiler::impl::CodeLocation& x) {
-    return c10::get_hash(x.code_, x.lasti_);
+    return c10::get_hash(x.filename_, x.name_, x.line_number_);
   }
 };
 
@@ -203,8 +212,7 @@ class Callsite {
       "Key should be trivial, as it is passed by value.");
 
   template <typename U>
-  Callsite(U value, const PyFrameObject* f_back)
-      : value_(value), caller_(f_back) {}
+  Callsite(U value, PyFrameObject* f_back) : value_(value), caller_(f_back) {}
 
   bool operator==(const Callsite<C>& other) const {
     return value_ == other.value_ && caller_ == other.caller_;
@@ -254,11 +262,10 @@ template <>
 void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
   auto& locations = std::get<CallType::PyCall>(state_);
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
-    TORCH_INTERNAL_ASSERT(key.code_ != nullptr);
     locations[key] = {
-        PyCode_Addr2Line(key.code_, key.lasti_),
-        at::StringView(THPUtils_unpackString(key.code_->co_filename)),
-        at::StringView(THPUtils_unpackString(key.code_->co_name))};
+        key.line_number_,
+        at::StringView(key.filename_),
+        at::StringView(key.name_)};
   }
 }
 
@@ -271,11 +278,12 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyCall>(
 template <>
 void ValueCache::store<CallType::PyModuleCall>(
     const PyModuleCallKey& key,
-    PyFrameObject* frame) {
+    Config<CallType::PyModuleCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
-      TORCH_INTERNAL_ASSERT((PyObject*)(frame->f_code) == nnModuleCode());
+      auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+      TORCH_INTERNAL_ASSERT(code.get() == nnModuleCode());
       cache.module_forward_ = PyCallKey(frame);
       store<CallType::PyCall>(*cache.module_forward_, no_ephemeral_t());
     }
@@ -303,7 +311,7 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
 template <>
 void ValueCache::store<CallType::PyCCall>(
     const PyCCallKey& key,
-    PyObject* arg) {
+    Config<CallType::PyCCall>::ephemeral_t arg) {
   auto& names = std::get<CallType::PyCCall>(state_);
   if (C10_UNLIKELY(names.find(key) == names.end())) {
     names[key] = at::StringView(py::repr(arg));
@@ -500,7 +508,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg);
 
   torch::profiler::impl::RecordQueue* queue_;
-  PyObject* module_call_code_;
+  PyCodeObject* module_call_code_;
 
   std::deque<ThreadLocalResults> thread_local_results_;
   ValueCache value_cache_;
@@ -554,14 +562,16 @@ void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
     // to all the prior frames onto our event stack. (We stop at depth=128)
     std::vector<PyFrameObject*> current_stack;
     auto frame = PyEval_GetFrame();
+    Py_INCREF(frame);
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
       current_stack.push_back(frame);
-      frame = frame->f_back;
+      frame = PyFrame_GetBack(frame);
       depth++;
     }
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
       recordPyCall(thread_local_results_.back(), *it);
+      Py_DECREF(*it);
     }
 
     // Note:
@@ -598,7 +608,8 @@ void PythonTracer::clear() {
 void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
   static constexpr auto E = EventType::PyCall;
   auto get_key = [&]() -> TraceKey {
-    if ((PyObject*)(frame->f_code) == module_call_code_) {
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+    if (code.get() == module_call_code_) {
       // By default, CPython stores locals in a "fast" format, with an array
       // of names and an array of values. Consequently, frame->f_locals is
       // NULL since the interpreter has no need to populate it.
@@ -608,14 +619,15 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       // not stable across versions. As a result, we are forced to call
       // `PyFrame_FastToLocals` which forces the interpreter to materialize
       // the full dict of locals.
-      PyFrame_FastToLocals(frame);
-      auto self = PyDict_GetItemString(frame->f_locals, "self");
-      PyFrame_LocalsToFast(frame, 0);
-      TORCH_INTERNAL_ASSERT(frame->f_back != nullptr);
-      return tls.intern<CallType::PyModuleCall, E>(frame, self, frame->f_back);
-
+      auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      Py_INCREF(self.get());
+      auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
+      TORCH_INTERNAL_ASSERT(back != nullptr);
+      return tls.intern<CallType::PyModuleCall, E>(frame, self.get(), back.get());
     } else {
-      auto f_back = frame->f_back != nullptr ? frame->f_back : frame;
+      auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
+      auto f_back = (back.get() != nullptr) ? back.get() : frame;
       return tls.intern<CallType::PyCall, E>(no_ephemeral_t(), frame, f_back);
     }
   };
