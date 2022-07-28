@@ -549,7 +549,7 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NestedTensor only allows reduction of a single"):
             torch.nested_tensor([torch.tensor([[3, 4, 5]]), torch.tensor([[1, 2]])]).sum([0, 1], keepdim=True)
 
-        with self.assertRaisesRegex(RuntimeError, "NestedTensor always keeps the reduced dimension for now"):
+        with self.assertRaisesRegex(RuntimeError, "NestedTensor always requires keepdim=True for now."):
             torch.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(-1)
 
 
