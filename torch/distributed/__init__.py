@@ -75,4 +75,5 @@ if is_available():
 
     set_debug_level_from_env()
 
-    __all__.extend(distributed_c10d.__all__)
+    from . import distributed_c10d as _distributed_c10d
+    __all__.extend(_distributed_c10d.__all__)
