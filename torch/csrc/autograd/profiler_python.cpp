@@ -624,7 +624,8 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
-      return tls.intern<CallType::PyModuleCall, E>(frame, self.get(), back.get());
+      return tls.intern<CallType::PyModuleCall, E>(
+          frame, self.get(), back.get());
     } else {
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       auto f_back = (back.get() != nullptr) ? back.get() : frame;
