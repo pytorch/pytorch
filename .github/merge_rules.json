@@ -192,7 +192,7 @@
     {
       "name": "IDEEP",
       "patterns": [
-        "third-party/ideep/**",
+        "third_party/ideep",
         "caffe2/ideep/**",
         "caffe2/python/ideep/**"
       ],
