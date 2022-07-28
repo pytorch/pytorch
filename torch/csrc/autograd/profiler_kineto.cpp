@@ -765,8 +765,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 TORCH_API void registerProfilerFactory(
-    torch::profiler::impl::kineto::child_activity_profiler_factory_t factory) {
-      torch::profiler::impl::kineto::registerProfilerFactory(factory);
+    child_activity_profiler_factory_t factory) {
+  torch::profiler::impl::kineto::registerProfilerFactory(factory);
 }
 
 int64_t KinetoEvent::cudaElapsedUs() const {

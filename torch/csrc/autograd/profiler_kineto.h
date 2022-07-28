@@ -6,6 +6,10 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/util.h>
 
+namespace libkineto {
+class IActivityProfiler;
+}
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -18,6 +22,8 @@ struct ActivityTraceWrapper;
 namespace autograd {
 namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
+using child_activity_profiler_factory_t =
+    std::function<std::unique_ptr<libkineto::IActivityProfiler>()>;
 
 struct TORCH_API KinetoEvent {
   explicit KinetoEvent(bool is_python_function = false)
@@ -383,7 +389,7 @@ TORCH_API void enableProfilerWithEventPostProcess(
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
 TORCH_API void registerProfilerFactory(
-    torch::profiler::impl::kineto::child_activity_profiler_factory_t factory);
+    child_activity_profiler_factory_t factory);
 
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,

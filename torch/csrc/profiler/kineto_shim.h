@@ -25,7 +25,7 @@ struct CpuTraceBuffer;
 class ActivityTraceInterface;
 class IActivityProfiler;
 using ChildActivityProfilerFactory =
-  std::function<std::unique_ptr<IActivityProfiler>()>;
+    std::function<std::unique_ptr<IActivityProfiler>()>;
 } // namespace libkineto
 #endif
 
@@ -55,8 +55,9 @@ const DeviceAndResource kineto_ids();
 #ifdef USE_KINETO
 using trace_t = libkineto::CpuTraceBuffer;
 using interface_trace_t = libkineto::ActivityTraceInterface;
-using child_activity_profiler_factory_t = libkineto::ChildActivityProfilerFactory;
 using activity_t = libkineto::GenericTraceActivity;
+using child_activity_profiler_factory_t =
+    libkineto::ChildActivityProfilerFactory;
 #else
 struct DummyTraceBuffer {};
 struct DummyTraceInterface {};
