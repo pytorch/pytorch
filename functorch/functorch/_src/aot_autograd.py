@@ -1,9 +1,10 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import torch
 import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
 from torch.fx import immutable_collections
+from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch.nn.utils import _stateless
@@ -15,9 +16,6 @@ from .partitioners import default_partition
 from .named_members_polyfill import _named_parameters, _named_buffers
 from typing import Callable, List, Dict, Any, Tuple, Optional
 from functools import wraps
-import os
-
-AOT_PARTITIONER_DEBUG = 'AOT_PARTITIONER_DEBUG' in os.environ
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -169,14 +167,19 @@ def create_aot_autograd_function(
             # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
             old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
             if compiled_fw is None:
-                with preserve_rng_state():
+                flat_tensor_args = pytree.tree_map(
+                    lambda x: x.detach().requires_grad_(x.requires_grad)
+                    if isinstance(x, Tensor) else x, flat_tensor_args
+                )
+                fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
+                with preserve_rng_state(), fake_mode as mode:
                     # Set input tensors that require grad to leaves
-                    flat_tensor_args = pytree.tree_map(
-                        lambda x: x.detach().requires_grad_(x.requires_grad)
+                    fake_flat_tensor_args = pytree.tree_map(
+                        lambda x: mode.from_tensor(x) if mode else x
                         if isinstance(x, Tensor) else x, flat_tensor_args
                     )
                     with torch.set_grad_enabled(grad_state):
-                        out = flat_fn(*flat_tensor_args)
+                        out = flat_fn(*fake_flat_tensor_args)
                     out = pytree.tree_map(
                         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x, out
                     )
@@ -186,7 +189,7 @@ def create_aot_autograd_function(
                     else:
                         num_outs = 1
 
-                    joint_inputs = (flat_tensor_args, out)
+                    joint_inputs = (fake_flat_tensor_args, out)
                     aot_decompositions = {**aot_autograd_decompositions, **decompositions}
                     with torch.set_grad_enabled(grad_state):
                         fx_g = make_fx(joint_forward_backward, aot_decompositions)(
@@ -200,17 +203,18 @@ def create_aot_autograd_function(
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
-                # print(fw_module.code, bw_module.code)
+                if config.debug_graphs:
+                    print(fw_module.code, bw_module.code)
 
                 compiled_fw = fw_compiler(fw_module, flat_tensor_args)
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
-
-                if AOT_PARTITIONER_DEBUG:
+                if config.debug_partitioner:
                     activation_sizes = 0
                     for out in fw_outs[num_outs:]:
                         if isinstance(out, torch.Tensor):
                             activation_sizes += out.storage().nbytes()
                     print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                 compiled_bw = bw_compiler(bw_module, bw_args)
             else:
@@ -650,19 +654,22 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
 
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
-    class AOTModule(nn.Module):
-        def __init__(self):
-            super(AOTModule, self).__init__()
-            self.orig_module = mod
-
-        def forward(self, *args, **kwargs):
+    if top_kwargs:
+        def forward(*args, **kwargs):
             return compiled_f(
                 *params_flat,
                 *args,
                 **kwargs,
             )
+    else:
+        def forward(*args):
+            return compiled_f(
+                *params_flat,
+                *args,
+            )
 
-    return AOTModule()
+    forward.zero_grad = mod.zero_grad
+    return forward
 
 
 compiled_function = aot_function
