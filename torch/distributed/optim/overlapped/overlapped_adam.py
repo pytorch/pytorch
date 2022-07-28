@@ -14,7 +14,8 @@ class OverlappedAdam(OverlappedOptimizer):
         maximize: bool = False,
         foreach: bool = False,
         grad_scaler=None,
-        zero_grad=False
+        zero_grad: bool = False,
+        zero_grad_to_none: bool = False
     ):
         
         self._functional_adam = _FunctionalAdam([],
@@ -29,9 +30,10 @@ class OverlappedAdam(OverlappedOptimizer):
 
         super().__init__(functional_optim=self._functional_adam, 
                          grad_scaler=grad_scaler, 
-                         zero_grad=zero_grad)
+                         zero_grad=zero_grad,
+                         zero_grad_to_none=zero_grad_to_none)
         self.params = params
-        
+
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):
         return self._functional_adam.step_param(param=param, grad=grad)
         
