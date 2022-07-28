@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import math
 import operator
 import weakref
@@ -31,6 +32,7 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
@@ -264,11 +266,15 @@ def TensorMeta(
     if device.type == "meta":
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
     else:
-        return FakeTensor(
-            mode,
-            torch.empty(shape, dtype=dtype, device="meta"),
-            device,
-        )
+        # SymInt doesnt support empty_strided yet
+        if any(
+            isinstance(inp, torch.SymbolicIntNode)
+            for inp in itertools.chain(shape, strides)
+        ):
+            meta_t = torch.empty(shape, dtype=dtype, device="meta")
+        else:
+            meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+        return FakeTensor(mode, meta_t, device)
 
 
 #
@@ -453,13 +459,26 @@ def _make_prim(
         flat_args, args_spec = tree_flatten((args, kwargs))
         return BackwardsNotSupported.apply(args_spec, *flat_args)
 
+    _meta_impl = _wrap_tensor_meta(meta)
+
+    def _backend_select_impl(*args, **kwargs):
+        if kwargs.get("device") and kwargs["device"].type == "meta":
+            return _meta_impl(*args, **kwargs)
+        else:
+            return _prim_impl(*args, **kwargs)
+
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
     prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
+    prim_meta_impl.impl(name, _meta_impl)
 
     _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
+
+    from torch._subclasses.fake_tensor import contains_tensor_types
+
+    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments):
+        prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
         p.__doc__ = doc
