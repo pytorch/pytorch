@@ -17748,6 +17748,13 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_autograd=False,
            skips=(
+               # TODO: same as this?
+               # https://github.com/pytorch/pytorch/issues/81774
+               # also see: arange, new_full
+               # fails to match any schemas despite working in the interpreter
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # fails to match any schemas despite working in the interpreter
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # skip these tests since we have non tensor input
                DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
