@@ -86,7 +86,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     Jiterator-generated kernels accepts noncontiguous tensors, and supports boardcasting and type promotion.
 
     Args:
-        code_string (string): CUDA code string to be compiled by jiterator. The entry functor must return by value.
+        code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return by value.
         kwargs (Dict, optional): Keyword arguments for generated function
 
     Example::
@@ -140,7 +140,7 @@ def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) ->
     Create a jiterator-generated cuda kernel for an elementwise op that supports returning one or more outputs.
 
     Args:
-        code_string (string): CUDA code string to be compiled by jiterator. The entry functor must return value by reference.
+        code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return value by reference.
         num_outputs(int): number of outputs return by the kernel
         kwargs (Dict, optional): Keyword arguments for generated function
 

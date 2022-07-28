@@ -136,7 +136,7 @@ class ThroughputBenchmark(object):
                 iterations might be slightly larger. Which is reported as
                 stats.num_iters where stats is the result of this function
 
-            profiler_output_path (string): Location to save Autograd Profiler trace.
+            profiler_output_path (str): Location to save Autograd Profiler trace.
                 If not empty, Autograd Profiler will be enabled for the main benchmark
                 execution (but not the warmup phase). The full trace will be saved
                 into the file path provided by this argument

@@ -28,7 +28,7 @@ class Embedding(Module):
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
         sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
                                  See Notes for more details regarding sparse gradients.
@@ -183,14 +183,14 @@ class Embedding(Module):
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
                 First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
-            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
             padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                          therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
                                          i.e. it remains as a fixed "pad".
             max_norm (float, optional): See module initialization documentation.
             norm_type (float, optional): See module initialization documentation. Default ``2``.
-            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
+            scale_grad_by_freq (bool, optional): See module initialization documentation. Default ``False``.
             sparse (bool, optional): See module initialization documentation.
 
         Examples::
@@ -245,10 +245,10 @@ class EmbeddingBag(Module):
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  ``"sum"`` computes the weighted sum, taking :attr:`per_sample_weights`
                                  into consideration. ``"mean"`` computes the average of the values
                                  in the bag, ``"max"`` computes the max value over each bag.
@@ -410,12 +410,12 @@ class EmbeddingBag(Module):
         Args:
             embeddings (Tensor): FloatTensor containing weights for the EmbeddingBag.
                 First dimension is being passed to EmbeddingBag as 'num_embeddings', second as 'embedding_dim'.
-            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embeddingbag.weight.requires_grad = False``. Default: ``True``
             max_norm (float, optional): See module initialization documentation. Default: ``None``
             norm_type (float, optional): See module initialization documentation. Default ``2``.
-            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
-            mode (string, optional): See module initialization documentation. Default: ``"mean"``
+            scale_grad_by_freq (bool, optional): See module initialization documentation. Default ``False``.
+            mode (str, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
             include_last_offset (bool, optional): See module initialization documentation. Default: ``False``.
             padding_idx (int, optional): See module initialization documentation. Default: ``None``.

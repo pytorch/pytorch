@@ -25,7 +25,7 @@ def named_params_with_sharded_tensor(
             are direct members of this module.
 
     Yields:
-        (string, Union[Tensor, ShardedTensor]): Tuple containing
+        (str, Union[Tensor, ShardedTensor]): Tuple containing
             the name and parameter (or ShardedTensor parameter)
 
     Example::
