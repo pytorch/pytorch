@@ -6423,7 +6423,6 @@
 # TODO: this should have a view annotation
 # TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
-  variants: method
   dispatch:
     CompositeExplicitAutograd: lift
 
