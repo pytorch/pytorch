@@ -196,7 +196,7 @@ private:
   }
 
   C10_HOST_DEVICE inline detail::UINT4 rand(detail::UINT4& counter, detail::UINT2& key, uint32_t n_rounds) {
-    for (int32_t round = 0; round < (n_rounds - 1); round++) {
+    for (uint32_t round = 0; round < (n_rounds - 1); round++) {
         counter = single_round(counter, key);
         key[0] += (kPhilox10A); key[1] += (kPhilox10B);
       }
