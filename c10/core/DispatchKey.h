@@ -22,6 +22,10 @@ namespace c10 {
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 
+// WARNING!  If you add a new backend component to the end of this list,
+// make sure you update PrivateUse3Bit.  (But you shouldn't: private use
+// keys should have higher precedence than all built-in keys)
+
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
   _(CUDA, extra)                                \
@@ -38,15 +42,15 @@ namespace c10 {
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)
 
+// WARNING!  If we add a new per-backend functionality key that has higher
+// priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
+
 #define C10_FORALL_FUNCTIONALITY_KEYS(_) \
   _(Dense, )                             \
   _(Quantized, Quantized)                \
   _(Sparse, Sparse)                      \
   _(NestedTensor, NestedTensor)          \
   _(AutogradFunctionality, Autograd)
-
-// WARNING!  If we add a new per-backend functionality key that has higher
-// priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
 
 enum class BackendComponent : uint8_t {
 
@@ -85,8 +89,6 @@ enum class BackendComponent : uint8_t {
 
   // Define an alias to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
-  // (But you shouldn't: private use keys should have higher precedence than
-  // all built-in keys)
   EndOfBackendKeys = PrivateUse3Bit,
 };
 
@@ -165,9 +167,11 @@ enum class DispatchKey : uint16_t {
   // If any of these backends ever need to customize, e.g., Autograd, then we'll
   // need to add a DispatchKey::*Bit for them.
 
+  // TODO: put this in BackendComponents
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
+  // TODO: put this in BackendComponents
   // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
   // https://github.com/microsoft/onnxruntime, and is also used to test general
   // backend/extension machinery in the core. cf:
@@ -176,8 +180,8 @@ enum class DispatchKey : uint16_t {
   // - aten/src/ATen/test/extension_backend_test.cpp
   ORT,
 
-  Vulkan,
-  Metal,
+  Vulkan, // TODO: put this in BackendComponents
+  Metal, // TODO: put this in BackendComponents
 
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Quantized,
@@ -193,6 +197,8 @@ enum class DispatchKey : uint16_t {
   // intended for out of tree use; tested by aten/src/ATen/test/rng_test.cpp
   CustomRNGKeyId,
 
+  // TODO: Make Mkldnn a functionality key, so we can give it Meta
+  // support
   // Here are backends which specify more specialized operators
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
@@ -203,6 +209,7 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 
+  // TODO: Make SparseCsr a functionality key
   SparseCsrCPU,
   SparseCsrCUDA,
 
@@ -219,6 +226,7 @@ enum class DispatchKey : uint16_t {
 
   // Out-of-core key for Fake Tensor in torchdistx.
   // See https://pytorch.org/torchdistx/latest/fake_tensor.html
+  // TODO: delete this in favor of Python-implemented fake tensor
   Fake,
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -244,6 +252,7 @@ enum class DispatchKey : uint16_t {
   // key that triggers before composite operators, in case a composite operator
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
+  // TODO: delete this once torchdim lands in functorch
   Named,
 
   // The Conjugate dispatch key is set for any tensors that need to perform
@@ -335,6 +344,7 @@ enum class DispatchKey : uint16_t {
 
   Tracer,
 
+  // TODO: make Autocast a functionality key
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
@@ -396,8 +406,6 @@ enum class DispatchKey : uint16_t {
 // ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
 // Here are backends which you think of as traditionally specifying
 // how to implement operations on some device.
-
-// See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 
 #define DEFINE_PER_BACKEND_KEYS_FOR_BACKEND(n, prefix) prefix##n,
 
