@@ -352,8 +352,8 @@ class TestProfilerTree(TestCase):
                           aten::empty_strided
                             [memory]
                         aten::fill_
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                  <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in method append of list object at 0xXXXXXXXXXXXX>
+                  <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
                     autograd::engine::evaluate_function: PowBackward0
                       PowBackward0
                         aten::pow
@@ -398,7 +398,7 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   torch/profiler/profiler.py(...): _transit_action
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
                     torch/profiler/profiler.py(...): stop_trace
