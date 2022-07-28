@@ -70,6 +70,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Split*) override;
   void handle(Merge*) override;
   void handle(Expr*) override;
+  void handle(Swizzle2D*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
   Val* getExtent(IterDomain* id) const;
@@ -204,12 +205,22 @@ class IndexSwizzle : public IndexCompute {
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> zero_merged_in);
 
+  IndexSwizzle(
+      const TensorView* tv,
+      const TensorDomain* domain,
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> zero_merged_in);
+
   void run() override;
 
  protected:
   using IndexCompute::handle;
 
   void handle(Expr* e) override;
+
+  void handle(Swizzle2D* swizzle_2d) override;
 
  private:
   const TensorView* tv_ = nullptr;
@@ -345,8 +356,7 @@ class Index {
   //! this is not a bool value as if we have an unswitch loop with a vectorized
   //! loop inside, we only want to base the "unswitch" like predicate on the
   //! vectorized loop.
-  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
-  getReferenceRootPredicates(
+  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
