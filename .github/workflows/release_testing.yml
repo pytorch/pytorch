@@ -16,8 +16,8 @@ jobs:
       CUDA_VISIBLE_DEVICES: "0"
       CORE_LIST: "24-47"
       GOMP_CPU_AFFINITY: "24-47"
-      CUDA_VERSION: "11.3"
-      MAGMA_VERSION: "magma-cuda113"
+      CUDA_VERSION: "11.6"
+      MAGMA_VERSION: "magma-cuda116"
     steps:
       - name: Check out pytorch/pytorch
         uses: actions/checkout@v2
