@@ -17105,6 +17105,7 @@ op_db: List[OpInfo] = [
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
         sample_inputs_func=sample_inputs_embedding_bag,
+        assert_jit_shape_analysis=True,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),

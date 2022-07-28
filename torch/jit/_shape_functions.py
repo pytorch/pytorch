@@ -452,6 +452,34 @@ def embedding(
     size.append(weight[1])
     return size
 
+def embedding_bag_padding_idx(weight: List[int], indices: List[int], offsets: List[int], scale_grad_by_freq: bool, mode: int, sparse: int, per_sample_weights: Optional[List[int]], include_last_offset: bool, padding_idx: Optional[int]) -> Tuple[List[int], List[int], List[int], List[int]]):
+    assert len(weight) == 2
+    assert len(indices) == 1
+    assert len(offsets) == 1
+    output_bag_shape: List[int] = []
+    out_dim0 = offsets[0]
+    if (include_last_offset):
+        out_dim0 = out_dim0 - 1
+    out_dim1 = weight[1]
+    output_bag_shape.append(out_dim0)
+    output_bag_shape.append(out_dim1)
+
+    offset2bag_shape: List[int] = []
+    if mode == 1:
+        offset2bag_shape.append(0)
+    else:
+        offset2bag_shape = _copy(indices)
+
+    bag_size_shape = _copy(offsets)
+
+    max_indices_shape: List[int] = []
+    if mode == 2:
+        max_indices_shape = _copy(output_bag_shape)
+    else:
+        max_indices_shape = _copy(offsets)
+
+    return output_bag_shape, offset2bag_shape, bag_size_shape, max_indices_shape
+
 
 def max_int():
     return 9223372036854775807
@@ -1038,6 +1066,7 @@ add_shape_compute_mapping("aten::softmax.int(Tensor self, int dim, ScalarType? d
 add_shape_compute_mapping("aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", unary)
 add_shape_compute_mapping("aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", unary)
 add_shape_compute_mapping("aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", embedding)
+add_shape_compute_mapping("aten::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor, Tensor)", embedding_bag_padding_idx)
 add_shape_compute_mapping("aten::mm(Tensor self, Tensor mat2) -> Tensor", mm)
 add_shape_compute_mapping("aten::dot(Tensor self, Tensor tensor) -> Tensor", dot)
 add_shape_compute_mapping("aten::mv(Tensor self, Tensor vec) -> Tensor", mv)
