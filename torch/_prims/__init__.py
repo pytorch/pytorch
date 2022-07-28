@@ -268,8 +268,7 @@ def TensorMeta(
     else:
         # SymInt doesnt support empty_strided yet
         if any(
-            isinstance(inp, torch.SymbolicIntNode)
-            for inp in itertools.chain(shape, strides)
+            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
         ):
             meta_t = torch.empty(shape, dtype=dtype, device="meta")
         else:

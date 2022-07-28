@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
@@ -11,11 +11,11 @@
 namespace torch {
 namespace lazy {
 
-class TORCH_API SymbolicIntNode : public c10::SymbolicIntNode {
+class TORCH_API SymIntNodeImpl : public c10::SymIntNodeImpl {
  public:
-  SymbolicIntNode(NodePtr ptr) : node_(std::move(ptr)){};
-  std::shared_ptr<c10::SymbolicIntNode> add(
-      const std::shared_ptr<c10::SymbolicIntNode>& other) override {
+  SymIntNodeImpl(NodePtr ptr) : node_(std::move(ptr)){};
+  std::shared_ptr<c10::SymIntNodeImpl> add(
+      const std::shared_ptr<c10::SymIntNodeImpl>& other) override {
     TORCH_CHECK(false, "NYI");
   }
   NodePtr node_;
