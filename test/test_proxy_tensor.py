@@ -437,10 +437,6 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
-    xfail('complex'),
-    xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
@@ -454,6 +450,10 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -823,6 +823,7 @@ symbolic_tensor_failures = {
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
+    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('var', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition

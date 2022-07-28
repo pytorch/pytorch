@@ -20688,6 +20688,9 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # See https://github.com/pytorch/pytorch/issues/82364
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
         ),
         supports_nvfuser=False,
     ),
