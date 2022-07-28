@@ -393,8 +393,7 @@
     "set_debug_level_from_env",
     "timedelta",
     "ProcessGroupMPI",
-    "ProcessGroupNCCL",
-    "ProcessGroupUCC"
+    "ProcessGroupNCCL"
   ],
   "torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks": [
     "Any",
@@ -447,8 +446,7 @@
     "rendezvous",
     "timedelta",
     "ProcessGroupMPI",
-    "ProcessGroupNCCL",
-    "ProcessGroupUCC"
+    "ProcessGroupNCCL"
   ],
   "torch.distributed.elastic.events": [
     "Dict",
