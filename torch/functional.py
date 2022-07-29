@@ -252,7 +252,7 @@ def einsum(*args: Any) -> Tensor:
         may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
-        equation (string): The subscripts for the Einstein summation.
+        equation (str): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
@@ -575,7 +575,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
-        pad_mode (string, optional): controls the padding method used when
+        pad_mode (str, optional): controls the padding method used when
             :attr:`center` is ``True``. Default: ``"reflect"``
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``
