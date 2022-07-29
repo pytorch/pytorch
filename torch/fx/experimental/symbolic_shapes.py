@@ -22,7 +22,7 @@ def create_contiguous(shape):
     return list(reversed(strides))
 
 def is_symbolic_op(func):
-    return func in [aten.sym_size.default, aten.dim.default, 
+    return func in [aten.sym_size.default, aten.dim.default,
                     aten.is_contiguous.default, aten.stride.default, aten.sym_numel.default
                     ]
 
