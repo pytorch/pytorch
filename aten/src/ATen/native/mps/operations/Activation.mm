@@ -1759,7 +1759,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
     NSMutableArray<NSNumber*> * reduce_dims = [NSMutableArray<NSNumber*> new];
     Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
     Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
-    
+
     TORCH_CHECK(
       weight_.dim() == 1 || weight_.dim() == 0,
       "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ", weight_.dim()
