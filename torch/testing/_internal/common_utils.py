@@ -833,7 +833,7 @@ TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
 
-TEST_LIBROSA = _check_module_exists('librosa')
+TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
