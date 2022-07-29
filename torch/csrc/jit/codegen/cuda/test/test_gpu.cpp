@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/grouped_reduction.h>
+#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -24844,6 +24845,71 @@ TEST_F(NVFuserTest, FusionInsertMagicZero1_CUDA) {
       PredicateMagicZeroChecker::isProtected(tv2, gpulw),
       "Failed to protect the predicates of ",
       tv2->toString());
+}
+
+TEST_F(NVFuserTest, FusionInlinePropagatorBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 3, 4});
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  // broadcasting
+  auto tv2 = broadcast(tv1, {false, true, false, true, false, true});
+  auto tv3 = cos(tv2);
+  auto tv4 = tan(tv3);
+  fusion.addOutput(tv4);
+
+  for (auto tv : {tv2, tv3, tv4}) {
+    tv->merge(0);
+    tv->merge(1);
+    tv->merge(2);
+  }
+
+  InlinePropagator inline_propagator(tv0, -1, ComputeAtMode::MostInlined);
+  MaxRootDomainInfoSpanningTree(tv0).traverse(&inline_propagator);
+
+  TORCH_CHECK(tv4->getComputeAtPosition() == 3);
+  TORCH_CHECK(tv3->getComputeAtPosition() == 3);
+  TORCH_CHECK(tv2->getComputeAtPosition() == 3);
+  TORCH_CHECK(tv1->getComputeAtPosition() == 3);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({2, 3, 4}, options);
+  auto output = input.sin().view({2, 1, 3, 1, 4, 1}).cos().tan();
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input});
+  auto cg_outputs = fe.runFusion({input});
+
+  testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionMatchedLeafPosWithoutReplayBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 3, 4});
+  fusion.addInput(tv0);
+  auto tv1 = broadcast(tv0, {false, true, false, true, false, true});
+  auto tv2 = sin(tv1);
+  fusion.addOutput(tv2);
+
+  for (auto tv : {tv1, tv2}) {
+    tv->merge(0);
+    tv->merge(1);
+    tv->merge(2);
+  }
+
+  TORCH_CHECK(
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(tv0, tv1, 3) == 3);
+  TORCH_CHECK(
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(tv1, tv0, 3) == 3);
+  TORCH_CHECK(
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(tv1, tv2, 3) == 3);
+  TORCH_CHECK(
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(tv2, tv1, 3) == 3);
 }
 
 } // namespace jit

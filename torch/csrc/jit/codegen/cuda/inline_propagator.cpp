@@ -225,8 +225,8 @@ void InlinePropagator::setUp() {
 namespace {
 
 // Try to find the aligned position on consumer's domain corresponding to the
-//  compute at position of producer domain. Used in computeAt pass only. No
-//  checking on actual producer-consumer relationship.
+//  compute at position of producer domain. Used in InlinePropagator pass only.
+//  No checking on actual producer-consumer relationship.
 unsigned int getConsumerPosAlignedToProducerCA(
     TensorView* consumer,
     TensorView* producer) {
@@ -239,18 +239,10 @@ unsigned int getConsumerPosAlignedToProducerCA(
   // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
   // NVFuserTest.FusionComplexBCast1_CUDA
 
-  auto c2p_map =
+  auto disjoint_sets =
       BestEffortReplay::replayPasC(
-          producer,
-          consumer,
-          -1,
-          // Compute at root domain may not be valid here, as all
-          // producers don't have to be able to map into consumer at
-          // max producer position. Since computeAt should be valid
-          // and this mechanism is only intended to lower produce
-          // position of consumer, we can simply use the pairwise map.
-          PairwiseRootDomainMap(producer, consumer))
-          .getReplay();
+          producer, consumer, -1, PairwiseRootDomainMap(producer, consumer))
+          .getDisjointSets();
 
   // Find the innermost position of consumer that has
   //  been mapped within the producer ca axis.
@@ -261,12 +253,8 @@ unsigned int getConsumerPosAlignedToProducerCA(
     if (std::any_of(
             p_dom.begin(),
             p_dom.begin() + producer->getComputeAtPosition(),
-            [&consumer_id, &c2p_map](IterDomain* p_id) {
-              auto c_id_it = c2p_map.find(consumer_id);
-              if (c_id_it != c2p_map.end()) {
-                return c_id_it->second == p_id;
-              }
-              return false;
+            [&consumer_id, &disjoint_sets](IterDomain* p_id) {
+              return disjoint_sets.permissiveAreMapped(consumer_id, p_id);
             })) {
       break;
     }
