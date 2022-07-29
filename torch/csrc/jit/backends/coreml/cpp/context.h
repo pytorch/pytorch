@@ -1,5 +1,4 @@
-#ifndef PTM_COREML_Context_h
-#define PTM_COREML_Context_h
+#pragma once
 
 #include <atomic>
 #include <string>
@@ -25,5 +24,3 @@ void setModelCacheDirectory(std::string path);
 } // namespace mobile
 } // namespace jit
 } // namespace torch
-
-#endif
