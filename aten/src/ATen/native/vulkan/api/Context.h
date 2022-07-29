@@ -279,7 +279,7 @@ inline void record_copy(
     const D& destination,
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
-    const api::utils::uvec3& dst_offset) {}
+    const api::utils::uvec3& dst_offset) = delete;
 
 template <>
 inline void record_copy<VulkanImage, VulkanImage>(

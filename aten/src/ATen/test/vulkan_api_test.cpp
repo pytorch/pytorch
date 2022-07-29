@@ -266,24 +266,13 @@ TEST_F(VulkanAPITest, copy_to_texture) {
   };
 
   for (auto in_cpu : test_tensors) {
-    // Test using transfer commands
-    at::Tensor in_vk_copied = at::native::vulkan::ops::to_vulkan(in_cpu);
-    at::Tensor out_copied = at::native::vulkan::ops::to_cpu(in_vk_copied);
+    at::Tensor in_vk_copied = in_cpu.vulkan();
+    at::Tensor out_copied = in_vk_copied.cpu();
 
     const auto check_copy = almostEqual(out_copied, in_cpu);
 
     if(!check_copy) {
       std::cout << "Copy failed on size " << in_cpu.sizes()
-                << "with dtype" << in_cpu.dtype() << std::endl;
-    }
-
-    // Test using compute shaders
-    at::Tensor in_vk_packed = at::native::vulkan::ops::to_vulkan(in_cpu, true);
-    at::Tensor out_packed = at::native::vulkan::ops::to_cpu(in_vk_packed, true);
-
-    const auto check_pack = almostEqual(out_packed, in_cpu);
-    if(!check_pack) {
-      std::cout << "Pack failed on size " << in_cpu.sizes()
                 << "with dtype" << in_cpu.dtype() << std::endl;
     }
   }

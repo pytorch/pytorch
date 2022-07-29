@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Allocator.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/hash.h>
@@ -136,7 +137,7 @@ class MemoryMap final {
   VmaAllocator allocator_;
   VmaAllocation allocation_;
   void* data_;
-  size_t nbytes_;
+  VkDeviceSize data_len_;
 
  public:
   template <typename T>
@@ -145,7 +146,7 @@ class MemoryMap final {
   }
 
   inline size_t nbytes() {
-    return nbytes_;
+    return utils::safe_downcast<size_t>(data_len_);
   }
 
   void invalidate();

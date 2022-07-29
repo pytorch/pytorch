@@ -175,7 +175,7 @@ MemoryMap::MemoryMap(const VulkanBuffer& buffer, const uint8_t access)
       allocator_(buffer.vma_allocator()),
       allocation_(buffer.allocation()),
       data_(nullptr),
-      nbytes_{buffer.mem_size()} {
+      data_len_{buffer.mem_size()} {
   VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
 }
 
@@ -183,7 +183,8 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
     : access_(other.access_),
       allocator_(other.allocator_),
       allocation_(other.allocation_),
-      data_(other.data_) {
+      data_(other.data_),
+      data_len_{other.data_len_} {
   other.allocation_ = VK_NULL_HANDLE;
   other.data_ = nullptr;
 }
