@@ -712,8 +712,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_filename = sanitize_test_filename(test_filename)
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
+        build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
         if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
-            "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
+            "cuda" in build_environment and "linux" in build_environment
         ):
             # exclude linux cuda tests because we run into memory issues when running in parallel
             import pytest
@@ -725,7 +726,7 @@ def run_tests(argv=UNITTEST_ARGS):
             pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
             print(f'Test results will be stored in {pytest_report_path}')
             # mac slower on 4 proc than 3
-            num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            num_procs = 3 if "macos" in build_environment else 4
             # f = failed
             # E = error
             # X = unexpected success
