@@ -10,7 +10,6 @@ from torch.profiler import profile
 import torch.utils.benchmark as benchmark
 from torch.profiler._utils import index_of_first_match
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
-                                _ExtraFields_Backend, _ExtraFields_Allocation,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
 
@@ -28,6 +27,7 @@ class Pattern:
         self.should_benchmark = should_benchmark
         self.name = "Please specify a name for pattern"
         self.description = "Please specify a description for pattern"
+        self.url = ""
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
         self.event_tree = prof.profiler.kineto_results.experimental_event_tree(
         )
@@ -54,11 +54,13 @@ class Pattern:
         default_summary = f"{self.name}: {len(events)} events matched."
         if self.should_benchmark:
             # If benchmark summary is not empty, use it.
-            return self.benchmark_summary(events) if hasattr(  # type: ignore[attr-defined]
-                self, 'benchmark') else default_summary
+            return self.benchmark_summary(
+                events) if hasattr(  # type: ignore[attr-defined]
+                    self, 'benchmark') else default_summary
         return default_summary
 
     def benchmark_summary(self, events: List[_ProfilerEvent]):
+
         def format_time(time_ns: int):
             unit_lst = ["ns", "us", "ms", "s"]
             for unit in unit_lst:
@@ -67,7 +69,8 @@ class Pattern:
                 time_ns //= 1000
 
         assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
-        shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
+        shapes_factor_map = self.benchmark(  # type: ignore[attr-defined]
+            events)
         original_time = sum(event.duration_time_ns for event in events)
         new_time = sum(shapes_factor_map[input_shapes(event)] *
                        event.duration_time_ns for event in events)
@@ -159,6 +162,7 @@ class ExtraCUDACopyPattern(Pattern):
         super().__init__(prof, should_benchmark)
         self.name = "Extra CUDA Copy Pattern"
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
+        self.url = "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#create-tensors-directly-on-the-target-device"
         self.init_ops = {
             "aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"
         }
@@ -274,6 +278,7 @@ class FP32MatMulPattern(Pattern):
             "You are currently using GPU that supports TF32. "
             "Please enable TF32 by setting 'torch.backends.cuda.matmul.allow_tf32 = True'"
         )
+        self.url = "https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
 
     @property
     def skip(self):
@@ -284,7 +289,7 @@ class FP32MatMulPattern(Pattern):
 
     def match(self, event: _ProfilerEvent):
         # If we saw this pattern once, we don't need to match it again
-        if event_type(event) != _EventType.TorchOp:
+        if event.tag != _EventType.TorchOp:
             return False
         assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
         if event.name() == "aten::mm":
@@ -342,6 +347,7 @@ class OptimizerSingleTensorPattern(Pattern):
             "Deteced optimizer running with single tensor implementation. "
             "Please enable multi tensor implementation by passing 'foreach=True' into optimizer."
         )
+        self.url = ""
 
     def match(self, event: _ProfilerEvent):
         for optimizer in self.optimizers_with_foreach:
@@ -375,10 +381,17 @@ class SynchronizedDataLoaderPattern(Pattern):
             "Detected DataLoader running with synchronized implementation. "
             "Please enable asynchronous dataloading by setting num_workers > 0 when initializing DataLoader."
         )
+        self.url = (
+            "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html"
+            "#enable-async-data-loading-and-augmentation")
 
     def match(self, event: _ProfilerEvent):
+
         def is_dataloader_function(name: str, function_name: str):
-            return name.startswith(os.path.join("torch", "utils", "data", "dataloader.py")) and name.endswith(function_name)
+            return name.startswith(
+                os.path.join("torch", "utils", "data",
+                             "dataloader.py")) and name.endswith(function_name)
+
         if not is_dataloader_function(event.name(), "__iter__"):
             return False
         if not event.children:
@@ -389,7 +402,8 @@ class SynchronizedDataLoaderPattern(Pattern):
         if not event.children:
             return False
         event = event.children[0]
-        return not is_dataloader_function(event.name(), "check_worker_number_rationality")
+        return not is_dataloader_function(event.name(),
+                                          "check_worker_number_rationality")
         # TODO: We should also check if the loader is bottleneck.
 
 
@@ -418,6 +432,9 @@ class GradNotSetToNonePattern(Pattern):
         self.description = (
             "Detected gradient set to zero instead of None. "
             "Please add 'set_to_none=True' when calling zero_grad().")
+        self.url = (
+            "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html"
+            "#disable-gradient-calculation-for-validation-or-inference")
 
     def match(self, event: _ProfilerEvent):
         if not event.name().endswith(": zero_grad"):
@@ -450,6 +467,9 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
         super().__init__(prof, should_benchmark)
         self.name = "Enabling Bias in Conv2d Followed By BatchNorm Pattern"
         self.description = "Detected bias enabled in Conv2d that is followed by BatchNorm2d. Please set 'bias=False' in Conv2d."
+        self.url = (
+            "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html"
+            "#disable-bias-for-convolutions-directly-followed-by-a-batch-norm")
 
     @property
     def skip(self):
@@ -477,6 +497,7 @@ class MatMulDimInFP16Pattern(Pattern):
         super().__init__(prof, should_benchmark)
         self.name = "Matrix Multiplication Dimension Not Aligned Pattern"
         self.description = "Detected matmul with dimension not aligned. Please use matmul with aligned dimension."
+        self.url = "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#use-mixed-precision-and-amp"
 
     @property
     def skip(self):
@@ -493,8 +514,10 @@ class MatMulDimInFP16Pattern(Pattern):
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        if (arg_dtype == "c10::BFloat16" or arg_dtype
-                == "c10::Half") and not mutiple_of(input_shapes(event), 8):
+        # TODO: Have a better way to check dtype_size
+        if (arg_dtype.endswith("c10::BFloat16")
+                or arg_dtype.endswith("c10::Half")) and not mutiple_of(
+                    input_shapes(event), 8):
             return True
         return False
 
@@ -533,12 +556,12 @@ class MatMulDimInFP16Pattern(Pattern):
 
 def source_code_location(event: _ProfilerEvent):
     while event:
-        if event_type(event) == _EventType.PyCall or event_type(
-                event) == _EventType.PyCCall:
+        if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
-            if not event.extra_fields.caller.file_name.startswith("torch" + os.sep):
+            if not event.extra_fields.caller.file_name.startswith("torch" +
+                                                                  os.sep):
                 return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
         event = event.parent
     return "No source code location found"
@@ -610,12 +633,19 @@ def report_all_anti_patterns(prof,
                 reported.add(report_msg)
                 src_location, line_no = source_code_location(event).split(":")
                 report_dict.setdefault(src_location, []).append({
-                    "line_number": int(line_no),
-                    "message": anti_pattern.description
+                    "line_number":
+                    int(line_no),
+                    "name":
+                    anti_pattern.name,
+                    "url":
+                    anti_pattern.url,
+                    "message":
+                    anti_pattern.description
                 })
 
     if json_report_dir is not None:
-        json_report_path = os.path.join(json_report_dir, "torchtidy_report.json")
+        json_report_path = os.path.join(json_report_dir,
+                                        "torchtidy_report.json")
         if os.path.exists(json_report_path):
             with open(json_report_path, "r") as f:
                 exisiting_report = json.load(f)
@@ -629,18 +659,3 @@ def report_all_anti_patterns(prof,
     message_list.append(f"{'-'*40}TorchTidy Report{'-'*40}")
     if print_enable:
         print("\n".join(message_list))
-
-
-def event_type(event: _ProfilerEvent):
-    if isinstance(event.extra_fields, _ExtraFields_TorchOp):
-        return _EventType.TorchOp
-    elif isinstance(event.extra_fields, _ExtraFields_Backend):
-        return _EventType.Backend
-    elif isinstance(event.extra_fields, _ExtraFields_Allocation):
-        return _EventType.Allocation
-    elif isinstance(event.extra_fields, _ExtraFields_PyCall):
-        return _EventType.PyCall
-    elif isinstance(event.extra_fields, _ExtraFields_PyCCall):
-        return _EventType.PyCCall
-    else:
-        raise Exception("Unknown event type")
