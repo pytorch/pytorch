@@ -875,7 +875,7 @@ static Tensor convolution_same(
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
     DimVector output_padding(static_cast<size_t>(dim));
-    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+    return at::convolution(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
@@ -913,7 +913,7 @@ Tensor _convolution_mode(
   } else if (padding == "valid") {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
-    return at::native::convolution(
+    return at::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
@@ -1067,7 +1067,7 @@ ConvBackend select_conv_backend(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1309,7 +1309,7 @@ at::Tensor _convolution(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1480,7 +1480,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     output = view3d(output);
   }
 
@@ -1815,7 +1815,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -2031,12 +2031,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
   // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }

@@ -7442,6 +7442,9 @@ a")
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
                         continue
+                    # Skip unsigned tensor initializaton for signed values on 3.10
+                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
+                        continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
                     exec(code, globals(), scope)
@@ -16132,6 +16135,22 @@ dedent """
                 return x[(1,)]
 
         self.checkModule(MyModule(), (torch.ones(2, 3),))
+
+    def test_context_manager(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                p = x + y
+                q = p + 2.0
+                return q
+
+        x = torch.randn(3, 2, dtype=torch.float)
+        y = torch.randn(3, 2, dtype=torch.float)
+        for fuser_name in ['fuser0', 'fuser1', 'none']:
+            with torch.jit.fuser(fuser_name):
+                self.checkModule(MyModule(), (x, y))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
