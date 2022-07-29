@@ -7831,7 +7831,7 @@ def reference_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
     )
 
     kwargs3d = kwargs2d + (
-        # make sure we can index dims other than 0 and 1
+        # make sure we can use non-sequential dims
         dict(offset=-1, dim1=0, dim2=2),
     )
 
