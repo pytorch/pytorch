@@ -685,6 +685,7 @@ Tensor class reference
     Tensor.type
     Tensor.type_as
     Tensor.unbind
+    Tensor.unflatten
     Tensor.unfold
     Tensor.uniform_
     Tensor.unique

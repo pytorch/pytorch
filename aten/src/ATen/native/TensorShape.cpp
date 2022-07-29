@@ -2899,7 +2899,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
@@ -2938,8 +2938,12 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   return result;
 }
 
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+  return native::unflatten_impl(self, dim, sizes, c10::nullopt);
+}
+
 Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
-  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+  return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {

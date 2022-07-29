@@ -1073,6 +1073,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.true_divide: lambda input, other: -1,
         torch.trunc: lambda input, out=None: -1,
         torch.unbind: lambda input, dim=0: -1,
+        torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
