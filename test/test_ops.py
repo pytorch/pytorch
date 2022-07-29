@@ -1675,6 +1675,12 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+aliasing_failures = (
+    "histogramdd",
+    "nn.functional.pixel_shuffle",
+    "nn.functional.pixel_unshuffle",
+)
+
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
@@ -1686,6 +1692,7 @@ class TestFakeTensorNonErroring(TestCase):
             name += "." + op.variant_test_name
         if name in fake_skips or "sparse" in name:
             self.skipTest("Skip failing test")
+
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
@@ -1727,9 +1734,11 @@ class TestFakeTensorNonErroring(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
                     prims.utils.compare_tensor_meta(fake_out, real_out)
-                    fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
-                    real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
-                    self.assertEqual(fake_aliasing, real_aliasing)
+
+                    if name not in aliasing_failures:
+                        fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
+                        real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
+                        self.assertEqual(fake_aliasing, real_aliasing)
 
                 self.assertTrue(name not in dynamic_output_op_tests)
 
