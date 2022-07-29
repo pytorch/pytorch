@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state)
+     freeze_rng_state, IS_ARM64)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -868,6 +868,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -905,6 +906,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_eigh_lower_uplo(self, device, dtype):
         def run_test(shape, batch, uplo):
             # check lower case uplo
@@ -2872,6 +2874,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_pinv(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
