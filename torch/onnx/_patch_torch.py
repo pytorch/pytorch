@@ -168,16 +168,6 @@ def _add_attribute(node, key, value, aten):
     return getattr(node, kind + "_")(name, value)
 
 
-def _node_getitem(self, k):
-    """Gets attributes of a node which is polymorphic over return type.
-
-    This is monkey-patched onto Node.
-    """
-    sel = self.kindOf(k)
-    return getattr(self, sel)(k)
-
-
 torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
 torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

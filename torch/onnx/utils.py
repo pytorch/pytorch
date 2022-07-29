@@ -1702,30 +1702,24 @@ def _run_symbolic_function(
     """
 
     opset_version = GLOBALS.export_onnx_opset_version
-    symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]
-    # TODO(ezyang): I think this is not necessary anymore
-    if n.kind().endswith("_"):
-        ns_op_name = n.kind()[:-1]
-    else:
-        ns_op_name = n.kind()
-    ns, op_name = ns_op_name.split("::")
+    ns_op_name = n.kind()
+    namespace, op_name = ns_op_name.split("::")
 
     try:
         symbolic_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        if ns == "aten":
+        if namespace == "aten":
             domain = ""
-        elif ns == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
+        elif namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
             domain = "caffe2"
         else:
-            domain = ns
+            domain = namespace
 
         if symbolic_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(
@@ -1742,11 +1736,13 @@ def _run_symbolic_function(
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
             return symbolic_fn(g, *inputs, **attrs)
-        elif ns == "onnx":
+        elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
-        elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+        elif _should_aten_fallback(
+            namespace, op_name, opset_version, operator_export_type
+        ):
             # Direct ATen export requested
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             outputs = n.outputsSize()
