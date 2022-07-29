@@ -170,7 +170,7 @@ class autocast(object):
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(string, required):  Whether to use 'cuda' or 'cpu' device
+        device_type(str, required):  Whether to use 'cuda' or 'cpu' device
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
         dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
         cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
