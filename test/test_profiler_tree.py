@@ -34,7 +34,6 @@ PRUNE_FUNCTIONS = {
 ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
 
 
-@unittest.skipIf(IS_ARM64, "Not working on ARM")
 class ProfilerTree:
 
     @staticmethod
@@ -155,6 +154,7 @@ class ProfilerTree:
                 caller_name = to_string(extra_fields.caller)
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
