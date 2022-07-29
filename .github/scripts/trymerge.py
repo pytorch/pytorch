@@ -1058,10 +1058,15 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
         raise PostCommentError("Don't want to revert based on edited command")
     author_association = comment.author_association
     author_login = comment.author_login
+    allowed_reverters = ["COLLABORATOR", "MEMBER", "OWNER"]
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
-    expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
-    if author_association != expected_association and author_association != "OWNER":
-        raise PostCommentError(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
+    if pr.is_base_repo_private():
+        allowed_reverters.append("CONTRIBUTOR")
+    if author_association not in allowed_reverters:
+        raise PostCommentError((
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
+        ))
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
