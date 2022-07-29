@@ -134,9 +134,7 @@ struct EventFieldsVisitor {
   }
 
   void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
-    kineto_event_.get()
-        .deviceIndex(alloc.device_index_)
-        .nBytes(alloc.alloc_size_);
+    kineto_event_.get().deviceIndex(alloc.device_index_);
 
     addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
