@@ -4553,6 +4553,41 @@ Example::
 )
 
 add_docstr(
+    torch.unflatten,
+    r"""
+unflatten(input, dim, sizes) -> Tensor
+
+Expands a dimension of the input tensor over multiple dimensions.
+
+.. seealso::
+
+    :func:`torch.flatten` the inverse of this function. It coalesces several dimensions into one.
+
+Args:
+    {input}
+    dim (int): Dimension to be unflattened, specified as an index into
+         ``input.shape``.
+    sizes (Tuple[int]): New shape of the unflattened dimension.
+         One of its elements can be `-1` in which case the corresponding output
+         dimension is inferred. Otherwise, the product of ``sizes`` *must*
+         equal ``input.shape[dim]``.
+
+Returns:
+    A View of input with the specified dimension unflattened.
+
+Examples::
+    >>> torch.unflatten(torch.randn(3, 4, 1), 1, (2, 2)).shape
+    torch.Size([3, 2, 2, 1])
+    >>> torch.unflatten(torch.randn(3, 4, 1), 1, (-1, 2)).shape
+    torch.Size([3, 2, 2, 1])
+    >>> torch.unflatten(torch.randn(5, 12, 3), -1, (2, 2, 3, 1, 1)).shape
+    torch.Size([5, 2, 2, 3, 1, 1, 3])
+""".format(
+        **common_args
+    ),
+)
+
+add_docstr(
     torch.gather,
     r"""
 gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
@@ -6370,7 +6405,7 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -7258,7 +7293,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7318,7 +7353,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -11134,7 +11169,7 @@ Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions consisting of symmetric or Hermitian matrices.
     eigenvectors(bool, optional): controls whether eigenvectors have to be computed
-    upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
+    upper(bool, optional): controls whether to consider upper-triangular or lower-triangular region
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
@@ -12898,7 +12933,7 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 Arguments:
     input (Tensor): 1D vector.
     r (int, optional): number of elements to combine
-    with_replacement (boolean, optional): whether to allow duplication in combination
+    with_replacement (bool, optional): whether to allow duplication in combination
 
 Returns:
     Tensor: A tensor equivalent to converting all the input tensors into lists, do
