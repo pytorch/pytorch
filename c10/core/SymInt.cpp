@@ -26,17 +26,14 @@ std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
 }
 
 SymIntNode SymInt::toSymIntNodeImpl() const {
-  auto& st = getSymIntTable();
   TORCH_CHECK(is_symbolic());
-  return st.getNode(static_cast<uint64_t>(data_) & ~MASK);
+  return SymIntNode::reclaim_copy(toSymIntNodeImplUnowned());
 }
 
 c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
-  auto& sit = getSymIntTable();
-  uint64_t idx = sit.addNode(sin_sp);
-  TORCH_CHECK(idx < MAX_SYM_IDX, "SymIntNodeImpl index overflow: ", idx);
-  uint64_t data = idx | IS_SYM;
-  return c10::SymInt(static_cast<int64_t>(data));
+  auto ptr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
+  auto rep = (ptr & ~MASK) | IS_SYM;
+  return c10::SymInt(static_cast<int64_t>(rep));
 }
 
 SymInt SymInt::operator+(SymInt sci) const {
@@ -96,6 +93,13 @@ bool SymInt::operator!=(int64_t sci) const {
 SymInt SymInt::operator*(int64_t sci) const {
   TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
   return SymInt(data_ * sci);
+}
+
+c10::SymInt SymIntNodeImpl::toSymInt() {
+  // We will need to figure out a way
+  // to dedup nodes
+  auto sit_sp = SymIntNode::reclaim_copy(this);
+  return SymInt::toSymInt(sit_sp);
 }
 
 } // namespace c10
