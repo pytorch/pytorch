@@ -379,7 +379,7 @@ Sparse Compressed Tensors
 +++++++++++++++++++++++++
 
 Sparse Compressed Tensors represents a class of sparse tensors that
-have a common feature of compressing the indices of certain dimension
+have a common feature of compressing the indices of a certain dimension
 using an encoding that enables certain optimizations on linear algebra
 kernels of sparse compressed tensors. This encoding is based on the
 `Compressed Sparse Row (CSR)`__ format that PyTorch sparse compressed
@@ -402,17 +402,19 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_o
    We say that an indices tensor ``compressed_indices`` uses CSR
    encoding if the following invariants are satisfied:
 
-   - ``compressed_indices`` is a contiguous strided 32 or 64 bit integer tensor
-   - ``compressed_indices`` shape is ``(*batchsize, ncompressed_dims +
-     1)`` where ``ncompressed_dims`` is the number of compressed
-     dimensions (e.g. rows or columns)
-   - ``compressed_indices[..., 0] == 0`` where ``...`` denotes batch indices
-   - ``compressed_indices[..., ncompressed_dims] == nse`` where
+   - ``compressed_indices`` is a contiguous strided 32 or 64 bit
+     integer tensor
+   - ``compressed_indices`` shape is ``(*batchsize,
+     compressed_dim_size + 1)`` where ``compressed_dim_size`` is the
+     number of compressed dimensions (e.g. rows or columns)
+   - ``compressed_indices[..., 0] == 0`` where ``...`` denotes batch
+     indices
+   - ``compressed_indices[..., compressed_dim_size] == nse`` where
      ``nse`` is the number of specified elements
    - ``0 <= compressed_indices[..., i] - compressed_indices[..., i -
-     1] <= nplain_dims`` for ``i=1, ..., ncompressed_dims``, where
-     ``nplain_dims`` is the number of plain dimensions (orthogonal to
-     compressed dimensions, e.g. columns or rows).
+     1] <= plain_dim_size`` for ``i=1, ..., compressed_dim_size``,
+     where ``plain_dim_size`` is the number of plain dimensions
+     (orthogonal to compressed dimensions, e.g. columns or rows).
 
 .. _sparse-csr-docs:
 
@@ -473,7 +475,7 @@ ncols, *densesize)`` where ``len(batchsize) == B`` and
 
 .. note::
 
-   The number of sparse and dense dimensions can be aquired using
+   The number of sparse and dense dimensions can be acquired using
    :meth:`torch.Tensor.sparse_dim` and :meth:`torch.Tensor.dense_dim`
    methods. The batch dimensions can be computed from the tensor
    shape: ``batchsize = tensor.shape[:-tensor.sparse_dim() -
@@ -1019,4 +1021,34 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
 
-In addition, all zero-preserving unary functions support sparse tensor inputs.
+In addition, all zero-preserving unary functions support sparse
+COO/CSR/CSC/BSR/CSR tensor inputs:
+
+:func:`~torch.abs`
+:func:`~torch.asin`
+:func:`~torch.asinh`
+:func:`~torch.atan`
+:func:`~torch.atanh`
+:func:`~torch.ceil`
+:func:`~torch.conj_physical`
+:func:`~torch.floor`
+:func:`~torch.log1p`
+:func:`~torch.neg`
+:func:`~torch.round`
+:func:`~torch.sin`
+:func:`~torch.sinh`
+:func:`~torch.sign`
+:func:`~torch.sgn`
+:func:`~torch.signbit`
+:func:`~torch.tan`
+:func:`~torch.tanh`
+:func:`~torch.trunc`
+:func:`~torch.expm1`
+:func:`~torch.sqrt`
+:func:`~torch.angle`
+:func:`~torch.isinf`
+:func:`~torch.isposinf`
+:func:`~torch.isneginf`
+:func:`~torch.isnan`
+:func:`~torch.erf`
+:func:`~torch.erfinv`

@@ -9087,7 +9087,7 @@ have a look at :ref:`the note on the data type of the indices
 
 Args:
     compressed_indices (array_like): (B+1)-dimensional array of size
-        ``(*batchsize, ncompressed_dims + 1)``.  The last element of
+        ``(*batchsize, compressed_dim_size + 1)``.  The last element of
         each batch is the number of non-zero elements or blocks. This
         tensor encodes the index in ``values`` and ``plain_indices``
         depending on where the given compressed dimension (row or
