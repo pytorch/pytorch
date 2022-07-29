@@ -86,6 +86,7 @@ class _KinetoEvent:
     ...
 
 class _ProfilerEvent:
+    tag: _EventType
     id: int
     correlation_id: int
     start_tid: int
@@ -113,9 +114,13 @@ class _EventType(Enum):
     PyCCall = ...
     TorchOp = ...
 
+class _Inputs:
+    shapes: List[List[int]]
+    dtypes: List[str]
+
 class _ExtraFields_TorchOp:
-    inputs: List[List[int]]
     allow_tf32_cublas: bool
+    inputs: _Inputs
     ...
 
 class _ExtraFields_Backend:
