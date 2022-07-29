@@ -180,7 +180,7 @@ def _init_test_roi_heads_faster_rcnn():
 
 @parameterized.parameterized_class(
     ("is_script",),
-    ([True, False],),
+    [(True,), (False,)],
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):

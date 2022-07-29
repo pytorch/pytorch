@@ -845,7 +845,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
   auto size = asIntArrayRefSlow(packed_size);
-  return expand(self, size, implicit);
+  return self.expand(size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
@@ -1330,7 +1330,8 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
       if (new_values.size(0) == 1) {
         return new_values[0];
       } else {
-        return new_values.sum(0);
+        // sum promotes integral type to int64 when dtype is not specified.
+        return at::sum(new_values, 0, false, new_values.scalar_type());
       }
     } else {
       auto dimIndices = (arange(
