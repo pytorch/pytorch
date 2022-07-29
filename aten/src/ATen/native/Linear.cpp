@@ -23,6 +23,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
+  if (input.is_nested()) {
+    return at::nested_linear(input, weight, *bias);
+  }
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }

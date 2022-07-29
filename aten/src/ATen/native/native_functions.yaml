@@ -2777,11 +2777,12 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
+
+- func: nested_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   dispatch:
-    CompositeImplicitAutograd: linear
     NestedTensorCPU, NestedTensorCUDA: nested_linear
 
-- func: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: nested_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: nested_linear_backward
 
@@ -3955,6 +3956,10 @@
   device_check: NoCheck
   device_guard: False
 
+- func: _reshape_nested(Tensor self, int[] shape) -> Tensor
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _reshape_nested
+
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
 # anywhere else.
@@ -4916,6 +4921,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
+    NestedTensorCPU, NestedTensorCUDA: transpose_nested
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method

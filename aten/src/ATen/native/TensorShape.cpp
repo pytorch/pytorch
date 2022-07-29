@@ -1262,6 +1262,9 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, proposed_shape);
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
