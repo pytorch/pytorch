@@ -464,6 +464,50 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
     else:
         return f'{workflow_run["workflow"]["name"]} / '
 
+
+def add_workflow_conclusions(
+    checksuites: Any,
+    get_next_checkruns_page: Callable[[List[Dict[str, Dict[str, Any]]], int, Any], Any],
+    get_next_checksuites: Callable[[Any], Any]
+) -> Dict[str, Tuple[str, str]]:
+    conclusions = {}
+
+    def add_conclusions(edges: Any) -> None:
+        for edge_idx, edge in enumerate(edges):
+            node = edge["node"]
+            workflow_run = node["workflowRun"]
+            checkruns = node["checkRuns"]
+            if workflow_run is not None:
+                workflow_name = workflow_run["workflow"]["name"]
+                workflow_conclusion = node["conclusion"]
+                # Do not override existing status with cancelled
+                if workflow_conclusion == "CANCELLED" and workflow_name in conclusions:
+                    continue
+                conclusions[workflow_name] = (workflow_conclusion, node["url"])
+            has_failing_check = False
+            while checkruns is not None:
+                for checkrun_node in checkruns["nodes"]:
+                    if checkrun_node["conclusion"] == 'FAILURE':
+                        has_failing_check = True
+                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    )
+                if bool(checkruns["pageInfo"]["hasNextPage"]):
+                    checkruns = get_next_checkruns_page(edges, edge_idx, checkruns)
+                else:
+                    checkruns = None
+            # Github doesn't set conclusion to failure if a job is still pending
+            if workflow_run is not None and has_failing_check:
+                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+
+    add_conclusions(checksuites["edges"])
+    while bool(checksuites["pageInfo"]["hasNextPage"]):
+        checksuites = get_next_checksuites(checksuites)
+        add_conclusions(checksuites["edges"])
+
+    return conclusions
+
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
@@ -638,46 +682,19 @@ class GitHubPR:
         if self.conclusions is not None:
             return self.conclusions
         orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
-        checksuites = orig_last_commit["checkSuites"]
-        conclusions = {}
 
-        def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
-            for edge_idx, edge in enumerate(edges):
-                node = edge["node"]
-                workflow_run = node["workflowRun"]
-                checkruns = node["checkRuns"]
-                if workflow_run is not None:
-                    workflow_name = workflow_run["workflow"]["name"]
-                    workflow_conclusion = node["conclusion"]
-                    # Do not override existing status with cancelled
-                    if workflow_conclusion == "CANCELLED" and workflow_name in conclusions:
-                        continue
-                    conclusions[workflow_name] = (workflow_conclusion, node["url"])
-                has_failing_check = False
-                while checkruns is not None:
-                    for checkrun_node in checkruns["nodes"]:
-                        if checkrun_node["conclusion"] == 'FAILURE':
-                            has_failing_check = True
-                        conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
-                            checkrun_node["conclusion"], checkrun_node["detailsUrl"]
-                        )
-                    if bool(checkruns["pageInfo"]["hasNextPage"]):
-                        rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
-                                        name=self.project,
-                                        owner=self.org,
-                                        number=self.pr_num,
-                                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
-                                        cr_cursor=checkruns["pageInfo"]["endCursor"])
-                        last_commit = rc["data"]["repository"]["pullRequest"]["commits"]["nodes"][-1]["commit"]
-                        checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
-                    else:
-                        checkruns = None
-                # Github doesn't set conclusion to failure if a job is still pending
-                if workflow_run is not None and has_failing_check:
-                    conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+        def get_pr_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                            cr_cursor=checkruns["pageInfo"]["endCursor"])
+            last_commit = rc["data"]["repository"]["pullRequest"]["commits"]["nodes"][-1]["commit"]
+            checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
+            return checkruns
 
-        add_conclusions(checksuites["edges"])
-        while bool(checksuites["pageInfo"]["hasNextPage"]):
+        def get_pr_next_checksuites(checksuites: Any) -> Any:
             rc = gh_graphql(GH_GET_PR_NEXT_CHECKSUITES,
                             name=self.project,
                             owner=self.org,
@@ -687,10 +704,12 @@ class GitHubPR:
             last_commit = info["commits"]["nodes"][-1]["commit"]
             if last_commit["oid"] != orig_last_commit["oid"]:
                 raise RuntimeError("Last commit changed on PR")
-            checksuites = last_commit["checkSuites"]
-            add_conclusions(checksuites["edges"])
-        self.conclusions = conclusions
-        return conclusions
+            return last_commit["checkSuites"]
+
+        checksuites = orig_last_commit["checkSuites"]
+
+        self.conclusions = add_workflow_conclusions(checksuites, get_pr_next_check_runs, get_pr_next_checksuites)
+        return self.conclusions
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
@@ -988,51 +1007,29 @@ def find_matching_merge_rule(pr: GitHubPR,
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, Tuple[str, str]]:
-    land_check_info = gh_get_land_check_info(org, project, commit)
-    checksuites = land_check_info["checkSuites"]
-    conclusions = {}
 
-    def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
-        for edge_idx, edge in enumerate(edges):
-            node = edge["node"]
-            workflow_run = node["workflowRun"]
-            checkruns = node["checkRuns"]
-            if workflow_run is not None:
-                conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-            has_failing_check = False
-            while checkruns is not None:
-                for checkrun_node in checkruns["nodes"]:
-                    if checkrun_node["conclusion"] == 'FAILURE':
-                        has_failing_check = True
-                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
-                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
-                    )
-                if bool(checkruns["pageInfo"]["hasNextPage"]):
-                    rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
-                                    name=project,
-                                    owner=org,
-                                    cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
-                                    cr_cursor=checkruns["pageInfo"]["endCursor"],
-                                    commit=commit)
-                    checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
-                else:
-                    checkruns = None
-            # Github doesn't set conclusion to failure if a job is still pending
-            if workflow_run is not None and has_failing_check:
-                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+    def get_commit_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
+        rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
+                        name=project,
+                        owner=org,
+                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                        cr_cursor=checkruns["pageInfo"]["endCursor"],
+                        commit=commit)
+        return rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
 
-    add_conclusions(checksuites["edges"])
-    while bool(checksuites["pageInfo"]["hasNextPage"]):
+    def get_commit_next_checksuites(checksuites: Any) -> Any:
         rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECKSUITES,
                         name=project,
                         owner=org,
                         commit=commit,
                         cursor=checksuites["edges"][-1]["cursor"])
         info = rc["data"]["repository"]["object"]
-        checksuites = info["checkSuites"]
-        add_conclusions(checksuites["edges"])
+        return info["checkSuites"]
 
-    return conclusions
+    land_check_info = gh_get_land_check_info(org, project, commit)
+    checksuites = land_check_info["checkSuites"]
+
+    return add_workflow_conclusions(checksuites, get_commit_next_check_runs, get_commit_next_checksuites)
 
 
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
