@@ -2812,6 +2812,21 @@ else:
             # not the data
             self.assertEqual(x, y)
 
+    @onlyCPU
+    def test_bfloat16_float_copy(self, device):
+        for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
+            input = torch.randn(shape, dtype=torch.float, device=device)
+            out1 = input.to(torch.bfloat16)
+            self.assertEqual(input, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out2 = out1.to(torch.float)
+            self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
+
+            input_s = input[..., ::2, :]
+            out1 = input_s.to(torch.bfloat16)
+            self.assertEqual(input_s, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out2 = out1.to(torch.float)
+            self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
+
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
     def test_copy_math_view(self, device):
@@ -8090,19 +8105,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for dtype, alias in type_alias_map.items():
             self.assertIs(alias, dtype)
 
-    # FIXME: Describe this test
     def test_doc_template(self) -> None:
+        """
+        Test that all public API doc strings use the same standard template for
+        all common arguments such as tensor or dim
+        """
         from torch._torch_docs import __file__ as doc_file
         from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
         with open(doc_file, "r", encoding="utf-8") as f:
             doc_strs = f.read()
 
-        for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
+        matches = re.findall(
+            r'add_docstr\(([^,]+?),[^"\']*?(?:"""|\'\'\')(.*?)(?:"""|\'\'\')(?:\.|,?[^,\)]*?\))',
+            doc_strs,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertTrue(matches)
+
+        for m in matches:
+            func = m[0].strip()
+            desc = m[1].strip()
+
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, doc_str[2], 'The argument description "{}" in {} can be '
-                                                    'replaced by {{{}}}'.format(v, doc_str[0], k))
+                    self.assertNotIn(v, desc, 'The argument description "{}" in {} can be '
+                                              'replaced by {{{}}}'.format(v, func, k))
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
