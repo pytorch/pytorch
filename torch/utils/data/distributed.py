@@ -134,3 +134,75 @@ class DistributedSampler(Sampler[T_co]):
             epoch (int): Epoch number.
         """
         self.epoch = epoch
+
+
+class DistributedSubsetSampler(DistributedSampler):
+    r""" Samples element from a given list of indices for distributed settings. This class is the distributed version
+    of :class:`torch.utils.data.sampler.SubsetRandomSampler`.
+    It can be used for splitting datasets (e.g., validation sets).
+
+    Args:
+        dataset: Dataset used for sampling.
+        indices (Sequence): The indices of the subset from original dataset.
+        num_replicas (int, optional): Number of processes participating in
+            distributed training. By default, :attr:`world_size` is retrieved from the
+            current distributed group.
+        rank (int, optional): Rank of the current process within :attr:`num_replicas`.
+            By default, :attr:`rank` is retrieved from the current distributed
+            group.
+        shuffle (bool, optional): If ``True`` (default), sampler will shuffle the
+            indices.
+        seed (int, optional): random seed used to shuffle the sampler if
+            :attr:`shuffle=True`. This number should be identical across all
+            processes in the distributed group. Default: ``0``.
+
+    Read the :class:torch.utils.data.distributed.DistributedSampler documentation for examples.
+    """
+
+    def __init__(self, dataset: Dataset, indices: Sequence[int], num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None, shuffle: bool = True,
+                 seed: int = 0, drop_last: bool = False) -> None:
+        super().__init__(dataset, num_replicas, rank, shuffle, seed, drop_last)
+
+        if max(indices) >= len(dataset):
+            raise ValueError(
+                "Indices must be less than size of the dataset. Got {} expected numbers less than {}.".format(
+                    max(indices), len(dataset)))
+
+        self.indices = indices
+        # num_samples is the only parameters that must be updated,
+        # since we use a subset of indices instead of whole dataset.
+        if self.drop_last and len(self.indices) % self.num_replicas != 0:  # type: ignore[arg-type]
+            self.num_samples = math.ceil(
+                (len(self.indices) - self.num_replicas) / self.num_replicas  # type: ignore[arg-type]
+            )
+        else:
+            self.num_samples = math.ceil(len(self.indices) / self.num_replicas)  # type: ignore[arg-type]
+        self.total_size = self.num_samples * self.num_replicas
+
+    def __iter__(self) -> Iterator[T_co]:
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            # masked_indices is a permutation that we use to return elements of self.indices with.
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            masked_indices = torch.randperm(len(self.indices), generator=g).tolist()  # type: ignore[arg-type]
+        else:
+            masked_indices = list(range(len(self.indices)))  # type: ignore[arg-type]
+
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            padding_size = self.total_size - len(masked_indices)
+            if padding_size <= len(masked_indices):
+                masked_indices += masked_indices[:padding_size]
+            else:
+                masked_indices += (masked_indices * math.ceil(padding_size / len(masked_indices)))[:padding_size]
+        else:
+            # remove tail of data to make it evenly divisible.
+            masked_indices = masked_indices[:self.total_size]
+        assert len(masked_indices) == self.total_size
+
+        # subsample
+        for i in range(self.rank, len(masked_indices), self.num_replicas):
+            assert 0 <= masked_indices[i] < len(self.indices)
+            yield self.indices[masked_indices[i]]
