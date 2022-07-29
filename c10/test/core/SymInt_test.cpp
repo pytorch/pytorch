@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/SymInt.h>
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNodeImpl.h>
 
 using namespace c10;
 
@@ -21,7 +21,7 @@ TEST(SymIntTest, ConcreteInts) {
 }
 
 TEST(SymIntTest, AddNode) {
-  auto n = std::make_shared<SymbolicIntNode>();
+  auto n = c10::make_intrusive<SymIntNodeImpl>();
   auto i = n->toSymInt();
   EXPECT_TRUE(i.is_symbolic());
 }
