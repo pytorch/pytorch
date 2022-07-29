@@ -336,14 +336,14 @@ class FakeTensor(torch.Tensor):
         assert device.type != "meta"
 
         # Note: [Fake Tensor Dispatch Keys]
-        # In order to model the behavior of device-specific autocast 
+        # In order to model the behavior of device-specific autocast
         # and autograd logic, we update the dispatch keys of FakeTensors
         # to reflect their fake device. This includes the BackendComponent
         # (DispatchKey::Meta -> DispatchKey::CUDA), and also the BackendComponent
         # related Autocast and Autograd keys. __torch__dispatch__ sits below
         # Autocast and Autograd, and is only invoked when we are at the
-        # kernel for the BackendComponent. Then, we add Meta to the 
-        # thread-local dispatch include set to hit the meta kernel 
+        # kernel for the BackendComponent. Then, we add Meta to the
+        # thread-local dispatch include set to hit the meta kernel
         # instead of the kernel of the BackendComponent for the fake device.
 
         torch._C._change_backend_component_keys(self, device)
