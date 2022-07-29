@@ -10252,37 +10252,39 @@ Example::
 
 add_docstr(
     torch.sparse_compressed_tensor,
-    r"""
-sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None,
-                         *, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+    r"""sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None, """
+    r"""*, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
-CSC, BSR, or BSC - <sparse-csr-docs>` with specified values at the
-given :attr:`compressed_indices` and :attr:`plain_indices`. Sparse
+CSC, BSR, or BSC - <sparse-compressed-docs>` with specified values at
+the given :attr:`compressed_indices` and :attr:`plain_indices`. Sparse
 matrix multiplication operations in Compressed Sparse format are
 typically faster than that for sparse tensors in COO format. Make you
 have a look at :ref:`the note on the data type of the indices
-<sparse-csr-docs>`.
+<sparse-compressed-docs>`.
 
 Args:
-    compressed_indices (array_like): One-dimensional array of size
-        size[cdim] + 1 where cdim is 0 or 1 depending on the layout.
-        The last element is the number of non-zeros. This tensor
-        encodes the index in values and plain_indices depending on
-        where the given compressed dimension (row or column)
-        starts. Each successive number in the tensor subtracted by the
-        number before it denotes the number of elements in a given
-        compressed dimension.
+    compressed_indices (array_like): (B+1)-dimensional array of size
+        ``(*batchsize, compressed_dim_size + 1)``.  The last element of
+        each batch is the number of non-zero elements or blocks. This
+        tensor encodes the index in ``values`` and ``plain_indices``
+        depending on where the given compressed dimension (row or
+        column) starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements or blocks in a given compressed dimension.
     plain_indices (array_like): Plain dimension (column or row)
-        co-ordinates of each element in values. Strictly one
-        dimensional tensor with the same length as values.
+        co-ordinates of each element or block in values. (B+1)-dimensional
+        tensor with the same length as values.
     values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types.  For block
-        sparse formats, the dimensionality of values must be two plus
-        the dimensionality of plain_indices.
+        tuple, NumPy ``ndarray``, scalar, and other types.  that
+        represents a (1+K)-dimensional or (1+2+K)-dimensional tensor
+        where ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
-        sparse tensor. If not provided, the size will be inferred as
-        the minimum size big enough to hold all non-zero elements.
+        sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
+        blocksize[1], *densesize)`` where ``blocksize[0] ==
+        blocksize[1] == 1`` for CSR and CSC formats. If not provided,
+        the size will be inferred as the minimum size big enough to
+        hold all non-zero elements or blocks.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of
@@ -10327,20 +10329,24 @@ in CSR format are typically faster than that for sparse tensors in COO format. M
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 Args:
-    crow_indices (array_like): One-dimensional array of size size[0] + 1.
-        The last element is the number of non-zeros. This tensor
-        encodes the index in values and col_indices depending on where
-        the given row starts. Each successive number in the tensor
-        subtracted by the number before it denotes the number of
-        elements in a given row.
+    crow_indices (array_like): (B+1)-dimensional array of size
+        ``(*batchsize, nrows + 1)``.  The last element of each batch
+        is the number of non-zeros. This tensor encodes the index in
+        values and col_indices depending on where the given row
+        starts. Each successive number in the tensor subtracted by the
+        number before it denotes the number of elements in a given
+        row.
     col_indices (array_like): Column co-ordinates of each element in
-        values. Strictly one dimensional tensor with the same length
+        values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types.
+        tuple, NumPy ``ndarray``, scalar, and other types that
+        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
-        sparse tensor. If not provided, the size will be inferred as
-        the minimum size big enough to hold all non-zero elements.
+        sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
+        not provided, the size will be inferred as the minimum size
+        big enough to hold all non-zero elements.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of
@@ -10376,27 +10382,31 @@ add_docstr(
 sparse_csc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
-<sparse-csr-docs>` with specified values at the given
+<sparse-csc-docs>` with specified values at the given
 :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in CSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
-note on the data type of the indices <sparse-csr-docs>`.
+note on the data type of the indices <sparse-csc-docs>`.
 
 Args:
-    ccol_indices (array_like): One-dimensional array of size size[1] + 1.
-        The last element is the number of non-zeros. This tensor
-        encodes the index in values and row_indices depending on where
-        the given column starts. Each successive number in the tensor
-        subtracted by the number before it denotes the number of
-        elements in a given column.
+    ccol_indices (array_like): (B+1)-dimensional array of size
+        ``(*batchsize, ncols + 1)``.  The last element of each batch
+        is the number of non-zeros. This tensor encodes the index in
+        values and row_indices depending on where the given column
+        starts. Each successive number in the tensor subtracted by the
+        number before it denotes the number of elements in a given
+        column.
     row_indices (array_like): Row co-ordinates of each element in
-        values. Strictly one dimensional tensor with the same length
-        as values.
+        values. (B+1)-dimensional tensor with the same length as
+        values.
     values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types.
+        tuple, NumPy ``ndarray``, scalar, and other types that
+        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
-        sparse tensor. If not provided, the size will be inferred as
-        the minimum size big enough to hold all non-zero elements.
+        sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
+        not provided, the size will be inferred as the minimum size
+        big enough to hold all non-zero elements.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of
@@ -10432,29 +10442,33 @@ add_docstr(
 sparse_bsr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
-<sparse-csr-docs>` with specified 2-dimensional blocks at the given
+<sparse-bsr-docs>` with specified 2-dimensional blocks at the given
 :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
 multiplication operations in BSR format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
-note on the data type of the indices <sparse-csr-docs>`.
+note on the data type of the indices <sparse-bsr-docs>`.
 
 Args:
-    crow_indices (array_like): One-dimensional array of size size[0] +
-        1. The last element is the number of non-zeros. This tensor
-        encodes the index in values and col_indices depending on where
-        the given row starts. Each successive number in the tensor
+    crow_indices (array_like): (B+1)-dimensional array of size
+        ``(*batchsize, nrowblocks + 1)``.  The last element of each
+        batch is the number of non-zeros. This tensor encodes the
+        block index in values and col_indices depending on where the
+        given row block starts. Each successive number in the tensor
         subtracted by the number before it denotes the number of
         blocks in a given row.
-    col_indices (array_like): Column co-ordinates of each block in
-        values. Strictly one dimensional tensor with the same length
-        as values.
+    col_indices (array_like): Column block co-ordinates of each block
+        in values. (B+1)-dimensional tensor with the same length as
+        values.
     values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types. The
-        dimensionality of values must be two plus the dimensionality
-        of col_indices.
+        tuple, NumPy ``ndarray``, scalar, and other types that
+        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
-        sparse tensor. If not provided, the size will be inferred as
-        the minimum size big enough to hold all non-zero blocks.
+        sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
+        blocksize[1], *densesize)`` where ``blocksize ==
+        values.shape[1:3]``. If not provided, the size will be
+        inferred as the minimum size big enough to hold all non-zero
+        blocks.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of
@@ -10479,7 +10493,6 @@ Example::
            col_indices=tensor([0, 1]),
            values=tensor([[[1., 2.],
                            [3., 4.]],
-
                           [[5., 6.],
                            [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
            layout=torch.sparse_bsr)
@@ -10494,28 +10507,32 @@ add_docstr(
 sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
-Column)) <sparse-csr-docs>` with specified 2-dimensional blocks at the
+Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
 given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in BSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
-note on the data type of the indices <sparse-csr-docs>`.
+note on the data type of the indices <sparse-bsc-docs>`.
 
 Args:
-    ccol_indices (array_like): One-dimensional array of size size[1] +
-        1. The last element is the number of non-zeros. This tensor
-        encodes the index in values and row_indices depending on where
-        the given column starts. Each successive number in the tensor
-        subtracted by the number before it denotes the number of
-        elements in a given column.
-    row_indices (array_like): Row co-ordinates of each element in
-        values. Strictly one dimensional tensor with the same length
+    ccol_indices (array_like): (B+1)-dimensional array of size
+        ``(*batchsize, ncolblocks + 1)``. The last element of each
+        batch is the number of non-zeros. This tensor encodes the
+        index in values and row_indices depending on where the given
+        column starts. Each successive number in the tensor subtracted
+        by the number before it denotes the number of elements in a
+        given column.
+    row_indices (array_like): Row block co-ordinates of each block in
+        values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, and other types. The dimensionality
-        of values must be two plus the dimensionality of row_indices.
+        tuple, NumPy ``ndarray``, and other types that
+        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
-        sparse tensor. If not provided, the size will be inferred as
-        the minimum size big enough to hold all non-zero blocks.
+        sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
+        blocksize[1], *densesize)`` If not provided, the size will be
+        inferred as the minimum size big enough to hold all non-zero
+        blocks.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of
@@ -10540,7 +10557,6 @@ Example::
            row_indices=tensor([0, 1]),
            values=tensor([[[1., 2.],
                            [3., 4.]],
-
                           [[5., 6.],
                            [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
            layout=torch.sparse_bsc)
