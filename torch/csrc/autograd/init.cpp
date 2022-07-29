@@ -298,6 +298,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
     py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+        .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
         .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
     py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
         .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
@@ -312,6 +313,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
+        .def_property_readonly("tag", &Result::tag)
         .def_readonly("extra_fields", &Result::extra_fields_)
         .def_property_readonly(
             "id",

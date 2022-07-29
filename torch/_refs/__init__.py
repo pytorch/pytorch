@@ -3138,16 +3138,8 @@ def arange(
     pass
 
 
-# See https://github.com/pytorch/pytorch/issues/82364
-# @register_decomposition(torch.ops.aten.arange)
-# @out_wrapper()
-@register_decomposition(
-    [
-        torch.ops.aten.arange.default,
-        torch.ops.aten.arange.start,
-        torch.ops.aten.arange.start_step,
-    ]
-)
+@register_decomposition(torch.ops.aten.arange)
+@out_wrapper()
 def arange(
     a: Optional[NumberType] = None,
     b: Optional[NumberType] = None,
