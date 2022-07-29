@@ -7,6 +7,7 @@ from functools import partial
 from typing import Callable, Union
 
 import torch
+import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -43,7 +44,7 @@ _device_not_kwarg_ops = (
 )
 
 # this op is never actually used
-_non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
+_non_kwarg_device_constructors = (aten._list_to_tensor,)
 
 
 def contains_tensor_types(type):
@@ -128,8 +129,6 @@ class FakeTensorConverter(object):
             return maybe_memo
         existing_device = t.device
         # not yet supported in metatensors
-        if t.is_complex():
-            raise UnsupportedFakeTensorException("complex nyi in meta tensors")
         if t.is_sparse:
             raise UnsupportedFakeTensorException("sparse nyi in meta tensors")
         if t.is_quantized:
@@ -176,7 +175,7 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
-def contructors(fake_mode, func, *args, **kwargs):
+def constructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -217,7 +216,7 @@ def resize_as_(fake_mode, func, *args, **kwargs):
 
 # _to_copy fails when run with FakeTensors to cuda device
 # TODO: debug
-@register_op_impl(torch.ops.aten._to_copy.default)
+@register_op_impl(aten._to_copy.default)
 def to_copy(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -227,16 +226,14 @@ def to_copy(fake_mode, func, *args, **kwargs):
     out_device = input_device if input_device else new_kwargs["input"].device
     with no_dispatch():
         input = new_kwargs.pop("input").to("meta")
-        return FakeTensor(
-            fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
-        )
+        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
-@register_op_impl(torch.ops.aten.clone.default)
+@register_op_impl(aten.clone.default)
 def clone(fake_mode, func, input, memory_format=None):
     out_device = input.device
     with no_dispatch():
-        out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
+        out = aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
 
@@ -295,6 +292,7 @@ def in_kernel_invocation_manager(fake_mode):
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
+    has_sym_ints: bool
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
@@ -312,6 +310,7 @@ class FakeTensor(torch.Tensor):
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
+        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -321,6 +320,15 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+
+    def stride(self):
+        if self.has_sym_ints:
+            # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
+            # The reason this needs to be here instead of __torch_dispatch__ is that
+            # when aten.stride goes into __torch_dispatch__, it expects a list of
+            # concrete ints to be returned. So we need to short-circuit that entirely
+            return symbolic_shapes.create_contiguous(self.shape)
+        return super().stride()
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -460,12 +468,49 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        flat_arg_tensors = [
+            i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
+        ]
+        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        if has_symbolic_sizes:
+            # TODO: Find better approach for this
+            # Avoid circular import
+            from torch._decomp import decomposition_table
+            from torch._meta_registrations import meta_table
+
+            # TODO: hack, doesn't actually work.
+            # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
+            with enable_torch_dispatch_mode(
+                self
+            ), torch.overrides.enable_reentrant_dispatch():
+                if func in meta_table:
+                    r = meta_table[func](*args, **kwargs)
+                    return r
+                if func in decomposition_table:
+                    return decomposition_table[func](*args, **kwargs)
+
+            with no_dispatch():
+                if symbolic_shapes.is_symbolic_op(func):
+                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+                if func == aten.size.default:
+                    raise RuntimeError(
+                        "Trying to call aten.size on a tensor with symbolic shapes. "
+                        "It's likely that this is from calling tensor.shape in C++"
+                    )
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
+
         if "prims::" in func._schema.name:
             with no_dispatch():
                 return func(*args, **kwargs)
+
+        if has_symbolic_sizes:
+            constructors = [aten.empty.SymInt]
+            if func not in constructors:
+                raise RuntimeError(
+                    f"{func} - couldn't find symbolic meta function/decomposition"
+                )
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator
@@ -518,8 +563,8 @@ class FakeTensorMode(TorchDispatchMode):
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
             # we need to handle before error checking
             if func in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.lift_fresh_copy.default,
+                aten.lift_fresh.default,
+                aten.lift_fresh_copy.default,
             ]:
                 assert (
                     len(kwargs) == 0
@@ -579,13 +624,10 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
                 return out
             return e
 
-        try:
-            args = tree_map(to_real_tensor, args)
-            kwargs = tree_map(to_real_tensor, kwargs)
+        args = tree_map(to_real_tensor, args)
+        kwargs = tree_map(to_real_tensor, kwargs)
 
-            r = func(*args, **kwargs)
-        except Exception as new_exception:
-            raise orig_not_implemented_exception from new_exception
+        r = func(*args, **kwargs)
 
         tensor_impls = set()
         storages = set()

@@ -39,16 +39,10 @@ class C10_API SymInt {
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
   }
 
-  bool operator==(const SymInt& p2) const {
-    return data_ == p2.data_;
-  }
-
-  bool operator!=(const SymInt& p2) const {
-    return data_ != p2.data_;
-  }
-
   SymInt operator+(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  bool operator==(SymInt sci) const;
+  bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
 
@@ -93,7 +87,7 @@ class C10_API SymInt {
   static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & ~(1ULL << 62);
+  static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 
