@@ -450,7 +450,7 @@ build_xla() {
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   XLA_DIR=xla
-  USE_CACHE=0
+  USE_CACHE=1
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
