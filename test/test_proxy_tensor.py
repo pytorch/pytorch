@@ -437,12 +437,7 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
-    xfail('complex'),
-    xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
-    xfail('linalg.matrix_power'),
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('mvlgamma', 'mvlgamma_p_1'),
@@ -455,6 +450,10 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -595,6 +594,7 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
     xfail('linalg.matrix_norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -819,6 +819,7 @@ symbolic_tensor_failures = {
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
+    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('var', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
