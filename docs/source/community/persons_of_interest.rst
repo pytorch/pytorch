@@ -215,7 +215,7 @@ Windows
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 
 Apple M1/MPS
-~~~~~~~~
+~~~~~~~~~~~~
 
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
