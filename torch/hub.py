@@ -346,7 +346,7 @@ def set_dir(d):
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
     Args:
-        d (string): path to a local folder to save downloaded models & weights.
+        d (str): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
     _hub_dir = os.path.expanduser(d)
@@ -357,7 +357,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
     List all callable entrypoints available in the repo specified by ``github``.
 
     Args:
-        github (string): a string with format "repo_owner/repo_name[:ref]" with an optional
+        github (str): a string with format "repo_owner/repo_name[:ref]" with an optional
             ref (tag or branch). If ``ref`` is not specified, the default branch is assumed to be ``main`` if
             it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
@@ -412,11 +412,11 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
     Show the docstring of entrypoint ``model``.
 
     Args:
-        github (string): a string with format <repo_owner/repo_name[:ref]> with an optional
+        github (str): a string with format <repo_owner/repo_name[:ref]> with an optional
             ref (a tag or a branch). If ``ref`` is not specified, the default branch is assumed
             to be ``main`` if it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
-        model (string): a string of entrypoint name defined in repo's ``hubconf.py``
+        model (str): a string of entrypoint name defined in repo's ``hubconf.py``
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is ``False``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the ref
@@ -475,15 +475,15 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
     path to a local directory.
 
     Args:
-        repo_or_dir (string): If ``source`` is 'github',
+        repo_or_dir (str): If ``source`` is 'github',
             this should correspond to a github repo with format ``repo_owner/repo_name[:ref]`` with
             an optional ref (tag or branch), for example 'pytorch/vision:0.10'. If ``ref`` is not specified,
             the default branch is assumed to be ``main`` if it exists, and otherwise ``master``.
             If ``source`` is 'local'  then it should be a path to a local directory.
-        model (string): the name of a callable (entrypoint) defined in the
+        model (str): the name of a callable (entrypoint) defined in the
             repo/dir's ``hubconf.py``.
         *args (optional): the corresponding args for callable ``model``.
-        source (string, optional): 'github' or 'local'. Specifies how
+        source (str, optional): 'github' or 'local'. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is 'github'.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
             This parameter was introduced in v1.12 and helps ensuring that users
@@ -546,9 +546,9 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     Load a model from a local directory with a ``hubconf.py``.
 
     Args:
-        hubconf_dir (string): path to a local directory that contains a
+        hubconf_dir (str): path to a local directory that contains a
             ``hubconf.py``.
-        model (string): name of an entrypoint defined in the directory's
+        model (str): name of an entrypoint defined in the directory's
             ``hubconf.py``.
         *args (optional): the corresponding args for callable ``model``.
         **kwargs (optional): the corresponding kwargs for callable ``model``.
@@ -577,9 +577,9 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     r"""Download object at the given URL to a local path.
 
     Args:
-        url (string): URL of the object to download
-        dst (string): Full path where object will be saved, e.g. ``/tmp/temporary_file``
-        hash_prefix (string, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
+        url (str): URL of the object to download
+        dst (str): Full path where object will be saved, e.g. ``/tmp/temporary_file``
+        hash_prefix (str, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
             Default: None
         progress (bool, optional): whether or not to display a progress bar to stderr
             Default: True
@@ -679,8 +679,8 @@ def load_state_dict_from_url(
     ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
     Args:
-        url (string): URL of the object to download
-        model_dir (string, optional): directory in which to save the object
+        url (str): URL of the object to download
+        model_dir (str, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
         progress (bool, optional): whether or not to display a progress bar to stderr.
             Default: True
@@ -689,7 +689,7 @@ def load_state_dict_from_url(
             digits of the SHA256 hash of the contents of the file. The hash is used to
             ensure unique names and to verify the contents of the file.
             Default: False
-        file_name (string, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
+        file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
 
     Example:
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
