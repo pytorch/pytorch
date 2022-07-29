@@ -487,7 +487,12 @@ static void setInputTensorTypes(
   auto s_iter = stack.begin();
   size_t list_idx = 0;
   if (!param_count_list.empty()) {
-    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+    TORCH_INTERNAL_ASSERT(
+        input_values.size() == param_count_list.size(),
+        " input_values:",
+        input_values.size(),
+        " vs param_count_list:",
+        param_count_list.size());
   }
   for (auto v : input_values) {
     // Leave packed param types alone. This is needed for downstream passes

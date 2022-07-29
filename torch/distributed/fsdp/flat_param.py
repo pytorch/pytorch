@@ -302,7 +302,7 @@ class FlatParamHandle:
             f"Expects {flat_param._unsharded_size.numel()} numel but got " \
             f"{tensor.numel()} numel"
         views = (
-            tensor.view(shape) for (tensor, shape) in
+            subtensor.view(shape) for (subtensor, shape) in
             zip(torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes)  # type: ignore[arg-type]
         )
         return views
