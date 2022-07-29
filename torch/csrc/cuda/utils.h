@@ -11,7 +11,4 @@
 #define THCSPTensorPtr TH_CONCAT_3(THCSP, Real, TensorPtr)
 
 #include <torch/csrc/cuda/override_macros.h>
-
-#define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
-#include <torch/csrc/THCGenerateByteType.h>
 #endif
