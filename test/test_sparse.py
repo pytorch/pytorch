@@ -719,8 +719,6 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
-        if dtype is torch.cdouble and TEST_WITH_CROSSREF:
-            return
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
         nnz = 10
@@ -955,7 +953,6 @@ class TestSparse(TestSparseBase):
         test_shape(2, 20, [3, 17, 19, 0])
 
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "cuda leak")
     def test_add_sub_nnz(self, device, dtype):
         # nnz should not grow unbounded (gh-34964)
         x = torch.randn(10, dtype=dtype, device=device).to_sparse()

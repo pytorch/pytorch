@@ -705,6 +705,9 @@ Tensor empty_like_sparse_csr(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
+  TORCH_CHECK(options.layout() == self.layout(),
+    "empty_like with different sparse layout is not supported (self is ",
+    self.layout(), " but you requested ", options.layout(), ")");
   if (options.layout() == kSparseCsr) {
     auto result = at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().clone(),
@@ -734,6 +737,7 @@ Tensor empty_like_sparse_csr(
         optTypeMetaToScalarType(options.dtype()),
         self.layout(),
         options.device());
+
     return result;
   } else if (options.layout() == kSparseBsc) {
     auto result = at::native::_sparse_bsc_tensor_unsafe(

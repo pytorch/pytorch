@@ -236,14 +236,12 @@ class MetaConverter:
                     t.is_mkldnn,
                     t.is_quantized,
                     t.is_nested,
-                    t._is_view() and t._base and t._base.is_sparse,
+                    t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     # these are supported in meta conversion but the fallbacks
                     # don't work
                     t.is_neg(),
                     t.is_conj(),
-                    # conjugate fallback does not support meta tensors
-                    t.dtype in (torch.complex128, torch.complex64, torch.complex32),
                     t.device.type in ("lazy", "meta"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
