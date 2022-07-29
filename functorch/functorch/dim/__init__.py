@@ -70,9 +70,11 @@ def cat(tensors, dim, new_dim):
 
 if use_c:
     _wrap = _C._wrap
+
     def _def(name, *args, **kwargs):
         orig = getattr(torch.Tensor, name)
         setattr(_Tensor, name, _C._instancemethod(_wrap(orig, *args, **kwargs)))
+
     t__getitem__ = _C._instancemethod(_C.__getitem__)
     stack = _C.stack
     split = _C._instancemethod(_C.split)
@@ -89,7 +91,7 @@ t__setitem__ = _C._instancemethod(_C.__setitem__)
 # torch.Tensor.__getitem__ = t__getitem__
 
 _Tensor.__getitem__ = t__getitem__
-#torch.Tensor.__setitem__ = t__setitem__
+# torch.Tensor.__setitem__ = t__setitem__
 _Tensor.__setitem__ = t__setitem__
 
 torch.Tensor.split = split
@@ -102,7 +104,7 @@ del _Tensor.ndim
 if use_c:
     _Tensor.permute = _Tensor.order = _C._instancemethod(_C.order)
 else:
-    _Tensor.permute = _Tensor.order =reference.positional
+    _Tensor.permute = _Tensor.order = reference.positional
 
 _def('mean')
 _def('sum')

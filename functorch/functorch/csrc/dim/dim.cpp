@@ -2793,7 +2793,7 @@ static DimEntry _wrap_dim(py::handle d, size_t N, bool keepdim) {
     }
 }
 
-static Slice<DimEntry> _dims(Arena& A, py::handle d, size_t N, bool keepdim) {
+static Slice<DimEntry> _wrap_dims(Arena& A, py::handle d, size_t N, bool keepdim) {
     auto de = _wrap_dim(d, N, keepdim);
     Slice<DimEntry> r;
     if (!de.is_none()) {
@@ -2928,7 +2928,7 @@ static PyObject* patched_dim_method(PyObject * self_,
     }
 
     auto ndim = info.ndim();
-    auto dims = _dims(A, dim, ndim, keepdim);
+    auto dims = _wrap_dims(A, dim, ndim, keepdim);
     Slice<int64_t> dim_indices;
     auto seen = A.allocate<bool>(info.levels.size());
     std::fill(seen, seen + info.levels.size(), false);
@@ -3066,7 +3066,7 @@ static PyObject* Tensor_sum(PyObject * self_,
     auto levels = self_->levels();
 
     auto N = ndim_of_levels(levels);
-    auto reduced_dims = _dims(A, dim, N, false);
+    auto reduced_dims = _wrap_dims(A, dim, N, false);
 
     return dot(A, TensorInfo::create(A, d->args[0], false), TensorInfo::create(A, d->args[1], false), reduced_dims).release();
     PY_END(nullptr)

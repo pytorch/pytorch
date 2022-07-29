@@ -10,7 +10,7 @@ class LevelInfo:
     alive: bool = True
 
 class Dim:
-    def __init__(self, name: str, size: Union[None, int]=None):
+    def __init__(self, name: str, size: Union[None, int] = None):
         self.name = name
         self._size = None
         self._vmap_level = None
@@ -38,7 +38,8 @@ class Dim:
             _vmap_levels.append(LevelInfo(self._vmap_level))
 
         elif self._size != size:
-            raise DimensionBindError(f"Dim '{self}' previously bound to a dimension of size {self._size} cannot bind to a dimension of size {size}")
+            raise DimensionBindError(
+                  f"Dim '{self}' previously bound to a dimension of size {self._size} cannot bind to a dimension of size {size}")
 
     @property
     def is_bound(self):

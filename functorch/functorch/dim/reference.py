@@ -11,14 +11,14 @@ from .batch_tensor import _enable_layers
 from . import op_properties
 from functorch._C import dim as _C
 DimList = _C.DimList
-from collections import defaultdict
 from functools import reduce
 import operator
 
 
 # use dict to avoid writing C++ bindings for set
 pointwise = set(op_properties.pointwise)
-prod = lambda x: reduce(operator.mul, x, 1)
+def prod(x):
+    return reduce(operator.mul, x, 1)
 
 
 def _wrap_dim(d, N, keepdim):
@@ -141,7 +141,6 @@ def __torch_function__(self, orig, cls, args, kwargs={}):
     if orig is torch.Tensor.__mul__:
         lhs, rhs = args
         if isinstance(lhs, _Tensor) and isinstance(rhs, _Tensor) and lhs.ndim == 0 and rhs.ndim == 0:
-            #print("END", orig)
             return DelayedMulTensor(lhs, rhs)
     all_dims = llist()
     flat_args, unflatten = tree_flatten((args, kwargs))
@@ -153,6 +152,7 @@ def __torch_function__(self, orig, cls, args, kwargs={}):
             for d in f.dims:
                 if d not in all_dims:
                     all_dims.append(d)
+
     def unwrap(t):
         if isinstance(t, _Tensor):
             r = t._batchtensor
@@ -165,7 +165,7 @@ def __torch_function__(self, orig, cls, args, kwargs={}):
         result_levels = llist()
         arg_levels = llist()
         to_expand = []
-        for i,f in enumerate(flat_args):
+        for i, f in enumerate(flat_args):
             if isinstance(f, TensorLike):
                 ptensor, levels, _ = _tensor_levels(f)
                 if isinstance(f, _Tensor) and not f._has_device and device_holding_tensor is not None:
@@ -180,6 +180,7 @@ def __torch_function__(self, orig, cls, args, kwargs={}):
             flat_args[i] = _match_levels(flat_args[i], levels, result_levels)
         args, kwargs = unflatten(flat_args)
         result = orig(*args, **kwargs)
+
         def wrap(t):
             if isinstance(t, TensorLike):
                 return Tensor.from_positional(t, result_levels, device_holding_tensor is not None)
@@ -192,7 +193,7 @@ def __torch_function__(self, orig, cls, args, kwargs={}):
             return t
         with _enable_layers(all_dims):
             print(f"batch_tensor for {orig}")
-            args, kwargs = unflatten(unwrap(f) for f  in flat_args)
+            args, kwargs = unflatten(unwrap(f) for f in flat_args)
             result = orig(*args, **kwargs)
             # print("END", orig)
             return tree_map(wrap, result)
@@ -234,7 +235,7 @@ def positional(self, *dims):
         permute.insert(i, p)
     ptensor = ptensor.permute(*permute)
     seen = 0
-    for i in range(len(levels) - 1,  -1, -1):
+    for i in range(len(levels) - 1, -1, -1):
         if isinstance(levels[i], int):
             seen += 1
             levels[i] = -seen
@@ -246,14 +247,14 @@ def positional(self, *dims):
 def _contains_dim(input):
     from . import Dim
     for i in input:
-        if isinstance(i,  Dim):
+        if isinstance(i, Dim):
             return True
 
 def expand(self, *sizes):
     if not _contains_dim(sizes):
         return self.__torch_function__(torch.Tensor.expand, None, (self, *sizes))
     dims = sizes
-    sizes = [d.size for d in dims] + [-1]*self.ndim
+    sizes = [d.size for d in dims] + [-1] * self.ndim
     self = self.expand(*sizes)
     return self[dims]
 
@@ -273,6 +274,7 @@ def _patcharg(name, offset, args, kwargs, value):
 
 def _wrap(orig, dim_offset=0, keepdim_offset=1, dim_name='dim', single_dim=False, reduce=True):
     from . import TensorLike, Dim, Tensor
+
     def fn(self, *args, **kwargs):
         dim = _getarg(dim_name, dim_offset, args, kwargs, _not_present)
         if dim is _not_present or (single_dim and not isinstance(dim, Dim)):
@@ -289,9 +291,10 @@ def _wrap(orig, dim_offset=0, keepdim_offset=1, dim_name='dim', single_dim=False
             new_levels = levels
 
         if len(dim_indices) == 1:
-            dim_indices = dim_indices[0] # so that dims that really only take a single argument work...
+            dim_indices = dim_indices[0]  # so that dims that really only take a single argument work...
         args = list(args)
         _patcharg(dim_name, dim_offset, args, kwargs, dim_indices)
+
         def wrap(t):
             if isinstance(t, TensorLike):
                 return Tensor.from_positional(t, new_levels, self._has_device)
@@ -315,10 +318,12 @@ class dim_tracker:
     def __init__(self):
         self.dims = llist()
         self.count = []
+
     def record(self, d):
         if d not in self.dims:
             self.dims.append(d)
             self.count.append(1)
+
     def __getitem__(self, d):
         return self.count[self.dims.index(d)]
 
@@ -335,14 +340,17 @@ def t__getitem__(self, input):
     # * if we have dims to bind, bind them (it will help if we eliminated ... and None before)
 
     # this handles bool indexing handling, as well as some other simple cases.
-    if (not isinstance(input, Dim) and
-        not isinstance(input, (tuple,list)) and
-        # WAR for functorch bug where zero time tensors in getitem are not handled correctly.
-        not (isinstance(input, TensorLike) and input.ndim == 0)):
-            if isinstance(self, _Tensor):
-                return _Tensor.__torch_function__(_orig_getitem, None, (self, input))
-            else:
-                return _orig_getitem(self, input)
+
+    is_simple = (not isinstance(input, Dim) and
+                 not isinstance(input, (tuple, list)) and
+                 # WAR for functorch bug where zero time tensors in getitem are not handled correctly.
+                 not (isinstance(input, TensorLike) and input.ndim == 0))
+
+    if is_simple:
+        if isinstance(self, _Tensor):
+            return _Tensor.__torch_function__(_orig_getitem, None, (self, input))
+        else:
+            return _orig_getitem(self, input)
 
     # can further optimize this case
     if not isinstance(input, tuple):
@@ -372,12 +380,12 @@ def t__getitem__(self, input):
         expanding_ndims = ndim - dims_indexed
         obj = input[expanding_object]
         if obj is ...:
-            input[expanding_object:expanding_object+1] = [no_slice]*expanding_ndims
+            input[expanding_object:expanding_object + 1] = [no_slice] * expanding_ndims
         else:
             obj.bind_len(expanding_ndims)
     # flatten the dimslists into the indexing
     for i in reversed(dimlists):
-        input[i:i+1] = input[i]
+        input[i:i + 1] = input[i]
     dims_indexed = 0
     requires_view = False
     size = self.size()
@@ -408,7 +416,7 @@ def t__getitem__(self, input):
                     dims_seen.record(idx)
                 _bind_dims_to_size(sz, idx, f'offset {i}')
                 view_sizes.extend(d.size for d in idx)
-                requires_view=True
+                requires_view = True
                 dim_packs.append(i)
             else:
                 add_dims(idx)
@@ -417,7 +425,7 @@ def t__getitem__(self, input):
     if requires_view:
         self = self.view(*view_sizes)
     for i in reversed(dim_packs):
-        input[i:i+1] = input[i]
+        input[i:i + 1] = input[i]
 
     # currenty:
     # input is flat, containing either Dim, or Tensor, or something valid for standard indexing
@@ -477,7 +485,7 @@ def t__getitem__(self, input):
 
     next_positional = -1
     if to_pad > 0:
-        result_levels.extend([0]*to_pad)
+        result_levels.extend([0] * to_pad)
     for i, r in enumerate(reversed(result_levels)):
         if isinstance(r, int):
             result_levels[-1 - i] = next_positional
@@ -508,7 +516,7 @@ def split(self, split_size_or_sections, dim=0):
     from . import Dim, _Tensor
     if isinstance(split_size_or_sections, int) or any(isinstance(t, int) for t in split_size_or_sections):
         if isinstance(dim, Dim):
-            raise ValueError(f'when dim is specified as a Dim object, split sizes must also be dimensions.')
+            raise ValueError('when dim is specified as a Dim object, split sizes must also be dimensions.')
         return _orig_split(self, split_size_or_sections, dim=dim)
 
     if isinstance(dim, Dim):

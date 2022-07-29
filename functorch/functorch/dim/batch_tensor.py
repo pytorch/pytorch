@@ -18,12 +18,9 @@ def _enable_layers(dims):
     input = list(sorted((d._level, d.size) for d in dims if not isinstance(d, int)))
     n = len(input)
     try:
-        #print("BEGIN ", dims, input)
-        #import pdb; pdb.set_trace()
         _vmap_add_layers(input)
         _enabled = True
         yield
-        #print("FINISHED ", dims)
     finally:
         _enabled = False
         _vmap_remove_layers(n)

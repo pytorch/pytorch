@@ -3,8 +3,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import functorch.dim as dim
-from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError, cat, DimList
+from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError, DimList
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
@@ -12,12 +11,15 @@ from attn_positional import BertSelfAttention as BertSelfAttentionB
 from unittest import TestCase, main, skip
 import torch
 import gc
-from torchvision.models import resnet18
 
+from functorch._C import dim as _C
 
-from functorch._C import dim
+try:
+    from torchvision.models import resnet18
+except ImportError:
+    resnet18 = None
 
-_test_c, _parse_test, _set_pointwise_optimize = dim._test_c, dim._parse_test, dim._set_pointwise_optimize
+_test_c, _parse_test, _set_pointwise_optimize = _C._test_c, _C._parse_test, _C._set_pointwise_optimize
 
 from contextlib import contextmanager
 from time import perf_counter
@@ -35,35 +37,35 @@ def measure(what):
     b = perf_counter()
     yield
     e = perf_counter()
-    print (f"{what}: {e - b:.20f} seconds")
+    print(f"{what}: {e - b:.20f} seconds")
 
 def triu(A):
-   i,j = dims()
-   a = A[i, j]
-   zero = torch.tensor(0, dtype=torch.float) # XXX - torch.where is janky...
-   return torch.where(i <= j, a, zero).order(i, j)
+    i, j = dims()
+    a = A[i, j]
+    zero = torch.tensor(0, dtype=torch.float)  # XXX - torch.where is janky...
+    return torch.where(i <= j, a, zero).order(i, j)
 
 def gpu_time(lmb, name, r=100):
-        b = torch.cuda.Event(enable_timing=True)
-        e = torch.cuda.Event(enable_timing=True)
-        # with magic_trace(name + ".fxt"):
-        for _ in range(r):
-            lmb()
-        b.record()
-        for _ in range(r):
-            lmb()
-        e.record()
-        e.synchronize()
-        elapsed = b.elapsed_time(e)
-        # with torch.profiler.profile(schedule=torch.profiler.schedule(
-        #     wait=0,
-        #     warmup=1,
-        #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
-        #     for _ in range(3):
-        #         lmb()
-        #         profiler.step()
-        print(name, elapsed / r)
-        return elapsed / r
+    b = torch.cuda.Event(enable_timing=True)
+    e = torch.cuda.Event(enable_timing=True)
+    # with magic_trace(name + ".fxt"):
+    for _ in range(r):
+        lmb()
+    b.record()
+    for _ in range(r):
+        lmb()
+    e.record()
+    e.synchronize()
+    elapsed = b.elapsed_time(e)
+    # with torch.profiler.profile(schedule=torch.profiler.schedule(
+    #     wait=0,
+    #     warmup=1,
+    #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
+    #     for _ in range(3):
+    #         lmb()
+    #         profiler.step()
+    print(name, elapsed / r)
+    return elapsed / r
 
 class TestMin(TestCase):
 
@@ -87,7 +89,7 @@ class TestMin(TestCase):
         if 'cuda' in self._testMethodName:
             extra_memory += torch.cuda.memory_allocated() - self.mem_allocated
 
-        #nolevels = _n_levels_in_use() == 0
+        #  nolevels = _n_levels_in_use() == 0
         if extra_memory != 0 or len(interesting) != 0:
             import refcycle
             refcycle.garbage().export_image('garbage.pdf')
@@ -100,9 +102,9 @@ class TestMin(TestCase):
 
         A_ = torch.rand(3, 4)
         B_ = torch.rand(4, 5)
-        i,j,k = dims()
-        A = A_[i,k]
-        B = B_[k,j]
+        i, j, k = dims()
+        A = A_[i, k]
+        B = B_[k, j]
         C = (A.expand(j) * B.expand(i)).sum(k)
         self.assertTrue(torch.allclose(C.order(i, j), torch.mm(A_, B_)))
         self.assertTrue(torch.allclose(torch.triu(A_, 0), triu(A_)))
@@ -113,9 +115,9 @@ class TestMin(TestCase):
 
         A.index([i], [D]).order(k, d)
 
-    def attn(self, batch_size = 1, sequence_length = 4, hidden_size = 6, num_attention_heads = 3, linear=Linear, device=None, time=False):
+    def attn(self, batch_size=1, sequence_length=4, hidden_size=6, num_attention_heads=3, linear=Linear, device=None, time=False):
         def maybe_to(x):
-           return x if device is None else x.to(device)
+            return x if device is None else x.to(device)
 
         attention_probs_dropout_prob = 0.
         A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads, attention_probs_dropout_prob, linear=linear))
@@ -126,7 +128,7 @@ class TestMin(TestCase):
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
         b_out = B(hidden_state)
         a_out = A(hidden_state)
-        self.assertTrue(torch.allclose(a_out, b_out)) # why does a simple matmul not do the right thing?
+        self.assertTrue(torch.allclose(a_out, b_out))  # why does a simple matmul not do the right thing?
 
         if time:
             gpu_time(lambda: B(hidden_state), "positional", r=3)
@@ -151,8 +153,8 @@ class TestMin(TestCase):
         A.load_state_dict(B.state_dict())
 
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        past_key_value = (maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size//num_attention_heads)),
-                          maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size//num_attention_heads)))
+        past_key_value = (maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size // num_attention_heads)),
+                          maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size // num_attention_heads)))
 
         b_out = B(hidden_state, past_key_value=past_key_value)
         a_out = A(hidden_state, past_key_value=past_key_value)
@@ -181,15 +183,15 @@ class TestMin(TestCase):
 
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(batch_size = 256, hidden_size=768, sequence_length=128, num_attention_heads=12, device='cuda', time=measure_perf, linear=torch.nn.Linear)
+        self.attn(batch_size=256, hidden_size=768, sequence_length=128, num_attention_heads=12, device='cuda', time=measure_perf, linear=torch.nn.Linear)
 
     def test_stack(self):
         i, j, d = dims()
         A = torch.rand(4, 5)
-        r = stack([A[i,j]], d, j)
-        #a, b = r.unbind(d)
-        #self.assertTrue(torch.allclose(a.order(i, j), i.expand(j).order(i, j)))
-        #self.assertTrue(torch.allclose(b.order(i, j), j.expand(i).order(i, j)))
+        r = stack([A[i, j]], d, j)
+        # a, b = r.unbind(d)
+        # self.assertTrue(torch.allclose(a.order(i, j), i.expand(j).order(i, j)))
+        # self.assertTrue(torch.allclose(b.order(i, j), j.expand(i).order(i, j)))
 
     def test_max(self):
         ap = torch.rand(2, 3, 2)
@@ -202,16 +204,16 @@ class TestMin(TestCase):
         i, j, k, q = dims()
         a = torch.rand(3, 4)
         b = torch.rand(4, 5)
-        a_ = a[i,k]
+        a_ = a[i, k]
         b_ = b[k, j]
         q.size = 1
-        r = (a_.expand(j, q)*b_.expand(i, q)).sum(k).order(q, i, j)
-        #r = (a_*b_).sum(k).order(q, i, j)
+        r = (a_.expand(j, q) * b_.expand(i, q)).sum(k).order(q, i, j)
+        # r = (a_*b_).sum(k).order(q, i, j)
         # print(r)
         # print(a @ b)
 
     def test_with_dims_split(self):
-        a = torch.arange(3*12).view(3, 12)
+        a = torch.arange(3 * 12).view(3, 12)
         i, j, k = dims()
         k.size = 4
         r = a[i, [j, k]]
@@ -227,16 +229,16 @@ class TestMin(TestCase):
 
         # r = A[i]*4
         r = (A[i, k] * B[k, j]).sum(k).order(i, j)
-        assert torch.allclose(r, A@B)
+        assert torch.allclose(r, A @ B)
 
         assert A.sum() == A[i].sum((0, i))
         assert A.sum() == A[i].sum((-1, i))
 
-        assert torch.allclose(A.sum(), A[i].sum(0, keepdim=True).sum( (0,i) ))
+        assert torch.allclose(A.sum(), A[i].sum(0, keepdim=True).sum((0, i)))
         assert torch.allclose(A[i].std(i, True), A.std(0, True))
 
         assert torch.allclose(A[i, k].max(i)[0].order(k), A.max(0)[0])
-        assert torch.allclose(A.sort(1)[0], A[i,k].sort(k)[0].order(i,k))
+        assert torch.allclose(A.sort(1)[0], A[i, k].sort(k)[0].order(i, k))
         # XXX - chunk changes the size of a dimension, has to take a new dimension...
         # assert torch.allclose(A.chunk(2,1)[0], A[i, k].chunk(2, k)[0].order(i, k))
         assert torch.allclose(A[i].renorm(1, i, 7).order(i), A.renorm(1, 0, 7))
@@ -251,24 +253,24 @@ class TestMin(TestCase):
         assert torch.allclose(A.expand(5, -1, -1), A[i, k].expand(j).order(j, i, k))
         z = dims()
         C = torch.arange(2)
-        assert torch.allclose(A[:,0:2], A[i, k].index(k, C[z]).order(i, z))
+        assert torch.allclose(A[:, 0:2], A[i, k].index(k, C[z]).order(i, z))
 
-        o,l = dims()
+        o, l = dims()
         o.size = 2
         r = A[i, k].index(k, (o, l))
         assert torch.allclose(r.order(i, o, l), A.view(-1, 2, 2))
         rr = r.index((o, l), k)
-        assert torch.allclose(A, rr.order(i,k))
+        assert torch.allclose(A, rr.order(i, k))
 
         r = i + k - 1
-        r2 =  torch.arange(3)[:, None] + torch.arange(4)[None, :] - 1
+        r2 = torch.arange(3)[:, None] + torch.arange(4)[None, :] - 1
         assert torch.allclose(r.order(i, k), r2)
 
         # test with ...
         assert torch.allclose(A.T, A[..., k].order(k))
 
         # test with dimlist
-        a_,b_ = dimlists()
+        a_, b_ = dimlists()
         assert torch.allclose(A[i, a_].order(*a_, i), A.T)
         # test with one bound dimlist
         assert torch.allclose(A[:, a_].order(*a_), A.T)
@@ -279,33 +281,33 @@ class TestMin(TestCase):
         assert torch.allclose((A[i] + i).order(i), A + torch.arange(3)[:, None])
         # test with too many elements
         try:
-            A[1,...,1,1]
-            raise NotImplemented()
+            A[1, ..., 1, 1]
+            raise NotImplementedError()
         except IndexError:
             pass
         c, d = dims()
         c.size = 2
-        assert torch.allclose(A[i, [c,d]].order(i, c, d), A.view(3, 2, 2))
+        assert torch.allclose(A[i, [c, d]].order(i, c, d), A.view(3, 2, 2))
 
         assert torch.allclose(A[c + 1, c + 0].order(c), A[torch.arange(2) + 1, torch.arange(2)])
         try:
             A[..., 3, ...]
-            raise NotImplemented()
+            raise NotImplementedError()
         except DimensionBindError:
             pass
 
         C = torch.rand(4, 7)
         c_, x, y, z = dims()
 
-        a,b,c = C.split((3, 3, 1), dim=1)
+        a, b, c = C.split((3, 3, 1), dim=1)
         s = dims()
-        ref = C.split((3,3,1), dim=1)
-        t = C[s,c_].split((x,y,z), dim=c_)
-        for a,b,d in zip(ref, t, (x,y,z)):
-            assert torch.allclose(a, b.order(s,d))
+        ref = C.split((3, 3, 1), dim=1)
+        t = C[s, c_].split((x, y, z), dim=c_)
+        for a, b, d in zip(ref, t, (x, y, z)):
+            assert torch.allclose(a, b.order(s, d))
 
         D = torch.rand(3, 4, 5)
-        assert torch.allclose(D.transpose(0, 1).flatten(1,2), D[i, k, j].order((i, j)).order(k))
+        assert torch.allclose(D.transpose(0, 1).flatten(1, 2), D[i, k, j].order((i, j)).order(k))
 
 
         r = [id(x) for x in torch.rand_like(A[i, k]).dims]
@@ -362,7 +364,7 @@ class TestMin(TestCase):
         # magic_trace_stop_indicator()
 
 
-        assert torch.allclose(r1.order(i,j), r0)
+        assert torch.allclose(r1.order(i, j), r0)
 
     def test_compare_dims(self):
         i, j = dims()
@@ -395,22 +397,24 @@ class TestMin(TestCase):
         with self.assertRaises(TypeError):
             _parse_test(2, 0, "x", "y", "z", "q", "5")
         with self.assertRaises(TypeError):
-            _parse_test(2, 0, "x","y", b="y")
+            _parse_test(2, 0, "x", "y", b="y")
 
         with self.assertRaises(TypeError):
-            _parse_test(2, 0, "x",c="y")
+            _parse_test(2, 0, "x", c="y")
         with self.assertRaises(TypeError):
             _parse_test(2, 0, "x")
 
     def test_network(self):
+        if resnet18 is None:
+            self.skipTest('no torchvision')
         rn = resnet18(norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False))
         rn.train()
         img = torch.rand(1, 1, 2, 3, 224, 224)
         imgf = img.view(2, 3, 224, 224)
 
-        i,j = dims()
-        r = rn(img[i,j])
-        r = r.order(i,j).view(2, 1000)
+        i, j = dims()
+        r = rn(img[i, j])
+        r = r.order(i, j).view(2, 1000)
         r2 = rn(imgf)
         assert torch.allclose(r2, r, atol=1e-06)
 
@@ -432,6 +436,7 @@ class TestMin(TestCase):
         b = dimlists(sizes=[[4, 5]])
         assert b[0].size == 4
         assert b[1].size == 5
+
     def test_diag(self):
         i = dims()
         A = torch.rand(4, 4)
@@ -440,7 +445,7 @@ class TestMin(TestCase):
     def test_softmax_split(self):
         a = torch.rand(16)
         g, i = dims(sizes=[2, None])
-        a2 = a[[i,g],]
+        a2 = a[[i, g], ]
 
         m_b, _ = a2.max(i)
         f_b = torch.exp(a2 - m_b)
@@ -448,29 +453,29 @@ class TestMin(TestCase):
 
         m, _ = m_b.max(g)
         c = torch.exp(m_b - m)
-        f = (c*f_b).order((i, g))
-        l = (c*l_b).sum(g)
-        assert torch.allclose(f/l, torch.nn.functional.softmax(a, dim=0))
+        f = (c * f_b).order((i, g))
+        l = (c * l_b).sum(g)
+        assert torch.allclose(f / l, torch.nn.functional.softmax(a, dim=0))
 
     def test_index(self):
         A = torch.rand(3, 4)
         B = torch.rand(4, 5)
         i, j, k = dims()
 
-        o,l = dims()
+        o, l = dims()
         o.size = 2
         r = A[i, k].index(k, [o, l])
         assert torch.allclose(r.order(i, o, l), A.view(-1, 2, 2))
         rr = r.index([o, l], k)
-        assert torch.allclose(A, rr.order(i,k))
+        assert torch.allclose(A, rr.order(i, k))
         z = dims()
         C = torch.arange(2)
         x = A[i, k].index(k, C[z]).order(i, z)
-        assert torch.allclose(A[:,0:2], x)
+        assert torch.allclose(A[:, 0:2], x)
 
         C = torch.rand(3, 4, 5)
         ik = dims()
-        assert torch.allclose(C.index((0,2), ik).order(ik), C.permute(0,2,1).reshape(15,4))
+        assert torch.allclose(C.index((0, 2), ik).order(ik), C.permute(0, 2, 1).reshape(15, 4))
 
     # failures that came up from monkey patching some operators...
     def test_monkey(self):
@@ -486,14 +491,14 @@ class TestMin(TestCase):
         z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
         a = [z[2], z[0] + 3]
         x.new(a)
-        #self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
+        # self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
 
     def test_index_placement(self):
         A = torch.rand(1, 2, 3, 4)
 
-        i, j = dims(sizes=[2,4])
+        i, j = dims(sizes=[2, 4])
 
-        a = A[:, i+0, :, j+0]
+        a = A[:, i + 0, :, j + 0]
         r = a.order(i, j)
 
         assert torch.allclose(A.permute(1, 3, 0, 2), r)
@@ -505,7 +510,7 @@ class TestMin(TestCase):
 
     def test_mask(self):
         a = torch.rand(5)
-        i,j = dims(sizes=[a.size(0), a.size(0)])
+        i, j = dims(sizes=[a.size(0), a.size(0)])
         ((i >= j) * a[i]).sum(j).order(i)
 
     def test_eq(self):
@@ -515,6 +520,7 @@ class TestMin(TestCase):
     def test_dims_with_size(self):
         x = dims(3)
         assert len(x) == 3 and isinstance(x[0], Dim)
+
         class Foo:
             pass
         y = Foo()
@@ -524,7 +530,7 @@ class TestMin(TestCase):
         assert str(q) == "d2"
 
     def test_dir(self):
-        i,j = dims(sizes=[3, 3])
+        i, j = dims(sizes=[3, 3])
         dir(i <= j)
 
     def test_doc(self):
@@ -554,8 +560,8 @@ class TestMin(TestCase):
 
         i, j = dims()
 
-        AA = torch.mm(A[i], C) # 3, 4, 2
-        BB = torch.mm(B[j], C) # 3, 4, 2
+        AA = torch.mm(A[i], C)  # 3, 4, 2
+        BB = torch.mm(B[j], C)  # 3, 4, 2
         assert list(torch.mm(AA.T, BB).order(i, j).shape) == [3, 3, 2, 2]
 
 

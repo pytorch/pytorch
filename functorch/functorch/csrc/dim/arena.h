@@ -8,6 +8,15 @@
 #include <ATen/ATen.h>
 #include "minpybind.h"
 
+#ifdef _WIN32
+#include <intrin.h>
+// https://stackoverflow.com/questions/355967/how-to-use-msvc-intrinsics-to-get-the-equivalent-of-this-gcc-code
+inline unsigned int __builtin_clz(unsigned int x) {
+    unsigned long r = 0;
+    _BitScanReverse(&r, x);
+    return (31 - r);
+}
+#endif
 
 inline int round2min8(int num) {
    int nzeros = __builtin_clz((num - 1)|4);
@@ -311,7 +320,7 @@ Slice<T>::Slice(Arena& arena, Args&&... args) {
     for (auto i : lens) {
         size_ += i;
     }
-    capacity_ = round2min8(size_);
+    capacity_ = size_ ? round2min8(size_) : 0;
     begin_ = arena.allocate<T>(capacity_);
     T* dst_ = begin_;
     T* unused[] = {_insert(dst_, args)...};

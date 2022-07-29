@@ -30,7 +30,7 @@ class DelayedMulTensor(_Tensor):
     def _batchtensor(self):
         if self._batchtensor_data is None:
             with _enable_layers(self._levels):
-                print(f"bt multiply fallback")
+                print("bt multiply fallback")
                 self._batchtensor_data = self._lhs._batchtensor * self._rhs._batchtensor
         return self._batchtensor_data
 
@@ -39,6 +39,7 @@ class DelayedMulTensor(_Tensor):
         if self._tensor_data is None:
             self._tensor_data = Tensor.from_batched(self._batchtensor, self._has_device)._tensor
         return self._tensor_data
+
     @property
     def ndim(self):
         return self._batchtensor.ndim
@@ -52,6 +53,7 @@ class DelayedMulTensor(_Tensor):
         dims = _dims(dim, 0, False, False)
         n = ord('a')
         all_levels = self._levels
+
         def to_char(d):
             return chr(n + all_levels.index(d))
         plhs, levelslhs = self._lhs._tensor, self._lhs._levels

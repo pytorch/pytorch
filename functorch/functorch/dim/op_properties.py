@@ -15,7 +15,7 @@ pointwise_magic_methods_with_reverse = (
     'pow', 'lshift', 'rshift', 'and', 'or', 'xor'
 )
 pointwise_magic_methods = (
-    *(x for m in pointwise_magic_methods_with_reverse for x in (m, 'r'+m)),
+    *(x for m in pointwise_magic_methods_with_reverse for x in (m, 'r' + m)),
     'eq', 'gt', 'le', 'lt', 'ge', 'gt', 'ne', 'neg', 'pos',
     'abs', 'invert',
     'iadd', 'isub', 'imul', 'ifloordiv', 'idiv',

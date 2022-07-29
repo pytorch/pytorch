@@ -87,7 +87,7 @@ class BertSelfAttention(nn.Module):
         # Take the dot product between "query" and "key" to get the raw attention scores.
         # The actual outer-product and summation are explicitly represented here,
         # and like einsum, will be pattern matched to an efficient matrix multiply op.
-        attention_scores = (q*k).sum(features) / math.sqrt(features.size)
+        attention_scores = (q * k).sum(features) / math.sqrt(features.size)
 
         # relative positional embeddings gave a unique embedding based on the distance between
         # key and value tokens in the sequence, e.g.
@@ -114,11 +114,11 @@ class BertSelfAttention(nn.Module):
             if self.position_embedding_type == "relative_key":
                 # these were einsum ops in the positional code because they are not easy to fit to existing matmul operators
                 # eventhough they are degenerate matmuls
-                relative_position_scores = (q*positional_embedding).sum(features)
+                relative_position_scores = (q * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores
             elif self.position_embedding_type == "relative_key_query":
-                relative_position_scores_query = (q*positional_embedding).sum(features)
-                relative_position_scores_key = (k*positional_embedding).sum(features)
+                relative_position_scores_query = (q * positional_embedding).sum(features)
+                relative_position_scores_key = (k * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
 
         attention_probs = attention_scores
@@ -130,7 +130,7 @@ class BertSelfAttention(nn.Module):
 
         # similarly, we can replace the matmul with a direct listing of the outer product, which makes it clear
         # we are weighting the values v across all keys with the attention scores.
-        context_layer = (attention_probs*v).sum(key_sequence)
+        context_layer = (attention_probs * v).sum(key_sequence)
 
         # finally, we convert back to a standard tensor by describing the layout of dimensions.
         # working in reverse to with_dims, the (heads, features) group flattens the dimensions into a single one.
