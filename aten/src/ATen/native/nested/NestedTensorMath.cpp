@@ -768,10 +768,15 @@ Tensor dropout_nested(const Tensor& input, double p, bool train) {
   return wrap_buffer(output_buffer, sizemat.clone());
 }
 
-Tensor& dropout_nested_(Tensor& input, double p, bool train) {
-  Tensor input_buffer = get_buffer(input);
-  at::dropout_(input_buffer, p, train);
-  return input;
+std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
+  auto input_ptr = get_nested_tensor_impl(input);
+  const Tensor & input_buffer = input_ptr->get_buffer(),
+               & sizemat = input_ptr->get_nested_size_tensor();
+  Tensor output_buffer, mask_buffer;
+  std::tie(output_buffer, mask_buffer) = at::native_dropout(input_buffer, p, train);
+  Tensor output = wrap_buffer(output_buffer, sizemat.clone()),
+           mask = wrap_buffer(mask_buffer, sizemat.clone());
+  return std::make_tuple(output, mask);
 }
 
 Tensor softmax_nested(

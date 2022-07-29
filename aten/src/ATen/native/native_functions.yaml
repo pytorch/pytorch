@@ -222,6 +222,7 @@
   dispatch:
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
+    NestedTensorCPU, NestedTensorCUDA: native_dropout_nested
   tags: nondeterministic_seeded
 
 - func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
@@ -242,15 +243,9 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  dispatch:
-    CompositeImplicitAutograd: dropout
-    NestedTensorCPU, NestedTensorCUDA: dropout_nested
   tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  dispatch:
-    CompositeImplicitAutograd: dropout_
-    NestedTensorCPU, NestedTensorCUDA: dropout_nested_
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
@@ -2777,11 +2772,12 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
+
+- func: nested_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   dispatch:
-    CompositeImplicitAutograd: linear
     NestedTensorCPU, NestedTensorCUDA: nested_linear
 
-- func: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: nested_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: nested_linear_backward
 
@@ -4435,9 +4431,6 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: softmax
-    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function

@@ -18,6 +18,9 @@
 namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  if (input.is_nested()) {
+    return at::nested_linear(input, weight, bias_opt);
+  }
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
