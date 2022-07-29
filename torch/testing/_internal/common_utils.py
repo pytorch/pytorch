@@ -713,7 +713,7 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
-        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and (
+        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
             "cuda" in build_environment and "linux" in build_environment
         ):
             # exclude linux cuda tests because we run into memory issues when running in parallel
