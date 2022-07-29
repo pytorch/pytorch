@@ -67,7 +67,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
           throw python_error();
         PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
-        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(si.data()));
+        PyTuple_SET_ITEM(
+            ret.get(), i, THPUtils_packInt64(si.as_int_unchecked()));
       }
     }
   }
