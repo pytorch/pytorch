@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -247,6 +248,46 @@ class VulkanAPITest : public ::testing::Test {
 #endif
   }
 };
+
+TEST_F(VulkanAPITest, copy_to_texture) {
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({5, 29, 197, 217}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
+    // 3D
+    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({31, 197, 217}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
+    // 2D
+    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({297, 317}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
+    // 1D
+    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1017}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    // Test using transfer commands
+    at::Tensor in_vk_copied = at::native::vulkan::ops::to_vulkan(in_cpu);
+    at::Tensor out_copied = at::native::vulkan::ops::to_cpu(in_vk_copied);
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+
+    // Test using compute shaders
+    at::Tensor in_vk_packed = at::native::vulkan::ops::to_vulkan(in_cpu, true);
+    at::Tensor out_packed = at::native::vulkan::ops::to_cpu(in_vk_packed, true);
+
+    const auto check_pack = almostEqual(out_packed, in_cpu);
+    if(!check_pack) {
+      std::cout << "Pack failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+  }
+}
 
 TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   c10::InferenceMode mode;

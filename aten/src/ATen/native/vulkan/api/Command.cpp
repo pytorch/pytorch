@@ -215,6 +215,82 @@ void CommandBuffer::copy_texture_to_texture(
   state_ = CommandBuffer::State::RECORDING;
 }
 
+void CommandBuffer::copy_texture_to_buffer(
+    const api::VulkanImage& source,
+    const api::VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_texture_to_buffer() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  const VkImageSubresourceLayers src_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
+
+  const VkBufferImageCopy copy_details{
+      dst_offset.data[0u], // bufferOffset
+      dst_offset.data[1u], // bufferRowLength
+      dst_offset.data[2u], // bufferImageHeight
+      src_subresource_layers, // imageSubresource
+      create_offset3d(src_offset), // imageOffset
+      create_extent3d(copy_range), // imageExtent
+  };
+
+  vkCmdCopyImageToBuffer(
+      handle_,
+      source.handle(),
+      source.layout(),
+      destination.handle(),
+      1u,
+      &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
+}
+
+void CommandBuffer::copy_buffer_to_texture(
+    const api::VulkanBuffer& source,
+    const api::VulkanImage& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_buffer_to_texture() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  const VkImageSubresourceLayers dst_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
+
+  const VkBufferImageCopy copy_details{
+      src_offset.data[0u], // bufferOffset
+      src_offset.data[1u], // bufferRowLength
+      src_offset.data[2u], // bufferImageHeight
+      dst_subresource_layers, // imageSubresource
+      create_offset3d(dst_offset), // imageOffset
+      create_extent3d(copy_range), // imageExtent
+  };
+
+  vkCmdCopyBufferToImage(
+      handle_,
+      source.handle(),
+      destination.handle(),
+      destination.layout(),
+      1u,
+      &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
+}
+
 void CommandBuffer::write_timestamp(
     const VkQueryPool querypool,
     const uint32_t idx) const {

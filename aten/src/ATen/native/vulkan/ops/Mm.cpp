@@ -42,7 +42,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
       weight.options(),
   };
 
-  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  api::StorageBuffer staging(context, at::kFloat, v_weight.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -105,7 +105,7 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -134,7 +134,7 @@ vTensor pack_biases(
         weight_arg.options(),
     };
 
-    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 

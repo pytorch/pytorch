@@ -77,7 +77,7 @@ vTensor pack_weights_dw_q(api::Context* const context, const Tensor& weight) {
       weight.q_scale(),
       weight.q_zero_point(),
   };
-  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  api::StorageBuffer staging(context, at::kFloat, v_weight.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -144,7 +144,7 @@ vTensor pack_weights_2d_q(api::Context* const context, const Tensor& weight) {
       weight.q_zero_point(),
   };
 
-  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  api::StorageBuffer staging(context, at::kFloat, v_weight.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -224,7 +224,7 @@ vTensor pack_biases_q(const c10::optional<Tensor>& bias, const Tensor& weight) {
       weight.q_zero_point(),
   };
 
-  api::StagingBuffer staging(context, v_bias.buffer_bytes());
+  api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
