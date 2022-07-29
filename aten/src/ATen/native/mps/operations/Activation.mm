@@ -1668,7 +1668,6 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
         if (i == 1) continue;
         [expand_dims addObject:[NSNumber numberWithInt:i]];
       }
-
     }
 
     struct CachedGraph : public MPSCachedGraph
@@ -1699,7 +1698,6 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
           MPSGraphTensor *inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
           MPSGraphTensor *weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_);
-
 
           MPSGraphTensor *zeroTensor = [mpsGraph constantWithScalar:0.0
                                                               shape:@[@1]
