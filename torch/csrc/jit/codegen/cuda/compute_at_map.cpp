@@ -33,6 +33,28 @@ IterDomainGraph::IterDomainGraph(Fusion* fusion) {
   build(fusion);
 }
 
+//! Map corresponding inputs and outputs of swizzle op together
+//!  on the given disjoint set, if the given id is an output
+//!  of a swizzle operator.
+//!
+//! The current usage of swizzle operator is local to each tensor
+//!  itself, so they should not affect exact or permissive mapping
+//!  between iterdomains on different tensor domains.
+//! TODO:
+//!   Exact mapping based index hoisting of swizzled iterdomains
+//!   is disabled currently and will be re-enabled in the next
+//!   few build out steps.
+void mapMaybeSwizzleOp(
+    DisjointSets<IterDomain*>& disjoint_sets,
+    IterDomain* id) {
+  if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
+    // Map each input to its corresponding output on the given
+    //  disjoint set.
+    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+  }
+}
+
 void IterDomainGraph::build(Fusion* fusion) {
   // Initialize a node for every iteration domain
   for (auto tv : ir_utils::allTvs(fusion)) {
@@ -178,6 +200,12 @@ void IterDomainGraph::build(Fusion* fusion) {
           exact_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(exact_nodes_, p_id);
+          mapMaybeSwizzleOp(exact_nodes_, c_id);
         }
 
         for (auto entry : permissive_c2p_map) {
@@ -189,6 +217,12 @@ void IterDomainGraph::build(Fusion* fusion) {
           permissive_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(permissive_nodes_, p_id);
+          mapMaybeSwizzleOp(permissive_nodes_, c_id);
         }
 
         // Make sure we always get root mapping for the permissive map. Because
