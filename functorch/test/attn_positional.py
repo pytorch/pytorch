@@ -8,7 +8,9 @@ from torch import nn
 import math
 
 class BertSelfAttention(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, position_embedding_type=None, max_position_embeddings=None):
+    def __init__(self, hidden_size, num_attention_heads,
+                 attention_probs_dropout_prob,
+                 position_embedding_type=None, max_position_embeddings=None):
         super().__init__()
         if hidden_size % num_attention_heads != 0:
             raise ValueError(

@@ -17,7 +17,9 @@ class Linear(nn.Linear):
         return result.order(b, co)
 
 class BertSelfAttention(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, position_embedding_type=None, max_position_embeddings=None, linear=Linear):
+    def __init__(self, hidden_size, num_attention_heads,
+                 attention_probs_dropout_prob, position_embedding_type=None,
+                 max_position_embeddings=None, linear=Linear):
         super().__init__()
         if hidden_size % num_attention_heads != 0:
             raise ValueError(
@@ -104,7 +106,8 @@ class BertSelfAttention(nn.Module):
             assert key_sequence.size <= self.max_position_embeddings
 
             # we can then use that as an indirect index into the embedding table values to look up the features for that index
-            # this is just a `gather` primitive op. The resulting tensor will have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
+            # this is just a `gather` primitive op. The resulting tensor will
+            # have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
             # plus all the dimensions of `embed` that were not indirectly accessed (`embedding_range`).
             # this form of indirect indexing is more strainghtforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.

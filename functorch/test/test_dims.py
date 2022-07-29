@@ -96,7 +96,9 @@ class TestMin(TestCase):
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
         assert extra_memory == 0, f'extra cuda memory left allocated: {extra_memory}'
-        assert len(interesting) == 0, f'extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types: { [type(t) for t in interesting] }'
+        assert len(interesting) == 0, \
+            f'extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:' \
+            f' { [type(t) for t in interesting] }'
 
     def test_manual_stuff(self):
 
@@ -135,8 +137,10 @@ class TestMin(TestCase):
             gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
         for approach in ('relative_key', 'relative_key_query'):
-            A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads, attention_probs_dropout_prob, approach, sequence_length, linear=linear))
-            B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads, attention_probs_dropout_prob, approach, sequence_length))
+            A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads,
+                         attention_probs_dropout_prob, approach, sequence_length, linear=linear))
+            B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads,
+                         attention_probs_dropout_prob, approach, sequence_length))
             A.load_state_dict(B.state_dict())
 
             hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
@@ -148,13 +152,17 @@ class TestMin(TestCase):
                 gpu_time(lambda: B(hidden_state), "positional", r=3)
                 gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
-        A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads, attention_probs_dropout_prob, None, None, linear=linear))
-        B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads, attention_probs_dropout_prob, None, None))
+        A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads,
+                                        attention_probs_dropout_prob, None, None, linear=linear))
+        B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads,
+                                        attention_probs_dropout_prob, None, None))
         A.load_state_dict(B.state_dict())
 
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        past_key_value = (maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size // num_attention_heads)),
-                          maybe_to(torch.rand(batch_size, num_attention_heads, sequence_length, hidden_size // num_attention_heads)))
+        past_key_value = (maybe_to(torch.rand(batch_size, num_attention_heads,
+                                   sequence_length, hidden_size // num_attention_heads)),
+                          maybe_to(torch.rand(batch_size, num_attention_heads,
+                                   sequence_length, hidden_size // num_attention_heads)))
 
         b_out = B(hidden_state, past_key_value=past_key_value)
         a_out = A(hidden_state, past_key_value=past_key_value)
@@ -183,7 +191,8 @@ class TestMin(TestCase):
 
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(batch_size=256, hidden_size=768, sequence_length=128, num_attention_heads=12, device='cuda', time=measure_perf, linear=torch.nn.Linear)
+        self.attn(batch_size=256, hidden_size=768, sequence_length=128,
+                  num_attention_heads=12, device='cuda', time=measure_perf, linear=torch.nn.Linear)
 
     def test_stack(self):
         i, j, d = dims()

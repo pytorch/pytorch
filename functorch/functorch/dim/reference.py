@@ -45,15 +45,18 @@ def _bind_dims_to_size(lhs_size, rhs, lhs_debug):
         idx, d = not_bound[0]
         rhs_so_far = prod(r.size for r in rhs if r.is_bound)
         if lhs_size % rhs_so_far != 0:
-            raise DimensionMismatchError(f"inferred dimension does not evenly fit into larger dimension: {lhs_size} vs {tuple('?' if not r.is_bound else str(r.size) for r in rhs)}")
+            rhs_s = tuple('?' if not r.is_bound else str(r.size) for r in rhs)
+            raise DimensionMismatchError(f"inferred dimension does not evenly fit into larger dimension: {lhs_size} vs {rhs_s}")
         new_size = lhs_size // rhs_so_far
         d.size = new_size
     elif len(not_bound) > 1:
-        raise DimensionMismatchError(f"cannot infer the size of two dimensions at once: {rhs} with sizes {tuple('?' if not r.is_bound else str(r.size) for r in rhs)}")
+        rhs_s = tuple('?' if not r.is_bound else str(r.size) for r in rhs)
+        raise DimensionMismatchError(f"cannot infer the size of two dimensions at once: {rhs} with sizes {rhs_s}")
     else:
         rhs_size = prod(r.size for r in rhs)
         if lhs_size != rhs_size:
-            raise DimensionMismatchError(f"Dimension sizes to do not match ({lhs_size} != {rhs_size}) when matching {lhs_debug} to {rhs}")
+            raise DimensionMismatchError(
+                  f"Dimension sizes to do not match ({lhs_size} != {rhs_size}) when matching {lhs_debug} to {rhs}")
 
 def _tensor_levels(inp):
     from . import _Tensor
@@ -133,8 +136,9 @@ class llist(isin, list):
 class ltuple(isin, tuple):
     pass
 
+empty_dict = {}
 @classmethod
-def __torch_function__(self, orig, cls, args, kwargs={}):
+def __torch_function__(self, orig, cls, args, kwargs=empty_dict):
     from . import _Tensor, TensorLike, Tensor
     from .delayed_mul_tensor import DelayedMulTensor
 
@@ -364,7 +368,9 @@ def t__getitem__(self, input):
     for i, s in enumerate(input):
         if s is ... or isinstance(s, DimList) and not s.is_bound:
             if expanding_object is not None:
-                raise DimensionBindError(f'at most one ... or unbound dimension list can exist in indexing list but found 2 at offsets {i} and {expanding_object}')
+                msg = 'at most one ... or unbound dimension list can exist in indexing list but' \
+                      f' found 2 at offsets {i} and {expanding_object}'
+                raise DimensionBindError(msg)
             expanding_object = i
 
         if isinstance(s, DimList):
@@ -536,7 +542,8 @@ def split(self, split_size_or_sections, dim=0):
             unbound.append(i)
 
     if unbound:
-        assert total_bound_size <= size, f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size <= size, \
+            f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
         remaining_size = size - total_bound_size
         chunk_size = -(-remaining_size // len(unbound))
         for u in unbound:
@@ -545,5 +552,6 @@ def split(self, split_size_or_sections, dim=0):
             sizes[u] = sz
             remaining_size -= sz
     else:
-        assert total_bound_size == size, f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size == size, \
+            f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
     return tuple(t.index(dim, d) for d, t in zip(split_size_or_sections, _orig_split(self, sizes, dim=dim)))

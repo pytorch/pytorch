@@ -60,6 +60,8 @@ class DelayedMulTensor(_Tensor):
         prhs, levelsrhs = self._rhs._tensor, self._rhs._levels
         new_dims = tuple(d for d in self.dims if d not in dims)
         new_levels = [l for l in self._levels if l not in dims]
-        fmt = ''.join([*(to_char(d) for d in levelslhs), ',', *(to_char(d) for d in levelsrhs), '->', *(to_char(d) for d in new_levels)])
+        fmt = ''.join([*(to_char(d) for d in levelslhs), ',',
+                       *(to_char(d) for d in levelsrhs), '->',
+                       *(to_char(d) for d in new_levels)])
         result_data = torch.einsum(fmt, (plhs, prhs))
         return Tensor.from_positional(result_data, new_levels, True)
