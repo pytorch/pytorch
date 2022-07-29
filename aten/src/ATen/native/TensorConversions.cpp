@@ -5,10 +5,11 @@
 #include <ATen/Parallel.h>
 
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
-#include <ATen/core/ATen_fwd.h>
+#include "ATen/SparseCsrTensorUtils.h"
 
 namespace at {
 namespace native {
@@ -361,6 +362,18 @@ Tensor sparse_compressed_to_dense(
   TORCH_CHECK(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
+
+  // Guard upfront against hybrid tensors (causes segfault)
+  auto batch_ndim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "sparse_compressed_to_dense",
+      [&]() { return self.crow_indices().dim() - 1; },
+      [&]() { return self.ccol_indices().dim() - 1; });
+
+  TORCH_CHECK(
+      (self.dim() - batch_ndim) == 2,
+      "sparse_compressed_to_dense: Hybrid tensors are not supported");
+
   if (self.layout() == kSparseCsr) {
     Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
     return dst.add_(self);
@@ -390,13 +403,16 @@ Tensor sparse_compressed_to_dense(
   if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
     Tensor compressed_indices;
     Tensor plain_indices;
-    std::tie(compressed_indices, plain_indices) = [&]() {
-      if (self.layout() == kSparseBsr) {
-        return std::make_pair(self.crow_indices(), self.col_indices());
-      } else {
-        return std::make_pair(self.ccol_indices(), self.row_indices());
-      }
-    }();
+    std::tie(compressed_indices, plain_indices) =
+        AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+            self.layout(),
+            "sparse_compressed_to_dense",
+            [&]() {
+              return std::make_pair(self.crow_indices(), self.col_indices());
+            },
+            [&]() {
+              return std::make_pair(self.ccol_indices(), self.row_indices());
+            });
     auto values = self.values();
     Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
     if (self.dim() == 2) {
