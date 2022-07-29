@@ -3835,7 +3835,7 @@ Example::
     >>> torch.dist(x, y, 3)
     tensor(1.6973)
     >>> torch.dist(x, y, 0)
-    tensor(inf)
+    tensor(4.)
     >>> torch.dist(x, y, 1)
     tensor(2.6537)
 """.format(
@@ -7293,7 +7293,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7353,7 +7353,7 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -11169,7 +11169,7 @@ Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions consisting of symmetric or Hermitian matrices.
     eigenvectors(bool, optional): controls whether eigenvectors have to be computed
-    upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
+    upper(bool, optional): controls whether to consider upper-triangular or lower-triangular region
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
@@ -12933,7 +12933,7 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 Arguments:
     input (Tensor): 1D vector.
     r (int, optional): number of elements to combine
-    with_replacement (boolean, optional): whether to allow duplication in combination
+    with_replacement (bool, optional): whether to allow duplication in combination
 
 Returns:
     Tensor: A tensor equivalent to converting all the input tensors into lists, do
