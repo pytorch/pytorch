@@ -474,7 +474,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::TensorIndex* ti) final {
+  //! Returns the sum of all indices in a TensorIndex,
+  //!  or 0 if the indices vector is empty.
+  //! Used lowering generic tensor index and lowering
+  //!  mma fragment indices.
+  std::string genTensorIndex(const kir::TensorIndex* ti) {
     bool first = true;
     std::stringstream index;
     for (auto* ind : ti->indices()) {
@@ -490,12 +494,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (first) {
       index << "0";
     }
+
+    return index.str();
+  }
+
+  void handle(const kir::TensorIndex* ti) final {
     bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
         kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
-    code_ << varName(ti->view()) << "[" << index.str() << "]";
+    code_ << varName(ti->view()) << "[" << genTensorIndex(ti) << "]";
   }
 
   void handle(const ViewAsScalar* sv) final {
@@ -1013,14 +1022,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     auto options = mma->options();
     auto in_a = mma->inA()->as<kir::TensorIndex>()->view();
     auto dtype = in_a->getDataType().value();
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputARegisterSize(options.macro) << ","
              << getInputARegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inA()) << "),\n";
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << varName(mma->inA()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inA()->as<kir::TensorIndex>()) << "])"
+             << ",\n";
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputBRegisterSize(options.macro) << ","
              << getInputBRegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inB()) << ")";
+             << varName(mma->inB()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inB()->as<kir::TensorIndex>()) << "])";
   }
 
   void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {

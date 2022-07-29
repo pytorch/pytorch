@@ -1125,7 +1125,16 @@ indexMapFromTV(
         // Similarly for local memory tensors, zero replacement can be
         // only done when there's a matching domain with the same
         // parallel type
-        (loop->iter_domain()->isThread() && is_local && same_parallel_type)) {
+        (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
+        // MMA operands are currently indexed in units of "fragments",
+        //  so each mma tensor domain would be zero-ed and the tensor index
+        //  calculated here would be the fragment index.
+        // TODO: This is a quick WAR to enable iterating over a register array
+        //  of MMA fragments, so we could generate unrolled mma loops.
+        //  Eventually we still want IdGraph to be able to analyze the
+        //  in-register layout of mma fragments for more unified indexing math
+        //  as well as more flexibility in swizzling loops.
+        (loop->iter_domain()->isMma() && !as_consumer)) {
       idx = GpuLower::current()->kernel()->zeroVal();
       zero_loops.insert(loop);
     } else {

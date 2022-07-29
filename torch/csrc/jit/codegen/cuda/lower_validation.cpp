@@ -899,22 +899,42 @@ void validateMmaTensors(MmaOp* mma) {
   }
 
   // Note: this check will be relaxed in a follow up.
-  auto validate_operand_ids = [](const TensorView* tv) {
+  auto validate_operand = [](const TensorView* tv) {
+    TORCH_INTERNAL_ASSERT(
+        tv->getMemoryType() == MemoryType::Local,
+        "Only supporting register input for mma ops, up to sm80 all mma ops have to take register inputs.");
+
     TORCH_INTERNAL_ASSERT(
         std::all_of(
             tv->domain()->domain().begin() + tv->getComputeAtPosition(),
             tv->domain()->domain().end(),
             [](IterDomain* id) {
               return id->isMmaSwizzled() ||
-                  (id->isBroadcast() &&
+                  // MMA instructions can only take inputs from registers,
+                  //  so we always assume mma op inputs are located on
+                  //  registers.
+                  // Currently requiring that serial ids on the right of the
+                  //  CA axis are constant sized to ensure early detection of
+                  //  invalid mma schedules.
+                  ((id->isBroadcast() || id->extent()->isConstInt()) &&
                    id->getParallelType() == ParallelType::Serial);
             }),
         "All id's on the right of CA pos needs to be mma-swizzled by WarpMmaSwizzler\n",
         tv);
   };
 
-  validate_operand_ids(mma->inA()->as<TensorView>());
-  validate_operand_ids(mma->inB()->as<TensorView>());
+  validate_operand(mma->inA()->as<TensorView>());
+  validate_operand(mma->inB()->as<TensorView>());
+
+  // Additionally validate that mma is not directly taking a double buffered
+  //  register input as the double buffer indexing is currently not compatible
+  //  with fragment iteration. Would need to require a cache stage in this case.
+  TORCH_INTERNAL_ASSERT(
+      !mma->inA()->as<TensorView>()->isDoubleBuffered(),
+      "MMA op cannot directly take double buffered register input, put a set stage before.");
+  TORCH_INTERNAL_ASSERT(
+      !mma->inB()->as<TensorView>()->isDoubleBuffered(),
+      "MMA op cannot directly take double buffered register input, put a set stage before.");
 }
 
 //! Note and TODO:
