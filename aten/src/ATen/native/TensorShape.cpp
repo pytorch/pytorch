@@ -928,7 +928,7 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
 }
 
 Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return narrow_copy(self, dim, start, sym_length.expect_int());
+  return self.narrow_copy(dim, start, sym_length.expect_int());
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
