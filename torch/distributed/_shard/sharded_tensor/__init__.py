@@ -12,6 +12,7 @@ from .api import (
     _CUSTOM_SHARDED_OPS,
     _SHARDED_OPS,
     Shard,
+    ShardedTensorBase,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,

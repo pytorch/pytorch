@@ -6,6 +6,23 @@ namespace torch {
 namespace utils {
 using c10::SchemaArgType;
 
+TEST(FunctionSchemaIsAliasingTest, Basic) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::test.Tensor(Tensor(a) self, Tensor(b!) other, Tensor more_other) -> (Tensor(a), Tensor(b!))");
+  ASSERT_TRUE(schema.is_aliasing({SchemaArgType::output, 0}));
+  ASSERT_TRUE(schema.is_aliasing({SchemaArgType::output, 1}));
+  ASSERT_TRUE(schema.is_aliasing({SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.is_aliasing({SchemaArgType::input, 1}));
+  ASSERT_FALSE(schema.is_aliasing({SchemaArgType::input, 2}));
+}
+
+TEST(FunctionSchemaIsAliasingTest, InvalidArgument) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  ASSERT_THROW(schema.is_aliasing({SchemaArgType::input, 4}), c10::Error);
+  ASSERT_THROW(schema.is_aliasing({SchemaArgType::output, 4}), c10::Error);
+}
+
 TEST(FunctionSchemaIsMutableTest, Basic) {
   c10::FunctionSchema schema = torch::jit::parseSchema(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
@@ -64,21 +81,21 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
 TEST(SchemaInfoIsMutableTest, InstanceNorm) {
   SchemaInfo schema_info(
       "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
-  ASSERT_FALSE(schema_info.is_mutable("running_var"));
-  schema_info.addArgumentValue("use_input_stats", true);
   ASSERT_TRUE(schema_info.is_mutable("running_mean"));
   ASSERT_TRUE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("use_input_stats", false);
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
 }
 
 TEST(SchemaInfoIsMutableTest, BatchNorm) {
   SchemaInfo schema_info(
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
-  ASSERT_FALSE(schema_info.is_mutable("running_var"));
-  schema_info.addArgumentValue("training", true);
   ASSERT_TRUE(schema_info.is_mutable("running_mean"));
   ASSERT_TRUE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("training", false);
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
 }
 
 TEST(SchemaInfoIsNonDeterministicTest, Basic) {
