@@ -214,7 +214,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
     }
     // CPU -> Vulkan
     else {
-      transfer_cpu_to_vulkan(src, v_self);
+      pack_cpu_to_vulkan(src, v_self);
     }
   }
   // Vulkan -> X
@@ -223,7 +223,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
 
     // Vulkan -> CPU
     if (dst.device().is_cpu()) {
-      transfer_vulkan_to_cpu(v_src, dst);
+      pack_vulkan_to_cpu(v_src, dst);
     } else {
       TORCH_CHECK(false, "Unsupported!");
     }

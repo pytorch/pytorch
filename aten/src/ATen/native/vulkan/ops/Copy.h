@@ -13,7 +13,7 @@ void transfer_cpu_to_vulkan(const Tensor&, vTensor&);
 
 void transfer_vulkan_to_cpu(vTensor&, Tensor&);
 
-Tensor& copy_(Tensor&, const Tensor&);
+Tensor& copy_(Tensor& dst, const Tensor& src);
 
 Tensor to_vulkan(const Tensor&, bool use_shader = false);
 
