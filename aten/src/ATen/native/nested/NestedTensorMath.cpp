@@ -96,20 +96,7 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_size_tensor));
-}
 
-at::Tensor wrap_buffer(
-    at::Tensor buffer, at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor, const std::vector<int64_t>& offsets) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_size_tensor),
-      std::move(nested_stride_tensor), offsets);
-}
 
 inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
