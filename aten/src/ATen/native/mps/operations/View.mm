@@ -35,7 +35,7 @@ static std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& bas
          getArrayRefString(base_shape) + "]:[" + getArrayRefString(new_shape) + "]";
 }
 
-// initializes the MTLBuffers for tesnsor data and runs the MPSGraph for the view op
+// initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
 static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
                             bool needsScatter, bool requires_sync = false)
 {
@@ -53,7 +53,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
-    // in case of scatter, we use ouput tensor as input buffer and write the results back to the source buffer
+    // in case of scatter, we use output tensor as input buffer and write the results back to the source buffer
     feeds[cachedGraph->inputTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: needsScatter ? outputBuffer : sourceBuffer
                                                                                shape: inputShape
                                                                             dataType: inputType] autorelease];
@@ -66,9 +66,15 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     for (int i = 0; i < sizes.size(); i++) {
       feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, Scalar(strides[i]), MPSDataTypeInt32);
     }
+    // Workaround for MPSShaderLibrary bug
+    // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+    auto outputType = getMPSDataType(output.scalar_type());
+    if (outputType ==  MPSDataTypeUInt8) {
+        outputType =  MPSDataTypeInt8;
+    }
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: outputBuffer
                                                                                     shape: outputShape
-                                                                                 dataType: getMPSDataType(output.scalar_type())] autorelease];
+                                                                                 dataType: outputType] autorelease];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
@@ -193,8 +199,14 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
         @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new ViewCachedGraph(mpsGraph);
+            // Workaround for MPSShaderLibrary bug
+            // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+            auto inputType = getMPSScalarType(self.scalar_type());
+            if (inputType ==  MPSDataTypeUInt8) {
+                inputType =  MPSDataTypeInt8;
+            }
             // Self is the input tensor we are creating view of
-            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), getMPSShape(base_shape));
+            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
             newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]);
             for (int i = 0; i < size.size(); i++) {
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
