@@ -152,8 +152,13 @@ class NormalizeOperators(AnnotateTypesWithSchema):
                 return super().call_function(target, args, kwargs)
             lhs, rhs = args
 
+            if target == torch.div and kwargs.get("rounding_mode") == "floor":
+                target = operator.floordiv
+            else:
+                target = self.binary_magic_method_remap[target]
+
             return super().call_function(
-                target=self.binary_magic_method_remap[target],
+                target=target,
                 args=(lhs, rhs),
                 kwargs={},
             )
