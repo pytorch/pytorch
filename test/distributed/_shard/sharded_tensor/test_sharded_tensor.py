@@ -2269,6 +2269,65 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
+    @skip_if_lt_x_gpu(4)
+    def test_st_base_init_from_local_shards_and_global_metadata(self):
+        world_size = 4
+        shards_metadata = []
+        shards = []
+        for rank in range(world_size):
+            local_shard_metadata = ShardMetadata(
+                shard_offsets=[(rank // 2) * 5, (rank % 2) * 5],
+                shard_sizes=[5, 5],
+                placement=f"rank:{rank}/cuda:{rank}",
+            )
+            shards_metadata.append(local_shard_metadata)
+            shards.append(
+                sharded_tensor.Shard(
+                    torch.randn(5, 5, device=f"cuda:{rank}"), local_shard_metadata
+                )
+            )
+
+        tensor_properties = TensorProperties(
+            dtype=torch.get_default_dtype(),
+            layout=torch.strided,
+            requires_grad=False,
+            memory_format=torch.contiguous_format,
+            pin_memory=False,
+        )
+
+        sharded_tensor_metadata = sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties,
+        )
+
+        st_base = sharded_tensor.ShardedTensorBase._init_from_local_shards_and_global_metadata(
+            shards, sharded_tensor_metadata=sharded_tensor_metadata
+        )
+        self.assertEqual(4, len(st_base.local_shards()))
+
+        # Verify local shard of st_base
+        local_shard = st_base.local_shards()[0]
+        self.assertEqual(torch.device("cuda:0"), local_shard.tensor.device)
+        self.assertEqual((5, 5), local_shard.tensor.size())
+
+        # Verify local shard metadata.
+        self.assertEqual(
+            (0, 0),
+            local_shard.metadata.shard_offsets,
+        )
+        self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
+        self.assertEqual("rank:0/cuda:0", str(local_shard.metadata.placement))
+
+        # Verify global metadata.
+        shards_metadata = st_base.metadata().shards_metadata
+        self.assertEqual(4, len(shards_metadata))
+        for rank, shard_metadata in enumerate(shards_metadata):
+            self.assertEqual(
+                (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
+            )
+            self.assertEqual((5, 5), shard_metadata.shard_sizes)
+            self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
