@@ -232,6 +232,9 @@ def create_aot_autograd_function(
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
+                if config.debug_joint:
+                    print(fx_g.code)
+
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
