@@ -904,12 +904,14 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
+                assert f.func.arguments.has_tensor_arg()
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
+                assert not f.func.arguments.has_tensor_arg()
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
