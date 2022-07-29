@@ -320,10 +320,26 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     has_sym_ints: bool
 
+    # Note: [Fake Tensor Dispatch Keys]
+    # In order to model the behavior of device-specific autocast
+    # and autograd logic, we update the dispatch keys of FakeTensors
+    # to reflect their fake device. This includes the BackendComponent
+    # (DispatchKey::Meta -> DispatchKey::CUDA), and also the BackendComponent
+    # related Autocast and Autograd keys. __torch__dispatch__ sits below
+    # Autocast and Autograd, and is only invoked when we are at the
+    # kernel for the BackendComponent. Then, we add Meta to the
+    # thread-local dispatch include set to hit the meta kernel
+    # instead of the kernel of the BackendComponent for the fake device.
+    # The `device_for_backend_keys` does that below
+
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
         return torch.Tensor._make_subclass(
-            cls, elem, elem.requires_grad, dispatch_device=True
+            cls,
+            elem,
+            elem.requires_grad,
+            dispatch_device=True,
+            device_for_backend_keys=device,
         )
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
@@ -335,18 +351,6 @@ class FakeTensor(torch.Tensor):
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         assert device.type != "meta"
 
-        # Note: [Fake Tensor Dispatch Keys]
-        # In order to model the behavior of device-specific autocast
-        # and autograd logic, we update the dispatch keys of FakeTensors
-        # to reflect their fake device. This includes the BackendComponent
-        # (DispatchKey::Meta -> DispatchKey::CUDA), and also the BackendComponent
-        # related Autocast and Autograd keys. __torch__dispatch__ sits below
-        # Autocast and Autograd, and is only invoked when we are at the
-        # kernel for the BackendComponent. Then, we add Meta to the
-        # thread-local dispatch include set to hit the meta kernel
-        # instead of the kernel of the BackendComponent for the fake device.
-
-        torch._C._change_backend_component_keys(self, device)
         self.fake_device = device
         self.fake_mode = fake_mode
         self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
@@ -540,10 +544,16 @@ class FakeTensorMode(TorchDispatchMode):
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
+        # and ensure that Meta kernels are dispatched to (see)
+        # Fake Tensor Dispatch Keys
 
         if "prims::" in func._schema.name:
-            with no_dispatch():
-                return func(*args, **kwargs)
+            try:
+                torch._C._add_meta_to_tls_dispatch_include()
+                with no_dispatch():
+                    return func(*args, **kwargs)
+            finally:
+                torch._C._remove_meta_from_tls_dispatch_include()
 
         if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]

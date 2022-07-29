@@ -196,18 +196,11 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
   // following logic TensorImpl::TensorImpl, update the BackendComponent related
   // keys to correspond to device
 
+  // TODO: Autocoast should be a per-backend functionality key, once that change
+  // is made this key swap will not be necessary.
   auto key_set =
       key_set_ - c10::getAutocastRelatedKeySetFromBackend(old_backend);
   key_set = key_set | c10::getAutocastRelatedKeySetFromBackend(new_backend);
-
-  // The AutogradRelatedKey will not be present if in inference mode
-  // Only swap in the new AutogradRelatedKey if the previous backend related key
-  // is present
-  auto old_autograd_key = c10::getAutogradRelatedKeySetFromBackend(old_backend);
-  if (key_set.has_all(old_autograd_key)) {
-    key_set = key_set - old_autograd_key;
-    key_set = key_set | c10::getAutogradRelatedKeySetFromBackend(new_backend);
-  }
 
   // See note [Removing keys from DispatchKeySet Only Affects Functionality
   // Keys]

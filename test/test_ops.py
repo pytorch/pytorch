@@ -1696,7 +1696,7 @@ class TestFakeTensorNonErroring(TestCase):
             self.skipTest("Skip failing test")
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample in enumerate(samples):
+        for sample in samples:
             try:
                 mode = FakeTensorMode(inner=None)
 
