@@ -867,10 +867,6 @@ void AliasDb::analyzeImpl(Node* node) {
   for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
     const at::AliasInfo* formal = schema.returns()[i].alias_info();
-    // Record writes
-    if (schema_info.is_mutable({c10::SchemaArgType::output, i})) {
-      registerWrite(actual, node);
-    }
     if (!formal) {
       // This is a fresh tensor
       giveFreshAlias(actual);
