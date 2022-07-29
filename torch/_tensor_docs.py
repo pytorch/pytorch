@@ -5383,7 +5383,7 @@ Example::
 )
 
 add_docstr_all(
-    'to_sparse_csc',
+    "to_sparse_csc",
     r"""
 to_sparse_csc() -> Tensor
 
@@ -5399,7 +5399,7 @@ Example::
 """)
 
 add_docstr_all(
-    'to_sparse_bsr',
+    "to_sparse_bsr",
     r"""
 to_sparse_bsr(blocksize) -> Tensor
 
@@ -5417,7 +5417,7 @@ Example::
 )
 
 add_docstr_all(
-    'to_sparse_bsc',
+    "to_sparse_bsc",
     r"""
 to_sparse_bsc(blocksize) -> Tensor
 
@@ -5434,7 +5434,7 @@ Example::
 """)
 
 add_docstr_all(
-    'to_mkldnn',
+    "to_mkldnn",
     r"""
 to_mkldnn() -> Tensor
 Returns a copy of the tensor in ``torch.mkldnn`` layout.
