@@ -145,6 +145,15 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto x_ptr = float_data_ptr(x);
           auto h_ptr = float_data_ptr(h);
           auto y_ptr = float_data_ptr(y);
+#ifndef NO_PROFILING
+          RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER(
+              x_ptr,
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float) + y.numel() * sizeof(float) +
+                  h.numel() * sizeof(float),
+              c10::Device(c10::kCPU));
+#endif
           if (instruction == "aten::add") {
             y_ptr[0] = x_ptr[0] + h_ptr[0];
           } else {
