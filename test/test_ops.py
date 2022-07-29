@@ -608,8 +608,12 @@ class TestCommon(TestCase):
     #   - Case 1: out has the correct shape, dtype, and device but is noncontiguous
     #   - Case 2: out has the correct dtype and device, but is zero elements
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
-    #   - Case 4: out has the with correct shape and device, but a dtype that cannot
+    #   - Case 4: out has the correct shape and device, but a dtype that cannot
     #       "safely" cast to
+    #
+    # Case 3 and 4 are slightly different when the op is a factory function:
+    #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
+    #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
@@ -734,15 +738,26 @@ class TestCommon(TestCase):
             elif torch.cuda.is_available():
                 wrong_device = "cuda"
 
+
+            factory_fn_msg = (
+                "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
+                "OpInfo with `is_factory_function=True`."
+            )
             if wrong_device is not None:
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
                 out = _apply_out_transform(_case_three_transform, expected)
-                msg_fail = f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}"
-                with self.assertRaises(RuntimeError, msg=msg_fail):
+
+                if op.is_factory_function and sample.kwargs.get("device", None) is None:
                     op_out(out=out)
+                else:
+                    msg_fail = (
+                        f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}."
+                    ) + factory_fn_msg
+                    with self.assertRaises(RuntimeError, msg=msg_fail):
+                        op_out(out=out)
 
             # Case 4: out= with correct shape and device, but a dtype
             #   that output cannot be "safely" cast to (long).
@@ -774,9 +789,13 @@ class TestCommon(TestCase):
                         "Expected RuntimeError when doing an unsafe cast from a result of dtype "
                         f"{expected.dtype} into an out= with dtype torch.long"
                     )
-                )
-                with self.assertRaises(RuntimeError, msg=msg_fail):
+                ) + factory_fn_msg
+
+                if op.is_factory_function and sample.kwargs.get("dtype", None) is None:
                     op_out(out=out)
+                else:
+                    with self.assertRaises(RuntimeError, msg=msg_fail):
+                        op_out(out=out)
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
@@ -1624,6 +1643,7 @@ class TestRefsOpsInfo(TestCase):
 
 
 fake_skips = (
+    "aminmax",  # failing input
     "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
@@ -1678,14 +1698,14 @@ sometimes_dynamic_output_op_test = (
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
-    @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
-        if name in fake_skips or "sparse" in name:
+        if name in fake_skips or "sparse" in name or "jiterator" in name:
             self.skipTest("Skip failing test")
+
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
