@@ -4,6 +4,7 @@ import torchvision
 import torchvision.transforms.transforms as transforms
 import os
 import torch.quantization
+from torchvision.models.quantization.resnet import resnet18
 
 # Setup warnings
 import warnings
@@ -128,15 +129,13 @@ def prepare_data_loaders(data_path):
     return data_loader, data_loader_test
 
 data_path = '~/my_imagenet/'
-saved_model_dir = '/data/home/amandaliu/cluster/pytorch/test/quantization/core/experimental/data/'
-float_model_file = 'resnet18_pretrained_float.pth'
 
 train_batch_size = 30
 eval_batch_size = 50
 
 data_loader, data_loader_test = prepare_data_loaders(data_path)
 criterion = nn.CrossEntropyLoss()
-float_model = load_model(saved_model_dir + float_model_file).to("cpu")
+float_model = resnet18(pretrained=True)
 float_model.eval()
 
 # deepcopy the model since we need to keep the original model around
@@ -250,8 +249,6 @@ print("Model #3 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % 
 """
 Prepare eager mode quantized model
 """
-
-from torchvision.models.quantization.resnet import resnet18
 eager_quantized_model = resnet18(pretrained=True, quantize=True).eval()
 top1, top5 = evaluate(eager_quantized_model, criterion, data_loader_test)
 print("Eager mode quantized model evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
