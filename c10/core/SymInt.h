@@ -2,14 +2,13 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/intrusive_ptr.h>
 
 #include <memory>
 
 namespace c10 {
 
 class SymIntNodeImpl;
-using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
+using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
