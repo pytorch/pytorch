@@ -4035,7 +4035,7 @@ def error_inputs_assert_all_true(op, device):
     t = torch.ones(S, device=device)
     t[0] = 0
     yield ErrorInput(SampleInput(t, args=(err_msg,)), error_regex=err_msg)
-    
+
 
 def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
