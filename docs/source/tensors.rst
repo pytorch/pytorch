@@ -669,7 +669,12 @@ Tensor class reference
     Tensor.arctanh_
     Tensor.tolist
     Tensor.topk
+    Tensor.to_dense
     Tensor.to_sparse
+    Tensor.to_sparse_csr
+    Tensor.to_sparse_csc
+    Tensor.to_sparse_bsr
+    Tensor.to_sparse_bsc
     Tensor.trace
     Tensor.transpose
     Tensor.transpose_
