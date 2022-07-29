@@ -13,7 +13,8 @@ void SizesAndStrides::resizeSlowPath(
     SymInt* tempStorage = outOfLineStorage_;
     for (size_t i = 0; i < C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE; i++) {
       inlineStorage_[i] = std::move(tempStorage[i]);
-      inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] = std::move(tempStorage[oldSize + i]);
+      inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] =
+          std::move(tempStorage[oldSize + i]);
     }
     // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
     // HAS BEEN OVERWRITTEN!
@@ -29,12 +30,11 @@ void SizesAndStrides::resizeSlowPath(
           tempStorage,
           "Could not allocate memory to change Tensor SizesAndStrides!");
       const auto elemsToCopy = oldSize;
-      const auto elemsToZero = (newSize > oldSize)
-          ? (newSize - oldSize)
-          : 0;
+      const auto elemsToZero = (newSize > oldSize) ? (newSize - oldSize) : 0;
       for (size_t i = 0; i < elemsToCopy; i++) {
         tempStorage[i] = std::move(inlineStorage_[i]);
-        tempStorage[newSize + i] = std::move(inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i]);
+        tempStorage[newSize + i] = std::move(
+            inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i]);
       }
       for (size_t i = 0; i < elemsToZero; i++) {
         tempStorage[oldSize + i] = 0;
@@ -52,16 +52,14 @@ void SizesAndStrides::resizeSlowPath(
       // the stride starting point is not moving.
       if (isGrowing) {
         std::move_backward(
-          outOfLineStorage_ + oldSize,
-          outOfLineStorage_ + oldSize + oldSize,
-          outOfLineStorage_ + newSize + oldSize
-        );
+            outOfLineStorage_ + oldSize,
+            outOfLineStorage_ + oldSize + oldSize,
+            outOfLineStorage_ + newSize + oldSize);
       } else {
         std::move(
-          outOfLineStorage_ + oldSize,
-          outOfLineStorage_ + oldSize + newSize,
-          outOfLineStorage_ + newSize
-        );
+            outOfLineStorage_ + oldSize,
+            outOfLineStorage_ + oldSize + newSize,
+            outOfLineStorage_ + newSize);
       }
       if (!isGrowing) {
         // Resize after shifting so that we don't lose data.

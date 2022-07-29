@@ -311,9 +311,9 @@ class C10_API SizesAndStrides {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     auto* newStorage = new SymInt[storageElems(newSize)];
     TORCH_CHECK(
-        newStorage,
-        "Could not allocate memory for Tensor SizesAndStrides!");
-    for (size_t i = 0; i < storageElems(newSize) && i < storageElems(size_); i++) {
+        newStorage, "Could not allocate memory for Tensor SizesAndStrides!");
+    for (size_t i = 0; i < storageElems(newSize) && i < storageElems(size_);
+         i++) {
       newStorage[i] = std::move(outOfLineStorage_[i]);
     }
     delete[] outOfLineStorage_;
