@@ -21,7 +21,7 @@ TEST(SymIntTest, ConcreteInts) {
 }
 
 TEST(SymIntTest, AddNode) {
-  auto n = std::make_shared<SymIntNodeImpl>();
+  auto n = c10::make_intrusive<SymIntNodeImpl>();
   auto i = n->toSymInt();
   EXPECT_TRUE(i.is_symbolic());
 }
