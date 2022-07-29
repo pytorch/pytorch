@@ -536,7 +536,7 @@ void cuda_sparse_coo_softmax_backward(
   }
 
   auto nnz = values.size(0);
-  auto nvalues = values.numel() / nnz;
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
   auto values_2 = values.view({nnz, nvalues});
   auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
@@ -573,21 +573,23 @@ void cuda_sparse_coo_softmax_backward(
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
-  cuda_sparse_coo_softmax_backward_kernel<scalar_t, LogSoftMax>
-      <<<grid_size, block_size, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          pool_size,
-          pool_sizes.data_ptr<int64_t>(),
-          pool_offsets.data_ptr<int64_t>(),
-          nvalues,
-          grad_nnz,
-          grad_offsets.data_ptr<int64_t>(),
-          out_offsets.data_ptr<int64_t>(),
-          lower_bound_values.data_ptr<int64_t>(),
-          values_accessor,
-          out_values_accessor,
-          grad_values_accessor);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (nvalues > 0 && pool_size > 0) {
+    cuda_sparse_coo_softmax_backward_kernel<scalar_t, LogSoftMax>
+        <<<grid_size, block_size, 0, stream>>>(
+            sorted_indices.data_ptr<int64_t>(),
+            pool_size,
+            pool_sizes.data_ptr<int64_t>(),
+            pool_offsets.data_ptr<int64_t>(),
+            nvalues,
+            grad_nnz,
+            grad_offsets.data_ptr<int64_t>(),
+            out_offsets.data_ptr<int64_t>(),
+            lower_bound_values.data_ptr<int64_t>(),
+            values_accessor,
+            out_values_accessor,
+            grad_values_accessor);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 } // end anonymous namespace
