@@ -674,7 +674,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             optimizer_state_dict,
             src=REFERENCE_RANK,
             group=dist.group.WORLD,
-            device=self.device,
+            map_location=self.device,
         )
         optimizer.load_state_dict(optimizer_state_dict)
 
@@ -976,7 +976,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         grads_and_params = [grads_at_each_iter, params_at_each_iter]
         dist.broadcast_object_list(
             grads_and_params, src=world_size - 1, group=dist.group.WORLD,
-            device=device,
+            map_location=device,
         )
         grads_at_each_iter = grads_and_params[0]
         params_at_each_iter = grads_and_params[1]
