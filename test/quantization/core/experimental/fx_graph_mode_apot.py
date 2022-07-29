@@ -135,7 +135,7 @@ eval_batch_size = 50
 
 data_loader, data_loader_test = prepare_data_loaders(data_path)
 criterion = nn.CrossEntropyLoss()
-float_model = resnet18(pretrained="True")
+float_model = resnet18(pretrained=True)
 float_model.eval()
 
 # deepcopy the model since we need to keep the original model around
