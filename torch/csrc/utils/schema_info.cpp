@@ -11,6 +11,7 @@ void SchemaInfo::addArgumentValue(
       index != c10::nullopt, "Schema has no argument named ", name);
   value_map_[name] = value;
   alias_maps_current_ = false;
+  has_inputs_set_ = true;
 }
 
 void SchemaInfo::addArgumentValues(
@@ -23,6 +24,7 @@ void SchemaInfo::addArgumentValues(
     if (value_list[i] != c10::nullopt) {
       value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
       alias_maps_current_ = false;
+      has_inputs_set_ = true;
     }
   }
 }
@@ -54,10 +56,20 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
   TORCH_INTERNAL_ASSERT(
       argument.index < schema_.getCorrectList(argument.type).size(),
       "Invalid index for schema.");
+  static const std::vector<c10::FunctionSchema> training_ops = getTrainingOps();
+  bool is_training_op = std::any_of(
+      training_ops.begin(),
+      training_ops.end(),
+      [this](const c10::FunctionSchema& training_op) {
+        return this->schema_ == training_op;
+      });
+  if (!has_inputs_set_ && !is_training_op) {
+    return this->schema_.is_mutable(argument);
+  }
+
   if (!alias_maps_current_) {
     generateAliasMaps();
   }
-  static const std::vector<c10::FunctionSchema> training_ops = getTrainingOps();
   const auto& correct_map = (argument.type == c10::SchemaArgType::input)
       ? input_alias_map_
       : output_alias_map_;

@@ -16,12 +16,14 @@ namespace utils {
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(const c10::FunctionSchema& schema)
-      : schema_(std::move(schema)), alias_maps_current_(false) {
+      : schema_(schema), alias_maps_current_(false), has_inputs_set_(false) {
     initSchemaInfo();
   }
   explicit SchemaInfo(const char* signature)
-      : schema_(torch::jit::parseSchema(signature)),
-        alias_maps_current_(false) {
+      : schema_owner_(torch::jit::parseSchema(signature)),
+        schema_(schema_owner_.value()),
+        alias_maps_current_(false),
+        has_inputs_set_(false) {
     initSchemaInfo();
   }
 
@@ -100,9 +102,14 @@ struct TORCH_API SchemaInfo {
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
 
-  const c10::FunctionSchema schema_;
+  // FunctionSchema copy constructor is expensive, so we want store schema_
+  // by reference; but in case we need to construct the FunctionSchema, we need
+  // to hold the actual FunctionSchema value somewhere (in schema_owner_)
+  c10::optional<c10::FunctionSchema> schema_owner_;
+  const c10::FunctionSchema& schema_;
 
   bool alias_maps_current_;
+  bool has_inputs_set_;
 };
 } // namespace utils
 } // namespace torch
