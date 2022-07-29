@@ -161,8 +161,9 @@ void THPAutograd_initFunctions() {
   if (!c_module)
     throw python_error();
 
-  Py_INCREF(module);
+  Py_INCREF(module.get());
   if (PyModule_AddObject(c_module, "_functions", module) < 0) {
+    Py_DECREF(module.get());
     throw python_error();
   }
 }

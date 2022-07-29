@@ -10,20 +10,15 @@ with FusionDefinition(fusion) as fd :
     t1 = fd.define_tensor(1, DataType.Half)
     s0 = fd.define_scalar()
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-    fd.add_input(s0)
-
     c0 = fd.define_constant(3.0)
 
-    t1_b = fd.Ops.broadcast(t1, [True, True, False])
-    t2 = fd.Ops.add(t0, t1)
-    t3 = fd.Ops.mul(t2, c0)
-    t4 = fd.Ops.mul(t3, s0)
-    t5 = fd.Ops.relu(t4)
-    t6 = fd.Ops.sum(t5, [-1], False, DataType.Float)
+    t2 = fd.ops.add(t0, t1)
+    t3 = fd.ops.mul(t2, c0)
+    t4 = fd.ops.mul(t3, s0)
+    t5 = fd.ops.relu(t4)
+    t6 = fd.ops.sum(t5, [-1], False, DataType.Float)
 
-    t7 = fd.Ops.cast(DataType.Half, t6)
+    t7 = fd.ops.cast(t6, DataType.Half)
     fd.add_output(t7)
 
 fusion.print_ir()
