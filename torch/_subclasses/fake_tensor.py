@@ -129,8 +129,6 @@ class FakeTensorConverter(object):
             return maybe_memo
         existing_device = t.device
         # not yet supported in metatensors
-        if t.is_complex():
-            raise UnsupportedFakeTensorException("complex nyi in meta tensors")
         if t.is_sparse:
             raise UnsupportedFakeTensorException("sparse nyi in meta tensors")
         if t.is_quantized:
@@ -256,14 +254,7 @@ def check_no_bool_index_tensors(func, self, indices):
             raise DynamicOutputShapeException(func)
 
 
-# Dont default to default device handling,
-# Since op can take in non-zero sized cpu
-# index tensors with cuda self
-@register_op_impl(aten.index.Tensor)
-def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
-
+def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -273,6 +264,36 @@ def index_tensor(fake_mode, func, *args, **kwargs):
         out = func(*args, **kwargs)
 
     return FakeTensor(fake_mode, out, out_device)
+
+
+# Dont default to default device handling,
+# Since op can take in non-zero sized cpu
+# index tensors with cuda self
+@register_op_impl(aten.index.Tensor)
+def index_tensor(fake_mode, func, *args, **kwargs):
+    # dynamic shape op if indices are bool/uint8
+    check_no_bool_index_tensors(func, *args, **kwargs)
+
+    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+
+# takes in multiple-devices, dont default to default device handling
+@register_op_impl(aten.index_put.default)
+def index_put(fake_mode, func, *args, **kwargs):
+    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+
+# same with index_put, but return the input
+@register_op_impl(aten.index_put_.default)
+def index_put_(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    return new_kwargs["input"]
 
 
 # Meta tensors give you the ability to run PyTorch code without having to
@@ -285,10 +306,13 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     fake_mode.in_kernel_invocation = True
+    # See: note [Fake Tensor Dispatch Keys]
+    torch._C._add_meta_to_tls_dispatch_include()
     try:
         yield
     finally:
         fake_mode.in_kernel_invocation = False
+        torch._C._remove_meta_from_tls_dispatch_include()
 
 
 class FakeTensor(torch.Tensor):
@@ -296,10 +320,26 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     has_sym_ints: bool
 
+    # Note: [Fake Tensor Dispatch Keys]
+    # In order to model the behavior of device-specific autocast
+    # and autograd logic, we update the dispatch keys of FakeTensors
+    # to reflect their fake device. This includes the BackendComponent
+    # (DispatchKey::Meta -> DispatchKey::CUDA), and also the BackendComponent
+    # related Autocast and Autograd keys. __torch__dispatch__ sits below
+    # Autocast and Autograd, and is only invoked when we are at the
+    # kernel for the BackendComponent. Then, we add Meta to the
+    # thread-local dispatch include set to hit the meta kernel
+    # instead of the kernel of the BackendComponent for the fake device.
+    # The `device_for_backend_keys` does that below
+
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
         return torch.Tensor._make_subclass(
-            cls, elem, elem.requires_grad, dispatch_device=True
+            cls,
+            elem,
+            elem.requires_grad,
+            dispatch_device=True,
+            device_for_backend_keys=device,
         )
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
@@ -310,6 +350,7 @@ class FakeTensor(torch.Tensor):
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         assert device.type != "meta"
+
         self.fake_device = device
         self.fake_mode = fake_mode
         self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
@@ -337,17 +378,18 @@ class FakeTensor(torch.Tensor):
         # so in order to use the same pattern as normal invocation of
         # returning meta device within the kernel we need to intercept
         # the call here
+        # because it doesn't go through the dispatcher, we run into errors
+        # when attempting to compute an output in meta, so
+        # we compute the real tensor then convert to meta
         out_device = self.fake_device
-        if "device" in kwargs:
-            kwarg_device = kwargs.pop("device")
-            out_device = kwarg_device if kwarg_device else out_device
-            kwargs["device"] = "meta"
+        with no_dispatch():
+            real_out = super().new(*args, **kwargs)
 
-        with in_kernel_invocation_manager(self.fake_mode):
-            with no_dispatch():
-                meta_out = super().new(*args, **kwargs)
+        assert not isinstance(real_out, FakeTensor), real_out
+        assert real_out.device.type != "meta", real_out.device
 
         with no_dispatch():
+            meta_out = MetaConverter()(real_out)
             return FakeTensor(self.fake_mode, meta_out, out_device)
 
     @classmethod
@@ -502,10 +544,16 @@ class FakeTensorMode(TorchDispatchMode):
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
+        # and ensure that Meta kernels are dispatched to (see)
+        # Fake Tensor Dispatch Keys
 
         if "prims::" in func._schema.name:
-            with no_dispatch():
-                return func(*args, **kwargs)
+            try:
+                torch._C._add_meta_to_tls_dispatch_include()
+                with no_dispatch():
+                    return func(*args, **kwargs)
+            finally:
+                torch._C._remove_meta_from_tls_dispatch_include()
 
         if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]
@@ -586,13 +634,13 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
-            with in_kernel_invocation_manager(self):
-                try:
+            try:
+                with in_kernel_invocation_manager(self):
                     r = func(*args, **kwargs)
-                except NotImplementedError as not_implemented_error:
-                    if not self.allow_fallback_kernels:
-                        raise not_implemented_error
-                    r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
+            except NotImplementedError as not_implemented_error:
+                if not self.allow_fallback_kernels:
+                    raise not_implemented_error
+                r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"

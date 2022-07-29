@@ -151,6 +151,8 @@ TensorImpl::TensorImpl(
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
 
+  // XXX: if updating keyset logic here also update
+  // _change_backend_component_keys
   bool inference_mode = c10::InferenceMode::is_enabled();
 
   // TODO: be more explicit about the full key set at call sites so we
@@ -182,6 +184,28 @@ TensorImpl::TensorImpl(
 
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
+}
+
+void TensorImpl::_change_backend_component_keys(c10::Device device) {
+  DispatchKey device_key =
+      computeDispatchKey(c10::nullopt, c10::nullopt, device);
+  BackendComponent new_backend =
+      c10::DispatchKeySet(device_key).highestBackendKey();
+  BackendComponent old_backend = key_set_.highestBackendKey();
+
+  // following logic TensorImpl::TensorImpl, update the BackendComponent related
+  // keys to correspond to device
+
+  // TODO: Autocoast should be a per-backend functionality key, once that change
+  // is made this key swap will not be necessary.
+  auto key_set =
+      key_set_ - c10::getAutocastRelatedKeySetFromBackend(old_backend);
+  key_set = key_set | c10::getAutocastRelatedKeySetFromBackend(new_backend);
+
+  // See note [Removing keys from DispatchKeySet Only Affects Functionality
+  // Keys]
+  key_set = key_set.remove_backend(old_backend);
+  key_set_ = key_set | DispatchKeySet(device_key);
 }
 
 void TensorImpl::HandleResize() {
