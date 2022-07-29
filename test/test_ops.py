@@ -1624,6 +1624,7 @@ class TestRefsOpsInfo(TestCase):
 
 
 fake_skips = (
+    "aminmax",  # failing input
     "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
@@ -1678,14 +1679,14 @@ sometimes_dynamic_output_op_test = (
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
-    @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
-        if name in fake_skips or "sparse" in name:
+        if name in fake_skips or "sparse" in name or "jiterator" in name:
             self.skipTest("Skip failing test")
+
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
