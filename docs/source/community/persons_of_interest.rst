@@ -214,11 +214,12 @@ Windows
 -  (emeritus) Teng Gao (`gaoteng-git <https://github.com/gaoteng-git>`__)
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 
-Apple M1
-~~~~~~~~
+Apple M1/MPS
+~~~~~~~~~~~~
 
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
 
 PowerPC
 ~~~~~~~

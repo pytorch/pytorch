@@ -9,7 +9,6 @@ from torch.profiler import profile
 import torch.utils.benchmark as benchmark
 from torch.profiler._utils import index_of_first_match
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
-                                _ExtraFields_Backend, _ExtraFields_Allocation,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
 
@@ -283,7 +282,7 @@ class FP32MatMulPattern(Pattern):
 
     def match(self, event: _ProfilerEvent):
         # If we saw this pattern once, we don't need to match it again
-        if event_type(event) != _EventType.TorchOp:
+        if event.tag != _EventType.TorchOp:
             return False
         assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
         if event.name() == "aten::mm":
@@ -492,8 +491,10 @@ class MatMulDimInFP16Pattern(Pattern):
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        if (arg_dtype == "c10::BFloat16" or arg_dtype
-                == "c10::Half") and not mutiple_of(input_shapes(event), 8):
+        # TODO: Have a better way to check dtype_size
+        if (arg_dtype.endswith("c10::BFloat16")
+                or arg_dtype.endswith("c10::Half")) and not mutiple_of(
+                    input_shapes(event), 8):
             return True
         return False
 
@@ -532,8 +533,7 @@ class MatMulDimInFP16Pattern(Pattern):
 
 def source_code_location(event: _ProfilerEvent):
     while event:
-        if event_type(event) == _EventType.PyCall or event_type(
-                event) == _EventType.PyCCall:
+        if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
@@ -608,18 +608,3 @@ def report_all_anti_patterns(prof, should_benchmark: bool = False, json_report_d
     message_list += summaries
     message_list.append(f"{'-'*40}TorchTidy Report{'-'*40}")
     print("\n".join(message_list))
-
-
-def event_type(event: _ProfilerEvent):
-    if isinstance(event.extra_fields, _ExtraFields_TorchOp):
-        return _EventType.TorchOp
-    elif isinstance(event.extra_fields, _ExtraFields_Backend):
-        return _EventType.Backend
-    elif isinstance(event.extra_fields, _ExtraFields_Allocation):
-        return _EventType.Allocation
-    elif isinstance(event.extra_fields, _ExtraFields_PyCall):
-        return _EventType.PyCall
-    elif isinstance(event.extra_fields, _ExtraFields_PyCCall):
-        return _EventType.PyCCall
-    else:
-        raise Exception("Unknown event type")
