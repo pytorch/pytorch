@@ -115,6 +115,13 @@ size_t MaxPosCalculator::getMaxProducerPosFromConsumer(
        producer_pos++) {
     auto map_it = p2c_replay_map.find(producer->axis(producer_pos));
     if (map_it != p2c_replay_map.end()) {
+      // If the producer position is mismatching with the consumer, then we can
+      // not inline into this position, otherwise the max producer position of
+      // the consumer will become invalid and expression sort will fail.
+      if (TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+              consumer, producer, producer_pos + 1) < 0) {
+        return producer_pos;
+      }
       auto c_id = map_it->second;
       if (!isAllowedID(c_id, consumer, true, false, true)) {
         return producer_pos;
@@ -159,8 +166,10 @@ void InlinePropagator::setCAPos(TensorView* tv) {
           pos,
           ",  max position that's allowed is ",
           max_pos);
-    } else {
+    } else if (mode_ == ComputeAtMode::BestEffort) {
       pos = std::min<size_t>(pos, max_pos);
+    } else {
+      pos = max_pos;
     }
     // hoist inner most broadcast
     while (pos > 0 && tv->axis(pos - 1)->isBroadcast()) {
@@ -285,23 +294,29 @@ void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
     std::cout << "  to: " << to << std::endl;
   }
   // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
+  int from_pos = mapped_reference_pos_.at(from);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from consumer ",
-      from,
-      " at ",
-      from_pos,
-      " to producer ",
-      to,
-      " because this would require replay.");
+  if (mode_ == ComputeAtMode::Standard) {
+    TORCH_CHECK(
+        to_pos >= 0,
+        "Unable to propagate CA position from consumer ",
+        from,
+        " at ",
+        from_pos,
+        " to producer ",
+        to,
+        " because this would require replay.");
+  } else {
+    // For MostInlined and BestEffort inline propagation, we allow the DAG to
+    // be not replayed fully consistently. For such case, we just don't inline
+    // into the mismatched dimension.
+    while (to_pos < 0) {
+      from_pos--;
+      to_pos = TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+          to, from, from_pos);
+    }
+  }
   mapped_reference_pos_[to] = to_pos;
   // Step 2: set CA position of `to`
   setCAPos(to);
@@ -315,23 +330,29 @@ void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
     std::cout << "  to: " << to << std::endl;
   }
   // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
+  int from_pos = mapped_reference_pos_.at(from);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from producer ",
-      from,
-      " at ",
-      from_pos,
-      " to consumer ",
-      to,
-      " because this would require replay.");
+  if (mode_ == ComputeAtMode::Standard) {
+    TORCH_CHECK(
+        to_pos >= 0,
+        "Unable to propagate CA position from producer ",
+        from,
+        " at ",
+        from_pos,
+        " to consumer ",
+        to,
+        " because this would require replay.");
+  } else {
+    // For MostInlined and BestEffort inline propagation, we allow the DAG to
+    // be not replayed fully consistently. For such case, we just don't inline
+    // into the mismatched dimension.
+    while (to_pos < 0) {
+      from_pos--;
+      to_pos = TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+          to, from, from_pos);
+    }
+  }
   mapped_reference_pos_[to] = to_pos;
   // Step 2: set CA position of `to`
   setCAPos(to);
