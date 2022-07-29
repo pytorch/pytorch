@@ -528,10 +528,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   int rhs_i = -1;
   for (int i = (int)reference_tv->nDims(); i > (int)params.break_point; i--) {
     auto axis_i = i - 1;
-    if (reference_tv->axis(axis_i)->isBroadcast() ||
-        reference_tv->axis(axis_i)->isReduction()) {
-      continue;
-    }
     if (rhs_i == -1) {
       rhs_i = axis_i;
     } else {
@@ -548,10 +544,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   int lhs_i = -1;
   for (int i = (int)params.break_point; i > 0; i--) {
     auto axis_i = i - 1;
-    if (reference_tv->axis(axis_i)->isBroadcast() ||
-        reference_tv->axis(axis_i)->isReduction()) {
-      continue;
-    }
     if (lhs_i == -1) {
       lhs_i = axis_i;
     } else {

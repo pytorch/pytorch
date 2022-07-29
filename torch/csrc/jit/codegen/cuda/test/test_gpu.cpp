@@ -24847,6 +24847,40 @@ TEST_F(NVFuserTest, FusionInsertMagicZero1_CUDA) {
       tv2->toString());
 }
 
+TEST_F(
+    NVFuserTest,
+    FusionPointwiseScheduleWithBroadcastAndTrivialReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  auto tv1 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true, false, true, false, true});
+  auto tv3 = sin(tv2);
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = sum(tv4, {1});
+  fusion.addOutput(tv5);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({100, 100, 10}, options);
+  at::Tensor t1 = at::randn({10, 20}, options);
+
+  auto aten_output = (t0.view({100, 1, 100, 1, 10, 1}).sin() + t1).squeeze(1);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto cg_outputs = fe.runFusion(aten_inputs, lparams);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionInlinePropagatorMismatchedDims1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
