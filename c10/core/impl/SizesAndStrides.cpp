@@ -13,7 +13,7 @@ void SizesAndStrides::resizeSlowPath(
     SymInt* tempStorage = outOfLineStorage_;
     for (size_t i = 0; i < C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE; i++) {
       inlineStorage_[i] = std::move(tempStorage[i]);
-      inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] = std::move(tempStorage[oldSize]);
+      inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] = std::move(tempStorage[oldSize + i]);
     }
     // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
     // HAS BEEN OVERWRITTEN!
@@ -54,7 +54,7 @@ void SizesAndStrides::resizeSlowPath(
         std::move_backward(
           outOfLineStorage_ + oldSize,
           outOfLineStorage_ + oldSize + oldSize,
-          outOfLineStorage_ + newSize
+          outOfLineStorage_ + newSize + oldSize
         );
       } else {
         std::move(

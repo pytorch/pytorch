@@ -313,7 +313,7 @@ class C10_API SizesAndStrides {
     TORCH_CHECK(
         newStorage,
         "Could not allocate memory for Tensor SizesAndStrides!");
-    for (size_t i = 0; i < newSize && i < size_; i++) {
+    for (size_t i = 0; i < storageElems(newSize) && i < storageElems(size_); i++) {
       newStorage[i] = std::move(outOfLineStorage_[i]);
     }
     delete[] outOfLineStorage_;
@@ -321,7 +321,7 @@ class C10_API SizesAndStrides {
   }
 
   void copyDataOutline(const SizesAndStrides& rhs) noexcept {
-    for (size_t i = 0; i < rhs.size_; i++) {
+    for (size_t i = 0; i < storageElems(rhs.size_); i++) {
       outOfLineStorage_[i] = rhs.outOfLineStorage_[i];
     }
   }
