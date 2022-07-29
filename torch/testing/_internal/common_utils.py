@@ -726,8 +726,11 @@ def run_tests(argv=UNITTEST_ARGS):
             print(f'Test results will be stored in {pytest_report_path}')
             # mac slower on 4 proc than 3
             num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            # f = failed
+            # E = error
+            # X = unexpected success
             exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
-                                    '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
+                                    '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
             # exitcode of 5 means no tests were found, which happens since some test configs don't
