@@ -1456,6 +1456,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
+    Meta: copy_meta_
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
