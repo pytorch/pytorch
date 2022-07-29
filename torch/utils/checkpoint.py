@@ -222,9 +222,10 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
-        use_reentrant(bool, optional, default=True): Use checkpointing
+            Default: ``True``
+        use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
@@ -232,6 +233,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             working as expected with ``torch.autograd.grad`` and support for
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
+            Default: ``True``
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -284,8 +286,9 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
             functions (comprising the model) to run sequentially.
         segments: Number of chunks to create in the model
         input: A Tensor that is input to :attr:`functions`
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
+            Default: ``True``
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
@@ -326,8 +329,9 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
+            Default: ``True``
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
