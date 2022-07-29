@@ -1942,9 +1942,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
-    #ifdef DEBUG
+#ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
-    #endif
+#endif
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
