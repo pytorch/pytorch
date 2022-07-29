@@ -838,10 +838,12 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                         aten::sum
-                          cudaLaunchKernel
-                            void at::native::reduce_kernel<...>(...)
-                          [memory]
+                          aten::sum
+                            cudaLaunchKernel
+                              void at::native::reduce_kernel<...>(...)
+                            [memory]
                         aten::view
+                          aten::view
                       autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
                         torch::autograd::AccumulateGrad
                           aten::add_
@@ -876,15 +878,11 @@ class TestProfilerTree(TestCase):
                             [memory]
                           [memory]
                     [memory]
-                  torch/autograd/grad_mode.py(...): decorate_context
-                    torch/autograd/grad_mode.py(...): clone
-                      torch/autograd/grad_mode.py(...): __init__
-                        torch/_jit_internal.py(...): is_scripting
-                    torch/autograd/grad_mode.py(...): __enter__
+                  torch/optim/optimizer.py(...): _use_grad
+                    <built-in function is_grad_enabled>
+                    torch/autograd/grad_mode.py(...): __init__
                       <built-in function is_grad_enabled>
-                      torch/autograd/grad_mode.py(...): __init__
-                        <built-in function is_grad_enabled>
-                        <built-in function _set_grad_enabled>
+                      <built-in function _set_grad_enabled>
                     torch/optim/sgd.py(...): step
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
@@ -934,10 +932,9 @@ class TestProfilerTree(TestCase):
                       torch/_tensor.py(...): __hash__
                         <built-in function _has_torch_function_unary>
                         <built-in function id>
-                    torch/autograd/grad_mode.py(...): __exit__
-                      torch/autograd/grad_mode.py(...): __init__
-                        <built-in function is_grad_enabled>
-                        <built-in function _set_grad_enabled>
+                    torch/autograd/grad_mode.py(...): __init__
+                      <built-in function is_grad_enabled>
+                      <built-in function _set_grad_enabled>
                   torch/autograd/profiler.py(...): __exit__
                     torch/_ops.py(...): __call__
                       <built-in method _record_function_exit of PyCapsule object at 0xXXXXXXXXXXXX>

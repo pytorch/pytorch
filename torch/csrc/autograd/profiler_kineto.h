@@ -183,8 +183,8 @@ struct TORCH_API KinetoEvent {
   int64_t debug_handle_{-1};
 
  private:
-  torch::profiler::impl::CUDAEventStub fallbackStart() const;
-  torch::profiler::impl::CUDAEventStub fallbackEnd() const;
+  torch::profiler::impl::ProfilerEventStub fallbackStart() const;
+  torch::profiler::impl::ProfilerEventStub fallbackEnd() const;
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;

@@ -1589,6 +1589,50 @@ class TestNN(NNTestCase):
         other = nn.Sequential(l3, l4)
         self.assertEqual(n + other, nn.Sequential(l1, l2, l3, l4))
 
+    def test_Sequential_iadd(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3)
+        n2 = nn.Sequential(l4)
+        n += n2
+        n2 += n
+        self.assertEqual(n, nn.Sequential(l1, l2, l3, l4))
+        self.assertEqual(n2, nn.Sequential(l4, l1, l2, l3, l4))
+
+    def test_Sequential_mul(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3, l4)
+        n2 = n * 2
+        self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4))
+
+    def test_Sequential_rmul(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3, l4)
+        n2 = 2 * n
+        self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4))
+
+    def test_Sequential_imul(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3, l4)
+        n *= 2
+        self.assertEqual(n, nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4))
+        n *= 2
+        self.assertEqual(
+            n,
+            nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4)
+        )
+
     def test_Sequential_append(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
@@ -1599,6 +1643,19 @@ class TestNN(NNTestCase):
         self.assertEqual(n, nn.Sequential(l1, l2, l3, l4))
         self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4))
         self.assertEqual(nn.Sequential(l1).append(l2).append(l4), nn.Sequential(l1, l2, l4))
+
+    def test_Sequential_pop(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+        l4 = nn.Linear(4, 5)
+        n1 = nn.Sequential(l1, l2, l3, l4)
+        self.assertEqual(l4, n1.pop(3))
+        n2 = nn.Sequential(l1, l2, l3)
+        self.assertEqual(n1, n2)
+        # check order of the index
+        for k, mod in zip(range(len(n1)), n1):
+            self.assertIs(n1[k], mod)
 
     def test_Sequential_insert(self):
         l1 = nn.Linear(1, 2)
@@ -1718,6 +1775,14 @@ class TestNN(NNTestCase):
         module_list = nn.ModuleList()
         module_list.extend(s.modules())
         check()
+
+        modules = [nn.ReLU(), nn.Linear(5, 5), nn.Conv2d(3, 4, 3)]
+        module_list = nn.ModuleList(modules)
+        self.assertEqual(modules.pop(1), module_list.pop(1))
+        self.assertEqual(modules, module_list)
+        # check order of the index
+        for k, mod in zip(range(len(module_list)), module_list):
+            self.assertIs(module_list[k], mod)
 
         # verify the right exception is thrown when trying to "forward" through a ModuleList
         self.assertRaises(NotImplementedError, module_list)
