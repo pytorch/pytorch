@@ -89,6 +89,13 @@ class ContigIDs : public OptInDispatch {
 
   void handle(Merge* merge) override;
 
+  // TODO:
+  //  Currently not propagating any contiguity information
+  // as contiguity is generally not preserved after swizzles.
+  // But in follow ups we could gradually add back a few special
+  // cases, depending on specific swizzle type and axes.
+  void handle(Swizzle2D* swizzle) override {}
+
   IterDomain* getCAIndexConcreteId(IterDomain* id) const;
 
   //! True if an ID is indexable.
