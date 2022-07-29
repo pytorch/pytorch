@@ -10,7 +10,7 @@ load("@fbsource//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX",
 load("@fbsource//tools/build_defs/apple:build_mode_defs.bzl", "is_production_build")
 load("@fbsource//tools/build_defs/apple:config_utils_defs.bzl", "STATIC_LIBRARY_IOS_CONFIG", "STATIC_LIBRARY_MAC_CONFIG", "fbobjc_configs")
 load("@fbsource//tools/build_defs/apple:focus_config.bzl", "is_focus_enabled")
-load("@fbsource//xplat/pfh/Msgr/Mobile/ProductInfra:DEFS.bzl", "Msgr_Mobile_ProductInfra")
+load("@fbsource//xplat/pfh/Msgr_Mobile_ProductInfra:DEFS.bzl", "Msgr_Mobile_ProductInfra")
 
 def get_c2_expose_op_to_c10():
     c2_op_to_c10 = native.read_config("caffe2", "expose_op_to_c10", "0")
