@@ -34,7 +34,7 @@ from nn_ops import (
 )
 from quantization_ops import (
     GeneralQuantModule,
-    DynamicQuantModule,
+    # DynamicQuantModule,
     StaticQuantModule,
     FusedQuantModule,
 )
@@ -89,7 +89,8 @@ all_modules = {
     "nn_utils_ops": NNUtilsModule(),
     # quantization ops
     "general_quant_ops": GeneralQuantModule(),
-    "dynamic_quant_ops": DynamicQuantModule(),
+    # TODO(sdym@fb.com): fix and re-enable dynamic_quant_ops
+    # "dynamic_quant_ops": DynamicQuantModule(),
     "static_quant_ops": StaticQuantModule(),
     "fused_quant_ops": FusedQuantModule(),
     # TorchScript buildin ops

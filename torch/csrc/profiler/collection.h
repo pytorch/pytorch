@@ -153,7 +153,7 @@ using strong_t = strong::
 
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
-using PyCFunction = strong_t<PyObject*, struct PyCFunction_>;
+using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 
 struct NNModuleInfo {
   PyModuleSelf self_;
@@ -214,6 +214,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
   }
 
+  EventType tag() const {
+    return c10::visit(
+        [](const auto& i) { return deduceTag(i); }, extra_fields_);
+  }
+
   std::string name() const;
   libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
@@ -250,6 +255,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         start_tid_{start_tid},
         kineto_info_{kineto_info},
         extra_fields_{std::move(extra_fields)} {}
+
+  template <EventType E>
+  static EventType deduceTag(const ExtraFields<E>&) {
+    return E;
+  }
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
