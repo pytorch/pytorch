@@ -13,6 +13,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import json
+from typing import Dict, Optional, List, cast, Any
 
 import torch
 from torch.utils import cpp_extension
@@ -25,14 +27,13 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from typing import Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
-    from tools.stats.import_test_stats import get_test_times
+    from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         get_reordered_tests,
         get_test_case_configs,
@@ -71,6 +72,7 @@ def discover_tests(
     if extra_tests is not None:
         rc += extra_tests
     return sorted(rc)
+
 
 TESTS = discover_tests(
     blocklisted_patterns=[
@@ -268,9 +270,6 @@ CORE_TEST_LIST = [
     "test_torch"
 ]
 
-# the JSON file to store the S3 test stats
-TEST_TIMES_FILE = ".pytorch-test-times.json"
-
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
 
@@ -395,12 +394,12 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+
 run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
 
 
 def get_run_test_with_subprocess_fn():
     return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
-
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -569,6 +568,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
+
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -862,14 +862,21 @@ def get_selected_tests(options):
             return selected_tests
 
         # Download previous test times to make sharding decisions
-        test_file_times = get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
-        if len(test_file_times) == 0:
+        path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
+        if os.environ["TEST_CONFIG"] not in test_file_times:
             print(
-                "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+                "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
             )
             selected_tests = selected_tests[which_shard - 1 :: num_shards]
         else:
-            shards = calculate_shards(num_shards, selected_tests, test_file_times)
+            print("Found test time stats from artifacts")
+            test_file_times_config = test_file_times[os.environ["TEST_CONFIG"]]
+            shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
             _, tests_from_shard = shards[which_shard - 1]
             selected_tests = tests_from_shard
 
