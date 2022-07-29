@@ -223,7 +223,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
         join (bool): Perform a blocking join on all processes.
         daemon (bool): The spawned processes' daemon flag. If set to True,
                        daemonic processes will be created.
-        start_method (string): (deprecated) this method will always use ``spawn``
+        start_method (str): (deprecated) this method will always use ``spawn``
                                as the start method. To use a different start method
                                use ``start_processes()``.
 
