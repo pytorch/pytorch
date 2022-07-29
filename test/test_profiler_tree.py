@@ -12,7 +12,7 @@ import expecttest
 import torch
 from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -34,6 +34,7 @@ PRUNE_FUNCTIONS = {
 ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
 
 
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
 class ProfilerTree:
 
     @staticmethod
