@@ -59,6 +59,7 @@ METAL_SOURCE_LIST = [
     "aten/src/ATen/native/metal/ops/MetalConvolution.mm",
     "aten/src/ATen/native/metal/ops/MetalCopy.mm",
     "aten/src/ATen/native/metal/ops/MetalHardswish.mm",
+    "aten/src/ATen/native/metal/ops/MetalHardshrink.mm",
     "aten/src/ATen/native/metal/ops/MetalLeakyReLU.mm",
     "aten/src/ATen/native/metal/ops/MetalNeurons.mm",
     "aten/src/ATen/native/metal/ops/MetalPadding.mm",

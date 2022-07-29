@@ -1123,9 +1123,9 @@ def sort_overloads(
             str(t1) == "Tensor[]"
             and str(t2).find("[]") != -1
             or
-            # Prioritize SymIntArrayRef overload over IntArrayRef
-            str(t1) == "int[]"
-            and str(t2) == "SymInt[]"
+            # Prioritize IntArrayRef overload over SymIntArrayRef
+            str(t1) == "SymInt[]"
+            and str(t2) == "int[]"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
