@@ -777,29 +777,18 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         options.device_opt(),
         options.pinned_memory_opt());
 
-  } else if (dim > compressed_indices.dim() + 1) {
-    // Selecting dense dimension
-    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
-        self.layout(),
-        "select",
-        // Values has nnz dim in place of 2 sparse dims in values, so dim is
-        // shifted back 1
-        [&]() { return self.values().select(dim - 1, index); },
-        // Values has (nnz, block_row, block_col) dim in place of 2 sparse dims
-        // in values, so dim is shifted forward  1
-        [&]() { return self.values().select(dim + 1, index); });
-    else {
-      TORCH_CHECK(
-          self.layout() == kSparseCsr || self.layout() == kSparseCsc,
-          "select(): selecting non-batch dimensions is currently only supported for non-blocked sparse compressed layouts tensors.");
-      TORCH_CHECK(
-          self.dim() == 2,
-          "select(): selecting rows or columns is not implemented for batched sparse compressed tensors.")
-      // Converting to COO and calling select is slighly slower than operating
-      // on the CSR indices directly for constructing a COO vector, however
-      // current version is more readable and easier to understand.
-      return self.to_sparse().select(dim, index);
-    }
+  } else {
+    TORCH_CHECK(
+        self.layout() == kSparseCsr || self.layout() == kSparseCsc,
+        "select(): selecting non-batch dimensions is currently only supported for non-blocked sparse compressed layouts tensors.");
+    TORCH_CHECK(
+        self.dim() == 2,
+        "select(): selecting rows or columns is not implemented for batched sparse compressed tensors.")
+    // Converting to COO and calling select is slighly slower than operating
+    // on the CSR indices directly for constructing a COO vector, however
+    // current version is more readable and easier to understand.
+    return self.to_sparse().select(dim, index);
+  }
   }
 
 } // namespace native
