@@ -203,7 +203,7 @@ void FusionExecutor::compileFusion(
       options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
   auto properties = at::cuda::getDeviceProperties(options_.device.index());
   configured_device_smem_ = properties->sharedMemPerBlock;
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   device_smem_limit_ = properties->sharedMemPerBlockOptin;
 #else
   // don't know if rocm supports opt-in shared memroy reconfiguration
@@ -274,7 +274,7 @@ void FusionExecutor::compileFusion(
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   // The driver API call requires an int argument.
   int max_dynamic_smem = 0;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncGetAttribute(
@@ -1028,7 +1028,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (execute_kernel_) {
     if (maybe_available_dynamic_smem_.has_value() &&
         launch_params_.smem() > maybe_available_dynamic_smem_.value()) {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       // Increase limit of dynamic shared memory if needed.
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(
           compiled_kernel_.function,

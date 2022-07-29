@@ -977,7 +977,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 #endif
 
   const bool disable_fma = isDisabled(DisableOption::Fma);
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
