@@ -7,6 +7,7 @@ import unittest
 import itertools
 import torch
 import contextlib
+from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
 
@@ -1658,6 +1659,14 @@ fake_skips = (
     "nn.functional.one_hot",
 )
 
+fake_autocast_device_skips = defaultdict(dict)
+
+# TODO: investigate/fix
+fake_autocast_device_skips["cpu"] = set(
+    ("linalg.pinv",)
+)
+
+
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
@@ -1679,8 +1688,7 @@ sometimes_dynamic_output_op_test = (
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
-    @ops(op_db, dtypes=OpDTypes.any_one)
-    def test_fake(self, device, dtype, op):
+    def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
@@ -1688,7 +1696,7 @@ class TestFakeTensorNonErroring(TestCase):
             self.skipTest("Skip failing test")
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample in samples:
+        for sample in enumerate(samples):
             try:
                 mode = FakeTensorMode(inner=None)
 
@@ -1702,10 +1710,15 @@ class TestFakeTensorNonErroring(TestCase):
                 args = tree_map(map_to_fake, sample.args)
                 kwargs = tree_map(map_to_fake, sample.kwargs)
 
-                with enable_torch_dispatch_mode(mode):
-                    res_fake = op(input, *args, **kwargs)
+                try:
+                    with context():
+                        res = op(sample.input, *sample.args, **sample.kwargs)
+                except Exception as e:
+                    continue
 
-                res = op(sample.input, *sample.args, **sample.kwargs)
+                with context():
+                    with enable_torch_dispatch_mode(mode):
+                        res_fake = op(input, *args, **kwargs)
 
                 for fake_out, real_out in zip(
                     tree_flatten(res_fake)[0], tree_flatten(res)[0]
@@ -1718,12 +1731,24 @@ class TestFakeTensorNonErroring(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
                     prims.utils.compare_tensor_meta(fake_out, real_out)
+
                 self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_fake_autocast(self, device, dtype, op):
+        if op.name in fake_autocast_device_skips[device]:
+            self.skipTest("Skip failing test")
+        context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
+        self._test_fake_helper(device, dtype, op, context)
 
 
 instantiate_device_type_tests(TestCommon, globals())
