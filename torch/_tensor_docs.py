@@ -5396,7 +5396,8 @@ Example::
     >>> sparse._nnz()
     25
 
-""")
+""",
+)
 
 add_docstr_all(
     "to_sparse_bsr",
@@ -5431,7 +5432,8 @@ Example::
     >>> sparse_bsc.row_indices()
     tensor([0, 1, 0, 1])
 
-""")
+""",
+)
 
 add_docstr_all(
     "to_mkldnn",
