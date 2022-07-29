@@ -840,7 +840,7 @@ def forward(self, a_1):
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add_.Tensor(_to_copy_default, a_1);  a_1 = None
     return _to_copy_default
-    """)
+    """)  # noqa: B950
 
         # Test 4: copy_() with different dtype, different shape
         self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
@@ -870,7 +870,7 @@ def forward(self, a_1):
     expand_copy_default = torch.ops.aten.expand_copy.default(_to_copy_default, [2]);  _to_copy_default = None
     add_tensor = torch.ops.aten.add_.Tensor(expand_copy_default, a_1);  a_1 = None
     return expand_copy_default
-    """)
+    """)  # noqa: B950
 
     def test_expand_symint(self):
         # Once some existing SymInt bugs are ironed out, we should update
