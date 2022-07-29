@@ -676,8 +676,12 @@ static void qprelu_out_kernel(Tensor& out,
   DimVector sizes(input_ndim, 1), strides(input_ndim, 0);
   auto as_nd = [&](const Tensor& t) {
     TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
-    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+    if (input_ndim > 1) {
+      // Take t's length and stride if it's 1d.
+      // Otherwise t is a scalar. Then size is 1 and stride is 0.
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+    }
     return t.as_strided(sizes, strides);
   };
 
