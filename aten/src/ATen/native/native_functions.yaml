@@ -3909,9 +3909,10 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+
+- func: _reshape_nested(Tensor self, int[] shape) -> Tensor
   dispatch:
-    CompositeImplicitAutograd: reshape
-    NestedTensorCPU, NestedTensorCUDA: reshape_nested
+    NestedTensorCPU, NestedTensorCUDA: _reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
