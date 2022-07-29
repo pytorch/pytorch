@@ -139,7 +139,7 @@ tasks.all { task ->
 
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
-    implementation 'com.facebook.soloader:nativeloader:0.10.1'
+    implementation 'com.facebook.soloader:nativeloader:0.10.4'
 
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
@@ -154,7 +154,7 @@ dependencies {
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
-    aarImplementation 'com.facebook.soloader:nativeloader:0.10.1'
+    aarImplementation 'com.facebook.soloader:nativeloader:0.10.4'
     aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 
     def camerax_version = "1.0.0-alpha05"

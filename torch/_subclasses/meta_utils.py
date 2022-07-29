@@ -220,8 +220,6 @@ class MetaConverter:
                     # don't work
                     t.is_neg(),
                     t.is_conj(),
-                    # conjugate fallback does not support meta tensors
-                    t.dtype in (torch.complex128, torch.complex64, torch.complex32),
                     t.device.type in ("lazy", "meta"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
