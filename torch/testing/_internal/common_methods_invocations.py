@@ -797,6 +797,8 @@ class OpInfo(object):
 
     supports_expanded_weight: bool = False
 
+    is_factory_function: bool = False
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
@@ -3084,6 +3086,9 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
         else:
             yield SampleInput(start, args=(end, step), kwargs={"dtype": dtype, "device": device})
 
+    yield SampleInput(2)
+    yield SampleInput(1, args=(3, 1))
+
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
@@ -3101,6 +3106,8 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
+    yield SampleInput(1, args=(3, 1))
+
 
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
@@ -3117,6 +3124,8 @@ def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
+
+    yield SampleInput(1, args=(3, 1, 2.))
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
@@ -10780,6 +10789,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
            supports_autograd=False,
+           is_factory_function=True,
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
@@ -13056,6 +13066,7 @@ op_db: List[OpInfo] = [
         )),
     OpInfo('linspace',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_linspace,
@@ -13102,6 +13113,7 @@ op_db: List[OpInfo] = [
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_linspace,
@@ -13864,8 +13876,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # AssertionError: Shapes torch.Size([]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -19157,9 +19167,6 @@ op_db: List[OpInfo] = [
             # FIXME: mean reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: mean does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
@@ -20688,6 +20695,9 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # See https://github.com/pytorch/pytorch/issues/82364
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
         ),
         supports_nvfuser=False,
     ),
@@ -21975,6 +21985,21 @@ python_ref_db = [
             # Fixme: should not compare results of empty_like
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.new_full",
+        torch_opinfo_name="new_full",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_ones",
+        torch_opinfo_name="new_ones",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.new_zeros",
+        torch_opinfo_name="new_zeros",
+        supports_nvfuser=False,
     ),
     #
     # Conditional Reference OpInfos
