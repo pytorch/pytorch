@@ -452,7 +452,7 @@ def embedding(
     size.append(weight[1])
     return size
 
-def embedding_bag_padding_idx(weight: List[int], indices: List[int], offsets: List[int], scale_grad_by_freq: bool, mode: int, sparse: int, per_sample_weights: Optional[List[int]], include_last_offset: bool, padding_idx: Optional[int]) -> Tuple[List[int], List[int], List[int], List[int]]):
+def embedding_bag_padding_idx(weight: List[int], indices: List[int], offsets: List[int], mode: int, include_last_offset: bool) -> Tuple[List[int], List[int], List[int], List[int]]:
     assert len(weight) == 2
     assert len(indices) == 1
     assert len(offsets) == 1
@@ -465,7 +465,7 @@ def embedding_bag_padding_idx(weight: List[int], indices: List[int], offsets: Li
     output_bag_shape.append(out_dim1)
 
     offset2bag_shape: List[int] = []
-    if mode == 1:
+    if mode == 0:
         offset2bag_shape.append(0)
     else:
         offset2bag_shape = _copy(indices)
