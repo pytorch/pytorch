@@ -39,7 +39,7 @@ class C10_API SizesAndStrides {
 
   ~SizesAndStrides() {
     if (C10_UNLIKELY(!isInline())) {
-      free(outOfLineStorage_);
+      delete[] outOfLineStorage_;
     }
   }
 
@@ -76,7 +76,9 @@ class C10_API SizesAndStrides {
   // Move from rhs. rhs.size() == 0 afterwards.
   SizesAndStrides(SizesAndStrides&& rhs) noexcept : size_(rhs.size_) {
     if (C10_LIKELY(isInline())) {
-      memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
+      for (size_t i = 0; i < sizeof(inlineStorage_) / sizeof(SymInt); i++) {
+        inlineStorage_[i] = std::move(rhs.inlineStorage_[i]);
+      }
     } else {
       outOfLineStorage_ = rhs.outOfLineStorage_;
       rhs.outOfLineStorage_ = nullptr;
@@ -269,13 +271,10 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(
             newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())) {
       if (oldSize < newSize) {
-        const auto bytesToZero =
-            (newSize - oldSize) * sizeof(inlineStorage_[0]);
-        memset(&inlineStorage_[oldSize], 0, bytesToZero);
-        memset(
-            &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + oldSize],
-            0,
-            bytesToZero);
+        for (size_t i = oldSize; i < newSize; i++) {
+          inlineStorage_[i] = 0;
+          inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] = 0;
+        }
       }
       size_ = newSize;
     } else {
@@ -292,15 +291,17 @@ class C10_API SizesAndStrides {
 
   void copyDataInline(const SizesAndStrides& rhs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.isInline());
-    memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
+    for (size_t i = 0; i < sizeof(inlineStorage_) / sizeof(SymInt); i++) {
+      inlineStorage_[i] = rhs.inlineStorage_[i];
+    }
   }
 
-  static size_t storageBytes(size_t size) noexcept {
-    return size * 2 * sizeof(int64_t);
+  static size_t storageElems(size_t size) noexcept {
+    return size * 2;
   }
 
   void allocateOutOfLineStorage(size_t size) {
-    outOfLineStorage_ = static_cast<SymInt*>(malloc(storageBytes(size)));
+    outOfLineStorage_ = new SymInt[storageElems(size)];
     TORCH_CHECK(
         outOfLineStorage_,
         "Could not allocate memory for Tensor SizesAndStrides!");
@@ -308,15 +309,21 @@ class C10_API SizesAndStrides {
 
   void resizeOutOfLineStorage(size_t newSize) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
-    outOfLineStorage_ =
-        static_cast<SymInt*>(realloc(outOfLineStorage_, storageBytes(newSize)));
+    auto* newStorage = new SymInt[storageElems(newSize)];
     TORCH_CHECK(
-        outOfLineStorage_,
+        newStorage,
         "Could not allocate memory for Tensor SizesAndStrides!");
+    for (size_t i = 0; i < newSize && i < size_; i++) {
+      newStorage[i] = std::move(outOfLineStorage_[i]);
+    }
+    delete[] outOfLineStorage_;
+    outOfLineStorage_ = newStorage;
   }
 
   void copyDataOutline(const SizesAndStrides& rhs) noexcept {
-    memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
+    for (size_t i = 0; i < rhs.size_; i++) {
+      outOfLineStorage_[i] = rhs.outOfLineStorage_[i];
+    }
   }
 
   size_t size_;
