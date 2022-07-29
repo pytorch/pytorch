@@ -32,8 +32,7 @@ struct _call_fallback_fn<fallback_fn, Op, ReturnType(ParameterTypes...)> final {
             //.findSchemaOrThrow("a", "b")
             .typed<ReturnType (ParameterTypes...)>();
         return c10::impl::BoxedKernelWrapper<ReturnType (ParameterTypes...)>::call(
-            c10::KernelFunction::make_boxed_function<fallback_fn>,
-            nullptr,
+            c10::BoxedKernel::makeFromFunction<fallback_fn>(),
             op,
             c10::DispatchKeySet(), // we know that the cpu_fallback doesn't use the dispatch keyset.
             //std::forward<ParameterTypes...>(args...)
