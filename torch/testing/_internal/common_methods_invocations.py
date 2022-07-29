@@ -17748,6 +17748,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_autograd=False,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # TODO: same as this?
                # https://github.com/pytorch/pytorch/issues/81774
                # also see: arange, new_full

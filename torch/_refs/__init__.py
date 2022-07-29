@@ -3399,12 +3399,8 @@ def eye(
     check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(
-        0, n, dtype=torch.float64, device=device, requires_grad=requires_grad
-    )
-    range_m = torch.arange(
-        0, m, dtype=torch.float64, device=device, requires_grad=requires_grad
-    )
+    range_n = torch.arange(0, n, dtype=torch.int64, device=device, requires_grad=False)
+    range_m = torch.arange(0, m, dtype=torch.int64, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
     tmp = torch.where(cond, 1, 0)
