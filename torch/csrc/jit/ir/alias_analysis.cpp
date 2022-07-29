@@ -844,7 +844,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // Bind the formal to the actual
     formalToActual[formalAlias] = actualValue;
 
-		// Record writes
+    // Record writes
     if (formal->isWrite()) {
       registerWrite(actualValue, node);
     }
@@ -910,7 +910,7 @@ void AliasDb::analyzeImpl(Node* node) {
       giveFreshAlias(actual);
     }
 
-		// Record writes
+    // Record writes
     if (formal->isWrite()) {
       registerWrite(actual, node);
     }
