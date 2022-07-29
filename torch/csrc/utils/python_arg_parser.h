@@ -489,7 +489,7 @@ inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
     return py::cast(symint.toSymIntNodeImpl()).release().ptr();
   } else {
-    return THPUtils_packInt64(symint.data());
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 

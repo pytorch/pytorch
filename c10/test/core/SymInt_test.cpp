@@ -9,7 +9,7 @@ void check(int64_t value) {
   EXPECT_TRUE(SymInt::check_range(value));
   const auto i = SymInt(value);
   EXPECT_FALSE(i.is_symbolic());
-  EXPECT_EQ(i.data(), value);
+  EXPECT_EQ(i.as_int_unchecked(), value);
 }
 
 TEST(SymIntTest, ConcreteInts) {
