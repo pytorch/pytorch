@@ -8649,7 +8649,7 @@ Returns a view of the original tensor :attr:`input` with its dimensions permuted
 
 Args:
     {input}
-    dims (tuple of ints): The desired ordering of dimensions
+    dims (tuple of int): The desired ordering of dimensions
 
 Example:
     >>> x = torch.randn(2, 3, 5)
@@ -9609,7 +9609,7 @@ dimensions and the number of elements in :attr:`input`.
 
 Args:
     input (Tensor): the tensor to be reshaped
-    shape (tuple of ints): the new shape
+    shape (tuple of int): the new shape
 
 Example::
 
@@ -12389,8 +12389,8 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
     in memory) its behavior is undefined.
 
 Args:
-    size (tuple of ints): the shape of the output tensor
-    stride (tuple of ints): the strides of the output tensor
+    size (tuple of int): the shape of the output tensor
+    stride (tuple of int): the strides of the output tensor
 
 Keyword args:
     {dtype}
