@@ -58,7 +58,7 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       copyDataInline(rhs);
     } else {
@@ -94,13 +94,13 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       copyDataInline(rhs);
     } else {
       // They're outline. We're going to steal their vector.
       if (!isInline()) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       outOfLineStorage_ = rhs.outOfLineStorage_;
       rhs.outOfLineStorage_ = nullptr;
