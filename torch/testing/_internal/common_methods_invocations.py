@@ -4023,6 +4023,20 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
     for shape in shapes:
         yield SampleInput(make_arg(shape))
 
+
+def sample_inputs_assert_all_true(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(torch.ones, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(S, S), args=("Error Message",))
+
+
+def error_inputs_assert_all_true(op, device):
+    err_msg = "Found a non-true value"
+    yield ErrorInput(SampleInput(torch.zeros(S, device=device), args=(err_msg,)), error_regex=err_msg)
+    t = torch.ones(S, device=device)
+    t[0] = 0
+    yield ErrorInput(SampleInput(t, args=(err_msg,)), error_regex=err_msg)
+    
+
 def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -20425,6 +20439,15 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
+    ),
+    OpInfo(
+        'assert_all_true',
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_assert_all_true,
+        error_inputs_func=error_inputs_assert_all_true
     ),
 ]
 
