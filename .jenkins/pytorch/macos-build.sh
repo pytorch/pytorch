@@ -73,4 +73,6 @@ if which sccache > /dev/null; then
   print_sccache_stats
 fi
 
+python tools/stats/export_test_times.py
+
 assert_git_not_dirty
