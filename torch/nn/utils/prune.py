@@ -439,7 +439,7 @@ class Identity(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super(Identity, cls).apply(module, name)
+        return super().apply(module, name)
 
 
 class RandomUnstructured(BasePruningMethod):
@@ -496,7 +496,7 @@ class RandomUnstructured(BasePruningMethod):
                 fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
         """
-        return super(RandomUnstructured, cls).apply(module, name, amount=amount)
+        return super().apply(module, name, amount=amount)
 
 
 class L1Unstructured(BasePruningMethod):
@@ -559,7 +559,7 @@ class L1Unstructured(BasePruningMethod):
                 elements in the parameter being pruned.
                 If unspecified or None, the module parameter will be used in its place.
         """
-        return super(L1Unstructured, cls).apply(
+        return super().apply(
             module, name, amount=amount, importance_scores=importance_scores
         )
 
@@ -663,7 +663,7 @@ class RandomStructured(BasePruningMethod):
             dim (int, optional): index of the dim along which we define
                 channels to prune. Default: -1.
         """
-        return super(RandomStructured, cls).apply(module, name, amount=amount, dim=dim)
+        return super().apply(module, name, amount=amount, dim=dim)
 
 
 class LnStructured(BasePruningMethod):
@@ -783,7 +783,7 @@ class LnStructured(BasePruningMethod):
                 elements in the parameter being pruned.
                 If unspecified or None, the module parameter will be used in its place.
         """
-        return super(LnStructured, cls).apply(
+        return super().apply(
             module,
             name,
             amount=amount,
@@ -816,7 +816,7 @@ class CustomFromMask(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super(CustomFromMask, cls).apply(module, name, mask=mask)
+        return super().apply(module, name, mask=mask)
 
 
 def identity(module, name):

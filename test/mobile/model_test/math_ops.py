@@ -7,7 +7,7 @@ import torch
 
 class PointwiseOpsModule(torch.nn.Module):
     def __init__(self):
-        super(PointwiseOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         return self.pointwise_ops()
@@ -213,7 +213,7 @@ class PointwiseOpsModule(torch.nn.Module):
 
 class ReductionOpsModule(torch.nn.Module):
     def __init__(self):
-        super(ReductionOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         return self.reduction_ops()
@@ -266,7 +266,7 @@ class ReductionOpsModule(torch.nn.Module):
 
 class ComparisonOpsModule(torch.nn.Module):
     def __init__(self):
-        super(ComparisonOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         a = torch.tensor(0)
@@ -314,7 +314,7 @@ class ComparisonOpsModule(torch.nn.Module):
 
 class OtherMathOpsModule(torch.nn.Module):
     def __init__(self):
-        super(OtherMathOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         return self.other_ops()
@@ -388,7 +388,7 @@ class OtherMathOpsModule(torch.nn.Module):
 
 class SpectralOpsModule(torch.nn.Module):
     def __init__(self):
-        super(SpectralOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         return self.spectral_ops()
@@ -410,7 +410,7 @@ class SpectralOpsModule(torch.nn.Module):
 
 class BlasLapackOpsModule(torch.nn.Module):
     def __init__(self):
-        super(BlasLapackOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         return self.blas_lapack_ops()

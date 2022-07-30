@@ -28,17 +28,17 @@ class TestBuiltins(JitTestCase):
     def test_has_attr(self):
         class HasA(torch.nn.Module):
             def __init__(self):
-                super(HasA, self).__init__()
+                super().__init__()
                 self.a = 0
 
         class HasB(torch.nn.Module):
             def __init__(self):
-                super(HasB, self).__init__()
+                super().__init__()
                 self.b = 1
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mods = torch.nn.ModuleList([HasA(), HasB()])
 
             def forward(self):
@@ -59,7 +59,7 @@ class TestBuiltins(JitTestCase):
     def test_has_attr_invalid_args(self):
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mod = torch.nn.Linear(1, 1)
 
             def forward(self, name):
@@ -71,7 +71,7 @@ class TestBuiltins(JitTestCase):
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
 
             def forward(self, name):
                 # not allowed, `torch.rand` is not a class type

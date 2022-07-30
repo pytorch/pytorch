@@ -105,7 +105,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfig, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
@@ -130,7 +130,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
-        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 default_qconfig = QConfig(activation=default_observer,

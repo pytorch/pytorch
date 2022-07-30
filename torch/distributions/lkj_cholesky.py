@@ -67,7 +67,7 @@ class LKJCholesky(Distribution):
         beta_conc1 = offset + 0.5
         beta_conc0 = marginal_conc.unsqueeze(-1) - 0.5 * offset
         self._beta = Beta(beta_conc1, beta_conc0)
-        super(LKJCholesky, self).__init__(batch_shape, event_shape, validate_args)
+        super().__init__(batch_shape, event_shape, validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LKJCholesky, _instance)
@@ -75,7 +75,7 @@ class LKJCholesky(Distribution):
         new.dim = self.dim
         new.concentration = self.concentration.expand(batch_shape)
         new._beta = self._beta.expand(batch_shape + (self.dim,))
-        super(LKJCholesky, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super().__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

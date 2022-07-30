@@ -5,7 +5,7 @@ import torch
 
 class TestTRTModule(torch.nn.Module):
     def __init__(self, engine, input_names=None, output_names=None, fp16_output=False):
-        super(TestTRTModule, self).__init__()
+        super().__init__()
         self.engine = engine
         self.input_names = input_names
         self.output_names = output_names

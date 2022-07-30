@@ -248,7 +248,7 @@ class FunctionalModuleWithBuffers(nn.Module):
 
     def __init__(self, stateless_model, param_names, buffer_names,
                  param_names_map, buffer_names_map):
-        super(FunctionalModuleWithBuffers, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
@@ -291,7 +291,7 @@ class FunctionalModule(nn.Module):
     """
 
     def __init__(self, stateless_model, param_names, names_map):
-        super(FunctionalModule, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.names_map = names_map

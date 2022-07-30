@@ -25,7 +25,7 @@ class ReLU6(torch.nn.ReLU):
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(inplace)
+        super().__init__(inplace)
         self.inplace = inplace
 
     def forward(self, input):
@@ -46,7 +46,7 @@ class Hardswish(torch.nn.Hardswish):
         zero_point: quantization zero point of the output tensor
     """
     def __init__(self, scale, zero_point):
-        super(Hardswish, self).__init__()
+        super().__init__()
         self.scale = scale
         self.zero_point = zero_point
 
@@ -75,7 +75,7 @@ class ELU(torch.nn.ELU):
         alpha: the alpha constant
     """
     def __init__(self, scale, zero_point, alpha=1.):
-        super(ELU, self).__init__(alpha)
+        super().__init__(alpha)
         self.scale = scale
         self.zero_point = zero_point
 

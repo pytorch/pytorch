@@ -244,7 +244,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):
@@ -270,7 +270,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):
@@ -306,7 +306,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):

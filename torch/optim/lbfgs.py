@@ -231,7 +231,7 @@ class LBFGS(Optimizer):
             tolerance_change=tolerance_change,
             history_size=history_size,
             line_search_fn=line_search_fn)
-        super(LBFGS, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
             raise ValueError("LBFGS doesn't support per-parameter options "

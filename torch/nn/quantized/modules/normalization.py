@@ -15,7 +15,7 @@ class LayerNorm(torch.nn.LayerNorm):
     def __init__(self, normalized_shape, weight, bias, scale, zero_point, eps=1e-5,
                  elementwise_affine=True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LayerNorm, self).__init__(
+        super().__init__(
             normalized_shape, eps=eps, elementwise_affine=elementwise_affine,
             **factory_kwargs)
         self.weight = weight
@@ -58,7 +58,7 @@ class GroupNorm(torch.nn.GroupNorm):
     def __init__(self, num_groups, num_channels, weight, bias, scale, zero_point, eps=1e-5,
                  affine=True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine,
+        super().__init__(num_groups, num_channels, eps, affine,
                                         **factory_kwargs)
         self.weight = weight
         self.bias = bias
@@ -93,7 +93,7 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
                  eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(InstanceNorm1d, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias
@@ -134,7 +134,7 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
                  eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(InstanceNorm2d, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias
@@ -175,7 +175,7 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
                  eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(InstanceNorm3d, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias

@@ -204,7 +204,7 @@ class Caffe2Backend(Backend):
     # opset_version if you don't want this to version.
     @classmethod
     def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
-        super(Caffe2Backend, cls).run_node(node, inputs, device=device,
+        super().run_node(node, inputs, device=device,
                                            outputs_info=outputs_info, opset_version=opset_version)
 
         value_infos = []
@@ -684,7 +684,7 @@ class Caffe2Backend(Backend):
         there is no way we can know which blob is the input of the predict_graph.
         '''
         if not kwargs.pop('no_check_UNSAFE', False):
-            super(Caffe2Backend, cls).prepare(model, device, **kwargs)
+            super().prepare(model, device, **kwargs)
         opset_version = None
         for imp in model.opset_import:
             if not imp.HasField("domain") or imp.domain == "":
@@ -948,8 +948,8 @@ class Caffe2Backend(Backend):
     @classmethod
     def is_compatible(cls, model, device='CPU', **kwargs):
         if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
-           and callable(super(Caffe2Backend, cls).is_compatible):
-            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+           and callable(super().is_compatible):
+            if not super().is_compatible(model, device, **kwargs):
                 return False
         # TODO: should have an unspported list of operators, be optimistic for now
         return True

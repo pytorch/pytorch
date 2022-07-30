@@ -17,14 +17,14 @@ import copy
 
 class ModuleConstScale(nn.Module):
     def __init__(self):
-        super(ModuleConstScale, self).__init__()
+        super().__init__()
 
     def forward(self, a):
         return a * 2
 
 class ModuleSub(nn.Module):
     def __init__(self):
-        super(ModuleSub, self).__init__()
+        super().__init__()
 
     def forward(self, a, b):
         return a - b
@@ -34,14 +34,14 @@ class ModuleAddcmul(nn.Module):
     addcmul function takes a at::Scalar which results in a special TSData containing a Scalar rather than a Tensor.
     """
     def __init__(self):
-        super(ModuleAddcmul, self).__init__()
+        super().__init__()
 
     def forward(self, a, b, c):
         return torch.addcmul(a, b, c, value=5)
 
 class ModuleReturnMulti(nn.Module):
     def __init__(self):
-        super(ModuleReturnMulti, self).__init__()
+        super().__init__()
 
     def forward(self, a, b):
         return (b + 1, a - 1)
@@ -50,7 +50,7 @@ class ModuleReturnMulti(nn.Module):
 # a custom tracer.
 # class ModuleEagerTensor(nn.Module):
 #     def __init__(self):
-#         super(ModuleEagerTensor, self).__init__()
+#         super().__init__()
 #
 #     def forward(self, a):
 #         b = torch.randn(2, 3, device="cpu") # eager device
@@ -65,7 +65,7 @@ class ModuleReturnMulti(nn.Module):
 # method to a constant.. Comment out for now
 # class ModuleReturnEagerTensorOnDefaultDevice(nn.Module):
 #     def __init__(self):
-#         super(ModuleReturnEagerTensorOnDefaultDevice, self).__init__()
+#         super().__init__()
 #
 #     def forward(self):
 #         return torch.tensor((2, 3), dtype=torch.float32)
@@ -77,7 +77,7 @@ class ModuleReturnDupTensor(nn.Module):
     thru torchdynamo..
     """
     def __init__(self):
-        super(ModuleReturnDupTensor, self).__init__()
+        super().__init__()
 
     def forward(self, a, b):
         c = a + b
@@ -85,7 +85,7 @@ class ModuleReturnDupTensor(nn.Module):
 
 class ModuleInplaceUpdate(nn.Module):
     def __init__(self):
-        super(ModuleInplaceUpdate, self).__init__()
+        super().__init__()
 
     def forward(self, a, b):
         a.sub_(b)

@@ -35,13 +35,13 @@ class Beta(ExponentialFamily):
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0, validate_args=validate_args)
-        super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
+        super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Beta, _instance)
         batch_shape = torch.Size(batch_shape)
         new._dirichlet = self._dirichlet.expand(batch_shape)
-        super(Beta, new).__init__(batch_shape, validate_args=False)
+        super().__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

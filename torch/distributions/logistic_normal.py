@@ -35,13 +35,13 @@ class LogisticNormal(TransformedDistribution):
         base_dist = Normal(loc, scale, validate_args=validate_args)
         if not base_dist.batch_shape:
             base_dist = base_dist.expand([1])
-        super(LogisticNormal, self).__init__(base_dist,
+        super().__init__(base_dist,
                                              StickBreakingTransform(),
                                              validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogisticNormal, _instance)
-        return super(LogisticNormal, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def loc(self):

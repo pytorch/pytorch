@@ -341,7 +341,7 @@ def _sum_of_list(tensorlist):
 # has to be at top level or Pickle complains
 class FooToPickle(torch.nn.Module):
     def __init__(self):
-        super(FooToPickle, self).__init__()
+        super().__init__()
         self.bar = torch.jit.ScriptModule()
 
 class TestJit(JitTestCase):
@@ -398,7 +398,7 @@ class TestJit(JitTestCase):
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
-                super(M, self).__init__()
+                super().__init__()
                 self.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
                                                     device=cpu_device_str))
                 self.b0 = torch.tensor([0.9], dtype=torch.float,
@@ -416,7 +416,7 @@ class TestJit(JitTestCase):
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.register_buffer('b0', torch.randn(1, 3))
                 self.p0 = nn.Parameter(torch.randn(2, 3))
 
@@ -470,7 +470,7 @@ class TestJit(JitTestCase):
     def test_restore_shared_storage_on_cuda(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
                 self.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
                 self.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
@@ -488,7 +488,7 @@ class TestJit(JitTestCase):
     def test_add_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self, relu_op):
-                super(M, self).__init__()
+                super().__init__()
                 self.relu_op = relu_op
 
             def forward(self, a, b, c):
@@ -535,7 +535,7 @@ class TestJit(JitTestCase):
 
         class Madd_(torch.nn.Module):
             def __init__(self, relu_op):
-                super(Madd_, self).__init__()
+                super().__init__()
                 self.relu_op = relu_op
 
             def forward(self, a, b):
@@ -569,7 +569,7 @@ class TestJit(JitTestCase):
 
         class Madd_out(torch.nn.Module):
             def __init__(self, relu_op):
-                super(Madd_out, self).__init__()
+                super().__init__()
                 self.relu_op = relu_op
 
             def forward(self, a, b):
@@ -837,7 +837,7 @@ class TestJit(JitTestCase):
 
         class Mod(nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
 
             def forward(self, t):
                 return t + 2
@@ -890,7 +890,7 @@ class TestJit(JitTestCase):
     def test_Sequential(self):
         class Seq(nn.Module):
             def __init__(self):
-                super(Seq, self).__init__()
+                super().__init__()
                 self.seq = nn.Sequential(nn.Linear(10, 20), nn.Linear(20, 30))
 
             @torch.jit.script_method
@@ -905,7 +905,7 @@ class TestJit(JitTestCase):
     def test_ModuleList(self):
         class Mod(nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
                 self.model += (nn.Linear(10, 20),)
                 self.model.append(nn.Linear(20, 30))
@@ -951,7 +951,7 @@ class TestJit(JitTestCase):
 
         class MyModule(torch.jit.ScriptModule):
             def __init__(self, module):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.module = module
 
             @torch.jit.script_method
@@ -1401,7 +1401,7 @@ graph(%Ra, %Rb):
         # Check match::module behavior
         class Test(torch.nn.Module):
             def __init__(self):
-                super(Test, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
 
@@ -1426,7 +1426,7 @@ graph(%Ra, %Rb):
     def test_pattern_based_rewrite_with_source_range_preserved(self):
         class TestModule1(torch.nn.Module):
             def __init__(self):
-                super(TestModule1, self).__init__()
+                super().__init__()
 
             def forward(self, x, y, z, w):
                 x = x + y
@@ -1458,7 +1458,7 @@ graph(%Ra, %Rb):
 
         class TestModule2(torch.nn.Module):
             def __init__(self):
-                super(TestModule2, self).__init__()
+                super().__init__()
 
             def forward(self, x, y, z, w):
                 x = x + y
@@ -1822,7 +1822,7 @@ graph(%Ra, %Rb):
         with enable_profiling_mode_for_profiling_tests():
             class MyModule(torch.nn.Module):
                 def __init__(self, M):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.dropout = torch.nn.Dropout(0.5)
                     self.linear = torch.nn.Linear(M, M)
 
@@ -2452,7 +2452,7 @@ graph(%Ra, %Rb):
     def test_cuda_export_restore(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(3, 4))
 
             @torch.jit.script_method
@@ -2461,7 +2461,7 @@ graph(%Ra, %Rb):
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mod = Sub()
 
             @torch.jit.script_method
@@ -2495,7 +2495,7 @@ graph(%Ra, %Rb):
         for clazz in [nn.RNN(10, 20, 2), nn.GRU(10, 20, 2)]:
             class RNNTest(torch.nn.Module):
                 def __init__(self):
-                    super(RNNTest, self).__init__()
+                    super().__init__()
                     self.rnn = clazz
 
                 def forward(self, x, lengths, h0):
@@ -2517,7 +2517,7 @@ graph(%Ra, %Rb):
     def test_export_lstm(self):
         class LSTMTest(torch.nn.Module):
             def __init__(self):
-                super(LSTMTest, self).__init__()
+                super().__init__()
                 self.rnn = nn.LSTM(10, 20, 2)
 
             def forward(self, x, lengths, hiddens):
@@ -2540,7 +2540,7 @@ graph(%Ra, %Rb):
     def test_unique_state_dict(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 shared_param = torch.nn.Parameter(torch.ones(1))
                 self.register_parameter('w1', shared_param)
                 self.register_parameter('w2', shared_param)
@@ -2652,7 +2652,7 @@ graph(%Ra, %Rb):
         with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(Foo, self).__init__()
+                    super().__init__()
 
                 @torch.jit.script_method
                 def forward(self, x, y):
@@ -2670,7 +2670,7 @@ graph(%Ra, %Rb):
     def test_non_ascii_string(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.a = "Over \u0e55\u0e57 57"
 
             @torch.jit.script_method
@@ -2751,7 +2751,7 @@ graph(%Ra, %Rb):
 
         class Test(torch.jit.ScriptModule):
             def __init__(self):
-                super(Test, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, input, other=four):
@@ -2825,7 +2825,7 @@ graph(%Ra, %Rb):
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
-                super(J, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, input):
@@ -2889,7 +2889,7 @@ graph(%Ra, %Rb):
     def test_export_opnames(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
 
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -2906,7 +2906,7 @@ graph(%Ra, %Rb):
 
         class Bar(torch.jit.ScriptModule):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.sub = Foo()
 
             @torch.jit.script_method
@@ -3015,7 +3015,7 @@ class TestFrontend(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return MyScriptClass()
@@ -3058,7 +3058,7 @@ class TestScript(JitTestCase):
 
         class MyNestedMod(torch.nn.Module):
             def __init__(self):
-                super(MyNestedMod, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return torch.sub(x, x)
@@ -3066,7 +3066,7 @@ class TestScript(JitTestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.nested = MyNestedMod()
 
             def forward(self, x):
@@ -3086,7 +3086,7 @@ class TestScript(JitTestCase):
         """
         class MyCell(torch.nn.Module):
             def __init__(self):
-                super(MyCell, self).__init__()
+                super().__init__()
 
             @staticmethod
             def do_it(x, h):
@@ -3115,7 +3115,7 @@ class TestScript(JitTestCase):
 
         class Moddy(torch.nn.Module):
             def __init__(self):
-                super(Moddy, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return foo()
@@ -3136,7 +3136,7 @@ class TestScript(JitTestCase):
 
         class Moddy(torch.nn.Module):
             def __init__(self):
-                super(Moddy, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return foo()
@@ -3347,7 +3347,7 @@ class TestScript(JitTestCase):
     def test_ignored_method_binding(self):
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.x : int = 0
 
             @torch.jit.export
@@ -3377,7 +3377,7 @@ class TestScript(JitTestCase):
             __annotations__ = {"x": Optional[torch.Tensor]}
 
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
                 self.x = None
 
             @torch.jit.ignore
@@ -3400,7 +3400,7 @@ class TestScript(JitTestCase):
             __constants__ = ["foo"]
 
             def __init__(self, foo):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = foo
 
         m = M(5)
@@ -3414,7 +3414,7 @@ class TestScript(JitTestCase):
             FOO = 0
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = self.FOO
         m = M()
         self.assertEqual(m.foo, M.FOO)
@@ -3424,7 +3424,7 @@ class TestScript(JitTestCase):
             FOO = 0
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self):
@@ -3442,7 +3442,7 @@ class TestScript(JitTestCase):
     def test_attribute_in_init(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
                 # we should be able to use self.foo as a float here
                 assert 0.0 < self.foo
@@ -3451,7 +3451,7 @@ class TestScript(JitTestCase):
     def test_scriptable_fn_as_attr(self):
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -3504,7 +3504,7 @@ def foo(x):
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
 
             @torch.jit.unused
             def fn(self):
@@ -3523,7 +3523,7 @@ def foo(x):
     def test_unused_decorator(self):
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
 
             @torch.jit.unused
             @torch.no_grad()
@@ -3704,14 +3704,14 @@ def foo(x):
 
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return self.training
 
         class OldM(torch.jit.ScriptModule):
             def __init__(self):
-                super(OldM, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -3723,7 +3723,7 @@ def foo(x):
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -3731,7 +3731,7 @@ def foo(x):
 
         class B(A):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def bar(self, x):
@@ -3746,7 +3746,7 @@ def foo(x):
 
         class C(torch.jit.ScriptModule):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def bar(self, x):
@@ -3754,7 +3754,7 @@ def foo(x):
 
         class D(C, B):
             def __init__(self):
-                super(D, self).__init__()
+                super().__init__()
 
         self.assertEqual(D()(v), v + v)
 
@@ -3782,7 +3782,7 @@ def foo(x):
     def test_first_class_module(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = nn.Parameter(torch.rand(3, 4))
 
             @torch.jit.script_method
@@ -3818,7 +3818,7 @@ def foo(x):
     def test_static_methods(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             @staticmethod
             def my_method(x):
@@ -3829,7 +3829,7 @@ def foo(x):
 
         class N(nn.Module):
             def __init__(self):
-                super(N, self).__init__()
+                super().__init__()
 
             @staticmethod
             def my_method(x):
@@ -3867,7 +3867,7 @@ def foo(x):
     def test_builtin_function_attributes(self):
         class Add(nn.Module):
             def __init__(self):
-                super(Add, self).__init__()
+                super().__init__()
                 self.add = torch.add
 
             def forward(self, input):
@@ -4079,7 +4079,7 @@ def foo(x):
 
         class What(torch.jit.ScriptModule):
             def __init__(self, x):
-                super(What, self).__init__()
+                super().__init__()
                 self.foo = x
         a = What(foo)
         c = What(foo)
@@ -4087,7 +4087,7 @@ def foo(x):
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
             def __init__(self):
-                super(What, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -4115,7 +4115,7 @@ def foo(x):
 
         class FooBar1234(torch.nn.Module):
             def __init__(self):
-                super(FooBar1234, self).__init__()
+                super().__init__()
                 self.f = Foo321()
 
             def forward(self, x):
@@ -4175,7 +4175,7 @@ def foo(x):
         with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(Foo, self).__init__()
+                    super().__init__()
 
                 @torch.jit.script_method
                 def forward(self):
@@ -4598,7 +4598,7 @@ def foo(xyz):
         """
         class A(torch.jit.ScriptModule):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -4606,7 +4606,7 @@ def foo(xyz):
 
         class B(torch.jit.ScriptModule):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.ModuleList([A()])
 
             @torch.jit.script_method
@@ -4617,7 +4617,7 @@ def foo(xyz):
 
         class C(torch.jit.ScriptModule):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Sequential(B())
 
             @torch.jit.script_method
@@ -5219,7 +5219,7 @@ a")
     def test_module_copy_with_attributes(self):
         class Vocabulary(torch.jit.ScriptModule):
             def __init__(self, vocab_list):
-                super(Vocabulary, self).__init__()
+                super().__init__()
                 self._vocab = torch.jit.Attribute(vocab_list, List[str])
                 self.some_idx = torch.jit.Attribute(2, int)
                 self.idx = torch.jit.Attribute(
@@ -7175,7 +7175,7 @@ a")
     def test_nested_select_assign(self):
         class SubSubModule(torch.nn.Module):
             def __init__(self):
-                super(SubSubModule, self).__init__()
+                super().__init__()
                 self.abc = 11
 
             def forward(self, x):
@@ -7183,7 +7183,7 @@ a")
 
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 11
                 self.nested = SubSubModule()
 
@@ -7192,7 +7192,7 @@ a")
 
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
                 self.hi = 1
 
@@ -7762,7 +7762,7 @@ dedent """
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):
             def __init__(self, in_channels, out_channels, **kwargs):
-                super(ScriptedConv2d, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
                 self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
 
@@ -7774,7 +7774,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.Conv2d_1a_3x3 = ScriptedConv2d(3, 32, kernel_size=3, stride=2)
 
             @torch.jit.script_method
@@ -7784,7 +7784,7 @@ dedent """
 
         class EagerConv2d(torch.nn.Module):
             def __init__(self, in_channels, out_channels, **kwargs):
-                super(EagerConv2d, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
                 self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
 
@@ -7795,7 +7795,7 @@ dedent """
 
         class EagerMod(torch.nn.Module):
             def __init__(self):
-                super(EagerMod, self).__init__()
+                super().__init__()
                 self.Conv2d_1a_3x3 = EagerConv2d(3, 32, kernel_size=3, stride=2)
 
             def forward(self, x):
@@ -8221,7 +8221,7 @@ dedent """
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
-                super(M1, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -8230,7 +8230,7 @@ dedent """
 
         class PModule(nn.Module):
             def __init__(self):
-                super(PModule, self).__init__()
+                super().__init__()
                 self.a = nn.Parameter(torch.randn(2, 3))
 
             def forward(self, a):
@@ -8238,7 +8238,7 @@ dedent """
 
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 # test submodule
                 self.sub = M1()
                 self.sub2 = PModule()
@@ -8790,7 +8790,7 @@ dedent """
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.value = 1
 
             @torch.jit.ignore
@@ -8815,7 +8815,7 @@ dedent """
     def test_script_module_nochange_submodule(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sub = nn.Linear(5, 5)
 
             @torch.jit.script_method
@@ -8832,21 +8832,21 @@ dedent """
     def test_module_apis(self):
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
 
             def forward(self, thing):
                 return thing - 2
 
         class Double(torch.nn.Module):
             def __init__(self):
-                super(Double, self).__init__()
+                super().__init__()
 
             def forward(self, thing):
                 return thing * 2
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.mod = (Sub())
                 self.mod2 = (Sub())
                 self.mod3 = nn.Sequential(nn.Sequential(Sub()))
@@ -8885,7 +8885,7 @@ dedent """
             __constants__ = ['b', 'i', 'c', 's']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.b = False
                 self.i = 1
                 self.c = 3.5
@@ -8905,7 +8905,7 @@ dedent """
     def test_script_module_fail_exist(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -8917,7 +8917,7 @@ dedent """
     def test_script_module_none_exist_fail(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, my_optional):
-                super(M, self).__init__()
+                super().__init__()
                 self.my_optional = my_optional
 
             @torch.jit.script_method
@@ -8935,7 +8935,7 @@ dedent """
             __constants__ = ['invalid']
 
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.invalid = [nn.Linear(3, 4)]
 
         with self.assertRaisesRegex(
@@ -8947,7 +8947,7 @@ dedent """
             __constants__ = ['invalid']
 
             def __init__(self):
-                super(Foo2, self).__init__()
+                super().__init__()
                 self.invalid = type(1)
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
@@ -8957,7 +8957,7 @@ dedent """
             __constants__ = ['invalid']
 
             def __init__(self):
-                super(Foo3, self).__init__()
+                super().__init__()
                 self.invalid = (3, 4, {})
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
@@ -8967,7 +8967,7 @@ dedent """
             __constants__ = ['invalid']
 
             def __init__(self):
-                super(Foo4, self).__init__()
+                super().__init__()
                 self.invalid = np.int64(5)
 
         # verify that we capture human understandable class name
@@ -8978,7 +8978,7 @@ dedent """
         # TODO: add param mutation test case after JIT support it
         class ModuleBufferMutate(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleBufferMutate, self).__init__()
+                super().__init__()
                 self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
 
             @torch.jit.script_method
@@ -8998,7 +8998,7 @@ dedent """
             __constants__ = ['b']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.b = [1, 2, 3, 4]
 
             @torch.jit.script_method
@@ -9015,7 +9015,7 @@ dedent """
     def test_override_magic(self):
         class OverrideMagic(nn.Module):
             def __init__(self):
-                super(OverrideMagic, self).__init__()
+                super().__init__()
 
             @torch.jit.export
             def __len__(self):
@@ -9026,7 +9026,7 @@ dedent """
 
         class OverrideMagicSeq(nn.Sequential):
             def __init__(self):
-                super(OverrideMagicSeq, self).__init__()
+                super().__init__()
 
             @torch.jit.export
             def __len__(self):
@@ -9039,7 +9039,7 @@ dedent """
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9048,7 +9048,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = nn.ModuleList([Sub() for i in range(10)])
 
             @torch.jit.script_method
@@ -9071,7 +9071,7 @@ dedent """
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.qscheme = torch.per_tensor_affine
 
             def forward(self):
@@ -9087,7 +9087,7 @@ dedent """
     def test_script_module_const_submodule_fail(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9096,7 +9096,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = [Sub() for _ in range(10)]
 
             @torch.jit.script_method
@@ -9110,7 +9110,7 @@ dedent """
 
     class DerivedStateModule(torch.jit.ScriptModule):
         def __init__(self):
-            super(TestScript.DerivedStateModule, self).__init__()
+            super().__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
             self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
@@ -9257,7 +9257,7 @@ dedent """
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.x = 1
 
             def forward(self, x):
@@ -9286,7 +9286,7 @@ dedent """
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(SubSubMod, self).__init__()
+                super().__init__()
                 self.register_buffer('buf', torch.ones(3, 4) * 3)
 
             @torch.jit.script_method
@@ -9303,7 +9303,7 @@ dedent """
 
         class SubMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(SubMod, self).__init__()
+                super().__init__()
                 self.register_buffer('buf', torch.ones(3, 4) * 2)
                 self.ssm = SubSubMod()
 
@@ -9321,7 +9321,7 @@ dedent """
 
         class Mod(torch.jit.ScriptModule):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.submod = SubMod()
                 self.register_buffer('buf', torch.ones(3, 4) * 1)
 
@@ -9394,7 +9394,7 @@ dedent """
             __constants__ = ['mods']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = 1
 
             @torch.jit.script_method
@@ -9408,7 +9408,7 @@ dedent """
     def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
-                super(M2, self).__init__()
+                super().__init__()
                 self.mods = mod_list
 
             @torch.jit.script_method
@@ -9422,7 +9422,7 @@ dedent """
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9431,7 +9431,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = nn.Sequential(Sub(), Sub(), Sub())
 
             @torch.jit.script_method
@@ -9459,7 +9459,7 @@ dedent """
     def test_script_sequential_sliced_iteration(self):
         class seq_mod(nn.Module):
             def __init__(self):
-                super(seq_mod, self).__init__()
+                super().__init__()
                 self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
                 self.layers = nn.Sequential(*self.layers)
 
@@ -9477,7 +9477,7 @@ dedent """
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = nn.Sequential(OrderedDict([
                     ("conv", nn.Conv2d(1, 20, 5)),
                     ("relu", nn.ReLU())
@@ -9493,7 +9493,7 @@ dedent """
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9502,7 +9502,7 @@ dedent """
 
         class ReturnMulti(torch.jit.ScriptModule):
             def __init__(self):
-                super(ReturnMulti, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9510,7 +9510,7 @@ dedent """
 
         class HaveSequential(torch.jit.ScriptModule):
             def __init__(self):
-                super(HaveSequential, self).__init__()
+                super().__init__()
                 self.someseq = nn.Sequential(
                     Sub(),
                     ReturnMulti(),
@@ -9531,7 +9531,7 @@ dedent """
     def test_script_sequential_in_mod_list(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9540,7 +9540,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = nn.ModuleList([Sub(), nn.Sequential(Sub(), nn.Sequential(Sub(), Sub()), Sub())])
 
             @torch.jit.script_method
@@ -9558,7 +9558,7 @@ dedent """
     def test_script_nested_mod_list(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -9567,7 +9567,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.mods = nn.ModuleList([nn.ModuleList([Sub()]), nn.Sequential(Sub()), nn.ModuleList([Sub(), Sub()])])
 
             @torch.jit.script_method
@@ -9587,7 +9587,7 @@ dedent """
             __constants__ = ['dim']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.dim = 1
 
             @torch.jit.script_method
@@ -9599,7 +9599,7 @@ dedent """
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestSumStarred, self).__init__()
+            super().__init__()
 
         def forward(self, *inputs):
             output = inputs[0]
@@ -9609,7 +9609,7 @@ dedent """
 
     class StarTestReturnThree(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestReturnThree, self).__init__()
+            super().__init__()
 
         def forward(self, rep):
             return rep, rep, rep
@@ -9618,7 +9618,7 @@ dedent """
 
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.m = torch.jit.trace(TestScript.StarTestSumStarred(),
                                          (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
                 self.g = torch.jit.trace(TestScript.StarTestReturnThree(), torch.ones(4, 3))
@@ -9634,7 +9634,7 @@ dedent """
     def test_script_star_expr_string(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.m = torch.jit.trace(TestScript.StarTestSumStarred(),
                                          (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
                 self.g = torch.jit.trace(TestScript.StarTestReturnThree(), torch.ones(4, 3))
@@ -9650,7 +9650,7 @@ dedent """
 
     class StarTestSumAndReturnThree(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestSumAndReturnThree, self).__init__()
+            super().__init__()
 
         def forward(self, *inputs):
             output = inputs[0]
@@ -9661,7 +9661,7 @@ dedent """
     def test_script_star_assign(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.g = torch.jit.trace(TestScript.StarTestSumAndReturnThree(), torch.ones(4, 3))
                 self.define('''
             def forward(self, rep):
@@ -9675,7 +9675,7 @@ dedent """
     def test_script_module_star_assign2(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.g = torch.jit.trace(
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
@@ -9692,7 +9692,7 @@ dedent """
     def test_script_module_star_assign2_inplace(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.g = torch.jit.trace(
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
@@ -9714,7 +9714,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(M2, self).__init__()
+                    super().__init__()
 
                     @torch.jit.ignore
                     def myfunc():
@@ -9733,7 +9733,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(M2, self).__init__()
+                    super().__init__()
 
                     self.define('''
                 def forward(self, rep):
@@ -9751,7 +9751,7 @@ dedent """
 
         class PadPackedWrapper(torch.nn.Module):
             def __init__(self):
-                super(PadPackedWrapper, self).__init__()
+                super().__init__()
 
             def forward(self, x, seq_lens):
                 x = pack_padded_sequence(x, seq_lens)
@@ -9942,7 +9942,7 @@ dedent """
             }
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.val = None
 
             def some_method(self):
@@ -9962,7 +9962,7 @@ dedent """
         # We want to support the use case of attaching a different `forward` method
         class LowLevelModule(torch.nn.Module):
             def __init__(self):
-                super(LowLevelModule, self).__init__()
+                super().__init__()
 
             def forward(self, input: torch.Tensor):
                 # Generic forward dispatch
@@ -9970,7 +9970,7 @@ dedent """
 
         class TestModule(LowLevelModule):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 # Replace the forward method
                 self.forward = types.MethodType(LowLevelModule.forward, self)
 
@@ -9998,7 +9998,7 @@ dedent """
 
         class RNNTraceWrapper(torch.nn.Module):
             def __init__(self, cell_type):
-                super(RNNTraceWrapper, self).__init__()
+                super().__init__()
                 if cell_type == 'RNN':
                     self.rnn = torch.nn.RNN(input_size=C, hidden_size=C, num_layers=num_layers)
                 elif cell_type == 'LSTM':
@@ -10182,7 +10182,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self, mod):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
                 self.mod = torch.jit.trace(mod_fn, tuple())
@@ -10522,7 +10522,7 @@ dedent """
     def test_script_module_export_submodule(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
-                super(M1, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.randn(2))
 
             @torch.jit.script_method
@@ -10531,7 +10531,7 @@ dedent """
 
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 # test submodule
                 self.sub = M1()
                 self.weight = nn.Parameter(torch.randn(2, 3))
@@ -10574,7 +10574,7 @@ dedent """
     def test_compile_module_with_constant(self):
         class Double(nn.Module):
             def __init__(self, downsample=None):
-                super(Double, self).__init__()
+                super().__init__()
 
             def forward(self, input):
                 return input * 2
@@ -10583,7 +10583,7 @@ dedent """
             __constants__ = ['downsample']
 
             def __init__(self, downsample=None):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.downsample = downsample
 
             def forward(self, input):
@@ -10606,7 +10606,7 @@ dedent """
     def test_script_module_export_tensor_type(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, type):
-                super(M, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros((5, 5), dtype=type).random_())
 
             @torch.jit.script_method
@@ -10627,7 +10627,7 @@ dedent """
         class M(torch.jit.ScriptModule):
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda:0').random_())
 
             @torch.jit.script_method
@@ -10645,7 +10645,7 @@ dedent """
     def test_script_module_export_blocks(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, n, m):
-                super(M, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(n, m))
 
             @torch.jit.script_method
@@ -10666,7 +10666,7 @@ dedent """
         class M(torch.jit.ScriptModule):
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.param1 = torch.nn.Parameter(torch.rand(5, 5))
                 self.param2 = torch.nn.Parameter(self.param1[3])
                 self.param3 = torch.nn.Parameter(torch.rand(5, 5))
@@ -10688,21 +10688,21 @@ dedent """
     def test_sequential_intermediary_types(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x + 3
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return {"1": x}
 
         class C(torch.nn.Module):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Sequential(A(), B())
 
             def forward(self, x):
@@ -10952,7 +10952,7 @@ dedent """
     def test_torch_ignore_conversion_to_none(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             @torch.jit.ignore
             def ignored(self, a: int) -> None:
@@ -10967,7 +10967,7 @@ dedent """
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
 
             @torch.jit.ignore
             def ignored(self, a: int):
@@ -11036,7 +11036,7 @@ dedent """
         with enable_profiling_mode_for_profiling_tests():
             class MyBatchNorm(torch.nn.Module):
                 def __init__(self, num_features, affine, track_running_stats):
-                    super(MyBatchNorm, self).__init__()
+                    super().__init__()
                     self.bn = torch.nn.BatchNorm2d(
                         num_features, 1e-5, affine=affine, track_running_stats=track_running_stats).float()
 
@@ -11098,7 +11098,7 @@ dedent """
             __constants__ = ['d']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.d = torch.device('cpu')
 
             @torch.jit.script_method
@@ -11286,7 +11286,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.weight_0 = torch.nn.Parameter(torch.rand(weight_0_shape))
                 self.weight_1 = torch.nn.Parameter(torch.rand(weight_1_shape))
 
@@ -11666,14 +11666,14 @@ dedent """
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
 
             def forward(self, thing):
                 return thing - 2
 
         class Double(torch.nn.Module):
             def __init__(self):
-                super(Double, self).__init__()
+                super().__init__()
 
             def forward(self, thing):
                 return thing * 2
@@ -11681,7 +11681,7 @@ dedent """
         # zipping over two
         class ZipModLists(torch.nn.Module):
             def __init__(self, mods, mods2):
-                super(ZipModLists, self).__init__()
+                super().__init__()
                 self.mods = mods
                 self.mods2 = mods2
 
@@ -11696,7 +11696,7 @@ dedent """
             __constants__ = ['tup_larger', 'tup_smaller']
 
             def __init__(self, mods, mods2):
-                super(ZipWithValues, self).__init__()
+                super().__init__()
                 self.mods = mods
                 self.mods2 = mods2
                 self.tup_larger = list(range(len(mods2) + 1))
@@ -11729,7 +11729,7 @@ dedent """
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mods = nn.ModuleList([Double(), Double()])
 
             def forward(self, x):
@@ -11830,7 +11830,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self, mod_list):
-                super(M, self).__init__()
+                super().__init__()
                 self.module_list = mod_list
 
             def forward(self, x):
@@ -11845,7 +11845,7 @@ dedent """
 
         class M2(M):
             def __init__(self, mod_list):
-                super(M2, self).__init__(mod_list)
+                super().__init__(mod_list)
 
             def forward(self, x):
                 out = [mod(x) for mod in self.module_list]
@@ -12375,7 +12375,7 @@ dedent """
     def test_call_python_mod_from_tracing_fn(self):
         class PythonMod(torch.nn.Module):
             def __init__(self):
-                super(PythonMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
 
             def forward(self, x):
@@ -12409,7 +12409,7 @@ dedent """
     def test_call_traced_mod_from_tracing_fn(self):
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
 
             def forward(self, x):
@@ -12439,7 +12439,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "must be registered as submodules"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(ScriptMod, self).__init__()
+                    super().__init__()
                     self.param = torch.nn.Parameter(torch.rand(3, 4), requires_grad=False)
 
                 @torch.jit.script_method
@@ -12461,7 +12461,7 @@ dedent """
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             def forward(self, x):
@@ -12478,7 +12478,7 @@ dedent """
     def test_call_python_mod_from_traced_module(self):
         class PythonModule(torch.nn.Module):
             def __init__(self):
-                super(PythonModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(5, 7))
 
             def forward(self, x):
@@ -12486,7 +12486,7 @@ dedent """
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 5))
                 self.mod = PythonModule()
 
@@ -12569,7 +12569,7 @@ dedent """
     def test_call_python_mod_from_script_fn(self):
         class PythonModule(torch.nn.Module):
             def __init__(self):
-                super(PythonModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(5, 7))
 
             def forward(self, x):
@@ -12601,7 +12601,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(ScriptMod, self).__init__()
+                    super().__init__()
 
                 @torch.jit.script_method
                 def forward(self, x):
@@ -12620,7 +12620,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             @torch.jit.script_method
@@ -12634,7 +12634,7 @@ dedent """
     def test_call_python_mod_from_script_module(self):
         class PythonMod(torch.nn.Module):
             def __init__(self):
-                super(PythonMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 5))
 
             @torch.jit.ignore
@@ -12643,7 +12643,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
                 self.pm = PythonMod()
 
@@ -12664,7 +12664,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             @torch.jit.script_method
@@ -12679,7 +12679,7 @@ dedent """
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod1, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 5))
 
             @torch.jit.script_method
@@ -12688,7 +12688,7 @@ dedent """
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
                 self.tm = ScriptMod1()
 
@@ -12707,7 +12707,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(ScriptMod, self).__init__()
+                    super().__init__()
                     self.param = torch.nn.Parameter(torch.rand(3, 3))
 
                 @torch.jit.script_method
@@ -13001,7 +13001,7 @@ dedent """
     def test_annot_string_py3_method(self):
         class TestModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
         code = '''
             def foo(self, x : {input}, y : Tuple[Tensor, Tensor]) -> Tuple[{output}, {output}]:
@@ -13033,7 +13033,7 @@ dedent """
     def test_annot_string_mypy_method(self):
         class TestModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
         code = '''
         def foo(self, x, y):
@@ -13230,7 +13230,7 @@ dedent """
 
         class TestLinear(torch.nn.Module):
             def __init__(self, in_features, out_features):
-                super(TestLinear, self).__init__()
+                super().__init__()
                 self.in_features = in_features
                 self.out_features = out_features
                 self.weight = torch.nn.Parameter(torch.empty(out_features, in_features))
@@ -13251,7 +13251,7 @@ dedent """
         # Initialize a ScriptModule that uses the weak module above multiple times
         class Strong(torch.jit.ScriptModule):
             def __init__(self):
-                super(Strong, self).__init__()
+                super().__init__()
                 self.fc1 = TestLinear(10, 10)
                 self.fc1.weight = torch.nn.Parameter(weights)
                 self.fc1.bias = torch.nn.Parameter(bias)
@@ -13281,14 +13281,14 @@ dedent """
     def test_module_copying(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
-                super(Submodule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x + 100
 
         class Weak(torch.nn.Module):
             def __init__(self, in_features, out_features):
-                super(Weak, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.register_buffer("buffer", torch.ones(out_features))
@@ -13300,7 +13300,7 @@ dedent """
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self, weak):
-                super(Strong, self).__init__()
+                super().__init__()
                 self.weak = weak
 
             @torch.jit.script_method
@@ -13748,7 +13748,7 @@ dedent """
             __constants__ = ['number']
 
             def __init__(self, number):
-                super(Root, self).__init__()
+                super().__init__()
                 self.register_buffer('buffer1', torch.ones(2, 2))
                 self.register_buffer('buffer2', torch.ones(2, 2))
                 self.number = number
@@ -13767,7 +13767,7 @@ dedent """
             __constants__ = ['number']
 
             def __init__(self, number, submodule):
-                super(M, self).__init__()
+                super().__init__()
                 self.register_buffer('buffer1', torch.ones(2, 2))
                 self.register_buffer('buffer2', torch.ones(2, 2))
                 self.number = number
@@ -13804,7 +13804,7 @@ dedent """
         # Check simpler module
         class NoArgState(torch.nn.Module):
             def __init__(self):
-                super(NoArgState, self).__init__()
+                super().__init__()
                 self.register_buffer('buffer1', torch.ones(2, 2))
                 self.register_buffer('buffer2', torch.ones(2, 2))
 
@@ -14328,7 +14328,7 @@ dedent """
             __constants__ = ['val']
 
             def __init__(self, val):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.val = val
 
             def forward(self):
@@ -14414,7 +14414,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, point: Point):
                 return point
@@ -14440,7 +14440,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, point: Point):
                 return point
@@ -14467,7 +14467,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, point: Point):
                 return point
@@ -14494,7 +14494,7 @@ dedent """
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, point: Point):
                 return point
@@ -14823,7 +14823,7 @@ dedent """
     def test_method_overloading(self):
         class Over(torch.nn.Module):
             def __init__(self):
-                super(Over, self).__init__()
+                super().__init__()
 
             @torch.jit._overload_method  # noqa: F811
             def forward(self, x):  # noqa: F811
@@ -14843,7 +14843,7 @@ dedent """
 
         class S(torch.jit.ScriptModule):
             def __init__(self):
-                super(S, self).__init__()
+                super().__init__()
                 self.weak = Over()
 
             @torch.jit.script_method
@@ -14860,7 +14860,7 @@ dedent """
 
         class Unannotated(torch.nn.Module):
             def __init__(self):
-                super(Unannotated, self).__init__()
+                super().__init__()
 
             @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
@@ -14883,7 +14883,7 @@ dedent """
 
         class CompileOverloadError(torch.nn.Module):
             def __init__(self):
-                super(CompileOverloadError, self).__init__()
+                super().__init__()
 
             @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
@@ -14909,7 +14909,7 @@ dedent """
         with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
             class W3(torch.nn.Module):
                 def __init__(self):
-                    super(W3, self).__init__()
+                    super().__init__()
 
                 @torch.jit._overload_method  # noqa: F811
                 def forward(self, x):  # noqa: F811
@@ -14929,7 +14929,7 @@ dedent """
 
             class W3(torch.nn.Module):
                 def __init__(self):
-                    super(W3, self).__init__()
+                    super().__init__()
 
                 def forward(self, x):  # noqa: F811
                     return x + 5 + 10
@@ -14940,7 +14940,7 @@ dedent """
         # testing non-overload declared first, then overload
         class W2(torch.nn.Module):
             def __init__(self):
-                super(W2, self).__init__()
+                super().__init__()
 
             def hello(self, x1, x2):
                 return x1 + x2
@@ -14953,7 +14953,7 @@ dedent """
 
         class W2(torch.nn.Module):
             def __init__(self):
-                super(W2, self).__init__()
+                super().__init__()
 
             @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
@@ -14991,7 +14991,7 @@ dedent """
     def test_nn_LSTM_with_layers(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             @torch.jit.script_method
@@ -15000,7 +15000,7 @@ dedent """
 
         class Eager(torch.nn.Module):
             def __init__(self):
-                super(Eager, self).__init__()
+                super().__init__()
                 self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             def forward(self, x, lengths, h0, c0):
@@ -15017,7 +15017,7 @@ dedent """
 
         class S(torch.jit.ScriptModule):
             def __init__(self):
-                super(S, self).__init__()
+                super().__init__()
                 self.x = torch.nn.LSTM(5, 5)
 
             @torch.jit.script_method
@@ -15035,7 +15035,7 @@ dedent """
 
         class SeqLengthGRU(torch.jit.ScriptModule):
             def __init__(self):
-                super(SeqLengthGRU, self).__init__()
+                super().__init__()
                 self.x = torch.nn.GRU(5, 5)
 
             @torch.jit.script_method
@@ -15044,7 +15044,7 @@ dedent """
 
         class TensorGRU(torch.jit.ScriptModule):
             def __init__(self):
-                super(TensorGRU, self).__init__()
+                super().__init__()
                 self.x = torch.nn.GRU(5, 5)
 
             @torch.jit.script_method
@@ -15154,7 +15154,7 @@ dedent """
 
         class MyModule(torch.jit.ScriptModule):
             def __init__(self, embed_dim, num_heads):
-                super(MyModule, self).__init__()
+                super().__init__()
                 sample_q = torch.randn(3, 2, embed_dim)
                 sample_kv = torch.randn(3, 2, embed_dim)
                 attention = nn.MultiheadAttention(embed_dim, num_heads)
@@ -15190,7 +15190,7 @@ dedent """
 
         class MyModule(torch.jit.ScriptModule):
             def __init__(self, transformer, sample_q, sample_kv):
-                super(MyModule, self).__init__()
+                super().__init__()
                 transformer.eval()
 
                 self.mod = torch.jit.trace(transformer,
@@ -15239,7 +15239,7 @@ dedent """
     def test_weak_cuda(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.lstm = torch.nn.LSTM(5, 5)
                 self.lstm.cuda()
 
@@ -15256,7 +15256,7 @@ dedent """
         with warnings.catch_warnings(record=True) as warns:
             class M(torch.jit.ScriptModule):
                 def __init__(self):
-                    super(M, self).__init__()
+                    super().__init__()
                     tensor = torch.zeros(1, requires_grad=False)
                     self.register_buffer('some_state', torch.nn.Parameter(tensor))
 
@@ -15284,7 +15284,7 @@ dedent """
     def test_ignored_as_value(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             @torch.jit.unused
             def tuple_ignored(self, x):
@@ -15319,7 +15319,7 @@ dedent """
     def test_module_error(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, foo):
                 return foo
@@ -15341,7 +15341,7 @@ dedent """
     def test_module_attrs(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, table):
-                super(M, self).__init__()
+                super().__init__()
                 self.table = torch.jit.Attribute(table, Dict[str, torch.Tensor])
                 self.x = torch.nn.Parameter(torch.tensor([100.0]))
 
@@ -15360,7 +15360,7 @@ dedent """
     def test_module_none_attrs(self):
         class MyMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.optional_value = None
 
             @torch.jit.script_method
@@ -15406,7 +15406,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 for name, value, the_type in tester.get_pickle_values():
                     setattr(self, name, torch.jit.Attribute(value, the_type))
 
@@ -15446,7 +15446,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 for name, value, the_type in tester.get_pickle_values():
                     setattr(self, "_" + name, torch.jit.Attribute(value, the_type))
 
@@ -15525,7 +15525,7 @@ dedent """
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):
             def __init__(self, list_data):
-                super(S, self).__init__()
+                super().__init__()
                 self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
                 self.list = torch.jit.Attribute(list_data, List[Tuple[int, int]])
 
@@ -15535,7 +15535,7 @@ dedent """
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.table = torch.jit.Attribute({"this": "is", "a different": "dict"}, Dict[str, str])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
                 self.s1 = S([(1, 2)])
@@ -15552,7 +15552,7 @@ dedent """
     def test_serialization_big_ints(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.int32_max = torch.jit.Attribute(2**31 - 1, int)
                 self.int32_min = torch.jit.Attribute(-2**31, int)
                 self.uint32_max = torch.jit.Attribute(2**32, int)
@@ -15584,7 +15584,7 @@ dedent """
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.list = torch.jit.Attribute([], List[str])
 
             @torch.jit.script_method
@@ -15641,7 +15641,7 @@ dedent """
     def test_dtype_attr(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.dtype = torch.zeros([]).dtype
 
             def forward(self):
@@ -15654,7 +15654,7 @@ dedent """
     def test_named_buffers_are_iterable(self):
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.mod = (torch.nn.ReLU())
                 self.mod2 = (torch.nn.ReLU())
                 self.mod3 = torch.nn.Sequential(torch.nn.Sequential(torch.nn.ReLU()))
@@ -15693,7 +15693,7 @@ dedent """
     def test_static_if_prop(self):
         class MaybeHasAttr(torch.nn.Module):
             def __init__(self, add_attr):
-                super(MaybeHasAttr, self).__init__()
+                super().__init__()
                 if add_attr:
                     self.maybe_attr = 1
 
@@ -15705,7 +15705,7 @@ dedent """
 
         class MaybeHasAttr2(torch.nn.Module):
             def __init__(self, add_attr):
-                super(MaybeHasAttr2, self).__init__()
+                super().__init__()
                 if add_attr:
                     self.maybe_attr = 1
 
@@ -15780,7 +15780,7 @@ dedent """
                 __constants__ = ['fname']
 
                 def __init__(self, tensor):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.fname = fname
                     self.tensor = torch.nn.Parameter(tensor)
 
@@ -15804,7 +15804,7 @@ dedent """
                 __constants__ = ['fname']
 
                 def __init__(self, tensor):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.fname = fname
                     self.tensor = torch.nn.Parameter(tensor)
 
@@ -15862,7 +15862,7 @@ dedent """
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.tensor = torch.randn(2, 2)
 
             @torch.jit.export
@@ -15996,7 +15996,7 @@ dedent """
                          b   # type: int
                          ):
                 # type: (...) -> None
-                super(M, self).__init__()
+                super().__init__()
                 self.a = a  # type: int
                 self.b = b  # type: int
 
@@ -16118,7 +16118,7 @@ dedent """
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return torch.div(x, -0.)
@@ -16129,7 +16129,7 @@ dedent """
     def test_index_with_tuple(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x[(1,)]
@@ -16139,7 +16139,7 @@ dedent """
     def test_context_manager(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x, y):
                 p = x + y
@@ -16329,7 +16329,7 @@ def add_nn_module_test(*args, **kwargs):
                 __constants__ = submodule_constants
 
                 def __init__(self):
-                    super(TheModule, self).__init__()
+                    super().__init__()
                     self.submodule = nn_module(*constructor_args)
 
             def make_module(script):

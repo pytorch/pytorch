@@ -41,7 +41,7 @@ def with_comms(func=None):
 
 class TestObjectCollectives(MultiProcessTestCase):
     def setUp(self):
-        super(TestObjectCollectives, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = BACKEND
         self._spawn_processes()

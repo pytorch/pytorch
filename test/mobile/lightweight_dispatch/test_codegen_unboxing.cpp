@@ -198,7 +198,7 @@ TEST(LiteInterpreterTest, MultipleOps) {
 
   // class ModelWithMultipleOps(torch.nn.Module):
   //           def __init__(self):
-  //               super(Model, self).__init__()
+  //               super().__init__()
   //               self.ops = torch.nn.Sequential(
   //                   torch.nn.ReLU(),
   //                   torch.nn.Flatten(),

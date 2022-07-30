@@ -113,7 +113,7 @@ class CudaFuserTestOptions():
 class TestCudaFuser(JitTestCase):
     def assertEqual(self, *args, **kwargs):
         kwargs["exact_layout"] = True
-        super(JitTestCase, self).assertEqual(*args, **kwargs)
+        super().assertEqual(*args, **kwargs)
 
     def _getSubgraphInFusion(self, graph):
         num_node = 0
@@ -133,7 +133,7 @@ class TestCudaFuser(JitTestCase):
         return ret[1]
 
     def setUp(self):
-        super(TestCudaFuser, self).setUp()
+        super().setUp()
 
         self.skip_node_list = []
         disabled_ops = ("aten::batch_norm",
@@ -187,7 +187,7 @@ class TestCudaFuser(JitTestCase):
 
         if(RUN_NVFUSER):
             self.cuda_fuser_options.restore()
-        super(TestCudaFuser, self).tearDown()
+        super().tearDown()
 
     def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1):
         seed = 123
@@ -1406,7 +1406,7 @@ class TestCudaFuser(JitTestCase):
             __constants__ = ['reduction_axis', 'keepdim']
 
             def __init__(self):
-                super(MyReduction, self).__init__()
+                super().__init__()
                 self.reduction_axis = reduction_axis
                 self.keepdim = keepdim
 
@@ -1551,7 +1551,7 @@ class TestCudaFuser(JitTestCase):
             __constants__ = ['norm_shape']
 
             def __init__(self, elementwise_affine=True):
-                super(MyLayerNorm, self).__init__()
+                super().__init__()
                 self.norm_shape = norm_shape
                 if elementwise_affine:
                     self.weight = torch.randn(norm_shape, dtype=dtype, device=device)
@@ -1635,7 +1635,7 @@ class TestCudaFuser(JitTestCase):
                      layer_dtype=torch.float32):
         class MyBatchNorm(torch.nn.Module):
             def __init__(self):
-                super(MyBatchNorm, self).__init__()
+                super().__init__()
 
             def forward(self, x: torch.Tensor, r_mean: torch.Tensor, r_var: torch.Tensor):
                 o = torch.nn.functional.batch_norm(x, r_mean, r_var, training=True)
@@ -1644,7 +1644,7 @@ class TestCudaFuser(JitTestCase):
 
         class MyInstanceNorm(torch.nn.Module):
             def __init__(self):
-                super(MyInstanceNorm, self).__init__()
+                super().__init__()
 
             def forward(self, x: torch.Tensor, r_mean: torch.Tensor, r_var: torch.Tensor):
                 o = torch.nn.functional.instance_norm(x, r_mean, r_var, use_input_stats=True)
@@ -1795,7 +1795,7 @@ class TestCudaFuser(JitTestCase):
             __constants__ = ['reduction_axis']
 
             def __init__(self):
-                super(MySoftmax, self).__init__()
+                super().__init__()
                 self.reduction_axis = reduction_axis
 
             def forward(self, x: torch.Tensor, y: torch.Tensor):
@@ -1807,7 +1807,7 @@ class TestCudaFuser(JitTestCase):
             __constants__ = ['reduction_axis']
 
             def __init__(self):
-                super(MyLogSoftmax, self).__init__()
+                super().__init__()
                 self.reduction_axis = reduction_axis
 
             def forward(self, x: torch.Tensor, y: torch.Tensor):
@@ -3241,7 +3241,7 @@ class TestCudaFuser(JitTestCase):
 
         class MyModule(torch.nn.Module):
             def __init__(self, num_features=10, affine=True, track_running_stats=True):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.bn = torch.nn.BatchNorm2d(num_features,
                                                1e-5,
                                                affine=affine,
@@ -3493,7 +3493,7 @@ class TestCudaFuser(JitTestCase):
     def test_remove_output_used_only_in_dtype(self):
         class MyModule(torch.nn.Module):
             def __init__(self, num_features=4):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.bn0 = torch.nn.BatchNorm2d(num_features)
                 self.bn1 = torch.nn.BatchNorm2d(num_features)
 
@@ -3526,7 +3526,7 @@ class TestCudaFuser(JitTestCase):
     def test_fix_shape_expression_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self, num_features=4):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.bn = torch.nn.BatchNorm2d(num_features)
 
             def forward(self, x, y):
@@ -3634,7 +3634,7 @@ class TestCudaFuser(JitTestCase):
     def _bias_view_relu_helper(self, shape, output_shape, dtype, device, error):
         class BiasViewRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasViewRelu, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
                 with torch.no_grad():
                     self.bias.fill_(10)
@@ -3673,7 +3673,7 @@ class TestCudaFuser(JitTestCase):
     def _alias_bias_view_relu_helper(self, shape, output_shape, dtype, device, error):
         class BiasViewRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasViewRelu, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
                 with torch.no_grad():
                     self.bias.fill_(10)
@@ -3823,7 +3823,7 @@ class TestCudaFuser(JitTestCase):
     def _bias_flatten_relu_helper(self, shape, start_dim, end_dim, dtype, device, error):
         class BiasFlattenRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasFlattenRelu, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
                 with torch.no_grad():
                     self.bias.fill_(10)
@@ -3843,7 +3843,7 @@ class TestCudaFuser(JitTestCase):
     def _alias_bias_flatten_relu_helper(self, shape, start_dim, end_dim, dtype, device, error):
         class BiasFlattenRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasFlattenRelu, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
                 with torch.no_grad():
                     self.bias.fill_(10)
@@ -3921,7 +3921,7 @@ class TestCudaFuser(JitTestCase):
         # modeled after LTC linear layer
         class LTC(torch.nn.Module):
             def __init__(self):
-                super(LTC, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.randn([1024, 1024], dtype=dtype, device=device), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.randn([1, 1024], dtype=dtype, device=device), requires_grad=False)
 
@@ -3959,7 +3959,7 @@ class TestCudaFuser(JitTestCase):
     def _bias_squeeze_relu_helper(self, shape, dtype, device, error):
         class BiasSqueezeRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasSqueezeRelu, self).__init__()
+                super().__init__()
 
             def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = inputs + bias
@@ -3985,7 +3985,7 @@ class TestCudaFuser(JitTestCase):
     def _alias_bias_squeeze_relu_helper(self, shape, dtype, device, error):
         class BiasSqueezeRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasSqueezeRelu, self).__init__()
+                super().__init__()
 
             def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = torch.squeeze(inputs)
@@ -4044,7 +4044,7 @@ class TestCudaFuser(JitTestCase):
     def _bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
         class BiasUnsqueezeRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasUnsqueezeRelu, self).__init__()
+                super().__init__()
 
             def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = inputs + bias
@@ -4070,7 +4070,7 @@ class TestCudaFuser(JitTestCase):
     def _alias_bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
         class BiasUnsqueezeRelu(torch.nn.Module):
             def __init__(self):
-                super(BiasUnsqueezeRelu, self).__init__()
+                super().__init__()
 
             def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
                 o = torch.unsqueeze(inputs, 0)
@@ -4796,7 +4796,7 @@ class TestCudaFuser(JitTestCase):
     def test_issue_1785(self):
         class Fusion(torch.nn.Module):
             def __init__(self):
-                super(Fusion, self).__init__()
+                super().__init__()
 
             def forward(self, x, a, b):
                 out = torch.mul(x.unsqueeze(-1), a)
@@ -5022,7 +5022,7 @@ class TestCudaFuserOpInfoParent(JitCommonTestCase):
 
 class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     def setUp(self):
-        super(TestCudaFuserOpInfoParent, self).setUp()
+        super().setUp()
         if RUN_NVFUSER:
             self.cuda_fuser_options = CudaFuserTestOptions()
             # enables guard mode since tracing could change graph to violate guard.
@@ -5035,7 +5035,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
 
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
-        super(TestCudaFuserOpInfoParent, self).tearDown()
+        super().tearDown()
 
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")

@@ -2649,7 +2649,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2979,7 +2979,7 @@ class UnaryUfuncInfo(OpInfo):
     ):
         self._original_unary_ufunc_args = locals().copy()
 
-        super(UnaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -6708,7 +6708,7 @@ class ShapeFuncInfo(OpInfo):
                  dtypesIfROCM=None,
                  sample_inputs_func=None,
                  **kwargs):
-        super(ShapeFuncInfo, self).__init__(name,
+        super().__init__(name,
                                             dtypes=dtypes,
                                             dtypesIfCUDA=dtypesIfCUDA,
                                             dtypesIfROCM=dtypesIfROCM,
@@ -8230,7 +8230,7 @@ def skips_mvlgamma(skip_redundant=False):
 # differ between the entries.
 class MvlGammaInfo(UnaryUfuncInfo):
     def __init__(self, variant_test_name, domain, skips, sample_kwargs):
-        super(MvlGammaInfo, self).__init__(
+        super().__init__(
             'mvlgamma',
             ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
             aliases=('special.multigammaln',),
@@ -20545,7 +20545,7 @@ class PythonRefInfo(OpInfo):
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
-        super(PythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 class ReductionPythonRefInfo(ReductionOpInfo):
     '''
@@ -20598,7 +20598,7 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         inherited = self.torch_opinfo._original_unary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
-        super(ElementwiseUnaryPythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
     '''
@@ -20623,7 +20623,7 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         inherited = self.torch_opinfo._original_binary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
-        super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 class SpectralFuncPythonRefInfo(SpectralFuncInfo):
     '''

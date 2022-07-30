@@ -27,7 +27,7 @@ class UniformSampling(ModelLayer):
         name='uniform_sampling',
         **kwargs
     ):
-        super(UniformSampling, self).__init__(
+        super().__init__(
             model, name, input_record, **kwargs
         )
 

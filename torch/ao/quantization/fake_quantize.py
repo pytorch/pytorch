@@ -189,7 +189,7 @@ class FakeQuantize(FakeQuantizeBase):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
         # specify serialization here.
-        super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
 
@@ -221,7 +221,7 @@ class FakeQuantize(FakeQuantizeBase):
                         self.zero_point.copy_(val)
             elif strict:
                 missing_keys.append(key)
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
 

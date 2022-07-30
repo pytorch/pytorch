@@ -44,10 +44,10 @@ class CUDAGraph(torch._C._CUDAGraph):
         This API is in beta and may change in future releases.
     """
     def __new__(cls):
-        return super(CUDAGraph, cls).__new__(cls)
+        return super().__new__(cls)
 
     def __init__(self):
-        super(CUDAGraph, self).__init__()
+        super().__init__()
 
     def capture_begin(self, pool=None):
         r"""
@@ -65,9 +65,9 @@ class CUDAGraph(torch._C._CUDAGraph):
         # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
         # so I'm not taking any chances.
         if pool is None:
-            super(CUDAGraph, self).capture_begin()
+            super().capture_begin()
         else:
-            super(CUDAGraph, self).capture_begin(pool)
+            super().capture_begin(pool)
 
     def capture_end(self):
         r"""
@@ -78,19 +78,19 @@ class CUDAGraph(torch._C._CUDAGraph):
         Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
         which call ``capture_end`` internally.
         """
-        super(CUDAGraph, self).capture_end()
+        super().capture_end()
 
     def replay(self):
         r"""
         Replays the CUDA work captured by this graph.
         """
-        super(CUDAGraph, self).replay()
+        super().replay()
 
     def reset(self):
         r"""
         Deletes the graph currently held by this instance.
         """
-        super(CUDAGraph, self).reset()
+        super().reset()
 
     def pool(self):
         r"""
@@ -98,7 +98,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
         """
-        return super(CUDAGraph, self).pool()
+        return super().pool()
 
 
 class graph(object):

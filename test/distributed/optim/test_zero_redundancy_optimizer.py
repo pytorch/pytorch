@@ -64,7 +64,7 @@ BACKEND = _get_backend_for_tests()
 )
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
-        super(TestZeroRedundancyOptimizer, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         self._spawn_processes()
 

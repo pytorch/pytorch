@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class GeneralQuantModule(torch.nn.Module):
     def __init__(self):
-        super(GeneralQuantModule, self).__init__()
+        super().__init__()
         self.embedding = torch.nn.quantized.Embedding(
             num_embeddings=10, embedding_dim=12
         )
@@ -48,7 +48,7 @@ class GeneralQuantModule(torch.nn.Module):
 
 class DynamicQuantModule:
     def __init__(self):
-        super(DynamicQuantModule, self).__init__()
+        super().__init__()
         self.module = self.M()
 
     def getModule(self):
@@ -56,7 +56,7 @@ class DynamicQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(DynamicQuantModule.M, self).__init__()
+            super().__init__()
             self.rnn = nn.RNN(4, 8, 2)
             self.rnncell = nn.RNNCell(4, 8)
             self.gru = nn.GRU(4, 8, 2)
@@ -112,7 +112,7 @@ class DynamicQuantModule:
 
 class StaticQuantModule:
     def __init__(self):
-        super(StaticQuantModule, self).__init__()
+        super().__init__()
 
     def getModule(self):
         model_fp32 = self.M()
@@ -124,7 +124,7 @@ class StaticQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(StaticQuantModule.M, self).__init__()
+            super().__init__()
             self.quant = torch.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)
             self.input2d = torch.randn((4, 2, 4, 4))
@@ -166,7 +166,7 @@ class StaticQuantModule:
 
 class FusedQuantModule:
     def __init__(self):
-        super(FusedQuantModule, self).__init__()
+        super().__init__()
 
     def getModule(self):
         model_fp32 = self.M()
@@ -187,7 +187,7 @@ class FusedQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(FusedQuantModule.M, self).__init__()
+            super().__init__()
             self.quant = torch.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)
             self.input2d = torch.randn((4, 2, 4, 4))

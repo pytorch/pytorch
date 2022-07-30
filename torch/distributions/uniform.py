@@ -51,7 +51,7 @@ class Uniform(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
-        super(Uniform, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
@@ -61,7 +61,7 @@ class Uniform(Distribution):
         batch_shape = torch.Size(batch_shape)
         new.low = self.low.expand(batch_shape)
         new.high = self.high.expand(batch_shape)
-        super(Uniform, new).__init__(batch_shape, validate_args=False)
+        super().__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

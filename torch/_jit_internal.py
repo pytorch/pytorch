@@ -587,7 +587,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused

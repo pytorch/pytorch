@@ -6,7 +6,7 @@ import torch
 
 class TSBuiltinOpsModule(torch.nn.Module):
     def __init__(self):
-        super(TSBuiltinOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         x = torch.tensor(1)
@@ -91,7 +91,7 @@ class TSBuiltinOpsModule(torch.nn.Module):
 
 class TSCollectionOpsModule(torch.nn.Module):
     def __init__(self):
-        super(TSCollectionOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         s = "abcde"

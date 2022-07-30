@@ -61,7 +61,7 @@ class ContinuousBernoulli(ExponentialFamily):
         else:
             batch_shape = self._param.size()
         self._lims = lims
-        super(ContinuousBernoulli, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ContinuousBernoulli, _instance)
@@ -73,7 +73,7 @@ class ContinuousBernoulli(ExponentialFamily):
         if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
-        super(ContinuousBernoulli, new).__init__(batch_shape, validate_args=False)
+        super().__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

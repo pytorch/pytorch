@@ -1434,7 +1434,7 @@ For loops on lists: for loops over a ``nn.ModuleList`` will unroll the body of t
 
     class SubModule(torch.nn.Module):
         def __init__(self):
-            super(SubModule, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(2))
 
         def forward(self, input):
@@ -1443,7 +1443,7 @@ For loops on lists: for loops over a ``nn.ModuleList`` will unroll the body of t
     class MyModule(torch.nn.Module):
 
         def __init__(self):
-            super(MyModule, self).init()
+            super().init()
             self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
         def forward(self, v):

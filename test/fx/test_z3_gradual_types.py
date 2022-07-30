@@ -44,7 +44,7 @@ class HFOperations(unittest.TestCase):
         """
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([32, 4, 4]), y: TensorType([32, 4, 4])):
                 size_5 = x.size()
@@ -71,7 +71,7 @@ class HFOperations(unittest.TestCase):
     def test_bmm(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 2, 3]), y: TensorType([1, 3, 2])):
                 bmm = torch.bmm(x, y)
@@ -94,7 +94,7 @@ class HFOperations(unittest.TestCase):
     def test_bmm2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: TensorType([1, 3, 2])):
                 bmm = torch.bmm(x, y)
@@ -116,7 +116,7 @@ class HFOperations(unittest.TestCase):
     def test_bmm3(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 3, 3]), y: TensorType([1, 3, 2])):
                 bmm = torch.bmm(x, y)
@@ -133,7 +133,7 @@ class HFOperations(unittest.TestCase):
     def test_transpose(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([1, 2, 3, 4])):
                 transpose = x.transpose(0, 1)
@@ -168,7 +168,7 @@ class HFOperations(unittest.TestCase):
     def test_index_select(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2050, 1024]), y: Dyn):
                 index_select = x.index_select(0, y)
@@ -202,7 +202,7 @@ class HFOperations(unittest.TestCase):
     def test_get_attr(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([1, 2, 3])):
                 getattr = x.device
@@ -224,7 +224,7 @@ class HFOperations(unittest.TestCase):
     def test_expand(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([1, 4])):
                 size = x.size()
@@ -261,7 +261,7 @@ class HFOperations(unittest.TestCase):
     def test_getitem_tensor(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([4, 4])):
                 getitem = x[(None, None, slice(None, None, None), slice(None, None, None))]
@@ -299,7 +299,7 @@ class HFOperations(unittest.TestCase):
     def test_getitem_tensor2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([4, 4])):
                 getitem = x[(None, None)]
@@ -323,7 +323,7 @@ class HFOperations(unittest.TestCase):
     def test_getitem_tensor_3(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([4, 4])):
                 getitem = x[(None, slice(None, None, None), None, slice(None, None, None))]
@@ -348,7 +348,7 @@ class HFOperations(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.l = torch.nn.LayerNorm((1024,))
 
             def forward(self, x: Dyn):
@@ -404,7 +404,7 @@ class HFOperations(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, Dyn]), y: TensorType([Dyn, Dyn])):
                 ne_int = torch.ne(x, y).int()
@@ -441,7 +441,7 @@ class HFOperations(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: Dyn):
                 return torch.ne(x, y)
@@ -482,7 +482,7 @@ class HFOperations(unittest.TestCase):
     def test_cumsum(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 4, 3])):
                 t = torch.cumsum(x, 3)
@@ -536,7 +536,7 @@ class HFOperations(unittest.TestCase):
     def test_cumsum_kwargs(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 4, 3])):
                 t = torch.cumsum(x, dim=3)
@@ -564,7 +564,7 @@ class HFOperations(unittest.TestCase):
     def test_arange(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 size = x.size()
@@ -605,7 +605,7 @@ class HFOperations(unittest.TestCase):
     def test_scalar_add(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 size = x.size()
@@ -628,7 +628,7 @@ class HFOperations(unittest.TestCase):
     def test_regular_add_2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 to = x.to()
@@ -651,7 +651,7 @@ class HFOperations(unittest.TestCase):
     def test_regular_add_3(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 to = x.to()
@@ -673,7 +673,7 @@ class HFOperations(unittest.TestCase):
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.embedding = torch.nn.Embedding(256008, 1024, padding_idx=1)
 
             def forward(self, x: TensorType([2, 4])):
@@ -722,7 +722,7 @@ class HFOperations(unittest.TestCase):
     def test_size_two_args(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 2, Dyn])):
                 size = x.size(-1)
@@ -754,7 +754,7 @@ class HFOperations(unittest.TestCase):
     def test_size_getitem(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn):
                 size = x.size()
@@ -792,7 +792,7 @@ class HFOperations(unittest.TestCase):
         # invalid index but should still be SAT because input will be Dyn
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn):
                 size = x.size()
@@ -814,7 +814,7 @@ class HFOperations(unittest.TestCase):
     def test_view_mul(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
 
             def forward(self, x: TensorType([2, 4])):
@@ -854,7 +854,7 @@ class HFOperations(unittest.TestCase):
     def test_gt(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 4])):
                 size = x.size()
@@ -876,7 +876,7 @@ class HFOperations(unittest.TestCase):
     def test_view(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 view = x.view(-1, 8)
@@ -894,7 +894,7 @@ class HFOperations(unittest.TestCase):
     def test_lt_tensor(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4]), y: Dyn):
                 lt = x > y
@@ -921,7 +921,7 @@ class HFOperations(unittest.TestCase):
         """
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
 
             def forward(self, x: TensorType([Dyn, 4])):
@@ -981,7 +981,7 @@ class HFOperations(unittest.TestCase):
         """
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
 
             def forward(self, x: TensorType([Dyn, 4])):
@@ -1012,7 +1012,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_masked_fill(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 4])):
                 size = x.size()
@@ -1058,7 +1058,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_add_reshape_1(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: Dyn):
                 return torch.add(torch.reshape(x, (1, 2)), torch.reshape(y, (2, 2)))
@@ -1076,7 +1076,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_add_reshape_2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: Dyn):
                 return torch.add(torch.reshape(x, (-1, 2)), torch.reshape(y, (2, 2, 2)))
@@ -1093,7 +1093,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_conv_reshape_add_0(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1114,7 +1114,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_conv_reshape_add_0_2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1166,7 +1166,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_conv_reshape_add_0_3(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1187,7 +1187,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_conv_reshape_add_1(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1210,7 +1210,7 @@ class GradualTypes(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1230,7 +1230,7 @@ class GradualTypes(unittest.TestCase):
     def test_conv_reshape0(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1283,7 +1283,7 @@ class GradualTypes(unittest.TestCase):
     def test_conv_reshape1(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1328,7 +1328,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -1380,7 +1380,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: Dyn):
                 return torch.add(x, y)
@@ -1410,7 +1410,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock2(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock2, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType((Dyn,)), y: Dyn):
                 return torch.add(x, y)
@@ -1436,7 +1436,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock3(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock3, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType((Dyn,)), y: Dyn):
                 return torch.add(x, y)
@@ -1457,7 +1457,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType((Dyn,)), y: TensorType((Dyn, Dyn))):
                 return torch.add(x, y)
@@ -1484,7 +1484,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, Dyn]), y: TensorType([Dyn])):
                 return torch.add(x, y)
@@ -1535,7 +1535,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, 1]), y: TensorType([Dyn])):
                 return torch.add(x, y)
@@ -1570,7 +1570,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_add_padding_4(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 1]), y: TensorType([3])):
                 return torch.add(x, y)
@@ -1592,7 +1592,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_add_padding_5(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([2, 2]), y: TensorType([3])):
                 return torch.add(x, y)
@@ -1611,7 +1611,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn, Dyn, Dyn]), y: TensorType([Dyn, Dyn, Dyn])):
                 return torch.add(x, y)
@@ -1644,7 +1644,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn]), y: TensorType([Dyn, Dyn, Dyn])):
                 return torch.add(x, y)
@@ -1677,7 +1677,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn]), y: TensorType([Dyn, Dyn, Dyn, Dyn])):
                 return torch.add(x, y)
@@ -1700,7 +1700,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn]), y: TensorType([Dyn, Dyn, Dyn, Dyn])):
                 return torch.add(x, y)
@@ -1729,7 +1729,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: TensorType([Dyn, Dyn, Dyn, Dyn])):
                 return torch.add(x, y)
@@ -1772,7 +1772,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, dilation=dilation)
@@ -1823,7 +1823,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn):
                 return torch.reshape(x, (2, -1))
@@ -1852,7 +1852,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn])):
                 return torch.reshape(x, (2, -1))
@@ -1873,7 +1873,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: TensorType([Dyn])):
                 return torch.reshape(x, (2, 3))
@@ -1898,7 +1898,7 @@ class TestSingleOperation(unittest.TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn):
                 return torch.reshape(x, (2, 3, 1, 1))
@@ -1921,7 +1921,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_conv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)
@@ -1958,7 +1958,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_conv2D_maxpool2d_flatten_unsat(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)
@@ -1991,7 +1991,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_conv2D_maxpool2d_flatten_dyn(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)
@@ -2072,7 +2072,7 @@ class ConstraintGeneration(unittest.TestCase):
     def test_add_reshape(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
             def forward(self, x: Dyn, y: Dyn):
                 return torch.add(torch.reshape(x, (1, 2)), torch.reshape(y, (2, 2)))
@@ -2089,7 +2089,7 @@ class ConstraintGeneration(unittest.TestCase):
     def test_conv_reshape_add(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                              kernel_size=kernel_size, stride=stride,
                                              padding=padding, groups=groups, bias=False, dilation=dilation)

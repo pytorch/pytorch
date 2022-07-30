@@ -291,7 +291,7 @@ class ShardedTensor(ShardedTensorBase):
 
     """
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
-        self = super(ShardedTensor, cls).__new__(cls, sharding_spec, *size, **kwargs)
+        self = super().__new__(cls, sharding_spec, *size, **kwargs)
         return self
 
     def __init__(

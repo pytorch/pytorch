@@ -39,7 +39,7 @@ class TestLegacyUpgraders(JitTestCase):
         """
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, a, b, alpha: float):
                 no_alpha = torch._test_serialization_subcmul(a, b)
@@ -114,7 +114,7 @@ class TestLegacyUpgraders(JitTestCase):
         # Tensor x Tensor
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, a, b):
                 result_0 = a / b
@@ -162,7 +162,7 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, a, b):
                 a /= b
@@ -209,7 +209,7 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, a, b, out):
                 return a.div(b, out=out)
@@ -260,14 +260,14 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModuleFloat(torch.nn.Module):
             def __init__(self):
-                super(MyModuleFloat, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: float):
                 return a / b
 
         class MyModuleInt(torch.nn.Module):
             def __init__(self):
-                super(MyModuleInt, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: int):
                 return a / b
@@ -321,14 +321,14 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModuleFloat(torch.nn.Module):
             def __init__(self):
-                super(MyModuleFloat, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: float):
                 return b / a
 
         class MyModuleInt(torch.nn.Module):
             def __init__(self):
-                super(MyModuleInt, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: int):
                 return b / a
@@ -393,7 +393,7 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModuleFloat(torch.nn.Module):
             def __init__(self):
-                super(MyModuleFloat, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: float):
                 a /= b
@@ -401,7 +401,7 @@ class TestLegacyUpgraders(JitTestCase):
 
         class MyModuleInt(torch.nn.Module):
             def __init__(self):
-                super(MyModuleInt, self).__init__()
+                super().__init__()
 
             def forward(self, a, b: int):
                 a /= b
@@ -453,7 +453,7 @@ class TestLegacyUpgraders(JitTestCase):
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, a: float, b: int, c: float, d: int):
                 result_0 = a / b
@@ -487,7 +487,7 @@ class TestLegacyUpgraders(JitTestCase):
     def test_versioned_full_integer_value(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, int_fill: int):
                 size = torch.Size(2, 2)
@@ -525,7 +525,7 @@ class TestLegacyUpgraders(JitTestCase):
     def test_versioned_full_preserved(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, float_fill: float):
                 size = (2, 2)

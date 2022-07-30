@@ -40,7 +40,7 @@ class TestTracer(JitTestCase):
     def test_large_nbr_kernel_args(self):
         class Recurrence(nn.Module):
             def __init__(self, seq_len):
-                super(Recurrence, self).__init__()
+                super().__init__()
                 self.seq_len = seq_len
 
             def forward(self, input):
@@ -88,7 +88,7 @@ class TestTracer(JitTestCase):
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
-                super(MyClass, self).__init__()
+                super().__init__()
 
             def forward(self, xs: List[Tensor]):
                 y = torch.cat(xs, dim=0)
@@ -105,7 +105,7 @@ class TestTracer(JitTestCase):
     def test_trace_aliased_parameter(self):
         class M(nn.Module):
             def __init__(self, x):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = nn.Parameter(x)
 
             def forward(self, y):
@@ -623,7 +623,7 @@ class TestTracer(JitTestCase):
         """Check that the trace remembers which keys were in a dict input"""
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
             def forward(self, dict_input):
                 return dict_input['x']
@@ -650,7 +650,7 @@ class TestTracer(JitTestCase):
         """Check that dictionary access doesn't care about insertion order"""
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
             def forward(self, dict_input):
                 return dict_input['x'], dict_input['y']
@@ -672,7 +672,7 @@ class TestTracer(JitTestCase):
     def test_input_dict_recursive(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
 
             def forward(self, dict_input):
                 return dict_input['x'][1]
@@ -833,7 +833,7 @@ class TestTracer(JitTestCase):
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.b = self.a = nn.Parameter(torch.randn(2, 2))
 
             def forward(self, x):
@@ -853,7 +853,7 @@ class TestTracer(JitTestCase):
 
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
 
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
@@ -955,7 +955,7 @@ class TestTracer(JitTestCase):
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
-                super(Model, self).__init__()
+                super().__init__()
                 self.num_layers = num_layers
                 layers = [[nn.Linear(num_features, num_features), nn.Sigmoid()]
                           for _ in range(num_layers)]
@@ -1143,7 +1143,7 @@ class TestTracer(JitTestCase):
     def test_trace_dict_input(self):
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.foo = Foo()
 
             def forward(self, a, b):
@@ -1275,7 +1275,7 @@ class TestTracer(JitTestCase):
     def test_trace_save_load_copy(self):
         class Test(torch.nn.Module):
             def __init__(self):
-                super(Test, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
@@ -1293,7 +1293,7 @@ class TestTracer(JitTestCase):
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.a = 3
 
             @torch.jit.export
@@ -1324,7 +1324,7 @@ class TestTracer(JitTestCase):
     def test_trace_export_fns_recursive(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.a = 3
 
             @torch.jit.export
@@ -1341,7 +1341,7 @@ class TestTracer(JitTestCase):
 
         class Wrapper(torch.nn.Module):
             def __init__(self):
-                super(Wrapper, self).__init__()
+                super().__init__()
                 self.foo = Foo()
 
             def forward(self, x):
@@ -1377,7 +1377,7 @@ class TestTracer(JitTestCase):
         # being traced.
         class WrapperExports(torch.nn.Module):
             def __init__(self):
-                super(WrapperExports, self).__init__()
+                super().__init__()
                 self.bar = Bar()
 
             @torch.jit.export
@@ -1411,7 +1411,7 @@ class TestTracer(JitTestCase):
 
         class Wrapper(torch.nn.Module):
             def __init__(self):
-                super(Wrapper, self).__init__()
+                super().__init__()
                 self.tm = TracedModule()
 
             def forward(self, x):
@@ -1463,7 +1463,7 @@ class TestTracer(JitTestCase):
     def test_interpolate_trace(self):
         class test(nn.Module):
             def __init__(self):
-                super(test, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 32, kernel_size=3, padding=1)
 
             def forward(self, x):
@@ -1523,7 +1523,7 @@ class TestTracer(JitTestCase):
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 5))
 
             def forward(self, x):
@@ -1541,7 +1541,7 @@ class TestTracer(JitTestCase):
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
-                super(TracedModule1, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(5, 7))
 
             def forward(self, x):
@@ -1549,7 +1549,7 @@ class TestTracer(JitTestCase):
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 5))
                 self.mod = torch.jit.trace(TracedModule1(), torch.rand(3, 5))
 
@@ -1705,7 +1705,7 @@ class TestTracer(JitTestCase):
     def test_trace_modulelist(self):
         class MySubmod(torch.nn.Module):
             def __init__(self):
-                super(MySubmod, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
@@ -1713,7 +1713,7 @@ class TestTracer(JitTestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.ml = torch.nn.ModuleList([
                     MySubmod(),
                     MySubmod()
@@ -1729,7 +1729,7 @@ class TestTracer(JitTestCase):
     def test_trace_fork_join_and_module(self):
         class MySubmod(torch.nn.Module):
             def __init__(self):
-                super(MySubmod, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
@@ -1737,7 +1737,7 @@ class TestTracer(JitTestCase):
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.ml = torch.nn.ModuleList([
                     MySubmod() for i in range(2)
                 ])
@@ -1759,7 +1759,7 @@ class TestTracer(JitTestCase):
     def test_trace_invert_module_hierarchy(self):
         class MySubmod(torch.nn.Module):
             def __init__(self):
-                super(MySubmod, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
@@ -1771,7 +1771,7 @@ class TestTracer(JitTestCase):
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.sm = MySubmod()
                 self.fm = MyFunctionalMod()
 
@@ -1799,7 +1799,7 @@ class TestTracer(JitTestCase):
     def test_tracing_hooks(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x + x
@@ -1860,7 +1860,7 @@ class TestTracer(JitTestCase):
     def test_tracing_backward_hook_error(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x + x
@@ -1877,7 +1877,7 @@ class TestTracer(JitTestCase):
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -1938,7 +1938,7 @@ class TestTracer(JitTestCase):
     def test_trace_with_conditional_property(self):
         class Net(nn.Module):
             def __init__(self, attr=None):
-                super(Net, self).__init__()
+                super().__init__()
                 if attr is not None:
                     self._attr = attr
                 self.attr_name = '_attr'
@@ -1972,7 +1972,7 @@ class TestTracer(JitTestCase):
     def test_trace_module_argument_names_captured(self):
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor):
@@ -2113,7 +2113,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class AnotherScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(AnotherScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(1, 2, 3))
 
             @torch.jit.script_method
@@ -2122,7 +2122,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class SomeScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(SomeScriptMod, self).__init__()
+                super().__init__()
                 self.asm = AnotherScriptMod()
 
             @torch.jit.script_method
@@ -2135,7 +2135,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class TraceMe(torch.nn.Module):
             def __init__(self):
-                super(TraceMe, self).__init__()
+                super().__init__()
                 self.ssm = SomeScriptMod()
 
             def forward(self, x):
@@ -2162,7 +2162,7 @@ class TestMixTracingScripting(JitTestCase):
     def test_trace_parameter(self):
         class Param(nn.Module):
             def __init__(self):
-                super(Param, self).__init__()
+                super().__init__()
                 self.register_parameter("bias", nn.Parameter(torch.empty(4, 4)))
 
             def forward(self, x):
@@ -2170,7 +2170,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class M3(torch.jit.ScriptModule):
             def __init__(self, model):
-                super(M3, self).__init__()
+                super().__init__()
                 self.traced = torch.jit.trace(model, (torch.rand(3, 3)))
 
             @torch.jit.script_method
@@ -2179,7 +2179,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class M2(nn.Module):
             def __init__(self, model):
-                super(M2, self).__init__()
+                super().__init__()
                 self.module = M3(model)
 
             def forward(self, x):
@@ -2187,7 +2187,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class M1(torch.jit.ScriptModule):
             def __init__(self, model):
-                super(M1, self).__init__()
+                super().__init__()
                 self.traced = torch.jit.trace(M2(model), (torch.rand(3, 3)))
 
             @torch.jit.script_method
@@ -2207,7 +2207,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 5))
 
             def forward(self, x):
@@ -2220,7 +2220,7 @@ class TestMixTracingScripting(JitTestCase):
     def test_call_script_module_from_traced_module(self):
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param_foo = torch.nn.Parameter(torch.rand(5, 7))
 
             @torch.jit.script_method
@@ -2229,7 +2229,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
-                super(TracedModule, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 5))
                 self.mod = ScriptMod()
 
@@ -2256,7 +2256,7 @@ class TestMixTracingScripting(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             class TracedModule(torch.nn.Module):
                 def __init__(self):
-                    super(TracedModule, self).__init__()
+                    super().__init__()
 
                 def forward(self, x):
                     return torch.mm(x, torch.zeros(4, 3))
@@ -2275,7 +2275,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             @torch.jit.script_method
@@ -2289,7 +2289,7 @@ class TestMixTracingScripting(JitTestCase):
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
             def __init__(self):
-                super(TracedMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 5))
 
             def forward(self, x):
@@ -2297,7 +2297,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
-                super(ScriptMod, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 3))
                 self.tm = torch.jit.trace(TracedMod(), torch.rand(3, 3))
 
@@ -2311,14 +2311,14 @@ class TestMixTracingScripting(JitTestCase):
     def test_script_inline_trace_multiple_args(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, input, input2):
                 return input + input2
 
         class M2(torch.jit.ScriptModule):
             def __init__(self):
-                super(M2, self).__init__()
+                super().__init__()
                 self.m = torch.jit.trace(M(), (torch.zeros(4, 3), torch.zeros(4, 3)))
 
             @torch.jit.script_method
@@ -2332,7 +2332,7 @@ class TestMixTracingScripting(JitTestCase):
     def test_trace_dict_mix_script(self):
         class testB(torch.nn.Module):
             def __init__(self):
-                super(testB, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
             def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
@@ -2344,7 +2344,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class testA(torch.nn.Module):
             def __init__(self):
-                super(testA, self).__init__()
+                super().__init__()
                 self.b = torch.jit.script(testB())
 
             def forward(self, input_map: Dict[str, List[Tensor]]) -> Tensor:
@@ -2481,7 +2481,7 @@ class TestMixTracingScripting(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:

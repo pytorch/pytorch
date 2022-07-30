@@ -104,7 +104,7 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
-        return super(_StorageBase, self).__sizeof__() + self.size()
+        return super().__sizeof__() + self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
@@ -596,7 +596,7 @@ class _TypedStorage:
         return self._new_wrapped_storage(copy.deepcopy(self._storage, memo))
 
     def __sizeof__(self):
-        return super(_TypedStorage, self).__sizeof__() + self.nbytes()
+        return super().__sizeof__() + self.nbytes()
 
     def clone(self):
         """Returns a copy of this storage"""

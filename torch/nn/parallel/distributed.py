@@ -536,7 +536,7 @@ class DistributedDataParallel(Module, Joinable):
         static_graph=False,
     ):
 
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         Joinable.__init__(self)
         self.logger = None
         if not any((p.requires_grad for p in module.parameters())):
@@ -779,7 +779,7 @@ class DistributedDataParallel(Module, Joinable):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
@@ -1081,7 +1081,7 @@ class DistributedDataParallel(Module, Joinable):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         if self._use_replicated_tensor_module:
             self._replicated_tensor_module.train(mode)
         return self

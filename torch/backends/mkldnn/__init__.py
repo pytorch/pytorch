@@ -70,7 +70,7 @@ def flags(enabled=False):
 
 class MkldnnModule(PropModule):
     def __init__(self, m, name):
-        super(MkldnnModule, self).__init__(m, name)
+        super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
 

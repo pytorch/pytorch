@@ -39,7 +39,7 @@ from torch.testing._internal.common_quantized import override_qengines
 
 class SubModule(torch.nn.Module):
     def __init__(self):
-        super(SubModule, self).__init__()
+        super().__init__()
         self.qconfig = default_qconfig
         self.mod1 = torch.nn.Conv2d(3, 3, 3, bias=False).to(dtype=torch.float)
         self.mod2 = nn.ReLU()
@@ -56,7 +56,7 @@ class SubModule(torch.nn.Module):
 
 class ModelWithSubModules(torch.nn.Module):
     def __init__(self):
-        super(ModelWithSubModules, self).__init__()
+        super().__init__()
         self.mod1 = SubModule()
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
 
@@ -68,7 +68,7 @@ class ModelWithSubModules(torch.nn.Module):
 
 class ModelWithFunctionals(torch.nn.Module):
     def __init__(self):
-        super(ModelWithFunctionals, self).__init__()
+        super().__init__()
         self.mycat = nnq.FloatFunctional()
         self.myadd = nnq.FloatFunctional()
         self.mymul = nnq.FloatFunctional()

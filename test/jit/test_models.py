@@ -31,7 +31,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class MnistNet(nn.Module):
     def __init__(self):
-        super(MnistNet, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
         self.conv2_drop = nn.Dropout2d()
@@ -52,7 +52,7 @@ class TestModels(JitTestCase):
     def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
             def __init__(self, nz, ngf, nc):
-                super(DCGANGenerator, self).__init__()
+                super().__init__()
                 self.main = nn.Sequential(
                     # input is Z, going into a convolution
                     nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
@@ -81,7 +81,7 @@ class TestModels(JitTestCase):
 
         class DCGANDiscriminator(nn.Module):
             def __init__(self, nc, ndf):
-                super(DCGANDiscriminator, self).__init__()
+                super().__init__()
                 self.main = nn.Sequential(
                     # input is (nc) x 64 x 64
                     nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
@@ -126,7 +126,7 @@ class TestModels(JitTestCase):
     def _test_neural_style(self, device, check_export_import=True):
         class TransformerNet(torch.nn.Module):
             def __init__(self):
-                super(TransformerNet, self).__init__()
+                super().__init__()
                 # Initial convolution layers
                 self.conv1 = ConvLayer(3, 32, kernel_size=9, stride=1)
                 self.in1 = torch.nn.InstanceNorm2d(32, affine=True)
@@ -165,7 +165,7 @@ class TestModels(JitTestCase):
 
         class ConvLayer(torch.nn.Module):
             def __init__(self, in_channels, out_channels, kernel_size, stride):
-                super(ConvLayer, self).__init__()
+                super().__init__()
                 reflection_padding = kernel_size // 2
                 self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
                 self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
@@ -182,7 +182,7 @@ class TestModels(JitTestCase):
             """
 
             def __init__(self, channels):
-                super(ResidualBlock, self).__init__()
+                super().__init__()
                 self.conv1 = ConvLayer(channels, channels, kernel_size=3, stride=1)
                 self.in1 = torch.nn.InstanceNorm2d(channels, affine=True)
                 self.conv2 = ConvLayer(channels, channels, kernel_size=3, stride=1)
@@ -204,7 +204,7 @@ class TestModels(JitTestCase):
             """
 
             def __init__(self, in_channels, out_channels, kernel_size, stride, upsample=None):
-                super(UpsampleConvLayer, self).__init__()
+                super().__init__()
                 self.upsample = upsample
                 if upsample:
                     self.upsample_layer = torch.nn.Upsample(mode='nearest', scale_factor=upsample)
@@ -276,7 +276,7 @@ class TestModels(JitTestCase):
     def _test_reinforcement_learning(self, device, test_export_import=True):
         class Policy(nn.Module):
             def __init__(self):
-                super(Policy, self).__init__()
+                super().__init__()
                 self.affine1 = nn.Linear(4, 128)
                 self.affine2 = nn.Linear(128, 2)
 
@@ -303,9 +303,9 @@ class TestModels(JitTestCase):
 
             def forward(self, input):
                 if len(input.size()) <= 2:
-                    return super(Bottle, self).forward(input)
+                    return super().forward(input)
                 size = input.size()[:2]
-                out = super(Bottle, self).forward(input.view(size[0] * size[1], -1))
+                out = super().forward(input.view(size[0] * size[1], -1))
                 return out.view(size[0], size[1], -1)
 
         class Linear(Bottle, nn.Linear):
@@ -314,7 +314,7 @@ class TestModels(JitTestCase):
         class Encoder(nn.Module):
 
             def __init__(self, config):
-                super(Encoder, self).__init__()
+                super().__init__()
                 self.config = config
                 input_size = config.d_proj if config.projection else config.d_embed
                 dropout = 0 if config.n_layers == 1 else config.dp_ratio
@@ -332,7 +332,7 @@ class TestModels(JitTestCase):
         class SNLIClassifier(nn.Module):
 
             def __init__(self, config):
-                super(SNLIClassifier, self).__init__()
+                super().__init__()
                 self.config = config
                 self.embed = nn.Embedding(config.n_embed, config.d_embed)
                 self.projection = Linear(config.d_embed, config.d_proj)
@@ -416,7 +416,7 @@ class TestModels(JitTestCase):
         class Net(nn.Module):
 
             def __init__(self, upscale_factor):
-                super(Net, self).__init__()
+                super().__init__()
 
                 self.relu = nn.ReLU()
                 self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
@@ -449,7 +449,7 @@ class TestModels(JitTestCase):
     def test_time_sequence_prediction(self):
         class Sequence(torch.jit.ScriptModule):
             def __init__(self):
-                super(Sequence, self).__init__()
+                super().__init__()
                 self.lstm1 = nn.LSTMCell(1, 51)
                 self.lstm2 = nn.LSTMCell(51, 51)
                 self.linear = nn.Linear(51, 1)
@@ -484,7 +484,7 @@ class TestModels(JitTestCase):
 
         class Traced(nn.Module):
             def __init__(self):
-                super(Traced, self).__init__()
+                super().__init__()
                 self.seq = Sequence()
 
             def forward(self, input):
@@ -500,7 +500,7 @@ class TestModels(JitTestCase):
     def _test_vae(self, device, check_export_import=True, quantized=False):
         class VAE(nn.Module):
             def __init__(self):
-                super(VAE, self).__init__()
+                super().__init__()
 
                 self.fc1 = nn.Linear(784, 400)
                 self.fc21 = nn.Linear(400, 20)
@@ -594,7 +594,7 @@ class TestModels(JitTestCase):
             __constants__ = ['downsample']
 
             def __init__(self, inplanes, planes, stride=1, downsample=None):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = nn.BatchNorm2d(planes)
                 self.relu = nn.ReLU(inplace=True)
@@ -626,7 +626,7 @@ class TestModels(JitTestCase):
             __constants__ = ['layer1', 'layer2', 'layer3', 'layer4']
 
             def __init__(self, block, layers, num_classes=1000):
-                super(ResNet, self).__init__()
+                super().__init__()
                 self.inplanes = 64
                 self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                        bias=False)

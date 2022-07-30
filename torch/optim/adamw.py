@@ -89,7 +89,7 @@ class AdamW(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         foreach=foreach, maximize=maximize, capturable=capturable)
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

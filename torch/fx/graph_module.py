@@ -264,7 +264,7 @@ class _WrappedCall:
             if self.cls_call is not None:
                 return self.cls_call(obj, *args, **kwargs)
             else:
-                return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
+                return super().__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \

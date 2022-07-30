@@ -35,7 +35,7 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
@@ -65,7 +65,7 @@ class BasicBlock(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000):
-        super(ResNet, self).__init__()
+        super().__init__()
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -144,7 +144,7 @@ class BatchedModel(nn.Module):
 
 class MultiReturn(torch.nn.Module):
     def __init__(self):
-        super(MultiReturn, self).__init__()
+        super().__init__()
 
     def forward(self, t: Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
         a, b = t

@@ -249,7 +249,7 @@ class cudaStatus(object):
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
-        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+        super().__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res: int) -> None:
@@ -296,7 +296,7 @@ class device_of(device):
 
     def __init__(self, obj):
         idx = obj.get_device() if obj.is_cuda else -1
-        super(device_of, self).__init__(idx)
+        super().__init__(idx)
 
 
 def set_device(device: _device_t) -> None:
@@ -640,7 +640,7 @@ def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
     # We may need to call lazy init again if we are a forked child
     # del _CudaBase.__new__
-    return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+    return super().__new__(cls, *args, **kwargs)
 
 
 class _CudaBase(object):
@@ -652,7 +652,7 @@ class _CudaBase(object):
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
         with device(self.get_device()):  # type: ignore[attr-defined]
-            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
+            return super().type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 

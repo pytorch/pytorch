@@ -21,7 +21,7 @@ if __name__ == '__main__':
 class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
         def __init__(self):
-            super(TestDataParallel.Mpy, self).__init__()
+            super().__init__()
             self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
                                    nn.ReLU(), nn.Linear(2, 2))
 
@@ -31,7 +31,7 @@ class TestDataParallel(JitTestCase):
 
     class Mpy1(torch.nn.Module):
         def __init__(self, block):
-            super(TestDataParallel.Mpy1, self).__init__()
+            super().__init__()
             self.m = block
 
         @torch.jit.ignore
@@ -40,7 +40,7 @@ class TestDataParallel(JitTestCase):
 
     class Mpy2(torch.nn.Module):
         def __init__(self, block1, block2):
-            super(TestDataParallel.Mpy2, self).__init__()
+            super().__init__()
             self.m1 = block1
             self.m2 = block2
 
@@ -54,7 +54,7 @@ class TestDataParallel(JitTestCase):
         __constants__ = ['m']
 
         def __init__(self):
-            super(TestDataParallel.Msm, self).__init__()
+            super().__init__()
             self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
                                    nn.ReLU(), nn.Linear(2, 2))
 
@@ -64,7 +64,7 @@ class TestDataParallel(JitTestCase):
 
     class Msm1(torch.jit.ScriptModule):
         def __init__(self, block):
-            super(TestDataParallel.Msm1, self).__init__()
+            super().__init__()
             self.block = block
 
         @torch.jit.script_method

@@ -42,13 +42,13 @@ class OneHotCategorical(Distribution):
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(OneHotCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new._categorical = self._categorical.expand(batch_shape)
-        super(OneHotCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super().__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

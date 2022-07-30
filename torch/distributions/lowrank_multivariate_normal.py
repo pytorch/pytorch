@@ -107,7 +107,7 @@ class LowRankMultivariateNormal(Distribution):
         self._unbroadcasted_cov_factor = cov_factor
         self._unbroadcasted_cov_diag = cov_diag
         self._capacitance_tril = _batch_capacitance_tril(cov_factor, cov_diag)
-        super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
+        super().__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -120,7 +120,7 @@ class LowRankMultivariateNormal(Distribution):
         new._unbroadcasted_cov_factor = self._unbroadcasted_cov_factor
         new._unbroadcasted_cov_diag = self._unbroadcasted_cov_diag
         new._capacitance_tril = self._capacitance_tril
-        super(LowRankMultivariateNormal, new).__init__(batch_shape,
+        super().__init__(batch_shape,
                                                        self.event_shape,
                                                        validate_args=False)
         new._validate_args = self._validate_args

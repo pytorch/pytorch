@@ -969,7 +969,7 @@ class TestTEFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method
@@ -1237,7 +1237,7 @@ class TestTEFuser(JitTestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self, dtype):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.dtype = dtype
 
             def forward(self, x):
@@ -2534,18 +2534,18 @@ def get_name(op):
 # Purpose of this class is to allow super() calls.
 # super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
 # super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
-# super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
+# super().fn() would skip JitCommonTestCase.fn() implementation
 class TestNNCOpInfoParent(JitCommonTestCase):
     pass
 
 class TestNNCOpInfo(TestNNCOpInfoParent):
     def setUp(self):
-        super(TestNNCOpInfoParent, self).setUp()
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
     def tearDown(self):
         self.tensorexpr_options.restore()
-        super(TestNNCOpInfoParent, self).tearDown()
+        super().tearDown()
 
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
@@ -2654,7 +2654,7 @@ class TestLoopnestRandomizationParent(JitTestCase):
 
 class TestLoopnestRandomization(TestLoopnestRandomizationParent):
     def setUp(self):
-        super(TestLoopnestRandomizationParent, self).setUp()
+        super().setUp()
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -2694,7 +2694,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
 
         # Set it back to 0.
         os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
-        super(TestLoopnestRandomizationParent, self).tearDown()
+        super().tearDown()
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")

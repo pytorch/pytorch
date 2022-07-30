@@ -144,7 +144,7 @@ class MultivariateNormal(Distribution):
         self.loc = loc.expand(batch_shape + (-1,))
 
         event_shape = self.loc.shape[-1:]
-        super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
@@ -166,7 +166,7 @@ class MultivariateNormal(Distribution):
             new.scale_tril = self.scale_tril.expand(cov_shape)
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
-        super(MultivariateNormal, new).__init__(batch_shape,
+        super().__init__(batch_shape,
                                                 self.event_shape,
                                                 validate_args=False)
         new._validate_args = self._validate_args

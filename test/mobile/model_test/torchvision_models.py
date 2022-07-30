@@ -6,7 +6,7 @@ from torch.utils.mobile_optimizer import optimize_for_mobile
 
 class MobileNetV2Module:
     def __init__(self):
-        super(MobileNetV2Module, self).__init__()
+        super().__init__()
 
     def getModule(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)

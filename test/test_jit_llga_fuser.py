@@ -102,7 +102,7 @@ class TestOp(JitLlgaTestCase):
     def test_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.eltwise = eltwise_fn
 
             def forward(self, x):
@@ -157,7 +157,7 @@ class TestOp(JitLlgaTestCase):
     def test_variable_kernel_avg_pool2d(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 x = F.avg_pool2d(x, kernel_size=(x.size(2), x.size(3)), padding=0, count_include_pad=False)
@@ -282,7 +282,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=False)
                 self.eltwise = eltwise_fn
@@ -312,7 +312,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_bn(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
 
@@ -331,7 +331,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_bn_relu(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
 
@@ -351,7 +351,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_bn2d_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.eltwise = eltwise_fn
                 self.bn = nn.BatchNorm2d(32)
 
@@ -371,7 +371,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_linear_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn, bias):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(28, 64, bias)
                 self.eltwise = eltwise_fn
 
@@ -394,7 +394,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_sum(self):
         class M(nn.Module):
             def __init__(self, bias=False):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=bias)
                 self.bn1 = nn.BatchNorm2d(32)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=bias)
@@ -423,7 +423,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_wildcard(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = nn.ReLU()
 
@@ -451,7 +451,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_rewrap_tensor_input_to_pytorch(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn, data_type):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=data_type)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=data_type)
                 self.eltwise = eltwise_fn

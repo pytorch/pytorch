@@ -208,7 +208,7 @@ class TestMisc(JitTestCase):
             sub : OneTwoModule
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sub = BarMod()
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:

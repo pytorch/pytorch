@@ -60,7 +60,7 @@ class Distribution(object):
                         f"to satisfy the constraint {repr(constraint)}, "
                         f"but found invalid values:\n{value}"
                     )
-        super(Distribution, self).__init__()
+        super().__init__()
 
     def expand(self, batch_shape, _instance=None):
         """

@@ -942,7 +942,7 @@ class TestOptim(TestCase):
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
-        super(SchedulerTestNet, self).__init__()
+        super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1)
         self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
@@ -968,7 +968,7 @@ class TestLRScheduler(TestCase):
     exact_dtype = True
 
     def setUp(self):
-        super(TestLRScheduler, self).setUp()
+        super().setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
@@ -2421,7 +2421,7 @@ class TestLRScheduler(TestCase):
 
 class SWATestDNN(torch.nn.Module):
     def __init__(self, input_features):
-        super(SWATestDNN, self).__init__()
+        super().__init__()
         self.n_features = 100
         self.fc1 = torch.nn.Linear(input_features, self.n_features)
         self.bn = torch.nn.BatchNorm1d(self.n_features)
@@ -2437,7 +2437,7 @@ class SWATestDNN(torch.nn.Module):
 
 class SWATestCNN(torch.nn.Module):
     def __init__(self, input_channels):
-        super(SWATestCNN, self).__init__()
+        super().__init__()
         self.n_features = 10
         self.conv1 = torch.nn.Conv2d(input_channels, self.n_features, kernel_size=3, padding=1)
         self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)

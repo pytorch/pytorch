@@ -18,7 +18,7 @@ class _ConstantPadNd(Module):
     padding: Sequence[int]
 
     def __init__(self, value: float) -> None:
-        super(_ConstantPadNd, self).__init__()
+        super().__init__()
         self.value = value
 
     def forward(self, input: Tensor) -> Tensor:
@@ -74,7 +74,7 @@ class ConstantPad1d(_ConstantPadNd):
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t, value: float):
-        super(ConstantPad1d, self).__init__(value)
+        super().__init__(value)
         self.padding = _pair(padding)
 
 
@@ -124,7 +124,7 @@ class ConstantPad2d(_ConstantPadNd):
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t, value: float) -> None:
-        super(ConstantPad2d, self).__init__(value)
+        super().__init__(value)
         self.padding = _quadruple(padding)
 
 
@@ -164,7 +164,7 @@ class ConstantPad3d(_ConstantPadNd):
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t, value: float) -> None:
-        super(ConstantPad3d, self).__init__(value)
+        super().__init__(value)
         self.padding = _ntuple(6)(padding)
 
 
@@ -215,7 +215,7 @@ class ReflectionPad1d(_ReflectionPadNd):
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
-        super(ReflectionPad1d, self).__init__()
+        super().__init__()
         self.padding = _pair(padding)
 
 
@@ -266,7 +266,7 @@ class ReflectionPad2d(_ReflectionPadNd):
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
-        super(ReflectionPad2d, self).__init__()
+        super().__init__()
         self.padding = _quadruple(padding)
 
 
@@ -318,7 +318,7 @@ class ReflectionPad3d(_ReflectionPadNd):
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
-        super(ReflectionPad3d, self).__init__()
+        super().__init__()
         self.padding = _ntuple(6)(padding)
 
 
@@ -369,7 +369,7 @@ class ReplicationPad1d(_ReplicationPadNd):
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
-        super(ReplicationPad1d, self).__init__()
+        super().__init__()
         self.padding = _pair(padding)
 
 
@@ -420,7 +420,7 @@ class ReplicationPad2d(_ReplicationPadNd):
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
-        super(ReplicationPad2d, self).__init__()
+        super().__init__()
         self.padding = _quadruple(padding)
 
 
@@ -460,7 +460,7 @@ class ReplicationPad3d(_ReplicationPadNd):
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
-        super(ReplicationPad3d, self).__init__()
+        super().__init__()
         self.padding = _ntuple(6)(padding)
 
 
@@ -511,7 +511,7 @@ class ZeroPad2d(ConstantPad2d):
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
-        super(ZeroPad2d, self).__init__(padding, 0.)
+        super().__init__(padding, 0.)
 
     def extra_repr(self) -> str:
         return '{}'.format(self.padding)

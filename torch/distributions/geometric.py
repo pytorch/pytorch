@@ -43,7 +43,7 @@ class Geometric(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
-        super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval
             value = self.probs
@@ -64,7 +64,7 @@ class Geometric(Distribution):
             new.probs = self.probs.expand(batch_shape)
         if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
-        super(Geometric, new).__init__(batch_shape, validate_args=False)
+        super().__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

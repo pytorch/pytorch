@@ -66,7 +66,7 @@ class Adadelta(Optimizer):
 
         defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay,
                         maximize=maximize, foreach=foreach)
-        super(Adadelta, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

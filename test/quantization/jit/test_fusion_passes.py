@@ -10,7 +10,7 @@ class TestFusionPasses(QuantizationTestCase):
     def test_quantized_add_relu_fusion(self):
         class MAdd(torch.nn.Module):
             def __init__(self):
-                super(MAdd, self).__init__()
+                super().__init__()
 
             def forward(self, x, y):
                 a = torch.ops.quantized.add(x, y, 1., 0)
@@ -45,7 +45,7 @@ class TestFusionPasses(QuantizationTestCase):
 
         class MAddOut(torch.nn.Module):
             def __init__(self):
-                super(MAddOut, self).__init__()
+                super().__init__()
 
             def forward(self, x, y, z):
                 a = torch.ops.quantized.add_out(x, y, z)
@@ -75,7 +75,7 @@ class TestFusionPasses(QuantizationTestCase):
 
         class MAddScalar(torch.nn.Module):
             def __init__(self):
-                super(MAddScalar, self).__init__()
+                super().__init__()
 
             def forward(self, x, y : float):
                 a = torch.ops.quantized.add_scalar(x, y)
@@ -97,7 +97,7 @@ class TestFusionPasses(QuantizationTestCase):
 
         class MAddScalarOut(torch.nn.Module):
             def __init__(self):
-                super(MAddScalarOut, self).__init__()
+                super().__init__()
 
             def forward(self, x, y : float, z):
                 a = torch.ops.quantized.add_scalar_out(x, y, z)

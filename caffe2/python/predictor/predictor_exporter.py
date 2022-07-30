@@ -93,7 +93,7 @@ class PredictorExportMeta(collections.namedtuple(
                 predict_net = predict_net.Proto()
 
             assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
-        return super(PredictorExportMeta, cls).__new__(
+        return super().__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
             extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)
 

@@ -62,7 +62,7 @@ class Rprop(Optimizer):
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
         defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach)
-        super(Rprop, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

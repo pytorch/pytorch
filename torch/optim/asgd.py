@@ -39,7 +39,7 @@ class ASGD(Optimizer):
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
                         weight_decay=weight_decay, foreach=foreach, maximize=maximize)
-        super(ASGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

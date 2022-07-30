@@ -82,7 +82,7 @@ class RMSprop(Optimizer):
 
         defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered,
                         weight_decay=weight_decay, foreach=foreach, maximize=maximize)
-        super(RMSprop, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

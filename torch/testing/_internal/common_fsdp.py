@@ -531,7 +531,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
     ):
-        return super(NestedWrappedModuleWithDelay, NestedWrappedModuleWithDelay).init(
+        return super().init(
             NestedWrappedModule,
             group=group,
             fsdp_init_mode=fsdp_init_mode,
@@ -692,7 +692,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
-        super(FSDPTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     @property

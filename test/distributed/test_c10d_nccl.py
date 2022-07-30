@@ -217,7 +217,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         return opts
 
     def setUp(self):
-        super(ProcessGroupNCCLTest, self).setUp()
+        super().setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -225,7 +225,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupNCCLTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -972,7 +972,7 @@ class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
-        super(DistributedDataParallelTest, self).setUp()
+        super().setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -1182,7 +1182,7 @@ class DistributedDataParallelTest(
 
         class ForwardReturnValueModule(nn.Module):
             def __init__(self):
-                super(ForwardReturnValueModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -1301,7 +1301,7 @@ class DistributedDataParallelTest(
 
         class FindUnusedParametersModule(nn.Module):
             def __init__(self):
-                super(FindUnusedParametersModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -1448,7 +1448,7 @@ class DistributedDataParallelTest(
 
         class MultipleOutputModule(nn.Module):
             def __init__(self):
-                super(MultipleOutputModule, self).__init__()
+                super().__init__()
 
                 def define_module():
                     return nn.Sequential(
@@ -1511,7 +1511,7 @@ class DistributedDataParallelTest(
 
         class NoGradModule(nn.Module):
             def __init__(self):
-                super(NoGradModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -1629,7 +1629,7 @@ class DistributedDataParallelTest(
 
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2255,7 +2255,7 @@ class DistributedDataParallelTest(
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
-        super(NcclErrorHandlingTest, self).setUp()
+        super().setUp()
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
@@ -2270,7 +2270,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
-        super(NcclErrorHandlingTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -2493,14 +2493,14 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

@@ -252,7 +252,7 @@ class SgdOptimizer(Optimizer):
         lars=None,
         **kwargs
     ):
-        super(SgdOptimizer, self).__init__()
+        super().__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
@@ -368,7 +368,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(MultiPrecisionSgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -439,7 +439,7 @@ class FP16SgdOptimizer(SgdOptimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(FP16SgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -584,7 +584,7 @@ class AdagradOptimizer(Optimizer):
         counter_halflife=-1,
         **kwargs
     ):
-        super(AdagradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -1123,7 +1123,7 @@ class WngradOptimizer(Optimizer):
         output_effective_lr_and_update=False,
         **kwargs
     ):
-        super(WngradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.policy = policy
@@ -1235,7 +1235,7 @@ class StormOptimizer(Optimizer):
               include 'mean' and 'sum'.
             lars: lars offset.
         """
-        super(StormOptimizer, self).__init__()
+        super().__init__()
         self.lr = lr
         self.momentum = momentum
         self.beta = beta
@@ -1336,7 +1336,7 @@ class AdadeltaOptimizer(Optimizer):
               include "mean" and "sum".
             engine: the engine used, options include "", "CUDNN", etc.
         """
-        super(AdadeltaOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -1404,7 +1404,7 @@ class FtrlOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         engine="",
     ):
-        super(FtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -1462,7 +1462,7 @@ class GFtrlOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         engine="",
     ):
-        super(GFtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -1514,7 +1514,7 @@ class AdamOptimizer(Optimizer):
         use_smart_decay=False,  # See https://fburl.com/2jdiwrhy for context.
         **kwargs
     ):
-        super(AdamOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -1677,7 +1677,7 @@ class DecayAdagradOptimizer(Optimizer):
         engine="",
         **kwargs
     ):
-        super(DecayAdagradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -1776,7 +1776,7 @@ class YellowFinOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(YellowFinOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.mu = mu
         self.beta = beta
@@ -1864,7 +1864,7 @@ class RmsPropOptimizer(Optimizer):
         engine="",
         **kwargs
     ):
-        super(RmsPropOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.decay = decay
         self.momentum = momentum

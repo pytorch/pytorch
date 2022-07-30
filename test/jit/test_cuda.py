@@ -45,12 +45,12 @@ class TestCUDA(JitTestCase):
     A suite of tests for the CUDA API in TorchScript.
     """
     def setUp(self):
-        super(TestCUDA, self).setUp()
+        super().setUp()
 
     def tearDown(self):
         gc.collect()
         torch.cuda.empty_cache()
-        super(TestCUDA, self).tearDown()
+        super().tearDown()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")

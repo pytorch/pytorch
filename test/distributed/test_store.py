@@ -122,7 +122,7 @@ class StoreTestBase(object):
 
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(FileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def _create_store(self):
@@ -134,7 +134,7 @@ class FileStoreTest(TestCase, StoreTestBase):
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(HashStoreTest, self).setUp()
+        super().setUp()
 
     def _create_store(self):
         store = dist.HashStore()
@@ -144,7 +144,7 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixFileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
@@ -271,7 +271,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixTCPStoreTest, self).setUp()
+        super().setUp()
         self.tcpstore = create_tcp_store()
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
@@ -289,7 +289,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 class MyPythonStore(dist.Store):
     def __init__(self):
-        super(MyPythonStore, self).__init__()
+        super().__init__()
         self.store = dict()
 
     def set(self, key, value):
@@ -313,7 +313,7 @@ class MyPythonStore(dist.Store):
 
 class PythonStoreTest(TestCase):
     def setUp(self):
-        super(PythonStoreTest, self).setUp()
+        super().setUp()
 
     def test_set_get(self):
         # If we were to inherit from StoreTestBase and try to use

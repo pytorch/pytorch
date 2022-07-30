@@ -121,7 +121,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(AdaptiveLogSoftmaxWithLoss, self).__init__()
+        super().__init__()
 
         cutoffs = list(cutoffs)
 

@@ -872,7 +872,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         # However, we can wrap it and quantize the wrapper.
         class SequentialAppendList(nn.Sequential):
             def __init__(self, *args):
-                super(SequentialAppendList, self).__init__(*args)
+                super().__init__(*args)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 concat_list = []

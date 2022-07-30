@@ -6,7 +6,7 @@ from torch import Tensor
 
 class AndroidAPIModule(torch.jit.ScriptModule):
     def __init__(self):
-        super(AndroidAPIModule, self).__init__()
+        super().__init__()
 
     @torch.jit.script_method
     def forward(self, input):

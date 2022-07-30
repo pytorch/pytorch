@@ -54,7 +54,7 @@ class _InputEqualizationObserver(nn.Module):
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  quant_min=None, quant_max=None, factory_kwargs=None) -> None:
-        super(_InputEqualizationObserver, self).__init__()
+        super().__init__()
 
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
@@ -137,7 +137,7 @@ class _WeightEqualizationObserver(nn.Module):
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
-        super(_WeightEqualizationObserver, self).__init__()
+        super().__init__()
 
         self.dtype = dtype
         self.qscheme = qscheme
@@ -221,7 +221,7 @@ class EqualizationQConfig(namedtuple('EqualizationQConfig', ['input_activation',
         if isinstance(input_activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("EqualizationQConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        self = super(EqualizationQConfig, cls).__new__(cls, input_activation, weight)
+        self = super().__new__(cls, input_activation, weight)
         return self
 
 

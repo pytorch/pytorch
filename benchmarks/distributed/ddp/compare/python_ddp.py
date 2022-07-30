@@ -93,7 +93,7 @@ class PythonDDP(nn.Module):
                 return False
 
     def __init__(self, module, process_group, async_reduction=True, buffer_size=2 ** 22):
-        super(PythonDDP, self).__init__()
+        super().__init__()
 
         self.module = module
         self.process_group = process_group

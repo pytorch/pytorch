@@ -22,7 +22,7 @@ class TestIgnoreContextManager(JitTestCase):
     def test_with_ignore_context_manager_with_inp_out(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             def forward(self):
                 a: int = 4
@@ -41,7 +41,7 @@ class TestIgnoreContextManager(JitTestCase):
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
 
             def forward(self):
                 a: int = 4
@@ -58,7 +58,7 @@ class TestIgnoreContextManager(JitTestCase):
 
         class C(torch.nn.Module):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
 
             def forward(self):
                 a: int = 4
@@ -76,7 +76,7 @@ class TestIgnoreContextManager(JitTestCase):
     def test_with_ignore_context_manager_with_just_inp(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             def forward(self):
                 a: int = 4
@@ -93,7 +93,7 @@ class TestIgnoreContextManager(JitTestCase):
     def test_with_ignore_context_manager_with_just_out(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             def forward(self):
                 with torch.jit._IgnoreContextManager(c="out:List[int]"):

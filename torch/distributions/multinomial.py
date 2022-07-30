@@ -64,14 +64,14 @@ class Multinomial(Distribution):
         self._binomial = Binomial(total_count=total_count, probs=self.probs)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Multinomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count
         new._categorical = self._categorical.expand(batch_shape)
-        super(Multinomial, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super().__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

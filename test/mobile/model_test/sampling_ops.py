@@ -5,7 +5,7 @@ import torch
 
 class SamplingOpsModule(torch.nn.Module):
     def __init__(self):
-        super(SamplingOpsModule, self).__init__()
+        super().__init__()
 
     def forward(self):
         a = torch.empty(3, 3).uniform_(0.0, 1.0)

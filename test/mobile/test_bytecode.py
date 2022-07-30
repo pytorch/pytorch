@@ -312,7 +312,7 @@ class testVariousModelVersions(TestCase):
     def test_get_mobile_model_contained_types(self):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x + 10

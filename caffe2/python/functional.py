@@ -21,7 +21,7 @@ def namedtupledict(typename, field_names, *args, **kwargs):
     def getitem(self, key):
         if isinstance(key, string_types):
             key = field_names_map[key]
-        return super(type(self), self).__getitem__(key)
+        return super().__getitem__(key)
 
     data.__getitem__ = getitem
     return data

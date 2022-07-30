@@ -85,7 +85,7 @@ class Adagrad(Optimizer):
             foreach=foreach,
             maximize=maximize,
         )
-        super(Adagrad, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group["params"]:

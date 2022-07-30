@@ -27,7 +27,7 @@ class AdaptiveWeight(ModelLayer):
         reg_lambda=0.1,
         **kwargs
     ):
-        super(AdaptiveWeight, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         self.output_schema = schema.Scalar(
             np.float32, self.get_next_blob_reference("adaptive_weight")
         )

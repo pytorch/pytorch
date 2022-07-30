@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
 class OrigModule(nn.Module):
     def __init__(self):
-        super(OrigModule, self).__init__()
+        super().__init__()
 
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         return inp1 + inp2 + 1
@@ -36,7 +36,7 @@ class OrigModule(nn.Module):
 
 class NewModule(nn.Module):
     def __init__(self):
-        super(NewModule, self).__init__()
+        super().__init__()
 
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         return inp1 * inp2 + 1
@@ -55,7 +55,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestNotModuleInterfaceCall, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -146,7 +146,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : TestInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input):
@@ -259,7 +259,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -288,7 +288,7 @@ class TestModuleInterface(JitTestCase):
 
         class NewModuleWrong(nn.Module):
             def __init__(self):
-                super(NewModuleWrong, self).__init__()
+                super().__init__()
 
             def forward(self, input: int) -> int:
                 return input + 1
@@ -297,7 +297,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -321,7 +321,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -329,7 +329,7 @@ class TestModuleInterface(JitTestCase):
 
         class NewModuleMethodNotLazyCompile(nn.Module):
             def __init__(self):
-                super(NewModuleMethodNotLazyCompile, self).__init__()
+                super().__init__()
 
             def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
                 return inp1 * inp2 + 1
@@ -345,7 +345,7 @@ class TestModuleInterface(JitTestCase):
 
         class NewModuleMethodManualExport(nn.Module):
             def __init__(self):
-                super(NewModuleMethodManualExport, self).__init__()
+                super().__init__()
 
             @torch.jit.export
             def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
@@ -362,7 +362,7 @@ class TestModuleInterface(JitTestCase):
         # test module swapping with no module interface
         class TestNoModuleInterface(nn.Module):
             def __init__(self):
-                super(TestNoModuleInterface, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -388,7 +388,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigScriptModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(OrigScriptModule, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
@@ -400,7 +400,7 @@ class TestModuleInterface(JitTestCase):
 
         class NewScriptModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(NewScriptModule, self).__init__()
+                super().__init__()
 
             @torch.jit.script_method
             def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
@@ -414,7 +414,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestNNModuleWithScriptModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigScriptModule()
 
             def forward(self, input: Tensor) -> Tensor:
@@ -432,7 +432,7 @@ class TestModuleInterface(JitTestCase):
     def test_freeze_module_with_interface(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.b = 20
 
             def forward(self, x):
@@ -440,7 +440,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.a = 0
 
             def forward(self, x):
@@ -455,7 +455,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()  # folded
 
@@ -475,7 +475,7 @@ class TestModuleInterface(JitTestCase):
     def test_freeze_module_with_setattr_in_interface(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.b = 20
 
             def forward(self, x):
@@ -487,7 +487,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.a = 0
 
             def forward(self, x):
@@ -502,7 +502,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
 
@@ -518,7 +518,7 @@ class TestModuleInterface(JitTestCase):
     def test_freeze_module_with_inplace_mutation_in_interface(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.b = torch.tensor([1.5])
 
             def forward(self, x):
@@ -530,7 +530,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([0.5])
 
             def forward(self, x):
@@ -545,7 +545,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
 
@@ -564,7 +564,7 @@ class TestModuleInterface(JitTestCase):
     def test_freeze_module_with_mutated_interface(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.b = torch.tensor([1.5])
 
             def forward(self, x):
@@ -575,7 +575,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([0.5])
 
             def forward(self, x):
@@ -590,7 +590,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
 
@@ -608,7 +608,7 @@ class TestModuleInterface(JitTestCase):
     def test_freeze_module_with_interface_and_fork(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.b = torch.tensor([1.5])
 
             def forward(self, x):
@@ -617,7 +617,7 @@ class TestModuleInterface(JitTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([0.5])
 
             def forward(self, x):
@@ -632,7 +632,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
 
@@ -643,7 +643,7 @@ class TestModuleInterface(JitTestCase):
 
         class MainModule(torch.nn.Module):
             def __init__(self):
-                super(MainModule, self).__init__()
+                super().__init__()
                 self.test= TestModule()
 
             def forward(self, x):
@@ -666,7 +666,7 @@ class TestModuleInterface(JitTestCase):
             proxy_mod : ModuleInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input):

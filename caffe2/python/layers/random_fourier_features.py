@@ -38,7 +38,7 @@ class RandomFourierFeatures(ModelLayer):
             name='random_fourier_features',
             **kwargs):
 
-        super(RandomFourierFeatures, self).__init__(model, name, input_record,
+        super().__init__(model, name, input_record,
                                                     **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
 

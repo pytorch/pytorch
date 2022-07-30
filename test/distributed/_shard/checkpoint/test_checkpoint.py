@@ -316,7 +316,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self,
         fail_conf
     ):
-        super(FaultyStorageWriter, self).__init__(fail_conf)
+        super().__init__(fail_conf)
 
     def prepare(self) -> None:
         self._fail_rank("fail_prepare")
@@ -341,7 +341,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         metadata,
         fail_conf
     ):
-        super(FaultyStorageReader, self).__init__(fail_conf)
+        super().__init__(fail_conf)
         self.metadata = metadata
 
     def read_bytes(self, requests: List[BytesReadRequest]) -> Future[None]:

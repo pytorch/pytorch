@@ -77,7 +77,7 @@ class TransformedDistribution(Distribution):
         cut = len(shape) - event_dim
         batch_shape = shape[:cut]
         event_shape = shape[cut:]
-        super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(TransformedDistribution, _instance)
@@ -88,7 +88,7 @@ class TransformedDistribution(Distribution):
         base_batch_shape = shape[:len(shape) - len(self.base_dist.event_shape)]
         new.base_dist = self.base_dist.expand(base_batch_shape)
         new.transforms = self.transforms
-        super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super().__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

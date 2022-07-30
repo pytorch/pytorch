@@ -46,7 +46,7 @@ class LocalResponseNorm(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
-        super(LocalResponseNorm, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -67,7 +67,7 @@ class CrossMapLRN2d(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
-        super(CrossMapLRN2d, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -165,7 +165,7 @@ class LayerNorm(Module):
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LayerNorm, self).__init__()
+        super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = (normalized_shape,)  # type: ignore[assignment]
@@ -247,7 +247,7 @@ class GroupNorm(Module):
     def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GroupNorm, self).__init__()
+        super().__init__()
         if num_channels % num_groups != 0:
             raise ValueError('num_channels must be divisible by num_groups')
 

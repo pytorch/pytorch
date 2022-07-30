@@ -3,7 +3,7 @@ from typing import Union
 
 class TestVersionedDivTensorExampleV7(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedDivTensorExampleV7, self).__init__()
+        super().__init__()
 
     def forward(self, a, b):
         result_0 = a / b
@@ -13,7 +13,7 @@ class TestVersionedDivTensorExampleV7(torch.nn.Module):
 
 class TestVersionedLinspaceV7(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedLinspaceV7, self).__init__()
+        super().__init__()
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
         c = torch.linspace(a, b, steps=5)
@@ -22,14 +22,14 @@ class TestVersionedLinspaceV7(torch.nn.Module):
 
 class TestVersionedLinspaceOutV7(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedLinspaceOutV7, self).__init__()
+        super().__init__()
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.linspace(a, b, out=out)
 
 class TestVersionedLogspaceV8(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedLogspaceV8, self).__init__()
+        super().__init__()
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
         c = torch.logspace(a, b, steps=5)
@@ -38,7 +38,7 @@ class TestVersionedLogspaceV8(torch.nn.Module):
 
 class TestVersionedLogspaceOutV8(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedLogspaceOutV8, self).__init__()
+        super().__init__()
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.logspace(a, b, out=out)

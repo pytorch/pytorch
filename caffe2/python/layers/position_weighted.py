@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class PositionWeighted(ModelLayer):
     def __init__(self, model, input_record, weight_optim=None,
                  name="position_weights"):
-        super(PositionWeighted, self).__init__(model, name, input_record)
+        super().__init__(model, name, input_record)
 
         assert isinstance(input_record, schema.List), "Incorrect input type"
         length_metadata = input_record.lengths.metadata

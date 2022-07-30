@@ -65,7 +65,7 @@ class Adamax(Optimizer):
 
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
                         foreach=foreach, maximize=maximize)
-        super(Adamax, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
