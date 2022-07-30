@@ -208,10 +208,7 @@ private:
   }
 
   C10_HOST_DEVICE inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
-    #ifdef __CUDA_ARCH__
-      // We use std:: below, and thus need a separate impl for CUDA.
-      AT_ASSERT(false, "PhiloxRNGEngine normalize_pair_uniform is not yet implemented for CUDA");
-    #endif
+    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = in[0];
     float u2 = in[1];
 
