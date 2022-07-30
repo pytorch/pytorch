@@ -2802,14 +2802,14 @@ for k, v in symbolic_helper.cast_pytorch_to_onnx.items():  # type: ignore[has-ty
 
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
-    return zeros(g, sizes, dtype, layout, device, pin_memory, memory_format)
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(
     g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
-    return zeros_like(g, input, dtype, layout, device, pin_memory, memory_format)
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
 def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
@@ -2864,8 +2864,8 @@ def as_tensor(g, data, dtype=None, device=None):
     return tensor(g, data, dtype, device)
 
 
-@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def zeros(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
@@ -2907,8 +2907,8 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
-@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def ones(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
@@ -2949,7 +2949,7 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
 
-def full(g, sizes, value, dtype, layout, device, pin_memory=False, memory_format=None):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
         dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
