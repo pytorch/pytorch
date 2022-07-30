@@ -424,7 +424,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     tensors[0],
                 )
 
-
             for op, err in zip(
                 (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
                 ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
@@ -433,6 +432,27 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                         RuntimeError, "Cannot use " + err + " with NCCL"
                 ):
                     reduce(tensors, self.rank, rt, op)
+
+            # Premul sum
+            if torch.cuda.nccl.version() >= (2, 11, 1):
+                for factor in (3.0, (torch.tensor([5.0], device=local_device_id),)):
+                    if isinstance(factor, tuple):
+                        factor_ref = factor[0].cpu().item()
+                    else:
+                        factor_ref = factor
+                    float_tensors = [
+                        torch.tensor(
+                            [self.rank + 1.0], device=f"cuda:{local_device_id}")
+                    ]
+                    float_tensors_ref = [
+                        torch.tensor(
+                            [(self.rank + 1.0) * factor_ref], device=f"cuda:{local_device_id}")
+                    ]
+
+                    reduce(float_tensors_ref, rt, 0)
+                    reduce(float_tensors, rt, 0, c10d._make_nccl_premul_sum(factor))
+                    if self.rank == rt:
+                        self.assertEqual(float_tensors_ref[0], float_tensors[0])
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -911,6 +931,20 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             prod_val = prod_val * (self.rank + 1 + k)
         expected = torch.tensor(prod_val)
         self.assertEqualIgnoreType(expected, output_tensor)
+
+        if torch.cuda.nccl.version() >= (2, 11, 1):
+            for factor in (3.0, (torch.tensor([5.0], device=self.rank),),):
+                if isinstance(factor, tuple):
+                    factor_ref = factor[0].cpu().item()
+                else:
+                    factor_ref = factor
+                output = [t.float() for t in output]
+                tensor_lists = [[t.float() for t in tl] for tl in tensor_lists]
+                output_ref = [t.float() for t in output]
+                tensor_lists_ref = [[t.float() * factor_ref for t in tl] for tl in tensor_lists]
+                reduce_scatter(output, tensor_lists, c10d._make_nccl_premul_sum(factor))
+                reduce_scatter(output_ref, tensor_lists_ref, c10d.ReduceOp.SUM)
+                self.assertEqual(output_ref, output)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")

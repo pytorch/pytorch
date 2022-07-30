@@ -91,7 +91,8 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_scatter_with_scaling_tensors_(
+c10::intrusive_ptr<ProcessGroup::Work>
+nccl_premulsum_reduce_scatter_with_scaling_tensors_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -99,16 +100,16 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_scatter_with_scalin
     at::TensorList tensors,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  auto scale_tensors_vec = tensors.vec();
   return process_group->reduce_scatter(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-        c10d::makeNCCLPreMulSum(tensor_vec),
-        std::chrono::milliseconds(timeout)});
+          c10d::makeNCCLPreMulSum(tensor_vec),
+          std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_scatter_with_scaling_scalar_(
+c10::intrusive_ptr<ProcessGroup::Work>
+nccl_premulsum_reduce_scatter_with_scaling_scalar_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -119,8 +120,8 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_scatter_with_scalin
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-        c10d::makeNCCLPreMulSum(double_factor),
-        std::chrono::milliseconds(timeout)});
+          c10d::makeNCCLPreMulSum(double_factor),
+          std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_(
@@ -140,7 +141,8 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_(
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_with_scaling_tensors_(
+c10::intrusive_ptr<ProcessGroup::Work>
+nccl_premulsum_reduce_with_scaling_tensors_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
@@ -153,13 +155,14 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_with_scaling_tensor
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-      c10d::makeNCCLPreMulSum(factor_tensor_vec),
+          c10d::makeNCCLPreMulSum(factor_tensor_vec),
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_with_scaling_scalar_(
+c10::intrusive_ptr<ProcessGroup::Work>
+nccl_premulsum_reduce_with_scaling_scalar_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
@@ -171,7 +174,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_with_scaling_scalar
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-      c10d::makeNCCLPreMulSum(double_factor),
+          c10d::makeNCCLPreMulSum(double_factor),
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
@@ -568,37 +571,51 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce_scatter(
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts) {
   TORCH_INTERNAL_ASSERT(process_group->getBackendName() == "nccl", "");
-  const auto* preMulSumSupplement = reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(opts.reduceOp.supplement_.get());
+  const auto* preMulSumSupplement =
+      reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(
+          opts.reduceOp.supplement_.get());
   const bool has_tensor = !preMulSumSupplement->tensor_factors.empty();
   if (has_tensor) {
     at::TensorList scale_factors{preMulSumSupplement->tensor_factors};
     static auto op =
         c10::Dispatcher::singleton()
-          .findSchemaOrThrow(
-              "c10d::nccl_premulsum_reduce_scatter_with_scaling_tensors_", "")
-          .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-              const std::vector<at::Tensor>&,
-              const std::vector<std::vector<at::Tensor>>,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              int64_t reduce_op,
-              at::TensorList,
-              int64_t timeout)>();
-    return op.call(output_tensors, input_tensors, process_group, static_cast<int64_t>(opts.reduceOp), scale_factors, opts.timeout.count());
+            .findSchemaOrThrow(
+                "c10d::nccl_premulsum_reduce_scatter_with_scaling_tensors_", "")
+            .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                const std::vector<at::Tensor>&,
+                const std::vector<std::vector<at::Tensor>>&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                int64_t,
+                at::TensorList,
+                int64_t)>();
+    return op.call(
+        output_tensors,
+        input_tensors,
+        process_group,
+        static_cast<int64_t>(opts.reduceOp),
+        scale_factors,
+        opts.timeout.count());
   } else {
     const double double_factor{preMulSumSupplement->double_factor};
 
     static auto op =
         c10::Dispatcher::singleton()
-          .findSchemaOrThrow(
-              "c10d::nccl_premulsum_reduce_scatter_with_scaling_scalar_", "")
-          .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-              const std::vector<at::Tensor>&,
-              const std::vector<std::vector<at::Tensor>>,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              int64_t reduce_op,
-              double,
-              int64_t timeout)>();
-    return op.call(output_tensors, input_tensors, process_group, static_cast<int64_t>(opts.reduceOp), double_factor, opts.timeout.count());
+            .findSchemaOrThrow(
+                "c10d::nccl_premulsum_reduce_scatter_with_scaling_scalar_", "")
+            .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                const std::vector<at::Tensor>&,
+                const std::vector<std::vector<at::Tensor>>&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                int64_t reduce_op,
+                double,
+                int64_t timeout)>();
+    return op.call(
+        output_tensors,
+        input_tensors,
+        process_group,
+        static_cast<int64_t>(opts.reduceOp),
+        double_factor,
+        opts.timeout.count());
   }
 }
 
@@ -607,19 +624,23 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce(
     at::TensorList tensors,
     const ReduceOptions& opts) {
   TORCH_INTERNAL_ASSERT(process_group->getBackendName() == "nccl", "");
-  const auto* preMulSumSupplement = reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(opts.reduceOp.supplement_.get());
+  const auto* preMulSumSupplement =
+      reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(
+          opts.reduceOp.supplement_.get());
   const bool has_tensor = !preMulSumSupplement->tensor_factors.empty();
   if (has_tensor) {
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("c10d::nccl_premulsum_reduce_with_scaling_tensors_", "")
-                         .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-                             at::TensorList,
-                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             int64_t,
-                             int64_t,
-                             int64_t,
-                             at::TensorList,
-                             int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow(
+                "c10d::nccl_premulsum_reduce_with_scaling_tensors_", "")
+            .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                int64_t,
+                int64_t,
+                int64_t,
+                at::TensorList,
+                int64_t)>();
     return op.call(
         tensors,
         process_group,
@@ -629,16 +650,18 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_reduce(
         at::TensorList{preMulSumSupplement->tensor_factors},
         opts.timeout.count());
   } else {
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("c10d::nccl_premulsum_reduce_with_scaling_tensors_", "")
-                         .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-                             at::TensorList,
-                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             int64_t,
-                             int64_t,
-                             int64_t,
-                             double,
-                             int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow(
+                "c10d::nccl_premulsum_reduce_with_scaling_scalar_", "")
+            .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                int64_t,
+                int64_t,
+                int64_t,
+                double,
+                int64_t)>();
     return op.call(
         tensors,
         process_group,

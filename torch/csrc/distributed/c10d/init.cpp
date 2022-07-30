@@ -1133,10 +1133,12 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce(self, tensors, opts);
+                    return ::c10d::ops::nccl_premulsum_reduce(
+                        self, tensors, opts);
                   }
 #endif
-                  TORCH_CHECK(false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
+                  TORCH_CHECK(
+                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
                 }
                 return ::c10d::ops::reduce(self, tensors, opts);
               },
@@ -1160,7 +1162,8 @@ Arguments:
                     return ::c10d::ops::nccl_premulsum_reduce(self, xs, opts);
                   }
 #endif
-                  TORCH_CHECK(false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
+                  TORCH_CHECK(
+                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
                 }
                 return ::c10d::ops::reduce(self, xs, opts);
               },
@@ -1284,10 +1287,12 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce_scatter(self, output_tensors, input_tensors, opts);
+                    return ::c10d::ops::nccl_premulsum_reduce_scatter(
+                        self, output_tensors, input_tensors, opts);
                   }
 #endif
-                  TORCH_CHECK(false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
+                  TORCH_CHECK(
+                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
                 }
                 return ::c10d::ops::reduce_scatter(
                     self, output_tensors, input_tensors, opts);
@@ -1310,10 +1315,12 @@ Arguments:
                 if (op.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce_scatter(self, outputs, inputs, opts);
+                    return ::c10d::ops::nccl_premulsum_reduce_scatter(
+                        self, outputs, inputs, opts);
                   }
 #endif
-                  TORCH_CHECK(false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
+                  TORCH_CHECK(
+                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
                 }
                 return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
               },
