@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# pyre-strict
 
 import torch
 import torch.fx as fx
@@ -11,7 +12,7 @@ from torch.fx.passes.infra.pass_manager import (
     _topological_sort_passes,
 )
 
-def replace_add_with_mul_pass(gm):
+def replace_add_with_mul_pass(gm: torch.fx.GraphModule) -> PassResult:
     modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.add:
@@ -19,7 +20,7 @@ def replace_add_with_mul_pass(gm):
             modified = True
     return PassResult(gm, modified)
 
-def replace_mul_with_div_pass(gm):
+def replace_mul_with_div_pass(gm: torch.fx.GraphModule) -> PassResult:
     modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.mul:
@@ -28,17 +29,17 @@ def replace_mul_with_div_pass(gm):
     return PassResult(gm, modified)
 
 class AddModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         y = torch.add(x, x)
         z = torch.add(y, x)
         return z
 
 
 class TestPassManager(TestCase):
-    def test_pass_manager(self):
+    def test_pass_manager(self) -> None:
         """
         Tests that the pass manager runs the passes correctly.
         """
@@ -59,7 +60,7 @@ class TestPassManager(TestCase):
             if node.op == "call_function":
                 self.assertEqual(node.target, torch.div)
 
-    def test_this_before_that_pass_constraint(self):
+    def test_this_before_that_pass_constraint(self) -> None:
         """
         Tests the construction of constraints
         """
@@ -90,7 +91,7 @@ class TestPassManager(TestCase):
         with self.assertRaises(ValueError):
             pm(traced_m)
 
-    def test_pass_manager_bad_checks(self):
+    def test_pass_manager_bad_checks(self) -> None:
         """
         Checks that we error if we pass in a check function with the wrong parameters
         """
@@ -100,27 +101,27 @@ class TestPassManager(TestCase):
         pm = PassManager()
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
 
-    def test_topological_sort(self):
+    def test_topological_sort(self) -> None:
         """
         Tests that passes are correctly ordered based on contraints.
         """
 
-        def pass0(x):
+        def pass0(x: torch.Tensor) -> torch.Tensor:
             return x
 
-        def pass1(x):
+        def pass1(x: torch.Tensor) -> torch.Tensor:
             return x + 1
 
-        def pass2(x):
+        def pass2(x: torch.Tensor) -> torch.Tensor:
             return x + 2
 
-        def pass3(x):
+        def pass3(x: torch.Tensor) -> torch.Tensor:
             return x + 3
 
-        def pass4(x):
+        def pass4(x: torch.Tensor) -> torch.Tensor:
             return x + 4
 
-        def pass5(x):
+        def pass5(x: torch.Tensor) -> torch.Tensor:
             return x + 5
 
         # Not passing any constraints should keep the original order
