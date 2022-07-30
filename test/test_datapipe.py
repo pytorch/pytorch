@@ -1371,7 +1371,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, "y", error=ValueError)
-        _helper(None, fn_n1, ["x", "y"], error=ValueError)
+        _helper(None, fn_1n, ["x", "y"], error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
