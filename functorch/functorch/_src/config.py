@@ -18,3 +18,5 @@ use_functionalize = False
 #   fix for test_aot_autograd_exhaustive_sgn_cpu_float32 _efficientzerotensor
 #   fix for complex numbers
 use_fake_tensor = False
+
+use_autograd_function = True

@@ -42,7 +42,7 @@ Context = Any
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    keys = sorted(d.keys())
+    keys = d.keys()
     values = [d[key] for key in keys]
     return values, keys
 
@@ -317,6 +317,11 @@ def rearrange(tensor_args, static_args, static_argnums):
 
     return args
 
+def fake_signature(fn, nargs):
+    """FX gets confused by varargs, de-confuse it"""
+    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
+
 
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool]
 
@@ -493,15 +498,17 @@ def aot_function(
                         )
                 out_spec.set(spec)
                 return flat_out
-
-            compiled_fn = create_aot_autograd_function(
-                flat_fn,
-                fw_compiler,
-                bw_compiler,
-                partition_fn,
-                decompositions,
-                grad_state=torch.is_grad_enabled(),
-            ).apply
+            if not any([arg.requires_grad for arg in flat_tensor_args]):
+                compiled_fn = fw_compiler(make_fx(fake_signature(flat_fn, len(flat_tensor_args)))(*flat_tensor_args), flat_tensor_args)
+            else:
+                compiled_fn = create_aot_autograd_function(
+                    flat_fn,
+                    fw_compiler,
+                    bw_compiler,
+                    partition_fn,
+                    decompositions,
+                    grad_state=torch.is_grad_enabled(),
+                ).apply
             cached_res = (compiled_fn, out_spec)
 
             # Save the compiled_fn in the cache
