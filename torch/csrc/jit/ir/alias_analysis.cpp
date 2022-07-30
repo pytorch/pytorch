@@ -636,6 +636,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::rpc_sync:
     case prim::rpc_remote:
       return analyzeRpcAsync(node);
+    case aten::batch_norm:
+      return analyzeBatchNorm(node);
+    case aten::instance_norm:
+      return analyzeInstanceNorm(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::BroadcastMKLDNNTensors: {
@@ -804,28 +808,6 @@ void AliasDb::analyzeImpl(Node* node) {
       analysis == AliasAnalysisKind::FROM_SCHEMA,
       "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
-  torch::utils::SchemaInfo schema_info(schema);
-
-  // Add arguments for batch_norm and instance_norm special case.
-  if (node->hasNamedInput("training")) {
-    if (isFrozen_) {
-      schema_info.addArgumentValue("training", false);
-    } else {
-      auto value = constant_as<bool>(node->namedInput("training"));
-      if (value.has_value()) {
-        schema_info.addArgumentValue("training", *value);
-      }
-    }
-  } else if (node->hasNamedInput("use_input_stats")) {
-    if (isFrozen_) {
-      schema_info.addArgumentValue("use_input_stats", false);
-    } else {
-      auto value = constant_as<bool>(node->namedInput("use_input_stats"));
-      if (value.has_value()) {
-        schema_info.addArgumentValue("use_input_stats", *value);
-      }
-    }
-  }
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
@@ -833,10 +815,6 @@ void AliasDb::analyzeImpl(Node* node) {
   for (const auto i : c10::irange(schema.arguments().size())) {
     const at::AliasInfo* formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
-    // Record writes
-    if (schema_info.is_mutable({c10::SchemaArgType::input, i})) {
-      registerWrite(actualValue, node);
-    }
 
     // Skip if there's no alias annotation
     if (!formal) {
@@ -866,6 +844,11 @@ void AliasDb::analyzeImpl(Node* node) {
     // Bind the formal to the actual
     formalToActual[formalAlias] = actualValue;
 
+    // Record writes
+    if (formal->isWrite()) {
+      registerWrite(actualValue, node);
+    }
+
     // Now deal with sets after the '->'
     if (formal->isWildcardAfter()) {
       TORCH_INTERNAL_ASSERT(
@@ -884,10 +867,6 @@ void AliasDb::analyzeImpl(Node* node) {
   for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
     const at::AliasInfo* formal = schema.returns()[i].alias_info();
-    // Record writes
-    if (schema_info.is_mutable({c10::SchemaArgType::output, i})) {
-      registerWrite(actual, node);
-    }
     if (!formal) {
       // This is a fresh tensor
       giveFreshAlias(actual);
@@ -929,6 +908,11 @@ void AliasDb::analyzeImpl(Node* node) {
     //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
     if (!inputs_has_alias && formal->beforeSets().size()) {
       giveFreshAlias(actual);
+    }
+
+    // Record writes
+    if (formal->isWrite()) {
+      registerWrite(actual, node);
     }
   }
 }
@@ -1067,6 +1051,73 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   // Give the future that the rpc_async emits a fresh value
   for (const auto output : node->outputs()) {
     giveFreshAlias(output);
+  }
+}
+
+namespace {
+c10::optional<bool> getConstantBooleanInput(
+    Node* node,
+    const std::string& inputName) {
+  TORCH_INTERNAL_ASSERT(
+      node->hasNamedInput(inputName), inputName + " input is expected");
+  auto value = node->namedInput(inputName);
+  TORCH_INTERNAL_ASSERT(
+      value->type() == BoolType::get(),
+      inputName + "training input is expected to be a bool");
+  return constant_as<bool>(value);
+}
+} // namespace
+
+// custom behavior for batch_norm because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// training
+void AliasDb::analyzeBatchNorm(Node* node) {
+  // we invoking freezing for inference, so we assume training will be folded to
+  // a constant false to avoid needing to invoke freezing multiple times in
+  // order to make batch norm weights constant
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
+  if (isFrozen_) {
+    return;
+  }
+
+  auto isTraining = getConstantBooleanInput(node, "training");
+
+  if (!isTraining.has_value() || *isTraining) {
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
+  }
+}
+
+// custom behavior for instance_norm, because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// use_input_stats
+void AliasDb::analyzeInstanceNorm(Node* node) {
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
+  auto useInputStats = getConstantBooleanInput(node, "use_input_stats");
+
+  if (!useInputStats.has_value() || *useInputStats) {
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
   }
 }
 
