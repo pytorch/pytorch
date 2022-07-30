@@ -63,7 +63,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
-import torch.testing._internal.opinfo_helper as opinfo_helper
+import torch.testing._internal.opinfos.helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten

@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
-import torch.testing._internal.opinfo_helper as opinfo_helper
+import torch.testing._internal.opinfos.helper as opinfo_helper
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
 
