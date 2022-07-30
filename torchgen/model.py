@@ -1499,11 +1499,6 @@ class FunctionSchema:
         returns = original_returns + returns_from_mutable_inputs
 
         args_sig = self.arguments.signature(strip_default=strip_default)
-        # See Note [arange.start_step schema]
-        if str(self.name) == "arange.start_step":
-            args_sig = Arguments.parse(
-                str(args_sig).replace("Scalar step", "Scalar step=1")
-            )
         # See Note [bernoulli.p schema]
         if str(self.name) == "bernoulli.p":
             args_sig = Arguments.parse(str(args_sig).replace("float p", "float p=0.5"))

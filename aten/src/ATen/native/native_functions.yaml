@@ -620,13 +620,8 @@
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-# Note [arange.start_step schema]
-# We want `arange.start_step` to be grouped up with `arange.start_out`,
-# But this doesn't happen automatically because the step argument
-# is defaultable for .start_out but not for .start_step.
-# We should probably just make "step" a defaultable param on arange.start,
-# and kill arange.start_step.
-- func: arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: arange.start_step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  cpp_no_default_args: ['step']
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
 
