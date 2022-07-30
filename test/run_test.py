@@ -868,14 +868,15 @@ def get_selected_tests(options):
                 test_file_times = cast(Dict[str, Any], json.load(f))
         else:
             test_file_times = {}
-        if os.environ["TEST_CONFIG"] not in test_file_times:
+        test_config = os.environ.get("TEST_CONFIG")
+        if test_config not in test_file_times:
             print(
                 "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
             )
             selected_tests = selected_tests[which_shard - 1 :: num_shards]
         else:
             print("Found test time stats from artifacts")
-            test_file_times_config = test_file_times[os.environ["TEST_CONFIG"]]
+            test_file_times_config = test_file_times[test_config]
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
             _, tests_from_shard = shards[which_shard - 1]
             selected_tests = tests_from_shard
