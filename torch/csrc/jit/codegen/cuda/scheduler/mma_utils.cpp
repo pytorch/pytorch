@@ -134,6 +134,13 @@ void WarpMmaSwizzler::scheduleMmaWarpOutput(
         setWarpMapped(tv, 4);
       }
       break;
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+      scheduleTuringM16N16K16MmaWarpOutput(tv, options);
+      if (tv->definition()->isA<MmaOp>()) {
+        setWarpMapped(tv, 4);
+      }
+      break;
     default:
       TORCH_CHECK(
           false, "scheduleMmaWarp: unsupported mma option ", toString(macro));
@@ -151,6 +158,8 @@ void WarpMmaSwizzler::scheduleOperandRead(TensorView* tv, MmaOptions options) {
       break;
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
       scheduleTuringOperandRead(tv, options);
       break;
     default:
@@ -505,7 +514,9 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
   // Check mma option is supported
   TORCH_CHECK(
       options.macro == MmaOptions::MacroType::Ampere_16_8_16 ||
-          options.macro == MmaOptions::MacroType::Turing_16_8_16,
+          options.macro == MmaOptions::MacroType::Ampere_16_16_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_8_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_16_16,
       "scheduleLdMatrix: unknown macro for ldmatrix");
 
   if (options.operand == MmaOptions::Operand::A) {
@@ -548,43 +559,80 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
     auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
     auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
-    // validation:
-    TORCH_INTERNAL_ASSERT(
-        canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 8),
-        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
     TORCH_INTERNAL_ASSERT(
         canValidateIsInnerDim(k_dims.back(), tv->axis(-1), 16),
         "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
 
-    if (transposed) {
-      // [8, 16]
-      tv->split(-2, 4);
+    // Each ldmatrix 4 would be loading an effective 16x16x16 tile, which is 2x
+    // the
+    //  size of regular 16x8x16 tile supported by largest mma operation. The
+    //  swizzle also needs to be different to take this into account.
+    // TODO:
+    //  Using an emulated 16x16x16 mma tile is a temporary step to enable the
+    //   widest load possible for scheduler bring up phase.
+    //  A unifying step would be needed in a follow up to support all these
+    //  swizzles
+    //   with a single affine utility.
+    bool use_ldmatrix4 = canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 16);
 
-      // [2i, 4i, 16]
-      tv->reorder({{-1, -2}, {-2, -1}});
-      // [2i, 16, 4i]
+    if (use_ldmatrix4) {
+      // [... N16, K16]
+      tv->split(-2, 8);
+      tv->split(-1, 8);
 
-      tv->merge(-3);
-      // [warp, 4i]
-    } else {
-      //[8, 16]
-      tv->split(-1, 4);
-      tv->split(-2, 2);
+      //       -4   -3  -2  -1
+      // [... N2o, N8, K2o, K8]
+      tv->reorder({{-3, -2}, {-2, -3}});
+      // [... N2o, K2o, N8, K8]
 
-      // 0  1   2   3
-      //[8, oo2,oi2,i4]
-      tv->reorder({{-4, -2}, {-2, -4}});
-
-      // 0     1   2  3
-      //[oi2, oo2, 8,i4]
+      if (transposed) {
+        tv->reorder({{-1, -2}, {-2, -1}});
+      }
 
       tv->merge(-4);
       tv->merge(-3);
-      //  0    1
-      //[warp, i4]
-    }
 
-    tv->axis(-2)->parallelize(ParallelType::TIDx);
+      // [Warp, K8]
+      tv->axis(-2)->parallelize(ParallelType::TIDx);
+      if (is_immediate_output) {
+        tv->axis(-1)->parallelize(ParallelType::Vectorize);
+      }
+    } else {
+      // validation:
+      TORCH_INTERNAL_ASSERT(
+          canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 8),
+          "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+
+      if (transposed) {
+        // [8, 16]
+        tv->split(-2, 4);
+
+        // [2i, 4i, 16]
+        tv->reorder({{-1, -2}, {-2, -1}});
+        // [2i, 16, 4i]
+
+        tv->merge(-3);
+        // [warp, 4i]
+      } else {
+        //[8, 16]
+        tv->split(-1, 4);
+        tv->split(-2, 2);
+
+        // 0  1   2   3
+        //[8, oo2,oi2,i4]
+        tv->reorder({{-4, -2}, {-2, -4}});
+
+        // 0     1   2  3
+        //[oi2, oo2, 8,i4]
+
+        tv->merge(-4);
+        tv->merge(-3);
+        //  0    1
+        //[warp, i4]
+      }
+
+      tv->axis(-2)->parallelize(ParallelType::TIDx);
+    }
   } else {
     TORCH_INTERNAL_ASSERT(false, "unreachable");
   }
@@ -710,6 +758,52 @@ void WarpMmaSwizzler::scheduleTuringM16N8K16MmaWarpOutput(
   if (is_reduction && tv->definition()->isA<MmaOp>()) {
     // Set instruction loops for mma reduce
     for (int pos : c10::irange(4)) {
+      tv->axis(-pos - 1)->parallelize(ParallelType::Mma);
+    }
+  }
+
+  tv->axis(m_pos)->parallelize(ParallelType::TIDx);
+}
+
+void WarpMmaSwizzler::scheduleTuringM16N16K16MmaWarpOutput(
+    TensorView* tv,
+    const MmaOptions& options) {
+  // Assume last 2 dims [M16, N8] or [M16, N8, R]
+  // Locate instruction m
+  bool is_reduction = tv->axis(-1)->isReduction();
+
+  // Make sure instruction tile size is correct.
+  if (is_reduction) {
+    validateMmaRootInnerMNK(tv, options, 16, 16, 16);
+  } else {
+    validateMmaRootInnerMN(tv, options, 16, 16);
+  }
+
+  int m_pos = is_reduction ? -3 : -2;
+  //  m
+  // [16, 16  (,R)]
+
+  tv->split(m_pos + 1, 8);
+  //       m
+  // [16, n2, 8 (,R)]
+  tv->reorder({{m_pos, m_pos - 1}, {m_pos - 1, m_pos}});
+
+  //       m
+  // [n2, 16, 8  (,R)]
+  tv->split(m_pos, 8);
+  tv->split(m_pos + 1, 2);
+
+  //          m
+  // [2o, 8o, 4i, 2i (,R)]
+  tv->merge(m_pos - 1);
+
+  //       m
+  // [2o, Warp, 2i (,R)]
+  TORCH_CHECK(tv->definition() != nullptr);
+
+  if (is_reduction && tv->definition()->isA<MmaOp>()) {
+    // Set instruction loops for mma reduce
+    for (int pos : c10::irange(5)) {
       tv->axis(-pos - 1)->parallelize(ParallelType::Mma);
     }
   }

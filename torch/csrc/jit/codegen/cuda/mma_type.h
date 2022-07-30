@@ -62,7 +62,9 @@ struct MmaOptions {
     NoMMA = 0,
     Volta_16_16_4,
     Ampere_16_8_16,
+    Ampere_16_16_16,
     Turing_16_8_16,
+    Turing_16_16_16,
     Ampere_16_8_8 // place holder for tf32
   };
 

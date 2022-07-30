@@ -276,6 +276,30 @@ DEVICE_INLINE void M16N8K16TN(
   _C[acc_stride + 1] = C_data[3];
 }
 
+template <int acc_stride>
+DEVICE_INLINE void initM16N16K16TN(Array<float, 8, 8>* accumulator) {
+  float* _C = reinterpret_cast<float*>(accumulator);
+  initM16N8K16TN<acc_stride>(reinterpret_cast<Array<float, 4, 4>*>(&_C[0]));
+  initM16N8K16TN<acc_stride>(reinterpret_cast<Array<float, 4, 4>*>(&_C[2]));
+}
+
+template <int acc_stride = 2>
+DEVICE_INLINE void M16N16K16TN(
+    Array<float, 8, 8>* C,
+    Array<__half, 8, 8>* A,
+    Array<__half, 8, 8>* B) {
+  float* _C = reinterpret_cast<float*>(C);
+  __half* _B = reinterpret_cast<__half*>(B);
+  M16N8K16TN<acc_stride>(
+      reinterpret_cast<Array<float, 4, 4>*>(&_C[0]),
+      A,
+      reinterpret_cast<Array<__half, 4, 4>*>(&_B[0]));
+  M16N8K16TN<acc_stride>(
+      reinterpret_cast<Array<float, 4, 4>*>(&_C[2]),
+      A,
+      reinterpret_cast<Array<__half, 4, 4>*>(&_B[4]));
+}
+
 } // namespace Turing
 
 #endif // Arch 75
@@ -336,6 +360,30 @@ DEVICE_INLINE void M16N8K16TN(
   _C[1] = C_data[1];
   _C[acc_stride] = C_data[2];
   _C[acc_stride + 1] = C_data[3];
+}
+
+template <int acc_stride>
+DEVICE_INLINE void initM16N16K16TN(Array<float, 8, 8>* accumulator) {
+  float* _C = reinterpret_cast<float*>(accumulator);
+  initM16N8K16TN<acc_stride>(reinterpret_cast<Array<float, 4, 4>*>(&_C[0]));
+  initM16N8K16TN<acc_stride>(reinterpret_cast<Array<float, 4, 4>*>(&_C[2]));
+}
+
+template <int acc_stride = 2>
+DEVICE_INLINE void M16N16K16TN(
+    Array<float, 8, 8>* C,
+    Array<__half, 8, 8>* A,
+    Array<__half, 8, 8>* B) {
+  float* _C = reinterpret_cast<float*>(C);
+  __half* _B = reinterpret_cast<__half*>(B);
+  M16N8K16TN<acc_stride>(
+      reinterpret_cast<Array<float, 4, 4>*>(&_C[0]),
+      A,
+      reinterpret_cast<Array<__half, 4, 4>*>(&_B[0]));
+  M16N8K16TN<acc_stride>(
+      reinterpret_cast<Array<float, 4, 4>*>(&_C[2]),
+      A,
+      reinterpret_cast<Array<__half, 4, 4>*>(&_B[4]));
 }
 
 } // namespace Ampere

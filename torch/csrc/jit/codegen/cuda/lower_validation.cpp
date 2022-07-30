@@ -1031,6 +1031,7 @@ void validateMma(Fusion* fusion) {
           validateMinimumArch(7, 0);
           break;
         case MmaOptions::MacroType::Turing_16_8_16:
+        case MmaOptions::MacroType::Turing_16_16_16:
           validateMinimumArch(7, 5);
 
           // Check that operands come from ldmatrix, can be
@@ -1039,6 +1040,7 @@ void validateMma(Fusion* fusion) {
           validateTuringMmaInput(mma->inB()->as<TensorView>());
           break;
         case MmaOptions::MacroType::Ampere_16_8_16:
+        case MmaOptions::MacroType::Ampere_16_16_16:
           validateMinimumArch(8, 0);
 
           // Check that operands come from ldmatrix, can be
