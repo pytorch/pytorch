@@ -1882,14 +1882,14 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::Tensor result, unused;
   // Note [is_nested check]
-  // We intercept matmul for nested tensor because from our understanding:
-  // matmul is CompositeImplicit, so in order to make autograd work for nested tensor
-  // we need to intercept matmul to call an op who has a backward formula
-  // Here the op is at::_NestedTensor_GeneralizedBMM
-  // TODO: We can remove this interception in the future if either comes true:
-  //       * we implement the more advanced nested reshape so that we can use bmm instead of matmul
-  //       * we find a way to register matmul backward formula dedicated to nested tensor backends
-  //         without affecting the CompositeImplicit-ness
+  // We have 2 choices to support nested tensor matmul:
+  // 1. intercept here by is_nested check
+  // 2. add nested tensor dispatch key
+  // Although 1. is gross, we still choose 1. because we hesitate about 2.:
+  // * We tried 2. for reshape and it caused a weird autograd bug
+  //   (see comment in reshape in TensorShape.cpp)
+  // * but 2. for linear works?
+  // TODO: use 2. after we make sure it is fine
   if (tensor1.is_nested() || tensor2.is_nested()) {
     result = at::_NestedTensor_GeneralizedBMM(tensor1, tensor2);
   }

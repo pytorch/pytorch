@@ -1286,6 +1286,36 @@ class TestNestedTensorAutograd(TestCase):
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
 
+    def test_nested_tensor_bmm_gradcheck(self):
+        a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(6, 4, requires_grad=True, dtype=torch.float64)
+        d = torch.randn(6, 5, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, d):
+            nt0 = torch.nested_tensor([a, b])
+            nt1 = torch.nested_tensor([c, d])
+            result = nt0.bmm(nt1)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b, c, d)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_bmm_backward(self):
+        nt0 = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
+        nt1 = torch.nested_tensor([torch.randn((6, 4)), torch.randn((6, 5))]).requires_grad_(True)
+        with torch.no_grad():
+            pt0 = nt0.to_padded_tensor(0.0).requires_grad_(True)
+            pt1 = nt1.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt0.bmm(nt1)
+        ypt = pt0.bmm(pt1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt0.grad.to_padded_tensor(0.0), pt0.grad)
+        self.assertEqual(nt1.grad.to_padded_tensor(0.0), pt1.grad)
+
     def test_nested_tensor_matmul_gradcheck(self):
         a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
         b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64)
@@ -1315,6 +1345,54 @@ class TestNestedTensorAutograd(TestCase):
 
         self.nt_equal(nt0.grad.to_padded_tensor(0.0), pt0.grad)
         self.nt_equal(nt1.grad.to_padded_tensor(0.0), pt1.grad)
+
+    def test_nested_tensor_transpose_gradcheck(self):
+        a = torch.randn(2, 5, requires_grad=True)
+        b = torch.randn(3, 4, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested_tensor([a, b])
+            result = nt.transpose(-2, -1).transpose(-2, -1)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+
+    def test_nested_tensor_transpose_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))]).requires_grad_(True)
+        with torch.no_grad():
+            pt = nt.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt.transpose(-2, -1)
+        ypt = pt.transpose(-2, -1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt.grad.to_padded_tensor(0.0), pt.grad)
+
+    def test_nested_tensor_reshape_gradcheck(self):
+        a = torch.randn(2, 6, requires_grad=True)
+        b = torch.randn(3, 6, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested_tensor([a, b])
+            result = nt.reshape(2, -1, 2, 3)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+
+    def test_nested_tensor_reshape_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
+        with torch.no_grad():
+            pt = nt.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt.reshape(2, -1, 2, 3)
+        ypt = pt.reshape(2, -1, 2, 3)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt.grad.to_padded_tensor(0.0), pt.grad)
 
     def test_nested_tensor_linear(self):
 
