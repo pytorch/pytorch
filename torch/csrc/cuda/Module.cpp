@@ -652,14 +652,10 @@ static void bindGetAllocFreeEvents(PyObject* module) {
   pybind11::class_<c10::cuda::CUDACachingAllocator::AllocFreeEvent>(
       m, "AllocFreeEvent")
       .def(pybind11::init<>())
-      .def_readonly(
+      .def_readwrite(
           "ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
-      .def_readonly(
-          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size)
-      .def_readonly(
-          "type", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::type)
-      .def_readonly(
-          "device", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::device);
+      .def_readwrite(
+          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size);
   m.def(
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,

@@ -491,15 +491,11 @@ class MemoryEventTracker {
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
   void append_alloc_free_event(
       intptr_t ptr,
-      size_t size,
-      bool type,
-      int device) {
+      int size) {
     std::lock_guard<std::mutex> lock(mutex);
     alloc_free_events[device].push_back(AllocFreeEvent{
         ptr, // ptr
         size, // size: of allocation in bytes
-        type, // type: 1 = allocation; 0 = free
-        device // allocation device
     });
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() const {
@@ -1084,9 +1080,7 @@ class DeviceCachingAllocator {
 
     memory_tracker.append_alloc_free_event(
         reinterpret_cast<intptr_t>(block->ptr), // ptr
-        block->size, // size: of allocation in bytes
-        0, // type: 1 = allocation; 0 = free
-        block->device // allocation device
+        -1 * block->size // size: of allocation in bytes, negative for free
     );
 
     size_t original_block_size = block->size;
@@ -1648,9 +1642,7 @@ class THCCachingAllocator {
     Block* block = device_allocator[device]->malloc(device, size, stream);
     memory_tracker.append_alloc_free_event(
         reinterpret_cast<intptr_t>(block->ptr), // ptr
-        size, // size: of allocation in bytes
-        1, // type: 1 = allocation; 0 = free
-        device // allocation device
+        size // size: of allocation in bytes
     );
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;

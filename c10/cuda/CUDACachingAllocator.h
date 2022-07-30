@@ -120,9 +120,7 @@ struct SegmentInfo {
 
 struct AllocFreeEvent {
   intptr_t ptr; // start location in memory
-  size_t size; // size in bytes
-  bool type; // 0 for free and 1 for allocate
-  int device;
+  int size; // size in bytes, negative size for free
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
