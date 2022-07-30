@@ -376,6 +376,7 @@ def get_alloc_free_events() -> list:
     _lazy_init()  # will define _get_alloc_free_events()
     return _get_alloc_free_events()  # type: ignore[name-defined]
 
+
 def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     r"""Checks if peer access between two devices is possible.
     """
