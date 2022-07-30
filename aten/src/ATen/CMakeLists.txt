@@ -178,8 +178,13 @@ else()
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
     ${native_transformers_cpp}
     ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
-    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp}
   )
+
+  # Add NNAPI wrapper only if NNAPI is being used.
+  if(USE_NNAPI)
+    set(all_cpu_cpp ${all_cpu_CPP} ${ATen_NNAPI_SRCS})
+  endif()
 endif()
 
 if(USE_LIGHTWEIGHT_DISPATCH)
