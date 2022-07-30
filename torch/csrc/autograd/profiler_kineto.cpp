@@ -73,9 +73,7 @@ constexpr bool is_py_fields() {
 }
 
 struct EventFieldsVisitor {
-  EventFieldsVisitor(
-      std::shared_ptr<Result>& result,
-      KinetoEvent& kineto_event)
+  EventFieldsVisitor(std::shared_ptr<Result>& result, KinetoEvent& kineto_event)
       : kineto_activity_{result->kineto_activity_},
         kineto_event_{kineto_event} {
     c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
@@ -709,7 +707,7 @@ bool KinetoEvent::isPythonFunction() const {
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {
-  auto get = [&](const auto& i) {
+  auto get = [&](const auto& i) -> auto& {
     return !i.jit_stack_.empty() ? i.jit_stack_ : python_stack_;
   };
 
