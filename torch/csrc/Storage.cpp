@@ -387,7 +387,7 @@ bool THPStorage_init(PyObject* module) {
 }
 
 void THPStorage_postInit(PyObject* module) {
-  THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
+  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass)
     throw python_error();
 }

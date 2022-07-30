@@ -158,10 +158,10 @@ class Tensor(torch._C._TensorBase):
                             f"Unsupported qscheme {self.qscheme()} in deepcopy"
                         )
                     # TODO: Once we decide to break serialization FC, no longer
-                    # need to wrap with _TypedStorage
+                    # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage._TypedStorage(
-                            wrap_storage=new_storage._untyped(), dtype=self.dtype
+                        torch.storage.TypedStorage(
+                            wrap_storage=new_storage.untyped(), dtype=self.dtype
                         ),
                         self.storage_offset(),
                         self.size(),
@@ -255,7 +255,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -324,10 +324,10 @@ class Tensor(torch._C._TensorBase):
                     f"Serialization is not supported for tensors of type {self.qscheme()}"
                 )
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args_qtensor = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -382,10 +382,10 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),

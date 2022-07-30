@@ -1303,7 +1303,7 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 
 
 def check_in_bounds_for_storage(
-    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+    a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
     """
     Determines if the given shape, strides, and offset are valid for the given storage.

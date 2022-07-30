@@ -97,7 +97,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
         self.assertEqual(c[4].dtype, torch.float)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -370,7 +370,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
         self.assertEqual(c[4].dtype, torch.float32)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -621,8 +621,8 @@ class SerializationMixin(object):
             a = torch.tensor([], dtype=dtype, device=device)
 
             for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
-                s = torch._TypedStorage(
-                    wrap_storage=a.storage()._untyped(),
+                s = torch.TypedStorage(
+                    wrap_storage=a.storage().untyped(),
                     dtype=other_dtype)
                 save_load_check(a, s)
                 save_load_check(a.storage(), s)
@@ -653,8 +653,8 @@ class SerializationMixin(object):
                 torch.save([a.storage(), a.imag.storage()], f)
 
             a = torch.randn(10, device=device)
-            s_bytes = torch._TypedStorage(
-                wrap_storage=a.storage()._untyped(),
+            s_bytes = torch.TypedStorage(
+                wrap_storage=a.storage().untyped(),
                 dtype=torch.uint8)
 
             with self.assertRaisesRegex(RuntimeError, error_msg):
