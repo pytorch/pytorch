@@ -18,6 +18,7 @@
 #
 import os
 from os import path
+import re
 # import sys
 import pkgutil
 
@@ -133,7 +134,7 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.fx.backend_config
+    # torch.ao.quantization.backend_config
     "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
@@ -166,6 +167,78 @@ coverage_ignore_classes = [
     "finfo",
     "iinfo",
     "qscheme",
+    "AggregationType",
+    "AliasDb",
+    "AnyType",
+    "Argument",
+    "ArgumentSpec",
+    "BenchmarkConfig",
+    "BenchmarkExecutionStats",
+    "Block",
+    "BoolType",
+    "BufferDict",
+    "CallStack",
+    "Capsule",
+    "ClassType",
+    "Code",
+    "CompleteArgumentSpec",
+    "ComplexType",
+    "ConcreteModuleType",
+    "ConcreteModuleTypeBuilder",
+    "DeepCopyMemoTable",
+    "DeserializationStorageContext",
+    "DeviceObjType",
+    "DictType",
+    "EnumType",
+    "ExecutionPlan",
+    "FileCheck",
+    "FloatType",
+    "FunctionSchema",
+    "Gradient",
+    "Graph",
+    "GraphExecutorState",
+    "IODescriptor",
+    "InferredType",
+    "IntType",
+    "InterfaceType",
+    "ListType",
+    "LockingLogger",
+    "MobileOptimizerType",
+    "ModuleDict",
+    "Node",
+    "NoneType",
+    "NoopLogger",
+    "NumberType",
+    "OperatorInfo",
+    "OptionalType",
+    "ParameterDict",
+    "PyObjectType",
+    "PyTorchFileReader",
+    "PyTorchFileWriter",
+    "RRefType",
+    "ScriptClass",
+    "ScriptClassFunction",
+    "ScriptDict",
+    "ScriptDictIterator",
+    "ScriptDictKeyIterator",
+    "ScriptList",
+    "ScriptListIterator",
+    "ScriptMethod",
+    "ScriptModule",
+    "ScriptModuleSerializer",
+    "ScriptObject",
+    "ScriptObjectProperty",
+    "SerializationStorageContext",
+    "StaticModule",
+    "StringType",
+    "SymIntType",
+    "ThroughputBenchmark",
+    "TracingState",
+    "TupleType",
+    "Type",
+    "UnionType",
+    "Use",
+    "Value",
     # torch.cuda
     "BFloat16Storage",
     "BFloat16Tensor",
@@ -248,6 +321,7 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
+    "SymIntNode"
 ]
 
 # The suffix(es) of source filenames.
@@ -291,7 +365,7 @@ if RELEASE:
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -569,12 +643,12 @@ def patched_make_field(self, types, domain, items, **kw):
             # inconsistencies later when references are resolved
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
-                typename = u''.join(n.astext() for n in fieldtype)
-                typename = typename.replace('int', 'python:int')
-                typename = typename.replace('long', 'python:long')
-                typename = typename.replace('float', 'python:float')
-                typename = typename.replace('bool', 'python:bool')
-                typename = typename.replace('type', 'python:type')
+                typename = fieldtype[0].astext()
+                builtin_types = ['int', 'long', 'float', 'bool', 'type']
+                for builtin_type in builtin_types:
+                    pattern = fr'(?<![\w.]){builtin_type}(?![\w.])'
+                    repl = f'python:{builtin_type}'
+                    typename = re.sub(pattern, repl, typename)
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis, **kw))
             else:

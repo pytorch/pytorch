@@ -20,8 +20,8 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, TEST_DILL, \
+    run_tests, download_file, BytesIOContext, TemporaryFileName, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -898,6 +898,10 @@ class TestGetStateSubclass(torch.Tensor):
         self.reloaded = True
 
 
+class TestEmptySubclass(torch.Tensor):
+    ...
+
+
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
@@ -948,8 +952,37 @@ class TestSubclassSerialization(TestCase):
         self.assertEqual(new_tensor.elem, my_tensor.elem)
         self.assertEqual(new_tensor.foo, foo_val)
 
+    @parametrize('requires_grad', (True, False))
+    def test_cloned_deepcopy(self, requires_grad):
+        my_tensor = torch.rand(2, requires_grad=requires_grad, device='meta')
+
+        new_tensor = deepcopy(my_tensor)
+
+        self.assertEqual(new_tensor.requires_grad, my_tensor.requires_grad)
+
+    def test_empty_class_serialization(self):
+        tensor = TestEmptySubclass([1.])
+        # Ensures it runs fine
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
+
+        tensor = TestEmptySubclass()
+        # Ensures it runs fine
+        # Note that tensor.data_ptr() == 0 here
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
+
 
 instantiate_device_type_tests(TestBothSerialization, globals())
+instantiate_parametrized_tests(TestSubclassSerialization)
 
 if __name__ == '__main__':
     run_tests()

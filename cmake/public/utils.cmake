@@ -449,7 +449,6 @@ function(torch_compile_options libname)
         -Wall
         -Wextra
         -Wno-unused-parameter
-        -Wno-unused-variable
         -Wno-unused-function
         -Wno-unused-result
         -Wno-unused-local-typedefs

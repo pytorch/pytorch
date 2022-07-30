@@ -49,6 +49,7 @@ __device__ void sync(
     // If for persistent kernels, lock all blocks until the semaphore has been
     // reached. Make sure we access semaphore as a volatile address so we get
     // the global memory updates.
+    unsigned int ns = 8;
     while ((PERSISTENT || last_block) &&
            ((oldArrive ^ globalAsVolatile(semaphore)) & FIRST_UINT64_BIT) ==
                0) {
@@ -56,7 +57,10 @@ __device__ void sync(
       // semaphore, giving a better chance for other warps/blocks to catch up.
 #if __CUDA_ARCH__ >= 700
       // __nanosleep only available on compute capability 7.0 or higher
-      __nanosleep(200); // avoids busy waiting
+      __nanosleep(ns); // avoids busy waiting
+      if (ns < 256) {
+        ns *= 2;
+      }
 #endif
     }
   }
@@ -71,6 +75,62 @@ __device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
       semaphore,
       segment_size,
       index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim));
+}
+
+// Grid sync that can be called multiple times in the same kernel without all
+// blocks being resident on device. This allows grid sync to be called multiple
+// times as long as it's not broadcasted on the parallel axis it was reduced on.
+//
+// n_entrances is how many times every block is expected to enter into this
+// function. All blocks must enter n_entrances times. The last block is only
+// allowed to proceed once all other blocks have entered n_entrance
+// times.
+//
+// Note that this is not currently used by grid and welford reduction
+// as they use a separate sync flag for each each grid sync call.
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
+__device__ void sync(
+    int64_t& semaphore,
+    const uint64_t& segment_size,
+    const nvfuser_index_t n_entrances) {
+  // Finish all global memory transactions before synchronizing
+  __threadfence();
+
+  // Synchronize all threads in a block before synchronizing blocks
+  block_sync::sync();
+
+  // Only allow linear_tid == 0 to participate in the synchronization
+  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+    // Makes the assumption that blocks are in increasing order, this is not
+    // guaranteed by CUDA but this is the current behavior, and unlikely to
+    // change.
+    bool last_block =
+        index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
+    if (last_block) {
+      int64_t finished_val =
+          ((int64_t)(
+              index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim) -
+              1)) *
+          ((int64_t)n_entrances);
+
+      unsigned int ns = 8;
+      // Last block needs to wait for all other blocks to finish
+      while (globalAsVolatile(semaphore) < finished_val) {
+#if __CUDA_ARCH__ >= 700
+        // __nanosleep only available on compute capability 7.0 or higher
+        __nanosleep(ns); // avoids busy waiting
+        if (ns < 256) {
+          ns *= 2;
+        }
+#endif
+      }
+    } else {
+      auto old = atomicAdd(reinterpret_cast<uint64_t*>(&semaphore), 1);
+    }
+  }
+
+  // Sync block to make sure all other threads are waiting on the sync
+  block_sync::sync();
 }
 
 } // namespace grid_sync

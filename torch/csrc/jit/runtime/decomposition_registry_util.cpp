@@ -3,7 +3,7 @@
  * @generated
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
- * cd ~/pytorch && python tools/codegen/decompositions/gen_jit_decompositions.py
+ * cd ~/pytorch && python torchgen/decompositions/gen_jit_decompositions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>

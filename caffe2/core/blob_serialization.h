@@ -296,7 +296,7 @@ inline std::string SerializeBlobProtoAsString_EnforceCheck(
 
 int64_t NumelFromTensorProto(const TensorProto& tensor_proto);
 
-std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto);
+c10::IntArrayRef DimsFromTensorProto(const TensorProto& proto);
 
 TypeMeta GetDataType(const TensorProto& tensor_proto);
 
