@@ -1260,6 +1260,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
+        _helper(None, fn_1n, [1, 2], error=ValueErrror)
         # Fn has keyword-only arguments
         _helper(None, fn_n1_kwargs, 1, error=ValueError)
         _helper(None, fn_cmplx, [0, 1], 2, ValueError)
@@ -1370,6 +1371,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, "y", error=ValueError)
+        _helper(None, fn_n1, ["x", "y"], error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
