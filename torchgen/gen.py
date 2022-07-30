@@ -1366,17 +1366,18 @@ def get_native_function_declarations(
     newline = "\n"
     for f in grouped_native_functions:
         native_function_namespaces = set()
-        for backend_idx in backend_indices.values():
+        dispatch_keys = set()
+        for dispatch_key, backend_idx in backend_indices.items():
             backend_metadata = backend_idx.get_kernel(f)
-            namespace = (
-                backend_metadata.cpp_namespace
-                if backend_metadata
-                else DEFAULT_KERNEL_NAMESPACE
-            )
-            native_function_namespaces.add(namespace)
+            if backend_metadata:
+                namespace = backend_metadata.cpp_namespace
+                dispatch_keys.add(dispatch_key)
+                native_function_namespaces.add(namespace)
+            else:
+                namespace = DEFAULT_KERNEL_NAMESPACE
             assert (
-                len(native_function_namespaces) == 1
-            ), "Codegen only supports one namespace per operator."
+                len(native_function_namespaces) <= 1
+            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
                 dest.compute_native_function_declaration(f, backend_idx)
             )

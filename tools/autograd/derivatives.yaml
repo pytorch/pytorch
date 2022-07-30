@@ -1038,7 +1038,7 @@
   self: grad.expand(self.sizes()) / self.numel()
   result: auto_linear
 
-- name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
   result: auto_linear
 
