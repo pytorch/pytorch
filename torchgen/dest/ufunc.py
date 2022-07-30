@@ -286,13 +286,14 @@ def compute_ufunc_cuda(g: NativeFunctionsGroup) -> str:
 
     # Next, build the conditionals
     sig = StructuredImplSignature(g, ufunc.kernel_name(g, DispatchKey.CUDA))
+    supported_dtypes = sorted(ufunctor_sigs.keys(), key=lambda x: str(x))
     dtype_cases = []
-    for dtype, inner_ufunctor_sigs in ufunctor_sigs.items():
+    for dtype in supported_dtypes:
         dtype_cases.append(
             f"""
 AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
-    {compute_ufunc_cuda_dtype_body(g, dtype, inner_ufunctor_sigs, sig.arguments())}
+    {compute_ufunc_cuda_dtype_body(g, dtype, ufunctor_sigs[dtype], sig.arguments())}
   }}
 )
 """
@@ -514,13 +515,14 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
                     )
 
     # Build the conditionals
+    supported_dtypes = sorted(ufunc_sigs.keys(), key=lambda x: str(x))
     dtype_cases = []
-    for dtype, inner_ufunc_sigs in ufunc_sigs.items():
+    for dtype in supported_dtypes:
         dtype_cases.append(
             f"""
 AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
-    {compute_ufunc_cpu_dtype_body(g, dtype, inner_ufunc_sigs, stub_sig.arguments())}
+    {compute_ufunc_cpu_dtype_body(g, dtype, ufunc_sigs[dtype], stub_sig.arguments())}
   }}
 )
 """
