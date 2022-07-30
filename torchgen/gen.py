@@ -1890,7 +1890,7 @@ def gen_headers(
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
     def gen_tags_enum() -> Dict[str, str]:
-        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
     core_fm.write("enum_tag.h", gen_tags_enum)
 
