@@ -1047,32 +1047,31 @@ def var_correction(
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
-    if dim is None:
-        dim = []
+    dims: List[int] = [] if dim is None else dim
 
     if x.is_complex():
         # For complex, calculate variance of real and imaginary components
         # separately then add to get overall variance.
         real_in = x.real
-        var_real = torch.var(real_in, dim, correction=correction, keepdim=keepdim)
+        var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
         imag_in = x.imag
-        var_imag = torch.var(imag_in, dim, correction=correction, keepdim=keepdim)
+        var_imag = torch.var(imag_in, dims, correction=correction, keepdim=keepdim)
         return var_real + var_imag
 
     if correction is None:
         correction = 0
 
-    if len(dim) == 0:
+    if len(dims) == 0:
         n = prod(x.shape)  # type: ignore[arg-type]
     else:
         n = 1
-        for dim in dim:
-            n *= x.shape[dim]
+        for d in dims:
+            n *= x.shape[d]
 
-    mean = torch.mean(x, dim, True)
+    mean = torch.mean(x, dims, True)
     sub = x - mean
     sq = sub * sub
-    sum = torch.sum(sq, dim, keepdim)
+    sum = torch.sum(sq, dims, keepdim)
 
     if correction:
         n = n - correction
