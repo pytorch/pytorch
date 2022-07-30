@@ -760,6 +760,13 @@ Tensor softmax_nested(
 }
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
+  if (self.is_nested() && !mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
+  }
+  else if (!self.is_nested() && mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a non-nested self and nested other");
+  }
+  // dispatcher should have guaranteed that at least one is nested
   auto self_ptr = get_nested_tensor_impl(self);
   auto mat2_ptr = get_nested_tensor_impl(mat2);
   TORCH_CHECK(self_ptr->dim() == 3, "batch1 must be a 3D tensor");
@@ -870,6 +877,13 @@ _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
 // and since nested tensor does not support broadcasting for now,
 // for each batch dimension `self` and `mat2` must have same size.
 Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
+  if (self.is_nested() && !mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
+  }
+  else if (!self.is_nested() && mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a non-nested self and nested other");
+  }
+  // dispatcher should have guaranteed that at least one is nested
   auto self_ptr = get_nested_tensor_impl(self),
       mat2_ptr = get_nested_tensor_impl(mat2);
   int64_t self_dim = self_ptr->dim(),

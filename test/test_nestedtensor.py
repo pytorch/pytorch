@@ -777,6 +777,19 @@ class TestNestedTensorDeviceType(TestCase):
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     def test_bmm(self, device, dtype):
+        # error case: one is nested but the other is not
+        nt = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        t = torch.randn(4, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a nested self and non-nested other",
+            lambda: nt.bmm(t)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a non-nested self and nested other",
+            lambda: t.bmm(nt)
+        )
         # error case: not 3D tensors
         nt0 = torch.nested_tensor([], device=device, dtype=dtype)
         nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
@@ -863,6 +876,19 @@ class TestNestedTensorDeviceType(TestCase):
     # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     def test_matmul(self, device, dtype):
+        # error case: one is nested but the other is not
+        nt = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        t = torch.randn(4, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a nested self and non-nested other",
+            lambda: torch.matmul(nt, t)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a non-nested self and nested other",
+            lambda: torch.matmul(t, nt)
+        )
         # error case: not 3+D tensors
         nt0 = torch.nested_tensor([], device=device, dtype=dtype)
         nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
