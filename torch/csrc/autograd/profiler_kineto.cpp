@@ -674,7 +674,7 @@ bool KinetoEvent::isPythonFunction() const {
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {
-  auto get = [&](const auto& i) {
+  auto get = [&](const auto& i) -> auto& {
     return !i.jit_stack_.empty() ? i.jit_stack_ : python_stack_;
   };
 
