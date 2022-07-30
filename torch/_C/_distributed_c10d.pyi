@@ -134,7 +134,7 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int = ...,
+        world_size: Optional[int] = ...,
         is_master: bool = ...,
         timeout: timedelta = ...,
         wait_for_workers: bool = ...,
@@ -371,6 +371,15 @@ class ProcessGroupNCCL(ProcessGroup):
     def _group_end() -> None: ...
     ...
 
+class ProcessGroupUCC(ProcessGroup):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        timeout: timedelta,
+    ): ...
+
 class ProcessGroupMPI(ProcessGroup):
     def __init__(
         self,
@@ -395,5 +404,7 @@ def _broadcast_coalesced(
 ): ...
 def _test_python_store(store: Store): ...
 def _verify_params_across_processes(
-    process_group: ProcessGroup, params: List[Tensor]
+    process_group: ProcessGroup,
+    params: List[Tensor],
+    logger: Optional[Logger],
 ): ...

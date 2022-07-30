@@ -145,7 +145,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
     5. After [rebuilding PyTorch](https://github.com/pytorch/pytorch#from-source), run the following command to auto update the file [`torch/csrc/jit/mobile/upgrader_mobile.cpp`](https://github.com/pytorch/pytorch/blob/8757e21c6a4fc00e83539aa7f9c28eb11eff53c1/torch/csrc/jit/mobile/upgrader_mobile.cpp). After rebuild PyTorch from source (`python setup.py`), run
 
   ```
-  python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
+  python pytorch/torchgen/operator_versions/gen_mobile_upgraders.py
   ```
 
     6. Add a test. With the model generated from step 1, you will need to add tests in `test/test_save_load_for_op_versions.py`. Following is an example to write a test

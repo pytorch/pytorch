@@ -58,7 +58,7 @@ class ShmProcessMutexCheck {
 template <class Derived>
 struct shm_traits;
 
-using ShmBaseHeader = struct {
+struct ShmBaseHeader {
   std::atomic<bool> isInitialized;
   std::atomic<int> countMapped;
   std::atomic<pid_t> owner;

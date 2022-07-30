@@ -16,15 +16,18 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
         description: Permissions for pushing to the docs site.
-
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
 
 jobs:
   build-docs:
@@ -69,8 +72,6 @@ jobs:
 
       - name: Build ${{ matrix.docs_type }} docs
         env:
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
@@ -86,13 +87,10 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
-            -e PR_LABELS \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -112,7 +110,7 @@ jobs:
         if: always()
 
       - name: Upload Python Docs Preview
-        uses: seemethere/upload-artifact-s3@v4
+        uses: seemethere/upload-artifact-s3@v5
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
           retention-days: 14
@@ -122,7 +120,7 @@ jobs:
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview
-        uses: seemethere/upload-artifact-s3@v4
+        uses: seemethere/upload-artifact-s3@v5
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
         with:
           retention-days: 14
