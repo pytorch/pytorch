@@ -6625,7 +6625,8 @@ class TestConsistency(TestCase):
             cpu_samples = op.sample_inputs(device, dtype)
 
             for cpu_sample in cpu_samples:
-                mps_sample = cpu_sample.transform(lambda x: x.to("mps") if isinstance(x, torch.Tensor) else x)
+                cpu_sample = cpu_sample.transform(lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) else x)
+                mps_sample = cpu_sample.transform(lambda x: x.to("mps").requires_grad_() if isinstance(x, torch.Tensor) else x)
 
                 # TODO: This checks only the function variant. We should also check the method and inplace version
                 # when they exist
@@ -6637,6 +6638,11 @@ class TestConsistency(TestCase):
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
                 self.assertEqual(cpu_out, mps_out)
+
+                cpu_out.sum().backward()
+                mps_out.sum().backward()
+                self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
+
         except Exception as e:
             if not generate_new_truth:
                 raise e
