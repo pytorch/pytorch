@@ -171,11 +171,18 @@ bool compatibleType(const torch::jit::Value* val) {
           DataType::Null) {
         return false;
       }
-      // Complex is disabled until its support is completely added
-      // TODO: remove this logic
-      if (isComplexType(aten_to_data_type(tensor_type->scalarType().value()))) {
-        return false;
+      if (!isEnabled(EnableOption::Complex)) {
+        // Complex is disabled by default until its support is completely added
+        // TODO: remove this logic
+        if (isComplexType(
+                aten_to_data_type(tensor_type->scalarType().value()))) {
+          return false;
+        }
       }
+    }
+    // magic number 8 here since our kernel argument only supports rank <= 8
+    if (tensor_type->dim().has_value() && (tensor_type->dim().value() > 8)) {
+      return false;
     }
   }
   return true;

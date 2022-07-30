@@ -307,7 +307,7 @@ class PruningContainer(BasePruningMethod):
                 + " Found '{}'".format(method._tensor_name)
             )
         # if all checks passed, add to _pruning_methods tuple
-        self._pruning_methods += (method,)
+        self._pruning_methods += (method,)  # type: ignore[operator]
 
     def __len__(self):
         return len(self._pruning_methods)
@@ -1315,7 +1315,7 @@ def _compute_nparams_toprune(amount, tensor_size):
     if isinstance(amount, numbers.Integral):
         return amount
     else:
-        return int(round(amount * tensor_size))  # int needed for Python 2
+        return round(amount * tensor_size)
 
 
 def _validate_pruning_dim(t, dim):

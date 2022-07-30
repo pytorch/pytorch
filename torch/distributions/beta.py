@@ -6,6 +6,7 @@ from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Beta']
 
 class Beta(ExponentialFamily):
     r"""
@@ -47,6 +48,10 @@ class Beta(ExponentialFamily):
     @property
     def mean(self):
         return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def mode(self):
+        return self._dirichlet.mode[..., 0]
 
     @property
     def variance(self):

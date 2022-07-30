@@ -239,19 +239,72 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   return result;
 }
 
-Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
-  auto common_size = at::infer_size_dimvector(x1.sizes(), x2.sizes());
-  auto commonDtype = at::result_type(x1, x2);
+Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
+  /*
+   * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
+   *
+   * The current implementation is an improvement over the previous version.
+   *
+   * Previous implementation:
+   * 1. Compute num = <x1, x2>,
+   * 2. Compute denom = ||x1|| * ||x2||,
+   * 3. Compute denom = max(denom, eps) to avoid division by zero,
+   * 4. Return num / denom.
+   *
+   * Previous implementation has the following issues:
+   * 1. Chance of losing precision in <x1, x2> when ||x1|| and ||x2|| are large.
+   * 2. Chance of losing precision in ||x1|| * ||x2|| when ||x1|| and ||x2|| are large.
+   * 3. Losing precision may cause |cosing_similarity(x1, x2)| > 1.0.
+   *
+   * Current implementation:
+   * 1. Compute x1_normalized = x1 / max(||x1||, eps),
+   *            x2_normalized = x2 / max(||x2||, eps),
+   * 2. Return <x1_normalized, x2_normalized>.
+   *
+   * The current implementation improves over the previous one by:
+   * 1. Making sure that <x1, x2> and ||x1|| * ||x2|| are not computed explicitly,
+   *    hence avoiding floating point overflows.
+   * 2. Both methods might have issues with computing ||x1|| and ||x2||, but for
+   *    the current method this is the only source of the floating point imprecision.
+   * 3. Makes sure |cosing_similarity(x1, x2)| <= 1.0.
+   *
+   */
+  auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
-  Tensor x1_ = x1.to(commonDtype).expand(common_size);
-  Tensor x2_ = x2.to(commonDtype).expand(common_size);
-  // Follow scipy impl to improve numerical precision
-  // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
-  Tensor w12 = at::sum(x1_ * x2_, dim);
-  Tensor w1 = at::sum(x1_ * x1_, dim);
-  Tensor w2 = at::sum(x2_ * x2_, dim);
-  Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
-  return w12.div_(n12);
+
+  auto common_size = at::infer_size_dimvector(x1_.sizes(), x2_.sizes());
+  auto x1 = x1_.to(commonDtype).expand(common_size);
+  auto x2 = x2_.to(commonDtype).expand(common_size);
+
+  auto x1_squared_norm = at::pow(x1, 2).sum(dim, /*keepdim=*/true);
+  auto x2_squared_norm = at::pow(x2, 2).sum(dim, /*keepdim=*/true);
+
+  {
+    at::NoGradGuard guard;
+    x1_squared_norm.clamp_min_(eps * eps);
+    x2_squared_norm.clamp_min_(eps * eps);
+  }
+
+  auto x1_norm = x1_squared_norm.sqrt_();
+  auto x2_norm = x2_squared_norm.sqrt_();
+
+  auto x1_normalized = x1.div(x1_norm);
+  auto x2_normalized = x2.div(x2_norm);
+
+  Tensor cos_sim_value = at::sum(x1_normalized * x2_normalized, dim);
+
+  // The code above is resistant to over +/-1 overshoots.
+  // However, if this happens and if it is critical, uncommenting
+  // the lines below will solve the issue.
+  // We keep these lines commented as to reduce the number of kernel
+  // launches for better runtime performance.
+  //{
+  //  at::NoGradGuard guard;
+  //  cos_sim_value.clamp_min_(-1.0);
+  //  cos_sim_value.clamp_max_(1.0);
+  //}
+
+  return cos_sim_value;
 }
 
 }}  // namespace at::native

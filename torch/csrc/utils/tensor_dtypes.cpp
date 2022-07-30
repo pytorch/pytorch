@@ -1,17 +1,16 @@
-#include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 namespace torch {
 namespace utils {
 
-std::pair<std::string, std::string> getDtypeNames(
-    at::ScalarType scalarType) {
+std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
   switch (scalarType) {
     case at::ScalarType::Byte:
       // no "byte" because byte is signed in numpy and we overload
@@ -34,7 +33,7 @@ std::pair<std::string, std::string> getDtypeNames(
     case at::ScalarType::Half:
       return std::make_pair("float16", "half");
     case at::ScalarType::ComplexHalf:
-      return std::make_pair("complex32", "");
+      return std::make_pair("complex32", "chalf");
     case at::ScalarType::ComplexFloat:
       return std::make_pair("complex64", "cfloat");
     case at::ScalarType::ComplexDouble:
@@ -72,7 +71,7 @@ void initializeDtypes() {
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;
     std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
-    PyObject *dtype = THPDtype_New(scalarType, primary_name);
+    PyObject* dtype = THPDtype_New(scalarType, primary_name);
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);
     if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=

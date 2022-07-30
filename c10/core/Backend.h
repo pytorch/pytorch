@@ -45,14 +45,16 @@ enum class Backend {
   XLA,
   Vulkan,
   Metal,
+  Meta,
   QuantizedCPU,
   QuantizedCUDA,
   QuantizedXPU,
   Undefined,
   MkldnnCPU,
-  MLC,
+  MPS,
   HPU,
   Lazy,
+  PrivateUse1,
   NumOptions
 };
 
@@ -73,12 +75,14 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::XLA;
   } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
     return Backend::Lazy;
-  } else if (t == DispatchKey::MLC || t == DispatchKey::AutogradMLC) {
-    return Backend::MLC;
+  } else if (t == DispatchKey::MPS || t == DispatchKey::AutogradMPS) {
+    return Backend::MPS;
   } else if (t == DispatchKey::Vulkan) {
     return Backend::Vulkan;
   } else if (t == DispatchKey::Metal) {
     return Backend::Metal;
+  } else if (t == DispatchKey::Meta) {
+    return Backend::Meta;
   } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
@@ -107,6 +111,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
+  } else if (t == DispatchKey::PrivateUse1) {
+    return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -156,16 +162,20 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::Vulkan;
     case Backend::Metal:
       return DispatchKey::Metal;
+    case Backend::Meta:
+      return DispatchKey::Meta;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPU;
     case Backend::QuantizedCUDA:
       return DispatchKey::QuantizedCUDA;
     case Backend::Undefined:
       return DispatchKey::Undefined;
-    case Backend::MLC:
-      return DispatchKey::MLC;
+    case Backend::MPS:
+      return DispatchKey::MPS;
     case Backend::HPU:
       return DispatchKey::HPU;
+    case Backend::PrivateUse1:
+      return DispatchKey::PrivateUse1;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -216,10 +226,14 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::Vulkan;
     case Backend::Metal:
       return DeviceType::Metal;
-    case Backend::MLC:
-      return DeviceType::MLC;
+    case Backend::Meta:
+      return DeviceType::Meta;
+    case Backend::MPS:
+      return DeviceType::MPS;
     case Backend::HPU:
       return DeviceType::HPU;
+    case Backend::PrivateUse1:
+      return DeviceType::PrivateUse1;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -250,8 +264,8 @@ static inline const char* toString(Backend b) {
       return "XLA";
     case Backend::Lazy:
       return "Lazy";
-    case Backend::MLC:
-      return "MLC";
+    case Backend::MPS:
+      return "MPS";
     case Backend::SparseCPU:
       return "SparseCPU";
     case Backend::SparseCUDA:
@@ -272,6 +286,8 @@ static inline const char* toString(Backend b) {
       return "Vulkan";
     case Backend::Metal:
       return "Metal";
+    case Backend::Meta:
+      return "Meta";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
     case Backend::QuantizedCUDA:
@@ -280,6 +296,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
+    case Backend::PrivateUse1:
+      return "PrivateUseOne";
     default:
       return "UNKNOWN_BACKEND";
   }

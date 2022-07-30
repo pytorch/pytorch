@@ -12,7 +12,7 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#ifdef __SYCL_DEVICE_ONLY__
+#ifdef SYCL_LANGUAGE_VERSION
 #include <CL/sycl.hpp>
 #endif
 
@@ -56,6 +56,15 @@ inline C10_HOST_DEVICE Half::operator __half() const {
 }
 #endif
 
+#ifdef SYCL_LANGUAGE_VERSION
+inline C10_HOST_DEVICE Half::Half(const sycl::half& value) {
+  x = *reinterpret_cast<const unsigned short*>(&value);
+}
+inline C10_HOST_DEVICE Half::operator sycl::half() const {
+  return *reinterpret_cast<const sycl::half*>(&x);
+}
+#endif
+
 // CUDA intrinsics
 
 #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)) || \
@@ -88,6 +97,8 @@ inline C10_HOST_DEVICE Half operator-(const Half& a) {
 #if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530) || \
     defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  return -sycl::bit_cast<sycl::half>(a);
 #else
   return -static_cast<float>(a);
 #endif

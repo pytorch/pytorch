@@ -7,7 +7,7 @@ void record_kernel_function_dtype(std::string name) {
   RECORD_FUNCTION_WITH_SCOPE(
         at::RecordScope::KERNEL_FUNCTION_DTYPE,
         name,
-        {});
+        c10::ArrayRef<const c10::IValue>{});
 }
 
 }}  // namespace at::detail
