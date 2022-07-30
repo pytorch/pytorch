@@ -1260,7 +1260,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
-        _helper(None, fn_1n, [1, 2], error=ValueErrror)
+        _helper(None, fn_1n, [1, 2], error=ValueError)
         # Fn has keyword-only arguments
         _helper(None, fn_n1_kwargs, 1, error=ValueError)
         _helper(None, fn_cmplx, [0, 1], 2, ValueError)
