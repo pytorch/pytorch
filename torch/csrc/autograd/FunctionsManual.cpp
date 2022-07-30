@@ -595,6 +595,21 @@ Tensor sum_backward(
   return grad.expand(sizes);
 }
 
+Tensor sum_backward(
+    const Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_symint(sizes);
+  }
+}
+
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -607,11 +622,12 @@ Tensor nansum_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim) {
-  auto n = dim.size() == 0 ? numel : _safe_size(shape, dim);
-  return sum_backward(grad, shape, dim, keepdim) / n;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
+  return sum_backward(grad, shape, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
