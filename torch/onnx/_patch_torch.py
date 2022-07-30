@@ -146,10 +146,8 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     m = _attr_pattern.match(key)
     if m is None:
         raise IndexError(
-            (
-                "Invalid attribute specifier '{}' names "
-                + " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
-            ).format(key)
+            f"Invalid attribute specifier '{key}' names "
+            " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
         )
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
