@@ -6,6 +6,7 @@ from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
 from torch.distributions.gumbel import euler_constant
 
+__all__ = ['Weibull']
 
 class Weibull(TransformedDistribution):
     r"""
@@ -51,6 +52,10 @@ class Weibull(TransformedDistribution):
     @property
     def mean(self):
         return self.scale * torch.exp(torch.lgamma(1 + self.concentration_reciprocal))
+
+    @property
+    def mode(self):
+        return self.scale * ((self.concentration - 1) / self.concentration) ** self.concentration.reciprocal()
 
     @property
     def variance(self):

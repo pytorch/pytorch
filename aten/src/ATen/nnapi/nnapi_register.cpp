@@ -13,6 +13,7 @@ TORCH_LIBRARY(_nnapi, m) {
   m.class_<torch::nnapi::bind::NnapiCompilation>("Compilation")
     .def(torch::jit::init<>())
     .def("init", &torch::nnapi::bind::NnapiCompilation::init)
+    .def("init2", &torch::nnapi::bind::NnapiCompilation::init2)
     .def("run", &torch::nnapi::bind::NnapiCompilation::run)
     ;
 }

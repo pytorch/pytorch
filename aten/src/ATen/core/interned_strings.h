@@ -14,6 +14,7 @@ namespace c10 {
 
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
+  _(namespaces, prims)               \
   _(namespaces, aten)                \
   _(namespaces, cuda)                \
   _(namespaces, onnx)                \
@@ -43,12 +44,17 @@ namespace c10 {
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
+  _(prim, oneDNNFusionGroup)         \
+  _(prim, oneDNNFusionGuard)         \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
   _(prim, view_copy)                 \
   _(prim, reshape_copy)              \
   _(prim, squeeze_copy)              \
   _(prim, unsqueeze_copy)            \
+  _(prim, flatten_copy)              \
+  _(prim, expand_copy)               \
+  _(prim, expand_as_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
@@ -226,6 +232,7 @@ namespace c10 {
   _(onnx, Gemm)                      \
   _(onnx, LSTM)                      \
   _(onnx, MatMul)                    \
+  _(onnx, Min)                       \
   _(onnx, Mul)                       \
   _(onnx, Pow)                       \
   _(onnx, RNN)                       \
@@ -276,6 +283,9 @@ namespace c10 {
   _(onnx, Range)                     \
   _(onnx, Tile)                      \
   _(onnx, Where)                     \
+  _(onnx, Optional)                  \
+  _(onnx, OptionalGetElement)        \
+  _(onnx, OptionalHasElement)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -315,6 +325,7 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
+  _(attr, output_layouts)            \
   _(attr, allowzero)                 \
   _(attr, seen_none)                 \
   _(attr, overload_name)

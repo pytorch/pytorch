@@ -94,6 +94,8 @@ InterpreterManager::InterpreterManager(
     size_t nInterp,
     std::shared_ptr<Environment> env)
     : resources_(nInterp) {
+  C10_LOG_API_USAGE_ONCE("torch.deploy.InterpreterManager");
+
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this, env);

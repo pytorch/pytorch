@@ -42,12 +42,12 @@ class StatelessDataLoader : public DataLoaderBase<
       DataLoaderOptions options)
       // NOLINTNEXTLINE(performance-move-const-arg)
       : super(std::move(options)), sampler_(std::move(sampler)) {
-    for (const auto w : c10::irange(this->options_.workers))  {
+    for (const auto w : c10::irange(this->options_.workers)) {
       // Here we copy the dataset into the worker thread closure. Each worker
       // has its own copy of the dataset. This means the dataset must be
       // trivially copiable, or else we don't expect more than one worker to
       // be in use.
-      (void)w; //Suppress unused variable warning
+      (void)w; // Suppress unused variable warning
       this->workers_.emplace_back(
           [this, dataset]() mutable { this->worker_thread(dataset); });
     }

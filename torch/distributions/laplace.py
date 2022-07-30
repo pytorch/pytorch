@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Laplace']
 
 class Laplace(Distribution):
     r"""
@@ -25,6 +26,10 @@ class Laplace(Distribution):
 
     @property
     def mean(self):
+        return self.loc
+
+    @property
+    def mode(self):
         return self.loc
 
     @property
