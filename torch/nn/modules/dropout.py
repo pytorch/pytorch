@@ -3,6 +3,7 @@ from .. import functional as F
 
 from torch import Tensor
 
+__all__ = ['Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'FeatureAlphaDropout']
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
@@ -58,6 +59,48 @@ class Dropout(_DropoutNd):
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
+class Dropout1d(_DropoutNd):
+    r"""Randomly zero out entire channels (a channel is a 1D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 1D tensor :math:`\text{input}[i, j]`).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+
+    Usually the input comes from :class:`nn.Conv1d` modules.
+
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
+    if adjacent pixels within feature maps are strongly correlated
+    (as is normally the case in early convolution layers) then i.i.d. dropout
+    will not regularize the activations and will otherwise just result
+    in an effective learning rate decrease.
+
+    In this case, :func:`nn.Dropout1d` will help promote independence between
+    feature maps and should be used instead.
+
+    Args:
+        p (float, optional): probability of an element to be zero-ed.
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
+
+    Shape:
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`.
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input).
+
+    Examples::
+
+        >>> m = nn.Dropout1d(p=0.2)
+        >>> input = torch.randn(20, 16, 32)
+        >>> output = m(input)
+
+    .. _Efficient Object Localization Using Convolutional Networks:
+       https://arxiv.org/abs/1411.4280
+    """
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.dropout1d(input, self.p, self.training, self.inplace)
+
+
 class Dropout2d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -82,9 +125,16 @@ class Dropout2d(_DropoutNd):
         inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
+    .. warning ::
+        Due to historical reasons, this class will perform 1D channel-wise dropout
+        for 3D inputs (as done by :class:`nn.Dropout1d`). Thus, it currently does NOT
+        support inputs without a batch dimension of shape :math:`(C, H, W)`. This
+        behavior will change in a future release to interpret 3D inputs as no-batch-dim
+        inputs. To maintain the old behavior, switch to :class:`nn.Dropout1d`.
+
     Shape:
-        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
-        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input).
+        - Input: :math:`(N, C, H, W)` or :math:`(N, C, L)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(N, C, L)` (same shape as input).
 
     Examples::
 

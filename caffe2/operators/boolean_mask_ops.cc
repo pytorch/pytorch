@@ -286,9 +286,6 @@ NO_GRADIENT(BooleanMaskLengths);
 
 } // namespace
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-const float minf = -1.0f * std::numeric_limits<float>::infinity();
-
 // Template this on a functor object so we can generate different
 // implementations at compile time and have a better chance of inlining
 template <typename Functor>

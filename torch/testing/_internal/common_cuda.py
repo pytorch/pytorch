@@ -76,7 +76,7 @@ def tf32_off():
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_precison = self.precision
+    old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
@@ -84,7 +84,7 @@ def tf32_on(self, tf32_precision=1e-5):
             yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precison
+        self.precision = old_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -160,6 +160,12 @@ def with_tf32_off(f):
 
     return wrapped
 
+def _get_magma_version():
+    if 'Magma' not in torch.__config__.show():
+        return (0, 0)
+    position = torch.__config__.show().find('Magma ')
+    version_str = torch.__config__.show()[position + len('Magma '):].split('\n')[0]
+    return tuple(int(x) for x in version_str.split("."))
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:

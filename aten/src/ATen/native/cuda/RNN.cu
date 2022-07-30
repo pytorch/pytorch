@@ -14,7 +14,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_native.h>
-#include <ATen/ops/_thnn_fused_lstm_cell_backward_native.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_impl_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
 #endif
@@ -559,7 +559,7 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
   checkNumel(c, workspace, exp_size[0] * exp_size[1] * 4);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -568,7 +568,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+    return std::tuple<Tensor, Tensor, Tensor>();
   }
   checkLSTMBackwardSizes({grad_hy, "grad_hy", 1}, {grad_cy, "grad_cy", 2},
                          {cx, "cx", 3}, {cy, "cy", 4},
@@ -585,7 +585,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   });
 
   auto grad_bias = has_bias ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(grad_gates, grad_gates, grad_cx, grad_bias, grad_bias);
+  return std::make_tuple(grad_gates, grad_cx, grad_bias);
 }
 
 static constexpr int64_t GRU_WORKSPACE_MULTIPLIER = 5;

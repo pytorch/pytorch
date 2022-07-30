@@ -2,7 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/core/ITensorListRef.h>
+#include <ATen/core/IListRef.h>
 
 namespace at { namespace native {
 

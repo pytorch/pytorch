@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     verify_ddp_error_logged,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -538,7 +537,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_allreduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1042,7 +1040,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1171,7 +1168,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_allgather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1352,7 +1348,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_reduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
