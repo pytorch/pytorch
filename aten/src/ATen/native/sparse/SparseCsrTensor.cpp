@@ -761,11 +761,12 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
           [&]() {
             return std::make_pair(self.ccol_indices(), self.row_indices());
           });
-  TORCH_CHECK(
-      dim < compressed_indices.dim(),
-      "select(): selecting dense dims is not supported");
+  auto n_batch = compressed_indices.dim() - 1;
+  auto n_dense = self.dim() - n_batch - 2;
 
-  if (dim < compressed_indices.dim() - 1) {
+  TORCH_CHECK(n_dense == 0, "select(): dense dims are not supported");
+
+  if (dim < n_batch) {
     // Selecting batch dimension
     return at::native::_sparse_compressed_tensor_unsafe(
         compressed_indices.select(dim, index),
