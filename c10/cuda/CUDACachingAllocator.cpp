@@ -1079,7 +1079,7 @@ class DeviceCachingAllocator {
 
     memory_tracker.append_alloc_free_event(
         reinterpret_cast<intptr_t>(block->ptr), // ptr
-        -1 * block->size, // size: of allocation in bytes, negative for free
+        -block->size, // size: of allocation in bytes, negative for free
         block->device);
 
     size_t original_block_size = block->size;
