@@ -6592,6 +6592,10 @@ class TestConsistency(TestCase):
         'take_along_dim': None,
     }
 
+    BACKWARD_BLOCK_LIST = {
+        'diff': None,
+    }
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
 
@@ -6639,9 +6643,10 @@ class TestConsistency(TestCase):
                 mps_out = op(*mps_args, **mps_kwargs)
                 self.assertEqual(cpu_out, mps_out)
 
-                cpu_out.sum().backward()
-                mps_out.sum().backward()
-                self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
+                if key not in self.BACKWARD_BLOCK_LIST:
+                    cpu_out.sum().backward()
+                    mps_out.sum().backward()
+                    self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
 
         except Exception as e:
             if not generate_new_truth:
