@@ -1188,6 +1188,7 @@ void initJITBindings(PyObject* module) {
           "get_pyobj",
           [](c10::SymIntNode a) -> py::object {
             if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
+              TORCH_INTERNAL_ASSERT(psn->getPyObj());
               return py::reinterpret_borrow<py::object>(psn->getPyObj());
             }
             return py::none();
