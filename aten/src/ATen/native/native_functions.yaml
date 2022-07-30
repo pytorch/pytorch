@@ -4167,6 +4167,7 @@
     MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
+    MPS: prelu_mps
     QuantizedCPU: prelu_quantized_cpu
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
@@ -4175,6 +4176,7 @@
     MkldnnCPU: mkldnn_prelu_backward
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
+    MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
