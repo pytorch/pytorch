@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
 // these just expose TypeMeta/ScalarType bridge functions in c10

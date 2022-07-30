@@ -37,6 +37,19 @@ TensorView* variance(
     bool unbiased,
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  int64_t correction = unbiased ? 1 : 0;
+  return variance(x, dims, correction, keepdim);
+}
+
+TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    int64_t correction,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  TORCH_CHECK(
+      correction >= 0, "correction must be non-negative, but got ", correction);
 
   const int kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
@@ -47,9 +60,9 @@ TensorView* variance(
   auto sum_x_mean_sub_sq = sum(x_mean_sub_sq, dims, keepdim);
 
   auto num_features = numFeatures(x, dims, kNumberOfDims);
-  if (unbiased) {
+  if (correction > 0) {
     num_features =
-        sub(num_features, IrBuilder::create<Double>(x->container(), 1.));
+        sub(num_features, IrBuilder::create<Int>(x->container(), correction));
   }
   auto y = div(sum_x_mean_sub_sq, num_features);
 
@@ -461,11 +474,11 @@ ForwardNormResult batch_norm(
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
 
-      // when inputs have been casted by parser. We want to alias the output to
-      // the pre-casted input, so we can still update running stats
+      // when inputs have been cast by parser. We want to alias the output to
+      // the pre-cast input, so we can still update running stats
       auto cast_to_input_dtype = [fusion](
-                                     Val* casted_input, Val* aliased_output) {
-        auto unary_op = casted_input->definition();
+                                     Val* cast_input, Val* aliased_output) {
+        auto unary_op = cast_input->definition();
         TORCH_INTERNAL_ASSERT(
             unary_op->isA<UnaryOp>() &&
                 unary_op->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Cast,
@@ -478,9 +491,9 @@ ForwardNormResult batch_norm(
         TORCH_INTERNAL_ASSERT(
             rm_dtype.has_value(),
             "Input running stats must have dtype defined");
-        auto casted_output = castOp(*rm_dtype, aliased_output);
+        auto cast_output = castOp(*rm_dtype, aliased_output);
 
-        fusion->aliasOutputToInput(casted_output, input_to_cast);
+        fusion->aliasOutputToInput(cast_output, input_to_cast);
       };
 
       if (running_mean->isFusionInput()) {

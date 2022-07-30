@@ -9,6 +9,9 @@ exclude_patterns = [
     'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
+    'functorch/docs/**',
+    'functorch/examples/**',
+    'functorch/notebooks/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'third_party/**',
@@ -16,6 +19,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
+    'tools/test/test_selective_build.py',
 ]
 command = [
     'python3',
@@ -41,18 +45,19 @@ init_command = [
 [[linter]]
 code = 'CLANGFORMAT'
 include_patterns = [
+    'aten/src/ATen/*.h',
+    'aten/src/ATen/native/vulkan/**/*.h',
+    'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'torch/csrc/jit/**/*.h',
-    'torch/csrc/jit/**/*.cpp',
-    'torch/csrc/deploy/**/*.h',
-    'torch/csrc/deploy/**/*.cpp',
-    'test/cpp/jit/**/*.h',
-    'test/cpp/jit/**/*.cpp',
-    'test/cpp/tensorexpr/**/*.h',
-    'test/cpp/tensorexpr/**/*.cpp',
+    'torch/csrc/**/*.h',
+    'torch/csrc/**/*.cpp',
+    'test/cpp/**/*.h',
+    'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 init_command = [
@@ -71,6 +76,7 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+is_formatter = true
 
 [[linter]]
 code = 'MYPY'
@@ -117,9 +123,16 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.20',
+    'numpy==1.21.6',
     'expecttest==0.1.3',
-    'mypy==0.812',
+    'mypy==0.960',
+    'types-requests==2.27.25',
+    'types-six==1.16.15',
+    'types-PyYAML==6.0.7',
+    'types-tabulate==0.8.8',
+    'types-protobuf==3.19.18',
+    'types-pkg-resources==0.1.3',
+    'types-Jinja2==2.11.9',
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
@@ -135,6 +148,14 @@ include_patterns = [
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
+]
+exclude_patterns = [
+    # (linbinyu) copied from internal repo
+    'tools/code_analyzer/gen_operators_yaml.py',
+    'tools/gen_vulkan_spv.py',
+    'tools/test/gen_operators_yaml_test.py',
+    'tools/test/gen_oplist_test.py',
+    'tools/test/test_selective_build.py',
 ]
 command = [
     'python3',
@@ -202,11 +223,13 @@ command = [
 [[linter]]
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = ['test/test_jit.py']
+exclude_patterns = [
+    'test/test_jit.py',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=# type:\s*ignore(?!\[)',
+    '--pattern=# type:\s*ignore([^\[]|$)',
     '--linter-name=TYPEIGNORE',
     '--error-name=unqualified type: ignore',
     """--error-description=\
@@ -224,7 +247,7 @@ exclude_patterns = ['caffe2/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=# noqa(?!: [A-Z]+\d{3})',
+    '--pattern=# noqa([^:]|$)',
     '--linter-name=NOQA',
     '--error-name=unqualified noqa',
     """--error-description=\
@@ -260,6 +283,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'ruamel.yaml==0.17.4',
 ]
+is_formatter = true
 
 [[linter]]
 code = 'NEWLINE'
@@ -269,7 +293,10 @@ exclude_patterns=[
     'third_party/**',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ptl',
     'tools/clang_format_hash/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -277,6 +304,7 @@ command = [
     '--',
     '@{{PATHSFILE}}',
 ]
+is_formatter = true
 
 [[linter]]
 code = 'SPACES'
@@ -285,6 +313,9 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -310,11 +341,16 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
+    '.lintrunner.toml',
 ]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=\t',
+    # @lint-ignore TXT2
+    '--pattern=	',
     '--linter-name=TABS',
     '--error-name=saw some tabs',
     '--replace-pattern=s/\t/    /',
@@ -334,6 +370,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -364,7 +401,7 @@ command = [
     'tools/linter/adapters/grep_linter.py',
     """--pattern=\
     (pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) \
-    install ([a-z][\\.a-z-0-9]*+(?!(=|.*\\.whl))([[:blank:]]|))+\
+    install ([a-zA-Z0-9][A-Za-z0-9\\._\\-]+)([^/=<>~!]+)[A-Za-z0-9\\._\\-\\*\\+\\!]*$\
     """,
     '--linter-name=PYPIDEP',
     '--error-name=unpinned PyPI install',
@@ -515,3 +552,122 @@ init_command = [
     '--output-dir=.lintbin',
     '--output-name=actionlint',
 ]
+
+[[linter]]
+code = 'TESTOWNERS'
+include_patterns = [
+    'test/**/test_*.py',
+    'test/**/*_test.py',
+]
+exclude_patterns = [
+    'test/run_test.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/testowners_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CALL_ONCE'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+exclude_patterns = [
+    'c10/util/CallOnce.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=std::call_once',
+    '--linter-name=CALL_ONCE',
+    '--error-name=invalid call_once',
+    '--replace-pattern=s/std::call_once/c10::call_once/',
+    """--error-description=\
+        Use of std::call_once is forbidden and should be replaced with c10::call_once\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'ONCE_FLAG'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=std::once_flag',
+    '--linter-name=ONCE_FLAG',
+    '--error-name=invalid once_flag',
+    '--replace-pattern=s/std::once_flag/c10::once_flag/',
+    """--error-description=\
+        Use of std::once_flag is forbidden and should be replaced with c10::once_flag\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'WORKFLOWSYNC'
+include_patterns = [
+    '.github/workflows/pull.yml',
+    '.github/workflows/trunk.yml',
+    '.github/workflows/periodic.yml',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/workflow_consistency_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0',
+]
+
+# Black + usort
+[[linter]]
+code = 'UFMT'
+include_patterns = [
+    'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
+    'tools/**/*.py',
+    'torch/onnx/**/*.py',
+    'torch/package/**/*.py',
+    'torch/_decomp/**/*.py',
+    'torch/_lazy/**/*.py',
+    'torch/_masked/**/*.py',
+    'torch/_prims/**/*.py',
+    'torch/_refs/**/*.py',
+    'torch/_subclasses/**/*.py',
+    'torch/_*.py',
+    'torchgen/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/ufmt_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+exclude_patterns = [
+    'tools/gen_vulkan_spv.py',
+    'torch/__init__.py',  # Skip this file to format because it's part of the public API
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'black==22.3.0',
+    'ufmt==1.3.3',
+    'usort==1.0.2',
+]
+is_formatter = true

@@ -132,7 +132,7 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
           return T{1} / (T{1} + std::exp(-x));
         }
       ); // sigmoid_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sigmoid_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sigmoid_cuda", [&]() {
         jitted_gpu_kernel<
             /*name=*/sigmoid_name,
             /*return_dtype=*/scalar_t,
@@ -140,9 +140,11 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
             /*arity=*/1>(iter, sigmoid_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sigmoid_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sigmoid_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return scalar_t{1} / (scalar_t{1} + std::exp(-a));
+          using opmath_t = at::opmath_type<scalar_t>;
+          const auto one = opmath_t{1};
+          return static_cast<scalar_t>(one / (one + std::exp(-opmath_t{a})));
         });
       });
     #endif

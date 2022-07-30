@@ -65,7 +65,7 @@ void DeduplicateInitializers(
 
 bool DeduplicateInitializersByDataPtr(at::Tensor& t1, at::Tensor& t2) {
   return t1.sizes().equals(t2.sizes()) && t1.strides().equals(t2.strides()) &&
-      (t1.data_ptr() == t2.data_ptr());
+      (t1.has_storage() && t2.has_storage() && t1.data_ptr() == t2.data_ptr());
 }
 
 bool DeduplicateInitializersByValue(at::Tensor& t1, at::Tensor& t2) {

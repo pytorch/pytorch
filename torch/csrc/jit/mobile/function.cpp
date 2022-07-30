@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -43,20 +44,53 @@ void Function::append_instruction(OpCode op, int X, int N) {
   code_.instructions_.emplace_back(op, X, N);
 }
 
-bool Function::append_operator(
+void Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
     const c10::optional<int>& num_specified_args) {
   // Keep the original opname in code_
   code_.op_names_.emplace_back(name, overload_name);
-  const auto& opname = code_.op_names_.back();
   code_.operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
-  auto func = makeOperatorFunction(opname, num_specified_args);
-  if (!func.has_value()) {
-    return false;
+}
+
+std::string operator_str(const c10::OperatorName& opname) {
+  std::string result = opname.name;
+  if (!opname.overload_name.empty()) {
+    result += "." + opname.overload_name;
   }
-  code_.operators_.emplace_back(*func);
-  return true;
+  return result;
+}
+
+bool Function::initialize_operators(bool should_check_operators) {
+  if (code_.initialized) {
+    return true;
+  }
+  std::unordered_set<std::string> unsupported_op_names;
+  code_.operators_.resize(code_.op_names_.size());
+  bool all_ops_supported = true;
+  for (int i = 0; i < code_.op_names_.size(); i++) {
+    const auto& opname = code_.op_names_[i];
+    int num_args = code_.operator_input_sizes_[i];
+    c10::optional<int> num_specified_args =
+        num_args < 0 ? c10::nullopt : c10::optional<int>(num_args);
+    auto func = makeOperatorFunction(opname, num_specified_args);
+    if (!func.has_value()) {
+      unsupported_op_names.insert(operator_str(opname));
+      all_ops_supported = false;
+      break;
+    } else {
+      code_.operators_[i] = *func;
+    }
+  }
+  if (should_check_operators) {
+    TORCH_CHECK(
+        unsupported_op_names.empty(),
+        "Following ops cannot be found: [",
+        c10::Join(", ", unsupported_op_names),
+        "]. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/c/mobile/");
+  }
+  code_.initialized = all_ops_supported;
+  return all_ops_supported;
 }
 
 void Function::append_constant(const c10::IValue& constant) {
@@ -96,6 +130,7 @@ const c10::FunctionSchema& Function::getSchema() const {
 }
 
 void Function::run(Stack& stack) {
+  initialize_operators(/* should_check_operators */ true);
   if (hasSchema()) { // if we have a schema then resolve optional args if any
     getSchema().checkAndNormalizeInputs<c10::DynamicType>(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
@@ -114,6 +149,7 @@ size_t Function::num_inputs() const {
 }
 
 bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+  initialize_operators(true);
   f(code_);
   return true;
 }
@@ -176,13 +212,13 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
           out_args.push_back(stack.back());
           stack.pop_back();
         }
-        size_t start_index = num_specified_args.value() - out_args.size();
         TORCH_CHECK(
-            start_index >= 0,
+            num_specified_args.value() >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
             ", which is more then the number of specified arguments: ",
             num_specified_args.value());
+        size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
           TORCH_CHECK(
               args[i].default_value().has_value(),

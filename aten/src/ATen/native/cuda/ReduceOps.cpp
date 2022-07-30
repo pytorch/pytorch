@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/ReduceOps.h>
 
-#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceAllOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -50,12 +49,6 @@ void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
 
 }
 
-void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
-  TORCH_CHECK(ord.isFloatingPoint(), "linalg.vector_norm expects ord to be float");
-  norm_kernel_cuda(iter, ord);
-}
-
-
 void min_kernel_impl(const Tensor& result, const Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
   auto iter = meta::make_reduction(self, result, indice, dim, keepdim, self.scalar_type(), kLong);
   min_launch_kernel(iter);
@@ -103,6 +96,5 @@ REGISTER_CUDA_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl);
 REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
 
 REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda);
-REGISTER_CUDA_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cuda);
 
 }} // namespace at::native

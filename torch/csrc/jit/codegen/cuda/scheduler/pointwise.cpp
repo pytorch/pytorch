@@ -1,17 +1,21 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-
 #include <ATen/cuda/CUDAContext.h>
+
+#include <algorithm>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -27,10 +31,7 @@ constexpr int64_t kThreadX = 128;
 // that maps to all iterDomains in the fusion.
 class DomainMap {
  public:
-  DomainMap(Fusion* fusion)
-      : fusion_(fusion),
-        ca_index_map_(ComputeAtMap(ComputeAtMap::MappingMode::INDEX)) {
-    ca_index_map_.build(fusion);
+  DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(ComputeAtMap(fusion)) {
     view_tvs_ = scheduler_utils::getViewTVs(fusion);
   }
 
@@ -88,9 +89,11 @@ class DomainMap {
     // Get concrete IDs for input root or rfactor domain
     std::unordered_set<IterDomain*> in_concrete_ids;
     for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-      if (!ca_index_map_.getConcreteMappedID(in_id)->isBroadcast() &&
+      if (!ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT)
+               ->isBroadcast() &&
           !in_id->isReduction()) {
-        in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
+        in_concrete_ids.insert(
+            ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT));
       }
     }
 
@@ -110,7 +113,8 @@ class DomainMap {
   bool eraseIfMapped(
       std::unordered_set<IterDomain*>& in_concrete_ids,
       IterDomain* out_id) const {
-    auto out_concrete_id = ca_index_map_.getConcreteMappedID(out_id);
+    auto out_concrete_id =
+        ca_map_.getConcreteMappedID(out_id, IdMappingMode::EXACT);
     auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
     bool found_match = in_concrete_id_iter != in_concrete_ids.end();
     if (found_match) {
@@ -150,7 +154,7 @@ class DomainMap {
       const std::vector<IterDomain*> domain,
       IterDomain* target) const {
     for (auto id : domain) {
-      if (ca_index_map_.areMapped(id, target)) {
+      if (ca_map_.areMapped(id, target, IdMappingMode::EXACT)) {
         return id;
       }
     }
@@ -158,9 +162,10 @@ class DomainMap {
   }
 
   Fusion* fusion_ = nullptr;
-  ComputeAtMap ca_index_map_;
+  ComputeAtMap ca_map_;
   std::vector<TensorView*> view_tvs_;
 };
+
 } // namespace
 
 c10::optional<PointwiseParams> getPointwiseHeuristics(
@@ -178,6 +183,10 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   FUSER_PERF_SCOPE("getPointwiseHeuristics");
 
   FusionGuard fg(fusion);
+
+  // Incase any buffer is of type DataType::Index
+  DataType index_type = indexModeToDtype(runtime_info.getIndexMode());
+
   TensorView* largest_out = nullptr;
   int max_dims = -1;
 
@@ -220,19 +229,10 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   for (auto inp : in_tvs) {
     max_input_dtype_size = std::max(
         max_input_dtype_size,
-        (int64_t)dataTypeSize(inp->getDataType().value()));
+        (int64_t)dataTypeSize(inp->getDataType().value(), index_type));
     n_tensors++;
   }
   n_tensors += std::distance(out_tvs.begin(), out_tvs.end());
-
-  constexpr int64_t kSixteen = 16; // clang tidy
-
-  auto max_unroll_factor = ceilDiv(
-      // Available unrolling based on size of data type
-      (int64_t)kSixteen / max_input_dtype_size,
-      // Reduce unrolling if we have many inputs, start reduction at 4 inputs
-      std::max(
-          (scheduler_utils::lastPow2((int64_t)n_tensors) >> 2), (int64_t)1));
 
   auto ref_root = largest_out->getMaybeRFactorDomain();
   std::vector<int64_t> elem_counts(ref_root.size(), 1);
@@ -272,6 +272,28 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     return params;
   }
 
+  // Find all vectorizable inputs/outputs
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getInputsOutputsWithInnerDim(
+                    largest_out, true));
+          });
+
+  constexpr int64_t kSixteen = 16; // clang tidy
+
+  auto max_unroll_factor = ceilDiv(
+      // Available unrolling based on size of data type
+      (int64_t)kSixteen / max_input_dtype_size,
+      // Reduce max unrolling factor if we have many inputs/outputs to unroll
+      // as it could start consuming a lot of registers.
+      std::max(
+          (scheduler_utils::lastPow2(
+               (int64_t)vectorizable_inputs_outputs_entry.get().size()) >>
+           2),
+          (int64_t)1));
+
   // Don't unroll at the cost of getting a full wave on the GPU
   if (n_elems < device_multiprocessor_count * kThreadX &&
       max_unroll_factor > 1) {
@@ -281,41 +303,13 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   }
 
   // If we use RNG don't unroll so we can do correctness testing
-  if (fusion->isStochastic() && disableRNGUnrolling()) {
+  if (fusion->isStochastic() && isDisabled(DisableOption::UnrollWithRng)) {
     max_unroll_factor = 1;
   }
 
   PointwiseParams params;
   params.tag = "Pointwise heuristics";
 
-  // Don't try to vectorize if it's not recommended
-  params.inner_factor = 1;
-
-  // Vectorize as much as we can
-  size_t vectorize_factor = max_unroll_factor;
-
-  auto vectorizable_inputs_outputs_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
-          data_cache, [&largest_out]() {
-            return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getInputsOutputsWithInnerDim(
-                    largest_out, true));
-          });
-
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
-
-  for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
-    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
-  }
-
-  if (vectorize_factor == 1) {
-    params.vectorize = false;
-    params.inner_factor = max_unroll_factor;
-  } else {
-    params.vectorize = true;
-    params.inner_factor = vectorize_factor;
-  }
   /*
    * 2D pointwise scheduling logic. What is expected is there's some
    * broadcasting pattern which would make scheduling as a 2D problem more
@@ -336,7 +330,11 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
    */
 
   // Ideal break point location
-  int64_t break_point = 0;
+  int break_point = 0;
+
+  // If break_point, mark if BIDy and BIDx should be positionally reversed
+  // relative to root domains
+  bool flip_grid_binding = false;
 
   // Elements on the right of break point (without break point all are on the
   // right)
@@ -349,20 +347,24 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // point.
   int64_t bdimy = 1;
 
-  // In 2D scheduler gdimx is used to parallelize the left side of the break
+  // In 2D scheduler gdim_left is used to parallelize the left side of the break
   // point.
-  int64_t gdimx = 1;
+  int64_t gdim_left = 1;
 
-  // gdimy is used if there's too much parallelization in the right side of the
-  // break point. We will expand grid parallelization into the right side of the
-  // break point with gdimx and use gdimy for the left side of the break point.
-  int64_t gdimy = 1;
+  // gdim_right is used if there's too much parallelization in the right side of
+  // the break point. We will expand grid parallelization into the right side of
+  // the break point with gdim_left and use gdim_right for the left side of the
+  // break point.
+  int64_t gdim_right = 1;
 
-  auto broadcast_byte_multiples_entry = HeuristicSummaryEntry<
-      HeuristicCompileTime::BroadcastMultiples>(data_cache, [&largest_out]() {
-    return std::make_unique<std::vector<scheduler_utils::BroadcastMultiple>>(
-        scheduler_utils::getBroadcastMultiples(largest_out));
-  });
+  auto broadcast_byte_multiples_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
+          data_cache, [&largest_out, &index_type]() {
+            return std::make_unique<
+                std::vector<scheduler_utils::BroadcastMultiple>>(
+                scheduler_utils::getBroadcastMultiples(
+                    largest_out, index_type));
+          });
 
   auto& broadcast_byte_multiples = broadcast_byte_multiples_entry.get();
 
@@ -370,13 +372,15 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   int64_t dtype_sum = 0;
   for (auto inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    dtype_sum += dataTypeSize(inp->getDataType().value());
+    dtype_sum += dataTypeSize(inp->getDataType().value(), index_type);
   }
   for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
-    dtype_sum += dataTypeSize(out->getDataType().value());
+    dtype_sum += dataTypeSize(out->getDataType().value(), index_type);
   }
 
-  {
+  { // Figure out break point position. Empty scope, consider moving to a
+    // separate function.
+    //
     // How much would this transfer cost if it was done as a 1-D schedule
     int64_t transfer_size_1d = 1;
 
@@ -396,10 +400,6 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
           cur_right_elem_count = cur_right_elem_count * elem_counts[right_i];
         }
 
-        if (cur_right_elem_count <= 1) {
-          continue;
-        }
-
         auto cur_left_elem_count = n_elems / cur_right_elem_count;
         if (cur_left_elem_count <= 1) {
           continue;
@@ -412,6 +412,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
         // Estimate transfer cost with this break point
         int64_t cur_transfer_size = 1;
+        int64_t right_transfer_size = 1;
 
         for (const auto left_i : c10::irange(break_point_i)) {
           cur_transfer_size =
@@ -419,26 +420,40 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         }
 
         for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
-          cur_transfer_size =
-              cur_transfer_size * elem_counts[right_i] * rhs_byte_multiple;
+          right_transfer_size =
+              right_transfer_size * elem_counts[right_i] * rhs_byte_multiple;
         }
+        cur_transfer_size *= right_transfer_size;
 
         //  Continue if this break point doesn't save at least 10% of 1D
-        //  scheduling.
+        //  scheduling or isn't better than previous break_points found.
         if (cur_transfer_size >= min_total_transfer ||
             cur_transfer_size * 10 >= transfer_size_1d * 9) {
           continue;
         }
 
-        // Don't limit unroll factor with break point
-        if (cur_right_elem_count < max_unroll_factor) {
+        // Need to be able to parallelize, don't use break if there's not
+        // at least an unrolled warp.
+        if (ceilDiv(cur_right_elem_count, max_unroll_factor) <=
+            at::cuda::getCurrentDeviceProperties()->warpSize) {
           continue;
         }
 
+        // If outer broadcast, or balanced broadcast:
+        if (lhs_byte_multiple <= rhs_byte_multiple &&
+            // If right transfer size is bigger than half of L2
+            at::cuda::getCurrentDeviceProperties()->l2CacheSize <
+                right_transfer_size * 2) {
+          // flip BIDx and BIDy bindings
+          flip_grid_binding = true;
+        } else {
+          flip_grid_binding = false;
+        }
+        // Min transfer found, start setting values
         bdimx = std::min(
             ceilDiv(cur_right_elem_count, max_unroll_factor), kThreadX);
         bdimy = 1;
-        gdimy = 1;
+        gdim_right = 1;
         // Put remainder in bdimy if there's at least a wave of grid level
         // parallelism.
         if (cur_left_elem_count > device_multiprocessor_count) {
@@ -446,32 +461,71 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         }
         auto remainder_left = ceilDiv(cur_left_elem_count, bdimy);
         auto remainder_right =
-            ceilDiv(cur_right_elem_count, bdimy * bdimx * max_unroll_factor);
-
+            ceilDiv(cur_right_elem_count, bdimx * max_unroll_factor);
         // Use this break point
-        break_point = break_point_i;
+        break_point = static_cast<int>(break_point_i);
         min_total_transfer = cur_transfer_size;
         right_elem_count = cur_right_elem_count;
 
-        gdimx = remainder_left;
-        if (remainder_right > 1 && bdimy <= 1) {
-          gdimy = remainder_right;
-        }
+        gdim_left = remainder_left;
+        gdim_right = remainder_right;
       }
     }
   }
 
-  TORCH_INTERNAL_ASSERT(right_elem_count > 0 || params.break_point == 0);
+  // Vectorizing innermost domains
 
-  TORCH_INTERNAL_ASSERT(!(bdimy > 1 && gdimy > 1));
+  // Don't try to vectorize if it's not recommended
+  params.unroll_factor = 1;
+
+  // Compute maximum vectorize factor that can be used
+  size_t vectorize_factor = max_unroll_factor;
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
+
+  for (auto tv : vectorizable_inputs_outputs) {
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
+    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
+  }
+
+  // Try expanding vectorization to contig merged domains
+  auto expanded_vector_word_size =
+      scheduler_utils::expandVectorizationToContigMergedDomains(
+          fusion,
+          runtime_info,
+          vectorizable_inputs_outputs,
+          largest_out,
+          break_point,
+          vectorize_factor);
+
+  expanded_vector_word_size = std::min(
+      static_cast<size_t>(max_unroll_factor), expanded_vector_word_size);
+
+  if (expanded_vector_word_size > vectorize_factor) {
+    vectorize_factor = expanded_vector_word_size;
+  }
+
+  if (vectorize_factor == 1) {
+    params.vectorize = false;
+    params.unroll_factor = max_unroll_factor;
+  } else {
+    params.vectorize = true;
+    params.unroll_factor = vectorize_factor;
+  }
+
+  TORCH_INTERNAL_ASSERT(right_elem_count > 0 || break_point == 0);
+  TORCH_INTERNAL_ASSERT(!(bdimy > 1 && gdim_right > 1));
+
   params.break_point = break_point;
+  params.flip_grid_binding = flip_grid_binding;
   params.split_block = bdimy > 1;
 
   params.lparams.bind(bdimx, ParallelType::TIDx);
   if (params.split_block) {
     params.lparams.bind(bdimy, ParallelType::TIDy);
   }
-  if (gdimy > 65535) {
+  if ((flip_grid_binding && gdim_right > 65535) ||
+      (!flip_grid_binding && gdim_left > 65535)) {
     params.split_grid_y_dim = true;
   }
 
@@ -487,6 +541,9 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
       std::cerr << "(" << multiple.lhs_multiple << ", " << multiple.rhs_multiple
                 << "), ";
     }
+    std::cerr << "LHS elems: "
+              << (right_elem_count > 0 ? n_elems / right_elem_count : 0)
+              << " RHS elems: " << right_elem_count << std::endl;
     std::cerr << std::endl;
     std::cerr << params.toString() << std::endl;
   }
@@ -539,15 +596,11 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       ir_utils::getReductionOps(fusion /*, ignore_trivial=true */).empty(),
       "This scheduler only handles pointwise ops.");
 
-  // For intermediate outputs, apply cache_fork
-  auto outs = fusion->outputs();
-  for (const auto output : outs) {
-    if (!output->uses().empty() && output->definition() != nullptr) {
-      if (output->getValType().value() == ValType::TensorView) {
-        output->as<TensorView>()->cache_fork();
-      }
-    }
-  }
+  // Cache inputs
+  auto cached_inputs = scheduler_utils::cacheInputs(fusion, true);
+
+  // Cache and fork outputs
+  auto cached_outputs = scheduler_utils::cacheAndForkOutputs(fusion, true);
 
   std::vector<TensorView*> input_tvs;
   {
@@ -583,47 +636,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr,
       "Could not find a fully broadcasted output to reference schedule on.");
-
-  IterDomain* inner_most_id = nullptr;
-  for (auto it = reference_tv->domain()->domain().rbegin();
-       it != reference_tv->domain()->domain().rend();
-       it++) {
-    if ((*it)->isReduction()) {
-      continue;
-    }
-    if ((*it)->isBroadcast() && inner_most_id == nullptr) {
-      inner_most_id = *it;
-    }
-    inner_most_id = *it;
-    break;
-  }
-
-  TORCH_INTERNAL_ASSERT(inner_most_id != nullptr);
-
-  // Caches of inputs
-  std::vector<TensorView*> cached_inputs;
-
-  // Output, cache_before of output
-  std::vector<std::pair<TensorView*, TensorView*>> cached_outputs;
-
-  // Track what should be vectorized versus unrolled
-  std::unordered_set<TensorView*> vectorized_tensor;
-
-  // Figure out which inputs to cache for unrolling or vectorization
-  for (auto inp : input_tvs) {
-    if (inp->uses().empty() || inp->isFusionOutput()) {
-      continue;
-    }
-    cached_inputs.emplace_back(inp->cache_after());
-  }
-
-  // Figure out which outputs to cache for unrolling or vectorization
-  for (auto out : output_tvs) {
-    if (out->definition() == nullptr) {
-      continue;
-    }
-    cached_outputs.emplace_back(std::make_pair(out, out->cache_before()));
-  }
 
   auto all_tvs = ir_utils::allTvs(fusion);
 
@@ -663,6 +675,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
+  int64_t unswitch_pos;
   if (params.break_point) {
     // 2D parallelization scheme
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
@@ -672,7 +685,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
 
     if (params.vectorize) {
-      reference_tv->split(1, params.inner_factor);
+      reference_tv->split(1, params.unroll_factor);
       reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
       reference_tv->split(0, 1);
       // [outer, Unswitch | i-remainder, TIDx, Vectorization]
@@ -689,7 +702,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       //[outer | i-remainder, Unswitch, Vectorization, TIDx]
     } else {
       reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
-      reference_tv->split(1, params.inner_factor);
+      reference_tv->split(1, params.unroll_factor);
 
       reference_tv->split(0, 1);
       // [outer, unswitch | i-remainder, unroll, TIDx ]
@@ -707,31 +720,73 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     //[i-remainder | outer | Unswitch, Unroll, TIDx]
     if (params.split_block) {
       reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-      // [i-remainder | BIDx TIDy | Unswitch, Unroll, TIDx]
-      reference_tv->axis(1)->parallelize(ParallelType::BIDx);
-      reference_tv->axis(2)->parallelize(ParallelType::TIDy);
+      if (params.flip_grid_binding) {
+        // [BIDy | BIDx, TIDy | Unswitch, Unroll, TIDx]
+        reference_tv->axis(1)->parallelize(ParallelType::BIDx);
+        reference_tv->axis(2)->parallelize(ParallelType::TIDy);
+        if (params.split_grid_y_dim) {
+          // [i-remainder, BIDy{65535} | BIDx, TIDy | Unswitch, Unroll, TIDx]
+          reference_tv->split(0, 65535);
+          reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 5;
+        } else {
+          reference_tv->axis(0)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 4;
+        }
+      } else {
+        // [BIDx | BIDy TIDy | Unswitch, Unroll, TIDx]
+        reference_tv->axis(0)->parallelize(ParallelType::BIDx);
+        reference_tv->axis(2)->parallelize(ParallelType::TIDy);
+        if (params.split_grid_y_dim) {
+          // [BIDx | i-remainder, BIDy{65535}, TIDy | Unswitch, Unroll, TIDx]
+          reference_tv->split(1, 65535);
+          reference_tv->axis(2)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 5;
+        } else {
+          reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 4;
+        }
+      }
     } else {
       // [BIDy | BIDx | Unswitch, Unroll, TIDx]
-      reference_tv->axis(1)->parallelize(ParallelType::BIDx);
-      if (params.split_grid_y_dim) {
-        reference_tv->split(0, 65535);
-        reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+      if (params.flip_grid_binding) {
+        // [BIDy | BIDx | Unswitch, Unroll, TIDx]
+        reference_tv->axis(1)->parallelize(ParallelType::BIDx);
+        if (params.split_grid_y_dim) {
+          // [i-remainder, BIDy{65535} | BIDx | Unswitch, Unroll, TIDx]
+          reference_tv->split(0, 65535);
+          reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 4;
+        } else {
+          reference_tv->axis(0)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 3;
+        }
       } else {
-        reference_tv->axis(0)->parallelize(ParallelType::BIDy);
+        // [BIDx | BIDy | Unswitch, Unroll, TIDx]
+        reference_tv->axis(0)->parallelize(ParallelType::BIDx);
+        if (params.split_grid_y_dim) {
+          // [BIDx | i-remainder, BIDy{65535} | Unswitch, Unroll, TIDx]
+          reference_tv->split(1, 65535);
+          reference_tv->axis(2)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 4;
+        } else {
+          reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+          unswitch_pos = 3;
+        }
       }
     }
-
   } else {
     // 1D Scheduler
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i == -1);
 
-    // right hand side exists and is the only axis we care to schedule, move it
-    // from the inner most position to left most. Order as [rhs_i, unmerged...]
+    // right hand side exists and is the only axis we care to schedule, move
+    // it from the inner most position to left most. Order as [rhs_i,
+    // unmerged...]
     reference_tv->reorder({{-1, 0}});
 
     if (params.vectorize) {
       // Vectorize
-      reference_tv->split(0, params.inner_factor);
+      reference_tv->split(0, params.unroll_factor);
       // Unswitch
       reference_tv->split(0, 1);
       // Threads
@@ -740,8 +795,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(0)->parallelize(ParallelType::BIDx);
       reference_tv->axis(1)->parallelize(ParallelType::TIDx);
       reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
-      // Aggressively mark with vectorized and cleanup later. That way we don't
-      // have to manually specify parallelization outside the reference.
+      // Aggressively mark with vectorized and cleanup later. That way we
+      // don't have to manually specify parallelization outside the reference.
       reference_tv->axis(3)->parallelize(ParallelType::Vectorize);
 
       //[BIDx, TIDx, Unswitch, Vectorization]
@@ -752,7 +807,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       // Threads
       reference_tv->split(0, kThreadX);
       // Unroll
-      reference_tv->split(0, params.inner_factor);
+      reference_tv->split(0, params.unroll_factor);
       // Unswitch
       reference_tv->split(0, 1);
 
@@ -761,9 +816,12 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(1)->parallelize(ParallelType::Unswitch);
       reference_tv->axis(3)->parallelize(ParallelType::TIDx);
     }
+    unswitch_pos = 2;
   }
 
-  TransformPropagator::from(reference_tv);
+  TransformPropagator propagator(reference_tv);
+  MaxRootDomainInfoSpanningTree spanning_tree(reference_tv);
+  spanning_tree.traverse(&propagator);
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 
   if (params.vectorize) {
@@ -798,84 +856,31 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
-  // Compute at into cached inputs
-  std::vector<TensorView*> consumers_of_cached_inputs;
-  // Cache of input, and one of its consumers
-  std::vector<std::pair<TensorView*, TensorView*>> input_cache_and_consumer;
-  {
-    // Avoid duplicate additions, so track what we add
-    std::unordered_set<TensorView*> added;
-    for (auto cached_input : cached_inputs) {
-      auto consumer_tvs = ir_utils::consumerTvsOf(cached_input);
-      TORCH_INTERNAL_ASSERT(
-          consumer_tvs.size(),
-          "Input was not succesfully filtered out for scheduling but wasn't used.");
+  // Begin by inlining at the unswitch position for the entire DAG. The cached
+  // inputs, and outputs will keep this inline position, but other tensors will
+  // get a higher position in later inline propagation.
+  InlinePropagator inline_unswitch(
+      reference_tv, unswitch_pos, ComputeAtMode::BestEffort);
+  spanning_tree.traverse(&inline_unswitch);
 
-      // Grab a consumer which will be used for computeAt structure of cached
-      // input into a consumer
-      input_cache_and_consumer.emplace_back(
-          std::make_pair(cached_input, consumer_tvs[0]));
-
-      // Grab all consumers which will be used for inlining computeAt for the
-      // body of the computation (excluding caching inputs/outputs)
-      for (auto consumer_tv : consumer_tvs) {
-        // Don't duplicate
-        if (added.insert(consumer_tv).second) {
-          consumers_of_cached_inputs.emplace_back(consumer_tv);
-        }
-      }
-    }
+  // Inline at the inner most position. The CA position of all tensors except
+  // inputs, cached inputs and outputs will be updated.
+  std::unordered_set<TensorView*> inner_most_tensors(
+      all_tvs.begin(), all_tvs.end());
+  for (auto cached_input : cached_inputs) {
+    inner_most_tensors.erase(cached_input);
   }
-
-  for (auto entry : input_cache_and_consumer) {
-    // Compute at inside unswitch position:
-    auto input_cache = entry.first;
-    auto input_cache_consumer = entry.second;
-
-    auto unswitch_it = std::find_if(
-        input_cache_consumer->domain()->domain().begin(),
-        input_cache_consumer->domain()->domain().end(),
-        [](IterDomain* id) {
-          return id->getParallelType() == ParallelType::Unswitch;
-        });
-    auto unswitch_pos =
-        unswitch_it == input_cache_consumer->domain()->domain().end()
-        ? -1
-        : std::distance(
-              input_cache_consumer->domain()->domain().begin(), unswitch_it) +
-            1;
-
-    input_cache->computeAt(
-        input_cache_consumer, unswitch_pos, ComputeAtMode::BestEffort);
-  }
-
-  // Producers for inlined computeAt
-  std::vector<TensorView*> compute_from = consumers_of_cached_inputs;
-
-  // Consumers for inlined computeAt
-  std::vector<TensorView*> compute_to;
-  // Compute at cached outputs
-  //[BIDx, Unswitch, Vectorization, TIDx]
   for (auto entry : cached_outputs) {
-    auto cached_output = entry.second;
-    auto output = entry.first;
-
-    auto unswitch_it = std::find_if(
-        output->domain()->domain().begin(),
-        output->domain()->domain().end(),
-        [](IterDomain* id) {
-          return id->getParallelType() == ParallelType::Unswitch;
-        });
-    auto unswitch_pos = unswitch_it == output->domain()->domain().end()
-        ? -1
-        : std::distance(output->domain()->domain().begin(), unswitch_it) + 1;
-
-    cached_output->computeAt(output, unswitch_pos, ComputeAtMode::BestEffort);
-    compute_to.push_back(cached_output);
+    auto output = entry.second;
+    inner_most_tensors.erase(output);
   }
+  InlinePropagator inline_inner_most(
+      reference_tv, -1, ComputeAtMode::BestEffort, inner_most_tensors);
+  spanning_tree.traverse(&inline_inner_most);
 
-  scheduler_utils::computeAtBetween(
-      compute_from, compute_to, -1, ComputeAtMode::BestEffort);
+  // Fix max producer position
+  MaxProducerPosUpdater updater;
+  spanning_tree.traverse(&updater);
 }
 
 } // namespace cuda

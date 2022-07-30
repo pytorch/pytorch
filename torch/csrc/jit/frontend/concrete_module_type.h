@@ -10,7 +10,7 @@
 namespace torch {
 namespace jit {
 
-enum class IterableModuleKind { NONE, LIST, DICT };
+enum class IterableModuleKind { NONE, LIST, DICT, PARAMLIST, PARAMDICT };
 class ConcreteModuleType;
 
 // You can think of an nn.Module as a template that corresponds to a family of
