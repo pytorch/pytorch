@@ -6307,6 +6307,7 @@ class TestConsistency(TestCase):
                                 'torch.int32',
                                 'torch.int64',
                                 'torch.uint8'],
+        'nn.functional.prelu': ['torch.float32'],
         'nn.functional.selu': ['torch.float32'],
         'nn.functional.silu': ['torch.float32'],
         'nn.functional.smooth_l1_loss': ['torch.float32',
