@@ -76,7 +76,7 @@ class Caffe2BenchmarkBase(object):
         """ if value is bool, we will convert it to 0 and 1
         """
         ret = value
-        if type(value) == bool:
+        if isinstance(value, bool):
             ret = int(value)
         return str(ret)
 

@@ -99,12 +99,12 @@ class Linear(torch.nn.Module):
 
         We only care about the convert at this stage, no need for observers just yet.
         """
-        assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+        assert isinstance(mod, cls._FLOAT_MODULE), ' nnq.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        if type(mod) == nni.LinearReLU:
+        if isinstance(mod, nni.LinearReLU):
             mod = mod[0]
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()

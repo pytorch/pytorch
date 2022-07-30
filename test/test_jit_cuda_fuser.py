@@ -200,7 +200,7 @@ class TestCudaFuser(JitTestCase):
             torch.cuda.manual_seed_all(seed + i)
             o = op(*args)
 
-            if type(jit_o) is torch.Tensor:
+            if isinstance(jit_o, torch.Tensor):
                 jit_o = [jit_o, ]
                 o = [o, ]
 

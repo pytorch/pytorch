@@ -621,7 +621,7 @@ class TestFuseFx(QuantizationTestCase):
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
-            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
+            if node.op == "call_module" and isinstance(named_modules[node.target], torch.nn.Conv2d):
                 self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
 
     def test_fusion_pattern_with_matchallnode(self):
@@ -719,7 +719,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
-            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+            if n.op == 'call_module' and isinstance(modules[n.target], nn.ReLU):
                 self.assertTrue(is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
@@ -4706,13 +4706,11 @@ class TestQuantizeFx(QuantizationTestCase):
             isinstance(mod_prep.untraceable_module_name.linear, torch.nn.Linear)
         )
         self.assertTrue(
-            type(mod_prep.untraceable_module_class.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            not isinstance(mod_prep.untraceable_module_class.linear, torch.nn.qat.modules.linear.Linear),
             "prepare_qat_fx shold not convert anything inside untraced module classes",
         )
         self.assertTrue(
-            type(mod_prep.untraceable_module_name.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            not isinstance(mod_prep.untraceable_module_name.linear, torch.nn.qat.modules.linear.Linear),
             "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
         )
 

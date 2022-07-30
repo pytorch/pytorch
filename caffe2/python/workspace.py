@@ -12,7 +12,6 @@ import os
 from collections import defaultdict
 import logging
 import numpy as np
-from past.builtins import basestring
 import shutil
 import socket
 import tempfile
@@ -156,7 +155,7 @@ def StringifyProto(obj):
   Raises:
     AttributeError: if the passed in object does not have the right attribute.
   """
-    if isinstance(obj, basestring):
+    if isinstance(obj, str):
         return obj
     else:
         if isinstance(obj, Message):
@@ -324,7 +323,7 @@ def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False,
 
 
 def _StringifyName(name, expected_type):
-    if isinstance(name, basestring):
+    if isinstance(name, str):
         return name
     assert type(name).__name__ == expected_type, \
         "Expected a string or %s" % expected_type
@@ -340,7 +339,7 @@ def StringifyNetName(name):
 
 
 def GetNetName(net):
-    if isinstance(net, basestring):
+    if isinstance(net, str):
         return net
     if type(net).__name__ == "Net" or type(net).__name__ == "NetWithShapeInference":
         return net.Name()
@@ -700,9 +699,9 @@ def _Workspace_run(ws, obj):
 
 
 def _Workspace_feed_blob(ws, name, arr, device_option=None):
-    if type(arr) is caffe2_pb2.TensorProto:
+    if isinstance(arr, caffe2_pb2.TensorProto):
         arr = utils.Caffe2TensorToNumpyArray(arr)
-    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
+    if isinstance(arr, np.ndarray) and arr.dtype.kind in 'SU':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
 

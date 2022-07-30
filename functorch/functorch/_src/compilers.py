@@ -401,7 +401,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             input_meta += get_input_meta(args[1])
             return input_meta
         for arg in args:
-            if(type(arg) == int or type(arg) == float):
+            if(isinstance(arg, int) or isinstance(arg, float)):
                 input_meta.append((type(arg),))
             else:
                 input_meta.append((type(arg), arg.shape, arg.stride(), arg.dtype, arg.device))

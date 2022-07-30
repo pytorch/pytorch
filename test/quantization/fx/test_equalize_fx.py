@@ -593,7 +593,7 @@ class TestEqualizeFx(QuantizationTestCase):
                 # Check that the type of call_modules are the same (ex. nn.Linear, MinMaxObserver)
                 orig_node = orig_nodes[orig_idx]
                 eq_node = eq_nodes[eq_idx]
-                if type(orig_modules[orig_node.target]) is not type(eq_modules[eq_node.target]):
+                if not isinstance(orig_modules[orig_node.target], type(eq_modules[eq_node.target])):
                     return False
             elif orig_nodes[orig_idx].op == 'call_function':
                 # Check that the call_functions are the same (ex. F.linear)

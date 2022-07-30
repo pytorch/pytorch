@@ -481,15 +481,15 @@ class Tracer(TracerBase):
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
                     if (
-                        type(x) == bool
+                        isinstance(x, bool)
                         or type(x) in base_types
-                        and type(x) != torch.Tensor
+                        and not isinstance(x, torch.Tensor)
                     ):
                         torch._assert(
                             out == x,
                             f"{name} has been specialized to have value {x} but got another value",
                         )
-                    elif type(x) == type(None):
+                    elif isinstance(x, type(None)):
                         args = (
                             out,
                             f"{name} has been specialized to have value None but got another value",

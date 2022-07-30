@@ -6,7 +6,6 @@
 
 
 from collections import namedtuple, OrderedDict, defaultdict
-from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
 from itertools import chain
 from six import binary_type, string_types, text_type
@@ -337,7 +336,7 @@ def _RectifyInputOutput(blobs, net=None):
         # and put it as a list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
         return [ScopedBlobReference(blobs, net=net)]
-    elif type(blobs) is BlobReference:
+    elif isinstance(blobs, BlobReference):
         # If blob is a BlobReference, simply put it as a list.
         return [blobs]
     elif type(blobs) in (list, tuple):
@@ -346,7 +345,7 @@ def _RectifyInputOutput(blobs, net=None):
         for blob in blobs:
             if isinstance(blob, string_types) or isinstance(blob, binary_type):
                 rectified.append(ScopedBlobReference(blob, net=net))
-            elif type(blob) is BlobReference:
+            elif isinstance(blob, BlobReference):
                 rectified.append(blob)
             else:
                 raise TypeError(
@@ -471,7 +470,7 @@ def GetIndexFromGradientList(g_list, name):
     for i, g in enumerate(g_list):
         if g == name:
             return i
-        elif type(g) is GradientSlice:
+        elif isinstance(g, GradientSlice):
             if (g.indices == name or g.values == name):
                 return i
     return None
@@ -675,7 +674,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                     input_name = forward_op.input[input_index]
                     input_version = in_versions[input_name]
                     g = g_input[input_index]
-                    if type(g) is GradientSlice:
+                    if isinstance(g, GradientSlice):
                         # the output corresponds either to the indices or the
                         # values of the sparse gradient. In either case we
                         # create a (partial) SparseGradGenMeta. If necessary,
@@ -708,7 +707,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             input_version = in_versions[input_name]
             if not g:
                 continue
-            if type(g) is GradientSlice:
+            if isinstance(g, GradientSlice):
                 if str(g.indices) not in locally_generated_blobs and \
                         str(g.values) not in locally_generated_blobs:
                     self.gradient_generators[input_name][input_version].append(
@@ -734,12 +733,12 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             return s
 
         for g in generator:
-            if type(g) is GradGenMeta:
+            if isinstance(g, GradGenMeta):
                 grad_op, idx, _, _ = g
                 if grad_op:
                     return grad_op.output[idx]
             else:
-                assert(type(g) is SparseGradGenMeta)
+                assert(isinstance(g, SparseGradGenMeta))
                 op_i, idx_i, op_v, idx_v, _, _ = g
                 if op_i:
                     return remove_suffix(op_i.output[idx_i], '_indices')
@@ -807,7 +806,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         first_grad_op = True
         for generator in generators:
             grad_op, idx, g, _ = generator
-            assert(type(g) is not GradientSlice)
+            assert(not isinstance(g, GradientSlice))
             if grad_op:
                 if first_grad_op:
                     first_grad_op = False
@@ -839,7 +838,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         cnt_v = 0
 
         for generator in generators:
-            assert(type(generator) is SparseGradGenMeta)
+            assert(isinstance(generator, SparseGradGenMeta))
             op_i, idx_i, op_v, idx_v, g, _ = generator
             if op_i:
                 out, cnt_i = self._DisambiguateGradOpOutput(op_i, idx_i, cnt_i)
@@ -916,11 +915,11 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         for g in generator:
             if g.device_option:
                 all_device_options.append(g.device_option)
-            if type(g) is GradGenMeta:
+            if isinstance(g, GradGenMeta):
                 if g.grad_op:
                     all_gradient_names.append(g.gradient)
             else:
-                assert(type(g) is SparseGradGenMeta)
+                assert(isinstance(g, SparseGradGenMeta))
                 if g.gradient.values:
                     all_gradient_names.append(g.gradient.values)
 
@@ -1179,7 +1178,7 @@ class GradientRegistry(object):
 
         if gradient_ops is None:
             return [], g_input
-        if type(gradient_ops) is not list:
+        if not isinstance(gradient_ops, list):
             gradient_ops = [gradient_ops]
         return gradient_ops, g_input
 
@@ -1488,7 +1487,7 @@ class Net(object):
         self._op_outputs = set()
         self._external_input_map = set()
         self._attr_dict = defaultdict(list)
-        if type(name_or_proto) is caffe2_pb2.NetDef:
+        if isinstance(name_or_proto, caffe2_pb2.NetDef):
             proto = name_or_proto
             # We are initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
@@ -2245,7 +2244,7 @@ class Net(object):
             # If we do not specify an output, we will assume that this op
             # produces one output in this case.
             outputs = self.NextName(prefix=op_type)
-        elif type(outputs) is int:
+        elif isinstance(outputs, int):
             # In this case, we will auto-fill the given number of outputs
             # with auto-generated names.
             outputs = [
@@ -2689,7 +2688,7 @@ class ExecutionStep(object):
         self._is_used = False
         self._substeps = []
         if nets is not None:
-            if type(nets) is Net:
+            if isinstance(nets, Net):
                 nets = [nets]
             for net in nets:
                 if _add_net_to_dict(self._net_dict, net):
@@ -2884,7 +2883,7 @@ class Plan(object):
         if isinstance(name_or_step, ExecutionStep):
             self._plan.name = name_or_step.Name()
             self.AddStep(name_or_step)
-        elif isinstance(name_or_step, basestring):
+        elif isinstance(name_or_step, str):
             self._plan.name = name_or_step
         else:
             raise ValueError('name_or_step must be a string or ExecutionStep')

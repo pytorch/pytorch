@@ -636,14 +636,14 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             torch.save(x, f)
             f.seek(0)
             x_loaded = torch.load(f)
-            self.assertTrue(type(x_loaded) is type(x))
+            self.assertTrue(isinstance(x_loaded, type(x)))
             self.assertEqual(x.elem, x_loaded.elem)
             self.assertFalse(x is x_loaded)
 
     def test_deepcopy_wrapper_subclass(self) -> None:
         x = LoggingTensor(torch.randn(3))
         x_copy = deepcopy(x)
-        self.assertTrue(type(x_copy) is type(x))
+        self.assertTrue(isinstance(x_copy, type(x)))
         self.assertEqual(x.elem, x_copy.elem)
         self.assertFalse(x is x_copy)
 

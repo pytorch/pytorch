@@ -312,7 +312,7 @@ atexit.register(dump_ops)
 
 def any_unsupported(args, kwargs):
     def test_unsupported(t):
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+        if isinstance(t, torch.Tensor) or isinstance(t, torch.nn.Parameter):
             # These are all things that we haven't coded decompositions
             # to handle correctly.  Maybe they should.
             return any([

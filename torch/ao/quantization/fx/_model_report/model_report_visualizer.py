@@ -124,7 +124,7 @@ class ModelReportVisualizer:
             # loop through features
             for feature_name in feature_dict:
                 # if we need plottable, ensure type of val is tensor
-                if not plottable_features_only or type(feature_dict[feature_name]) == torch.Tensor:
+                if not plottable_features_only or isinstance(feature_dict[feature_name], torch.Tensor):
                     unique_feature_names.add(feature_name)
 
         # return our compiled set of unique feature names
@@ -266,7 +266,7 @@ class ModelReportVisualizer:
                             feature_val = "Not Applicable"
 
                         # if it's a tensor we want to extract val
-                        if type(feature_val) is torch.Tensor:
+                        if isinstance(feature_val, torch.Tensor):
                             feature_val = feature_val.item()
 
                         # add value to channel specific row
@@ -503,7 +503,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if not type(row_value) == str:
+                if not isinstance(row_value, str):
                     x_data.append(x_val_to_append)
                     # how we append y value depends on if per tensor or not
                     if is_valid_per_channel_plot:

@@ -371,7 +371,7 @@ def try_ann_to_type(ann, loc):
         return BoolType.get()
     if ann is Any:
         return AnyType.get()
-    if ann is type(None):
+    if isinstance(None, ann):
         return NoneType.get()
     if inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(ann.__torch_script_interface__)

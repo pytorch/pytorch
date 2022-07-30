@@ -822,11 +822,11 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
-        if type(mod) == torch.nn.LSTMCell:
+        if isinstance(mod, torch.nn.LSTMCell):
             qRNNCellBase = LSTMCell(mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype)
-        elif type(mod) == torch.nn.GRUCell:
+        elif isinstance(mod, torch.nn.GRUCell):
             qRNNCellBase = GRUCell(mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype)
-        elif type(mod) == torch.nn.RNNCell:
+        elif isinstance(mod, torch.nn.RNNCell):
             qRNNCellBase = RNNCell(mod.input_size, mod.hidden_size, bias=mod.bias, nonlinearity=mod.nonlinearity, dtype=dtype)
         else:
             raise NotImplementedError('Only LSTMCell, GRUCell and RNNCell \

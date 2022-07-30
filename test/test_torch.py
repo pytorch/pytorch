@@ -7832,9 +7832,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         s2 = t2.as_subclass(SubTensor)
 
         # Check that the correct type is returned.
-        self.assertTrue(type(s0) is SubTensor)
-        self.assertTrue(type(s1) is SubTensor)
-        self.assertTrue(type(s2) is SubTensor)
+        self.assertTrue(isinstance(s0, SubTensor))
+        self.assertTrue(isinstance(s1, SubTensor))
+        self.assertTrue(isinstance(s2, SubTensor))
 
         # Check that the data is equal.
         self.assertEqual(t0, s0)

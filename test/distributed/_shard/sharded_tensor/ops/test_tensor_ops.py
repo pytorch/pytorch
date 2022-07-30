@@ -37,7 +37,7 @@ class TestTensorOps(ShardedTensorTestBase):
         )
         st = sharded_tensor.rand(spec, (12, 5))
         copied_st = copy.deepcopy(st)
-        self.assertTrue(type(copied_st) is type(st))
+        self.assertTrue(isinstance(copied_st, type(st)))
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
@@ -56,7 +56,7 @@ class TestTensorOps(ShardedTensorTestBase):
         )
         st = sharded_tensor.rand(spec, (12, 5))
         copied_st = st.clone()
-        self.assertTrue(type(copied_st) is type(st))
+        self.assertTrue(isinstance(copied_st, type(st)))
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 

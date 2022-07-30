@@ -290,7 +290,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 )
             )
 
-            assert type(optim) is type(ref_optim) and optim.attributes == ref_optim.attributes, (
+            assert isinstance(optim, type(ref_optim)) and optim.attributes == ref_optim.attributes, (
                 "Optim for {} is an instance of Optimizer. However, the optimizer "
                 "for the parameters shared with {} is {}. "
                 "This optimizer either doesn't have the same type as the current optimizer: "

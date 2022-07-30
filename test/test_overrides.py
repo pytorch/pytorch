@@ -143,7 +143,7 @@ class DiagonalTensor(object):
         return cls.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
-        if type(other) is type(self):
+        if isinstance(other, type(self)):
             if self._N == other._N and self._i == other._i:
                 return True
             else:

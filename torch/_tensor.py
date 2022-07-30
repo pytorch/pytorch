@@ -60,7 +60,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
         return func(*args)
 
     ret = func(*args)
-    if type(ret) is not new_type:
+    if not isinstance(ret, new_type):
         ret = ret.as_subclass(new_type)
     # Tensor does define __setstate__ even though it doesn't define
     # __getstate__. So only use __setstate__ if it is NOT the one defined
@@ -117,10 +117,10 @@ class Tensor(torch._C._TensorBase):
             if (
                 self.is_sparse
                 or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
-                or (type(self) is not Tensor and self.data_ptr() == 0)
+                or (not isinstance(self, Tensor) and self.data_ptr() == 0)
             ):
                 new_tensor = self.clone()
-                if type(new_tensor) is not type(self):
+                if not isinstance(new_tensor, type(self)):
                     raise RuntimeError(
                         "The default implementation of __deepcopy__() for wrapper subclasses "
                         "only works for subclass types that implement clone() and for which "
@@ -170,7 +170,7 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks,
                     )
-                    if type(new_tensor) is not type(self):
+                    if not isinstance(new_tensor, type(self)):
                         raise RuntimeError(
                             "The default implementation of __deepcopy__() for quantized tensors "
                             "expects the tensor returned by torch._utils._rebuild_qtensor() to "
@@ -179,7 +179,7 @@ class Tensor(torch._C._TensorBase):
                         )
                 else:
                     new_tensor = self.new_empty([])
-                    if type(new_tensor) is not type(self):
+                    if not isinstance(new_tensor, type(self)):
                         raise RuntimeError(
                             "The default implementation of __deepcopy__() for non-wrapper subclasses "
                             "only works for subclass types that implement new_empty() and for which "
@@ -200,8 +200,8 @@ class Tensor(torch._C._TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            if not type(self) is Tensor:
-                if type(new_tensor) is not type(self):
+            if not isinstance(self, Tensor):
+                if not isinstance(new_tensor, type(self)):
                     raise RuntimeError(
                         "Type of deepcopy result does not match the type of the source tensor. "
                         "If you encounter this, please open an issue on PyTorch's GitHub."
@@ -219,7 +219,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is Tensor:
+        if isinstance(self, Tensor):
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
@@ -366,7 +366,7 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
         elif (
             self.data_ptr() == 0
-            and type(self) is not torch.Tensor
+            and not isinstance(self, torch.Tensor)
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
         ):
             arg_wrapper_subclass = (
@@ -840,7 +840,7 @@ class Tensor(torch._C._TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
+        if self.dim() == 0 and not self.is_meta and isinstance(self, Tensor):
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
@@ -1301,7 +1301,7 @@ class Tensor(torch._C._TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
-        if stream is not None and type(stream) is not int:
+        if stream is not None and not isinstance(stream, int):
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
             raise TypeError("stream must be ``int`` or ``none``")

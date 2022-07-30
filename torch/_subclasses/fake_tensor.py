@@ -135,7 +135,7 @@ class FakeTensorConverter(object):
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
             out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
-        if type(t) is torch.nn.Parameter:
+        if isinstance(t, torch.nn.Parameter):
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         self.set_tensor_memo(t, out)
         return out
@@ -559,7 +559,7 @@ class FakeTensorMode(TorchDispatchMode):
                 subclass_seen = subclass_seen or (
                     isinstance(x, torch.Tensor)
                     and not isinstance(x, FakeTensor)
-                    and type(x) is not torch.Tensor
+                    and not isinstance(x, torch.Tensor)
                 )
 
             tree_map(check_non_fake_tensor, args)
@@ -592,7 +592,7 @@ class FakeTensorMode(TorchDispatchMode):
                 assert (
                     len(kwargs) == 0
                     and len(args) == 1
-                    and type(args[0]) is torch.Tensor
+                    and isinstance(args[0], torch.Tensor)
                 ), f"{args} {kwargs}"
                 with no_dispatch():
                     return converter(self, args[0])

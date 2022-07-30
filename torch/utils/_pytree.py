@@ -78,7 +78,7 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
     fields = getattr(typ, '_fields', None)
     if not isinstance(fields, tuple):
         return False
-    return all(type(entry) == str for entry in fields)
+    return all(isinstance(entry, str) for entry in fields)
 
 def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):

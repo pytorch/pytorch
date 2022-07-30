@@ -53,8 +53,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
         np.random.seed(seed)
         d = x.shape[1]
         lens = np.random.randint(low=1, high=3, size=d - 3)
-        indices = np.random.choice(range(d), d - 3, replace=False)
-        indices.sort()
+        indices = sorted(np.random.choice(range(d), d - 3, replace=False))
         boundaries = []
         for i in range(d - 3):
             # add [0, 0] as duplicated boundary for duplicated bucketization

@@ -220,7 +220,7 @@ def gather(outputs: List[Batch]):
             output_type = type(outputs[0][i])
             current_outputs = []
             for batch in outputs:
-                if output_type != type(batch[i]):
+                if not isinstance(batch[i], output_type):
                     raise TypeError(f'Types for microbatch outputs do not match, found: {output_type} and {type(batch[i])}')
                 current_outputs.append(batch[i])
 

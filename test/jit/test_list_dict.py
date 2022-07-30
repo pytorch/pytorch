@@ -547,8 +547,7 @@ class TestList(JitTestCase):
 
         @torch.jit.script
         def test_mutation():
-            a = [1, 2, 3]
-            a.sort()
+            a = sorted([1, 2, 3])
             return a
 
         test_mutation()
@@ -1390,7 +1389,7 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
+        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
 
     def dict2(self):
         return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}

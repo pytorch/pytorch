@@ -39,9 +39,9 @@ def onnxifi_caffe2_net(
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
     shape_hints = caffe2_pb2.TensorBoundShapes()
-    if type(input_shapes) is caffe2_pb2.TensorBoundShapes:
+    if isinstance(input_shapes, caffe2_pb2.TensorBoundShapes):
         shape_hints = input_shapes
-    elif type(input_shapes) is dict:
+    elif isinstance(input_shapes, dict):
         for k, v in input_shapes.items():
             tbs = caffe2_pb2.TensorBoundShape()
             tbs.name = k

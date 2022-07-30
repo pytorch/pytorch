@@ -7953,7 +7953,7 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
     inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
-            if type(mask) != torch.Tensor:
+            if not isinstance(mask, torch.Tensor):
                 continue
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
             if 'keepdim' in sample_input_kwargs:

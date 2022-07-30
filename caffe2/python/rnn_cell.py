@@ -1531,7 +1531,7 @@ def _LSTM(
     unrolled into Caffe2 graph. The size of the unroll is the value of
     this parameter.
     '''
-    if type(dim_out) is not list and type(dim_out) is not tuple:
+    if not isinstance(dim_out, list) and not isinstance(dim_out, tuple):
         dim_out = [dim_out]
     num_layers = len(dim_out)
 

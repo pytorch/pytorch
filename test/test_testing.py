@@ -773,7 +773,7 @@ class TestAssertClose(TestCase):
     def test_scalar(self):
         number = torch.randint(10, size=()).item()
         for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
-            check_dtype = type(actual) is type(expected)
+            check_dtype = isinstance(actual, type(expected))
 
             for fn in assert_close_with_inputs(actual, expected):
                 fn(check_dtype=check_dtype)

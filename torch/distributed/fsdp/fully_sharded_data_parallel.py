@@ -1822,13 +1822,13 @@ class FullyShardedDataParallel(nn.Module):
                 prev_state_dict_config = submodule._state_dict_config
             if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError("All FSDP module should the same state_dict_type.")
-            if type(prev_state_dict_config) != type(submodule._state_dict_config):
+            if not isinstance(prev_state_dict_config, type(submodule._state_dict_config)):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
 
             expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
-            if expected_state_dict_config_type != type(state_dict_config):
+            if not isinstance(state_dict_config, expected_state_dict_config_type):
                 raise RuntimeError(
                     f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
                 )
@@ -4029,10 +4029,10 @@ class FullyShardedDataParallel(nn.Module):
         osd = optim_state_dict  # alias
         # Validate that the existing parameter keys are uniformly typed
         uses_param_name_mask = [
-            type(param_key) is str for param_key in osd["state"]
+            isinstance(param_key, str) for param_key in osd["state"]
         ]
         uses_param_id_mask = [
-            type(param_key) is int for param_key in osd["state"]
+            isinstance(param_key, int) for param_key in osd["state"]
         ]
         if (any(uses_param_name_mask) and not all(uses_param_name_mask)) or \
                 (any(uses_param_id_mask) and not all(uses_param_id_mask)):

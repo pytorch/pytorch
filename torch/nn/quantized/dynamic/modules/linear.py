@@ -87,7 +87,7 @@ class Linear(nnq.Linear):
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \
             str([float_mod.__name__ for float_mod in float_modules])
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        if type(mod) == nni.LinearReLU:
+        if isinstance(mod, nni.LinearReLU):
             mod = mod[0]
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()

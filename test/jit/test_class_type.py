@@ -397,8 +397,7 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         def test_list_no_reverse():
-            li = [Foo(3), Foo(1)]
-            li.sort()
+            li = sorted([Foo(3), Foo(1)])
             return li[0].getVal()
 
         self.assertEqual(test_list_no_reverse(), 1)
@@ -413,8 +412,7 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         def test_nested_inside_tuple():
-            li = [(1, Foo(12)), (1, Foo(11))]
-            li.sort()
+            li = sorted([(1, Foo(12)), (1, Foo(11))])
             return [(li[0][0], li[0][1].getVal()), (li[1][0], li[1][1].getVal())]
 
         self.assertEqual(test_nested_inside_tuple(), [(1, 11), (1, 12)])
@@ -435,8 +433,7 @@ class TestClassType(JitTestCase):
 
             @torch.jit.script
             def test():
-                li = [NoMethod(), NoMethod()]
-                li.sort()
+                li = sorted([NoMethod(), NoMethod()])
                 return li
             test()
 
@@ -452,8 +449,7 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "must define a __lt__", ""):
             @torch.jit.script
             def test():
-                li = [WrongLt(), WrongLt()]
-                li.sort()
+                li = sorted([WrongLt(), WrongLt()])
                 return li
             test()
 

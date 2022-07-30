@@ -142,9 +142,9 @@ def MakeArgument(key, value):
         # convert numpy scalar to native python type
         value = np.asscalar(value)
 
-    if type(value) is float:
+    if isinstance(value, float):
         argument.f = value
-    elif type(value) in integer_types or type(value) is bool:
+    elif type(value) in integer_types or isinstance(value, bool):
         # We make a relaxation that a boolean variable will also be stored as
         # int.
         argument.i = value
@@ -158,13 +158,13 @@ def MakeArgument(key, value):
         argument.s = value.SerializeToString()
     elif iterable and all(type(v) in [float, np.float_] for v in value):
         argument.floats.extend(
-            v.item() if type(v) is np.float_ else v for v in value
+            v.item() if isinstance(v, np.float_) else v for v in value
         )
     elif iterable and all(
         type(v) in integer_types or type(v) in [bool, np.int_] for v in value
     ):
         argument.ints.extend(
-            v.item() if type(v) is np.int_ else v for v in value
+            v.item() if isinstance(v, np.int_) else v for v in value
         )
     elif iterable and all(
         isinstance(v, binary_type) or isinstance(v, text_type) for v in value
@@ -220,7 +220,7 @@ def GetContentFromProto(obj, function_map):
     """Gets a specific field from a protocol buffer that matches the given class
     """
     for cls, func in viewitems(function_map):
-        if type(obj) is cls:
+        if isinstance(obj, cls):
             return func(obj)
 
 
@@ -377,7 +377,7 @@ def BuildUniqueMutexIter(
 
 def EnumClassKeyVals(cls):
     # cls can only be derived from object
-    assert type(cls) == type
+    assert isinstance(cls, type)
     # Enum attribute keys are all capitalized and values are strings
     enum = {}
     for k in dir(cls):

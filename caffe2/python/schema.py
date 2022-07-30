@@ -24,7 +24,6 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
-from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
 from six import StringIO
@@ -660,7 +659,7 @@ class Struct(Field):
         for name, right_field in other.get_children():
             if name in children:
                 left_field = children[name]
-                if type(left_field) == type(right_field):
+                if isinstance(left_field, type(right_field)):
                     if isinstance(left_field, Struct):
                         child = left_field - right_field
                         if child.get_children():
@@ -814,7 +813,7 @@ class Scalar(Field):
                 "on newly created Scalar with unsafe=True. This will become an "
                 "error soon."
             )
-        if blob is not None and isinstance(blob, basestring):
+        if blob is not None and isinstance(blob, str):
             raise ValueError(
                 'Passing str blob to Scalar.set() is ambiguous. '
                 'Do either set(blob=np.array(blob)) or '
@@ -1129,7 +1128,7 @@ def as_record(value):
         return value
     elif isinstance(value, list) or isinstance(value, tuple):
         is_field_list = all(
-            f is tuple and len(f) == 2 and isinstance(f[0], basestring)
+            f is tuple and len(f) == 2 and isinstance(f[0], str)
             for f in value
         )
         if is_field_list:

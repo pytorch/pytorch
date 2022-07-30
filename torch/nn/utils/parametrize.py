@@ -644,7 +644,7 @@ def remove_parametrizations(
             # We do this so that the parameter does not to change the id()
             # This way the user does not need to update the optimizer
             with torch.no_grad():
-                if type(original) is torch.Tensor:
+                if isinstance(original, torch.Tensor):
                     original.set_(t)
                 else:
                     try:

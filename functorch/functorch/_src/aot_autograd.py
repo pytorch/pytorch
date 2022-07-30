@@ -461,8 +461,7 @@ def aot_function(
     elif static_argnums is not None and len(static_argnums) == 0:
         static_argnums = None
     elif static_argnums is not None:
-        static_argnums = list(static_argnums)
-        static_argnums.sort()
+        static_argnums = sorted(static_argnums)
 
     @wraps(fn)
     def returned_function(*args, **kwargs):

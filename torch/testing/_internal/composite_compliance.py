@@ -130,7 +130,7 @@ def generate_cct(enable_recursive_torch_dispatch=False,
 
         @staticmethod
         def __new__(cls, elem, *args, **kwargs):
-            assert type(elem) is not cls, \
+            assert not isinstance(elem, cls), \
                 "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
 
             # The storage of CompositeCompliantTensor should never be used directly
@@ -505,7 +505,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
     CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
 
     def maybe_tangent(t):
-        assert type(t) is not CCT
+        assert not isinstance(t, CCT)
         # Generate `tangent` tensor
         # if given object is a Tensor and requires grad is set.
         if isinstance(t, torch.Tensor) and t.requires_grad:

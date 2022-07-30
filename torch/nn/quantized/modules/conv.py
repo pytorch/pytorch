@@ -218,7 +218,7 @@ class _ConvNd(WeightedQuantizedModule):
         if hasattr(mod, "weight_fake_quant"):
             # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
-            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
+            if isinstance(mod, cls._NNIQAT_CONV_BN_MODULE):
                 mod.weight, mod.bias = fuse_conv_bn_weights(
                     mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                     mod.bn.eps, mod.bn.weight, mod.bn.bias)
@@ -227,14 +227,14 @@ class _ConvNd(WeightedQuantizedModule):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) == cls._FLOAT_MODULE, \
+            assert isinstance(mod, cls._FLOAT_MODULE), \
                 " nnq." + cls.__name__ + ".from_float only works for " + \
                 cls._FLOAT_MODULE.__name__ + " but got:" + str(type(mod))
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
             activation_post_process = None if not hasattr(
                 mod, "activation_post_process") else mod.activation_post_process
-            if type(mod) == cls._NNI_CONV_RELU_MODULE:
+            if isinstance(mod, cls._NNI_CONV_RELU_MODULE):
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
@@ -603,7 +603,7 @@ class _ConvTransposeNd(_ConvNd):
         # derived classes override cls._FLOAT_MODULE attribute
         msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
               cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
-        assert type(mod) == cls._FLOAT_MODULE, msg
+        assert isinstance(mod, cls._FLOAT_MODULE), msg
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()

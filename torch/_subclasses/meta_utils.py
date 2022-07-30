@@ -207,7 +207,7 @@ class MetaConverter:
     def __call__(self, t):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+        if isinstance(t, torch.Tensor) or isinstance(t, torch.nn.Parameter):
             if any(
                 [
                     t.is_sparse_csr,
@@ -236,7 +236,7 @@ class MetaConverter:
             else:
                 self.hit += 1
                 r = self.meta_tensor(t)
-                if type(t) is torch.nn.Parameter:
+                if isinstance(t, torch.nn.Parameter):
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                 return r
         elif torch.overrides.is_tensor_like(t):

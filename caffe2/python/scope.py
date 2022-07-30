@@ -7,7 +7,6 @@
 
 import contextlib
 import threading
-from past.builtins import basestring
 
 from caffe2.proto import caffe2_pb2
 
@@ -35,7 +34,7 @@ def CurrentDeviceScope():
 @contextlib.contextmanager
 def NameScope(prefix, reset=False):
     global _threadlocal_scope
-    assert isinstance(prefix, basestring) or prefix is None, \
+    assert isinstance(prefix, str) or prefix is None, \
         "NameScope takes in a string as its argument."
     old_scope = CurrentNameScope()
     prefix = prefix + _NAMESCOPE_SEPARATOR if prefix else ''

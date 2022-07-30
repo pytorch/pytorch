@@ -36,7 +36,7 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
             return False
         if current_node.target not in modules:
             return False
-        if type(modules[current_node.target]) is not expected_type:
+        if not isinstance(modules[current_node.target], expected_type):
             return False
     return True
 

@@ -29,7 +29,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
 
     if isinstance(dtype, str):
         dtype = _import_dotted_name(dtype)
-    if dtype == type(self):
+    if isinstance(self, dtype):
         return self
     if self.is_sparse:
         if not dtype.is_sparse:
@@ -273,7 +273,7 @@ def _rebuild_qtensor(
         )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
-        if type(scales) is list and type(zero_points) is list:
+        if isinstance(scales, list) and isinstance(zero_points, list):
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
                 zero_points = torch.tensor(

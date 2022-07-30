@@ -252,7 +252,7 @@ def pca_lowrank(
     """
 
     if not torch.jit.is_scripting():
-        if type(A) is not torch.Tensor and has_torch_function((A,)):
+        if not isinstance(A, torch.Tensor) and has_torch_function((A,)):
             return handle_torch_function(
                 pca_lowrank, (A,), A, q=q, center=center, niter=niter
             )

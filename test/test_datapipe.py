@@ -1968,7 +1968,7 @@ class TestTyping(TestCase):
             else:
                 self.assertFalse(issubinstance(d, S))
             for t in basic_type:
-                if type(d) == t:
+                if isinstance(d, t):
                     self.assertTrue(issubinstance(d, t))
                 else:
                     self.assertFalse(issubinstance(d, t))

@@ -37,9 +37,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def test_multi_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        bounds = np.random.uniform(0.1, 0.9,
-                                   (2, n + 1)).astype(np.float32)
-        bounds.sort()
+        bounds = sorted(np.random.uniform(0.1, 0.9,
+                                   (2, n + 1)).astype(np.float32))
         X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
 
         op = core.CreateOperator(
@@ -65,8 +64,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def test_binary_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
-        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
-        bounds.sort()
+        bounds = sorted(np.random.uniform(0.1, 0.9, n + 1).astype(np.float32))
 
         X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
         X[:, 0] = 1 - X[:, 1]
@@ -92,9 +90,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def test_multi_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        bounds = np.random.uniform(0.1, 0.9,
-                                   (2, n + 1)).astype(np.float32)
-        bounds.sort()
+        bounds = sorted(np.random.uniform(0.1, 0.9,
+                                   (2, n + 1)).astype(np.float32))
         X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
 
         op = core.CreateOperator(
@@ -120,8 +117,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def test_binary_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
-        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
-        bounds.sort()
+        bounds = sorted(np.random.uniform(0.1, 0.9, n + 1).astype(np.float32))
 
         X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
         X[:, 0] = 1 - X[:, 1]
@@ -146,8 +142,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def test_1D_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
-        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
-        bounds.sort()
+        bounds = sorted(np.random.uniform(0.1, 0.9, n + 1).astype(np.float32))
 
         X = np.random.uniform(0, 1, size=n).astype(np.float32)
 

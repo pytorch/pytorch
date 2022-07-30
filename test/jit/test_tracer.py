@@ -144,7 +144,7 @@ class TestTracer(JitTestCase):
         Point = namedtuple('point', ['x', 'y'])
 
         def f(p):
-            if type(p) is tuple:
+            if isinstance(p, tuple):
                 p = Point(*p)
             return p.x + p.y
 

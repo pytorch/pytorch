@@ -629,7 +629,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
+        is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.SUPPORTED_MODULES))) > 0
 
         # this is check for observer insertion
         if insert:

@@ -202,7 +202,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
+        assert isinstance(mod, cls._FLOAT_MODULE), 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -1081,8 +1081,8 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         mp = prepare_qat(m)
         mp(data)
         mq = convert(mp)
-        self.assertTrue(type(mq[1]) == nnq.Linear)
-        self.assertTrue(type(mq[2]) == nn.Identity)
+        self.assertTrue(isinstance(mq[1], nnq.Linear))
+        self.assertTrue(isinstance(mq[2], nn.Identity))
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

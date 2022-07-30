@@ -123,8 +123,7 @@ def visualize_file(filename):
 
 @app.route('/')
 def index():
-    files = glob.glob(os.path.join(args.root, "*.*"))
-    files.sort()
+    files = sorted(glob.glob(os.path.join(args.root, "*.*")))
     names = [os.path.basename(f) for f in files]
     return flask.render_template(
         'index.html',

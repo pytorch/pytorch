@@ -60,7 +60,7 @@ def process_bucket_with_remote_server(state, bucket):
     def callback(fut):
         cref.record_end("hook_future_metric", key)
         tensor = fut.wait()
-        if type(tensor) is list:
+        if isinstance(tensor, list):
             tensor = sparse_rpc_format_to_tensor(tensor)
         tensor = tensor.cuda(cref.rank)
         return [tensor]

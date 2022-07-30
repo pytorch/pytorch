@@ -1483,7 +1483,7 @@ class TestFX(JitTestCase):
 
         class CreateArgTracer(torch.fx.Tracer):
             def is_leaf_module(self, m, module_qualified_name):
-                return type(m) is HasCustomArgObjectWhenLeaf
+                return isinstance(m, HasCustomArgObjectWhenLeaf)
 
         m = Root()
         graph = CreateArgTracer().trace(m)
@@ -1603,7 +1603,7 @@ class TestFX(JitTestCase):
 
         class RTTracer(torch.fx.Tracer):
             def is_leaf_module(self, m, module_qualified_name):
-                return type(m) is ReturnTwo
+                return isinstance(m, ReturnTwo)
 
         graph = RTTracer().trace(ut)
         mod = torch.fx.GraphModule(ut, graph)
@@ -3685,8 +3685,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             return f'Tuple{contained_type_str}'
         if origin in {typing.Union}:
             # Annoying hack to detect Optional
-            if len(contained) == 2 and (contained[0] is type(None)) ^ (contained[1] is type(None)):
-                not_none_param = contained[0] if contained[0] is not type(None) else contained[1]
+            if len(contained) == 2 and (isinstance(None, contained[0])) ^ (isinstance(None, contained[1])):
+                not_none_param = contained[0] if not isinstance(None, contained[0]) else contained[1]
                 return f'Optional[{self._annotation_type_to_stable_str(not_none_param, sig_str)}]'
             return f'Union{contained_type_str}'
         if origin in {dict, typing.Dict}:
@@ -3787,9 +3787,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         non_back_compat_strs = [
             s for s in non_back_compat_strs if s.startswith('torch.fx') and not s.startswith('torch.fx.experimental')]
         # Only want objects in public namespaces
-        non_back_compat_strs = [
-            s for s in non_back_compat_strs if all(not atom.startswith('_') for atom in s.split('.'))]
-        non_back_compat_strs.sort()
+        non_back_compat_strs = sorted([
+            s for s in non_back_compat_strs if all(not atom.startswith('_') for atom in s.split('.'))])
 
         if len(non_back_compat_strs) != 0:
             raise AssertionError(f"Public FX API(s) {non_back_compat_strs} introduced but not given a "

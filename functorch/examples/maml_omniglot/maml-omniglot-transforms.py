@@ -154,7 +154,7 @@ def train(db, net, device, meta_opt, epoch, log):
     for batch_idx in range(n_train_iter):
         start_time = time.time()
         # Sample a batch of support and query images and labels.
-        x_spt, y_spt, x_qry, y_qry = db.next()
+        x_spt, y_spt, x_qry, y_qry = next(db)
 
         task_num, setsz, c_, h, w = x_spt.size()
 

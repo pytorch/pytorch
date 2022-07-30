@@ -317,7 +317,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
     ):
         result = []
         for i in range(2):
-            if type(node.args[i]) == Node:
+            if isinstance(node.args[i], Node):
                 result.append(i)
         return result
     return [0]

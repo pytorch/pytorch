@@ -65,7 +65,7 @@ class _InternalGlobals:
 
     @in_onnx_export.setter
     def in_onnx_export(self, value: bool):
-        if type(value) is not bool:
+        if not isinstance(value, bool):
             raise TypeError("in_onnx_export must be a boolean")
         self._in_onnx_export = value
 

@@ -233,7 +233,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
 
     def __init__(self, observer):
         super().__init__(observer=observer)
-        assert type(self.activation_post_process) == FixedQParamsObserver,\
+        assert isinstance(self.activation_post_process, FixedQParamsObserver),\
             "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale

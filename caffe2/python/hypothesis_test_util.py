@@ -542,7 +542,7 @@ class HypothesisTestCase(test_util.TestCase):
             # No inferred shape or type available
             return
         output = workspace.FetchBlob(name)
-        if type(output) is np.ndarray:
+        if isinstance(output, np.ndarray):
             if output.dtype == np.dtype('float64'):
                 correct_type = caffe2_pb2.TensorProto.DOUBLE
             elif output.dtype == np.dtype('float32'):

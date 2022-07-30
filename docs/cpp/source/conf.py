@@ -94,7 +94,7 @@ exhale_args = {
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
-    "afterTitleDescription": textwrap.dedent(u'''
+    "afterTitleDescription": textwrap.dedent('''
         Welcome to the developer reference for the PyTorch C++ API.
     '''),
 }

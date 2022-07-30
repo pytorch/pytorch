@@ -47,7 +47,7 @@ class TextFileReader(Reader):
             [self._reader],
             len(self.schema().field_names()),
             batch_size=self._batch_size)
-        if type(blobs) is core.BlobReference:
+        if isinstance(blobs, core.BlobReference):
             blobs = [blobs]
 
         is_empty = net.IsEmpty(

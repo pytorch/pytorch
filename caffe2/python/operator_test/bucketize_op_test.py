@@ -16,8 +16,7 @@ class TestBucketizeOp(hu.HypothesisTestCase):
         **hu.gcs)
     def test_bucketize_op(self, x, gc, dc):
         length = np.random.randint(low=1, high=5)
-        boundaries = np.random.randn(length) * 5
-        boundaries.sort()
+        boundaries = sorted(np.random.randn(length) * 5)
 
         def ref(x, boundaries):
             bucket_idx = np.digitize(x, boundaries, right=True)

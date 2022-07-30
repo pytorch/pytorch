@@ -32,8 +32,8 @@ def test_default_skip_tracker():
 
     skip_tracker = q.get()
 
-    assert type(skip_tracker) is SkipTracker
-    assert type(skip_tracker) is not SkipTrackerThroughPotals
+    assert isinstance(skip_tracker, SkipTracker)
+    assert not isinstance(skip_tracker, SkipTrackerThroughPotals)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

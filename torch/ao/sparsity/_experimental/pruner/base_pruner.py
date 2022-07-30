@@ -50,7 +50,7 @@ class BasePruner(BaseSparsifier):
         modules = []
         tensor_names = []
         if use_path:
-            if type(config['module']) is tuple:  # (Conv2d, BN)
+            if isinstance(config['module'], tuple):  # (Conv2d, BN)
                 for module_fqn, tensor_name in zip(config['module_fqn'], config['tensor_name']):
                     module = fqn_to_module(self.model, module_fqn)
                     modules.append(module)
@@ -62,7 +62,7 @@ class BasePruner(BaseSparsifier):
                 tensor_names.append(tensor_name)
 
         else:
-            if type(config['module']) is tuple:
+            if isinstance(config['module'], tuple):
                 for module, tensor_name in zip(config['module'], config['tensor_name']):
                     modules.append(module)
                     tensor_names.append(tensor_name)
@@ -152,7 +152,7 @@ class BasePruner(BaseSparsifier):
             self.make_config_from_model(self.model)
 
         for module_config in self.config:
-            if type(module_config) is tuple:
+            if isinstance(module_config, tuple):
                 first_layer, next_layer = module_config
                 assert isinstance(first_layer, nn.Conv2d) and isinstance(next_layer, nn.BatchNorm2d)
                 assert isinstance(module_config, tuple)  # for mypy

@@ -53,7 +53,6 @@ __version_info__ = tuple(int(segment) for segment in __version__.split("."))
 import os
 import sys
 
-unicode = str
 
 if sys.platform.startswith("java"):
     import platform
@@ -526,7 +525,7 @@ def _get_win_folder_with_pywin32(csidl_name):
     # not return unicode strings when there is unicode data in the
     # path.
     try:
-        dir = unicode(dir)
+        dir = str(dir)
 
         # Downgrade to short path name if have highbit chars. See
         # <http://bugs.activestate.com/show_bug.cgi?id=85099>.

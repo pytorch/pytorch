@@ -934,7 +934,7 @@ class TestDistributions(DistributionsTestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 try:
-                    self.assertTrue(type(dist.sample()) is type(dist.enumerate_support()),
+                    self.assertTrue(isinstance(dist.sample(), type(dist.enumerate_support())),
                                     msg=('{} example {}/{}, return type mismatch between ' +
                                          'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
@@ -3223,7 +3223,7 @@ class TestDistributions(DistributionsTestCase):
         for dist_cls, params in EXAMPLES:
             for param in params:
                 dist = dist_cls(**param)
-                if isinstance(dist, no_mode_available) or type(dist) is TransformedDistribution:
+                if isinstance(dist, no_mode_available) or isinstance(dist, TransformedDistribution):
                     with self.assertRaises(NotImplementedError):
                         dist.mode
                     continue
@@ -4224,7 +4224,7 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
-            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+            if isinstance(p, type(q)) and issubclass(type(p), ExponentialFamily):
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
                 self.assertEqual(actual, expected, msg='\n'.join([

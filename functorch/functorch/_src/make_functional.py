@@ -487,7 +487,7 @@ def combine_state_for_ensemble(models):
         raise RuntimeError('combine_state_for_ensemble: Expected all models to '
                            'have the same training/eval mode.')
     model0_typ = type(models[0])
-    if not all(type(m) == model0_typ for m in models):
+    if not all(isinstance(m, model0_typ) for m in models):
         raise RuntimeError('combine_state_for_ensemble: Expected all models to '
                            'be of the same class.')
     funcs, params, buffers = zip(*[make_functional_with_buffers(model)

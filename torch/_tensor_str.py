@@ -356,7 +356,7 @@ def get_summarized_data(self):
 
 
 def _str_intern(inp, *, tensor_contents=None):
-    is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
+    is_plain_tensor = isinstance(inp, torch.Tensor) or isinstance(inp, torch.nn.Parameter)
     if inp.is_nested:
         prefix = "nested_tensor("
     elif is_plain_tensor:

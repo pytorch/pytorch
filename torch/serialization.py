@@ -749,7 +749,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     class UnpicklerWrapper(pickle_module.Unpickler):  # type: ignore[name-defined]
 
         def find_class(self, mod_name, name):
-            if type(name) is str and 'Storage' in name:
+            if isinstance(name, str) and 'Storage' in name:
                 try:
                     return StorageType(name)
                 except KeyError:
@@ -1044,7 +1044,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         # Lets us override the imports that pickle uses when unpickling an object.
         # This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
         def find_class(self, mod_name, name):
-            if type(name) is str and 'Storage' in name:
+            if isinstance(name, str) and 'Storage' in name:
                 try:
                     return StorageType(name)
                 except KeyError:

@@ -215,7 +215,7 @@ class TranslatorRegistry(object):
                            str(layer))
         if caffe_ops is None:
             caffe_ops = []
-        if type(caffe_ops) is not list:
+        if not isinstance(caffe_ops, list):
             caffe_ops = [caffe_ops]
         return caffe_ops, params
 

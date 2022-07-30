@@ -246,7 +246,7 @@ class ExecutorTestBase(TestCase):
         workspace.CreateNet(model.net)
         model_run_func()
         ref_ws = {str(k): workspace.FetchBlob(k) for k in workspace.Blobs()}
-        ref_ws = {k: v for k, v in ref_ws.items() if type(v) is np.ndarray}
+        ref_ws = {k: v for k, v in ref_ws.items() if isinstance(v, np.ndarray)}
 
         workspace.ResetWorkspace()
         workspace.RunNetOnce(model.param_init_net)
@@ -255,7 +255,7 @@ class ExecutorTestBase(TestCase):
         workspace.CreateNet(model.net, overwrite=True)
         model_run_func()
         test_ws = {str(k): workspace.FetchBlob(k) for k in workspace.Blobs()}
-        test_ws = {k: v for k, v in test_ws.items() if type(v) is np.ndarray}
+        test_ws = {k: v for k, v in test_ws.items() if isinstance(v, np.ndarray)}
 
         for blob_name, ref_val in ref_ws.items():
             self.assertTrue(

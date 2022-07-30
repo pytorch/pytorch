@@ -147,8 +147,7 @@ class DirectoryReaderTest(PackageTestCase):
                 reader_one.open_resource("a.txt").getbuffer(), b"hello, a!"
             )
             self.assertFalse(reader_one.is_resource("three"))
-            reader_one_contents = list(reader_one.contents())
-            reader_one_contents.sort()
+            reader_one_contents = sorted(reader_one.contents())
             self.assertSequenceEqual(
                 reader_one_contents, ["a.txt", "b.txt", "c.txt", "three"]
             )

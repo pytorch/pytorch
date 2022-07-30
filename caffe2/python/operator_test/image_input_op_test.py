@@ -35,7 +35,7 @@ from caffe2.python import workspace, core
 # verify if the operator produces same result)
 def verify_apply_bounding_box(img, box):
     import skimage.util
-    if any(type(box[f]) is not int or np.isnan(box[f] or box[f] < 0)
+    if any(not isinstance(box[f], int) or np.isnan(box[f] or box[f] < 0)
            for f in range(0, 4)):
         return img
     # Box is ymin, xmin, bound_height, bound_width

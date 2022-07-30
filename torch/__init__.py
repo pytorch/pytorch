@@ -247,7 +247,7 @@ if not TYPE_CHECKING:
     # which fails with "_C is not a package
     for attr in dir(_C):
         candidate = getattr(_C, attr)
-        if type(candidate) is type(_C):
+        if isinstance(candidate, type(_C)):
             # submodule
             if f'torch._C.{attr}' not in sys.modules:
                 sys.modules[f'torch._C.{attr}'] = candidate
@@ -831,7 +831,7 @@ def _assert(condition, message):
     """
     from .overrides import has_torch_function, handle_torch_function
 
-    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+    if not isinstance(condition, torch.Tensor) and has_torch_function((condition,)):
         return handle_torch_function(_assert, (condition,), condition, message)
     assert condition, message
 

@@ -492,7 +492,7 @@ class NumberPair(Pair):
             raise ErrorMeta(TypeError, f"Unknown number type {type(number_like)}.", id=id)
 
     def compare(self) -> None:
-        if self.check_dtype and type(self.actual) is not type(self.expected):
+        if self.check_dtype and not isinstance(self.actual, type(self.expected)):
             raise self._make_error_meta(
                 AssertionError,
                 f"The (d)types do not match: {type(self.actual)} != {type(self.expected)}.",
@@ -583,7 +583,7 @@ class TensorLikePair(Pair):
         if not directly_related:
             raise UnsupportedInputs()
 
-        if not allow_subclasses and type(actual) is not type(expected):
+        if not allow_subclasses and not isinstance(actual, type(expected)):
             raise UnsupportedInputs()
 
         actual, expected = [self._to_tensor(input) for input in (actual, expected)]

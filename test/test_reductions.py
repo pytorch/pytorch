@@ -2382,7 +2382,7 @@ class TestReductions(TestCase):
 
         # Enumerate all input combinations
         for op, x, q, keepdim in product(ops, inputs, quantiles, keepdims):
-            if type(x) is tuple:
+            if isinstance(x, tuple):
                 a = torch.randn(x, dtype=dtype, device=device)
                 # Make some random elements NaN
                 a.masked_fill_(torch.randint_like(a, 20) == 0, float('nan'))
@@ -2969,7 +2969,7 @@ class TestReductions(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) == list:
+            if isinstance(t, list):
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t

@@ -465,7 +465,7 @@ class TestNumPyInterop(TestCase):
             for t, a in product((tensor.flatten()[0], tensor.flatten()[0].item()),
                                 (np_array.flatten()[0], np_array.flatten()[0].item())):
                 self.assertEqual(t, a)
-                if dtype == torch.complex64 and torch.is_tensor(t) and type(a) == np.complex64:
+                if dtype == torch.complex64 and torch.is_tensor(t) and isinstance(a, np.complex64):
                     # TODO: Imaginary part is dropped in this case. Need fix.
                     # https://github.com/pytorch/pytorch/issues/43579
                     self.assertFalse(t == a)

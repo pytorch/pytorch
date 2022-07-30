@@ -191,7 +191,7 @@ class TestBasePruner(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             modules = []
-            if type(config['module']) is tuple:
+            if isinstance(config['module'], tuple):
                 for module in config['module']:
                     modules.append(module)
             else:
@@ -206,14 +206,14 @@ class TestBasePruner(TestCase):
                 assert hasattr(module, "parametrizations")
                 # Assume that this is the 1st/only parametrization
                 if isinstance(module, tuple(NEEDS_ZEROS)):
-                    assert type(module.parametrizations.weight[0]) == ZeroesParametrization
+                    assert isinstance(module.parametrizations.weight[0], ZeroesParametrization)
                 else:
-                    assert type(module.parametrizations.weight[0]) == PruningParametrization
+                    assert isinstance(module.parametrizations.weight[0], PruningParametrization)
 
     def _check_pruner_mask_squashed(self, model, pruner, device):
         for config in pruner.groups:
             modules = []
-            if type(config['module']) is tuple:
+            if isinstance(config['module'], tuple):
                 for module in config['module']:
                     modules.append(module)
             else:
@@ -227,7 +227,7 @@ class TestBasePruner(TestCase):
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for config in pruner.groups:
             modules = []
-            if type(config['module']) is tuple:
+            if isinstance(config['module'], tuple):
                 for module in config['module']:
                     modules.append(module)
             else:
@@ -240,7 +240,7 @@ class TestBasePruner(TestCase):
     def _check_pruner_valid_after_step(self, model, pruner, pruned_set, device):
         for config in pruner.groups:
             modules = []
-            if type(config['module']) is tuple:
+            if isinstance(config['module'], tuple):
                 for module in config['module']:
                     modules.append(module)
             else:
@@ -375,7 +375,7 @@ class TestBasePruner(TestCase):
         pruner.prepare(model, config)
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
-        if type(model) is Conv2dBN:
+        if isinstance(model, Conv2dBN):
             assert pruner.get_module_pruned_outputs(model.seq[1]) == pruner.get_module_pruned_outputs(model.seq[0])
             assert pruner.get_module_pruned_outputs(model.bn) == pruner.get_module_pruned_outputs(model.conv2d)
         self._check_pruner_valid_after_step(model, pruner, {1}, device)

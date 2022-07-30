@@ -88,7 +88,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_float(cls, other):
-        assert type(other) == cls._FLOAT_MODULE
+        assert isinstance(other, cls._FLOAT_MODULE)
         assert hasattr(other, 'qconfig'), "The float module must have 'qconfig'"
         # Setting the dropout to 0.0!
         observed = cls(other.embed_dim, other.num_heads, other.dropout,

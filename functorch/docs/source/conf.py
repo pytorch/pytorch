@@ -301,7 +301,7 @@ def patched_make_field(self, types, domain, items, **kw):
             # inconsistencies later when references are resolved
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
-                typename = u''.join(n.astext() for n in fieldtype)
+                typename = ''.join(n.astext() for n in fieldtype)
                 typename = typename.replace('int', 'python:int')
                 typename = typename.replace('long', 'python:long')
                 typename = typename.replace('float', 'python:float')

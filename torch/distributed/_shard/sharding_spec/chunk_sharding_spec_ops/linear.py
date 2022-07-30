@@ -141,7 +141,7 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if type(bias) != torch.Tensor and type(bias) != torch.nn.Parameter:
+    if not isinstance(bias, torch.Tensor) and not isinstance(bias, torch.nn.Parameter):
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")

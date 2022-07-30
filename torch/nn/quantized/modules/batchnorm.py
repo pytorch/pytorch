@@ -13,7 +13,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     @staticmethod
     def from_float(cls, mod):
         activation_post_process = mod.activation_post_process
-        if type(mod) == cls._NNI_BN_RELU_MODULE:
+        if isinstance(mod, cls._NNI_BN_RELU_MODULE):
             mod = mod[0]
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)

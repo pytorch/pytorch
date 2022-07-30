@@ -222,13 +222,13 @@ class OutputLogger(Logger):
 
 
 def _convert_tuple_to_list(t: Any) -> Any:
-    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+    return list(_convert_tuple_to_list(x) for x in t) if isinstance(t, tuple) else t
 
 
 def _dequantize_tensor_list(t: Any) -> Any:
     return (
         list(_dequantize_tensor_list(x) for x in t)
-        if type(t) is list
+        if isinstance(t, list)
         else t.dequantize()
         if t.is_quantized
         else t

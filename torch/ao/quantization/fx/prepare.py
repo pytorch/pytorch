@@ -622,7 +622,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             if maybe_obs_node.op == 'call_module':
                 maybe_obs_mod = modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
-                    type(maybe_obs_mod) == type(new_obs_mod) and
+                    isinstance(maybe_obs_mod, type(new_obs_mod)) and
                     maybe_obs_mod.dtype == arg_as_input_target_dtype
                 ):
                     existing_obs_node = maybe_obs_node

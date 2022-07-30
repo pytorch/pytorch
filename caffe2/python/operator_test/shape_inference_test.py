@@ -612,7 +612,7 @@ class TestShapeInference(test_util.TestCase):
         for b in workspace.Blobs():
             arr = workspace.FetchBlob(b)
             correct_shapes[b] = arr.shape
-            if type(arr) is np.ndarray:
+            if isinstance(arr, np.ndarray):
                 if arr.dtype == np.dtype('float32'):
                     correct_types[b] = caffe2_pb2.TensorProto.FLOAT
                 elif arr.dtype == np.dtype('int32'):

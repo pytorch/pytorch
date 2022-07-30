@@ -425,7 +425,7 @@ def _match_static_pattern(
 
     # Handle cases where the node is wrapped in a ReLU
     if (ref_node.op == "call_function" and ref_node.target in (F.relu, torch.relu)) or\
-            (ref_node.op == "call_module" and type(_get_module(ref_node, modules)) == nn.ReLU):
+            (ref_node.op == "call_module" and isinstance(_get_module(ref_node, modules), nn.ReLU)):
         relu_node = ref_node
         ref_node = relu_node.args[0]
         assert(isinstance(ref_node, Node))
@@ -490,7 +490,7 @@ def _lower_static_weighted_ref_module(
         # If so, we replace the entire fused module with the corresponding quantized module
         if ref_class in STATIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
+            if not isinstance(ref_module[0], inner_ref_class):  # type: ignore[index]
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
@@ -552,7 +552,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
         ref_class = type(ref_module)
         if ref_class in DYNAMIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = DYNAMIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) != inner_ref_class:
+            if not isinstance(ref_module[0], inner_ref_class):
                 continue
         else:
             q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)  # type: ignore[assignment]
@@ -683,7 +683,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Handle cases where the functional op is wrapped in a ReLU
         if func_node.op == "call_function" and func_node.target == F.relu or \
            func_node.op == "call_module" and \
-           type(modules[str(func_node.target)]) == torch.nn.ReLU:
+           isinstance(modules[str(func_node.target)], torch.nn.ReLU):
             relu_node = func_node
             func_node = relu_node.args[0]
         else:

@@ -367,7 +367,7 @@ class GradientChecker:
                     "Mismatched inferred shape: want({}), got({})".format(
                         correct_shape, inferred_shape))
 
-            if type(blob) is np.ndarray:
+            if isinstance(blob, np.ndarray):
                 if blob.dtype == np.dtype('float64'):
                     correct_type = caffe2_pb2.TensorProto.DOUBLE
                 elif blob.dtype == np.dtype('float32'):

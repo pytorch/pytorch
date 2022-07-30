@@ -331,9 +331,9 @@ class ModelReport:
             dict_b_val = info_dict_b[key]
 
             # if it's a tensor we have to handle seperately
-            if type(dict_a_val) == torch.Tensor:
+            if isinstance(dict_a_val, torch.Tensor):
                 # if dict_b_val not tensor, automatically false
-                if type(dict_b_val) != torch.Tensor or sum(dict_a_val != dict_b_val) != 0:
+                if not isinstance(dict_b_val, torch.Tensor) or sum(dict_a_val != dict_b_val) != 0:
                     return False
             else:
                 # for non-tensor vals

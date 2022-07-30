@@ -3956,7 +3956,7 @@ class TestBinaryUfuncs(TestCase):
             for i in complex_exponents if exp_dtype.is_complex else exponents:
                 out_dtype_scalar_exp = (
                     torch.complex128
-                    if base_dtype.is_complex or type(i) == complex
+                    if base_dtype.is_complex or isinstance(i, complex)
                     else torch.float64
                 )
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
@@ -3984,7 +3984,7 @@ class TestBinaryUfuncs(TestCase):
         for i in complex_exponents if base_dtype.is_complex else exponents:
             out_dtype_scalar_base = (
                 torch.complex128
-                if exp_dtype.is_complex or type(i) == complex
+                if exp_dtype.is_complex or isinstance(i, complex)
                 else torch.float64
             )
             expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
@@ -3999,9 +3999,9 @@ class TestBinaryUfuncs(TestCase):
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
             for i in (x, y):
-                if type(i) == complex:
+                if isinstance(i, complex):
                     return torch.complex128
-                elif type(i) == torch.Tensor and i.is_complex():
+                elif isinstance(i, torch.Tensor) and i.is_complex():
                     return torch.complex128
             return torch.double
 

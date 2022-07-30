@@ -91,7 +91,7 @@ class CatBenchmark(op_bench.TorchBenchmarkBase):
         random.seed(42)
         inputs = []
         gen_sizes = []
-        if type(sizes) == list and N == -1:
+        if isinstance(sizes, list) and N == -1:
             gen_sizes = sizes
         else:
             for i in range(N):

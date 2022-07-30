@@ -130,7 +130,7 @@ class _NSGraphMatchableSubgraphsIterator:
         """
         if isinstance(arg, Node):
             self.stack.append(arg)
-        elif isinstance(arg, torch.fx.immutable_collections.immutable_list) or type(arg) is tuple:
+        elif isinstance(arg, torch.fx.immutable_collections.immutable_list) or isinstance(arg, tuple):
             for inner_arg in arg:
                 self._recursively_add_node_arg_to_stack(inner_arg)
         elif isinstance(arg, torch.fx.immutable_collections.immutable_dict):
@@ -228,11 +228,11 @@ def _get_subgraph_relationship_type(
         key = (type(mod_a), type(mod_b))
 
         if key not in type_a_related_to_b:
-            if type(mod_a) == type(mod_b):
+            if isinstance(mod_a, type(mod_b)):
                 return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
             else:
                 return SubgraphTypeRelationship.NOT_RELATED
-        elif type(mod_a) == type(mod_b):
+        elif isinstance(mod_a, type(mod_b)):
             return SubgraphTypeRelationship.EQUAL
         else:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL

@@ -456,9 +456,9 @@ class _TypedStorage:
         return self._storage
 
     def _new_wrapped_storage(self, untyped_storage):
-        assert type(untyped_storage) == torch._UntypedStorage
+        assert isinstance(untyped_storage, torch._UntypedStorage)
 
-        if type(self) == _TypedStorage:
+        if isinstance(self, _TypedStorage):
             return _TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
         else:
             return type(self)(wrap_storage=untyped_storage)
@@ -474,7 +474,7 @@ class _TypedStorage:
                 return 0
 
         else:
-            if type(idx) != int:
+            if not isinstance(idx, int):
                 raise TypeError(
                     f"can't index a {type(self)} with {type(idx)}")
             if is_stop:
@@ -847,7 +847,7 @@ class _LegacyStorageMeta(type):
     dtype: torch.dtype
 
     def __instancecheck__(cls, instance):
-        if type(instance) == _TypedStorage:
+        if isinstance(instance, _TypedStorage):
             cls_device = 'cuda' if cls.__module__ == 'torch.cuda' else 'cpu'
             return (cls_device == instance.device.type) and (cls.dtype == instance.dtype)
         return False

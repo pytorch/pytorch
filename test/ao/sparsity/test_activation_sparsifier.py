@@ -230,7 +230,7 @@ class TestActivationSparsifier(TestCase):
             if mask1 is None:
                 assert mask2 is None
             else:
-                assert type(mask1) == type(mask2)
+                assert isinstance(mask1, type(mask2))
                 if isinstance(mask1, List):
                     assert len(mask1) == len(mask2)
                     for idx in range(len(mask1)):

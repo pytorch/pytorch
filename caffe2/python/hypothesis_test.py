@@ -1536,8 +1536,7 @@ class TestOperators(hu.HypothesisTestCase):
             dims=dims)
 
         def expand_dims_ref(data, *args, **kw):
-            inc_dims = list(set(dims))
-            inc_dims.sort()
+            inc_dims = sorted(set(dims))
             r = data
             for dim in inc_dims:
                 r = np.expand_dims(r, axis=dim)

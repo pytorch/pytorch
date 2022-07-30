@@ -1760,7 +1760,7 @@ def is_tensor_like(inp):
     >>> is_tensor_like(TensorLike())
     True
     """
-    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+    return isinstance(inp, torch.Tensor) or hasattr(type(inp), "__torch_function__")
 
 
 def _wrap_torch_function(f):

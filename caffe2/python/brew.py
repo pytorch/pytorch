@@ -8,7 +8,6 @@
 import sys
 import copy
 import inspect
-from past.builtins import basestring
 from caffe2.python.model_helper import ModelHelper
 
 # flake8: noqa
@@ -129,7 +128,7 @@ class HelperWrapper(object):
     def has_helper(self, helper_or_helper_name):
         helper_name = (
             helper_or_helper_name
-            if isinstance(helper_or_helper_name, basestring) else
+            if isinstance(helper_or_helper_name, str) else
             helper_or_helper_name.__name__
         )
         return helper_name in self._registry

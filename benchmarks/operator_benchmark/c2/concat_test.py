@@ -98,7 +98,7 @@ class ConcatBenchmark(op_bench_c2.Caffe2BenchmarkBase):
         self.inputs = []
         self.args = {'axis': axis, 'add_axis': add_axis}
         gen_sizes = []
-        if type(sizes) == list and N == -1:
+        if isinstance(sizes, list) and N == -1:
             gen_sizes = sizes
         else:
             for i in range(N):

@@ -285,7 +285,7 @@ class AverageParameterServer(ParameterServerBase):
             gradient (torch.Tensor or list): tensor sent by the trainer
         """
         self = server_rref.local_value()
-        if type(gradient) is list:
+        if isinstance(gradient, list):
             gradient = sparse_rpc_format_to_tensor(gradient)
         gradient = gradient.cuda(self.rank)
         fut = torch.futures.Future()

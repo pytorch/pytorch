@@ -10,7 +10,6 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, scope, utils, workspace
 from caffe2.python.modeling import parameter_info
-from past.builtins import basestring
 
 
 _LEARNING_RATE_INJECTION = "lr_injection"
@@ -56,7 +55,7 @@ class Optimizer(object):
             ), "Expected parameter to be of type ParameterInfo, got {}".format(param)
             assert param.grad is not None
         else:
-            if isinstance(param, basestring):
+            if isinstance(param, str):
                 param = core.BlobReference(param)
             param = parameter_info.ParameterInfo(param_id=None, param=param, grad=grad)
 
@@ -642,7 +641,7 @@ class AdagradOptimizer(Optimizer):
 
         if self.mask_tensor is not None:
             assert (
-                type(self.mask_tensor) is np.ndarray
+                isinstance(self.mask_tensor, np.ndarray)
             ), "mask_tensor must be a numpy array!"
             assert self.mask_db_path is None, (
                 "mask can be provided through either a numpy array "
