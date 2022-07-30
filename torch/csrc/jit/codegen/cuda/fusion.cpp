@@ -30,6 +30,9 @@ FusionGuard::~FusionGuard() {
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
+void FusionGuard::setCurFusion(Fusion* fusion) {
+  ACTIVE_FUSION = fusion;
+}
 
 void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
@@ -63,6 +66,12 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
 
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
+  for (auto inp : to->inputs_) {
+    inp->setIsFusionInput(true);
+  }
+  for (auto out : to->outputs_) {
+    out->setIsFusionOutput(true);
+  }
 
   // TODO: put this into ir_cloner instead
   for (const auto& entry : from->io_alias_) {
@@ -252,7 +261,11 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
 
   if (find_output != outputs_.end()) {
-    *find_output = replacement;
+    std::replace_if(
+        outputs_.begin(),
+        outputs_.end(),
+        [&output](Val* v) { return v == output; },
+        replacement);
 
     if (replacement->getValType().value() == ValType::TensorView) {
       replacement->setIsFusionOutput(true);
@@ -588,7 +601,7 @@ bool Fusion::isAliasCompatible(Val* left, Val* right) {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
-  // Because we could cast output when input is casted.
+  // Because we could cast output when input is cast.
   TORCH_INTERNAL_ASSERT(
       !output->isFusionOutput(),
       "Do NOT add aliased output to fusion output outside of `aliasOutputToInput");

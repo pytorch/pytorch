@@ -2,26 +2,55 @@
 
 #include <torch/csrc/python_headers.h>
 
-template<class T>
+template <class T>
 class THPPointer {
-public:
-  THPPointer(): ptr(nullptr) {};
-  explicit THPPointer(T *ptr) noexcept : ptr(ptr) {};
-  THPPointer(THPPointer &&p) noexcept { free(); ptr = p.ptr; p.ptr = nullptr; };
+ public:
+  THPPointer() : ptr(nullptr){};
+  explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
+  THPPointer(THPPointer&& p) noexcept {
+    free();
+    ptr = p.ptr;
+    p.ptr = nullptr;
+  };
 
-  ~THPPointer() { free(); };
-  T * get() { return ptr; }
-  const T * get() const { return ptr; }
-  T * release() { T *tmp = ptr; ptr = nullptr; return tmp; }
-  operator T*() { return ptr; }
-  THPPointer& operator =(T *new_ptr) noexcept { free(); ptr = new_ptr; return *this; }
-  THPPointer& operator =(THPPointer &&p) noexcept { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
-  T * operator ->() { return ptr; }
-  explicit operator bool() const { return ptr != nullptr; }
+  ~THPPointer() {
+    free();
+  };
+  T* get() {
+    return ptr;
+  }
+  const T* get() const {
+    return ptr;
+  }
+  T* release() {
+    T* tmp = ptr;
+    ptr = nullptr;
+    return tmp;
+  }
+  operator T*() {
+    return ptr;
+  }
+  THPPointer& operator=(T* new_ptr) noexcept {
+    free();
+    ptr = new_ptr;
+    return *this;
+  }
+  THPPointer& operator=(THPPointer&& p) noexcept {
+    free();
+    ptr = p.ptr;
+    p.ptr = nullptr;
+    return *this;
+  }
+  T* operator->() {
+    return ptr;
+  }
+  explicit operator bool() const {
+    return ptr != nullptr;
+  }
 
-private:
+ private:
   void free();
-  T *ptr = nullptr;
+  T* ptr = nullptr;
 };
 
 /**
@@ -36,3 +65,5 @@ private:
  * not use THPPointer in this situation.
  */
 using THPObjectPtr = THPPointer<PyObject>;
+using THPCodeObjectPtr = THPPointer<PyCodeObject>;
+using THPFrameObjectPtr = THPPointer<PyFrameObject>;

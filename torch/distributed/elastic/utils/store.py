@@ -10,11 +10,14 @@ from datetime import timedelta
 from typing import List
 
 
-def get_all(store, prefix: str, size: int):
+def get_all(store, rank: int, prefix: str, size: int):
     r"""
     Given a store and a prefix, the method goes through the array of keys
     of the following format: ``{prefix}{idx}``, where idx is in a range
     from 0 to size, and tries to retrieve the data.
+
+    The Rank0 process waits at the end to make sure all other processes
+    finished the procedure before exiting.
 
     Usage
 
@@ -30,6 +33,14 @@ def get_all(store, prefix: str, size: int):
     for idx in range(size):
         data = store.get(f"{prefix}{idx}")
         data_arr.append(data)
+    store.set(f"{prefix}{rank}.FIN", b"FIN")
+    if rank == 0:
+        # Rank0 runs the TCPStore daemon, as a result it needs to exit last.
+        # Otherwise, the barrier may timeout if rank0 process finished the work
+        # before other processes finished `get_all` method
+        for node_rank in range(size):
+            store.get(f"{prefix}{node_rank}.FIN")
+
     return data_arr
 
 
@@ -50,7 +61,7 @@ def synchronize(
     """
     store.set_timeout(timedelta(seconds=barrier_timeout))
     store.set(f"{key_prefix}{rank}", data)
-    agent_data = get_all(store, key_prefix, world_size)
+    agent_data = get_all(store, rank, key_prefix, world_size)
     return agent_data
 
 

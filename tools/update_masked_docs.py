@@ -7,24 +7,26 @@ is functional.
 
 import os
 
+
 def main() -> None:
 
-    target = os.path.join('torch', '_masked', '_docs.py')
+    target = os.path.join("torch", "_masked", "_docs.py")
 
     try:
         import torch
     except ImportError as msg:
-        print(f'Failed to import torch required to build {target}: {msg}')
+        print(f"Failed to import torch required to build {target}: {msg}")
         return
 
     if os.path.isfile(target):
         with open(target) as _f:
             current_content = _f.read()
     else:
-        current_content = ''
+        current_content = ""
 
     _new_content = []
-    _new_content.append('''\
+    _new_content.append(
+        """\
 # -*- coding: utf-8 -*-
 # This file is generated, do not modify it!
 #
@@ -35,24 +37,25 @@ def main() -> None:
 # The script must be called from an environment where the development
 # version of torch package can be imported and is functional.
 #
-''')
+"""
+    )
 
     for func_name in sorted(torch._masked.__all__):
         func = getattr(torch._masked, func_name)
         func_doc = torch._masked._generate_docstring(func)
         _new_content.append(f'{func_name}_docstring = """{func_doc}"""\n')
 
-    new_content = '\n'.join(_new_content)
+    new_content = "\n".join(_new_content)
 
     if new_content == current_content:
-        print(f'Nothing to update in {target}')
+        print(f"Nothing to update in {target}")
         return
 
-    with open(target, 'w') as _f:
+    with open(target, "w") as _f:
         _f.write(new_content)
 
-    print(f'Successfully updated {target}')
+    print(f"Successfully updated {target}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -98,7 +98,8 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           "join",
           &TensorPipeAgent::join,
           py::call_guard<py::gil_scoped_release>(),
-          py::arg("shutdown") = false)
+          py::arg("shutdown") = false,
+          py::arg("timeout") = 0)
       .def(
           "shutdown",
           &TensorPipeAgent::shutdown,

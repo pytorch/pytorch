@@ -27,21 +27,21 @@ jobs:
         with:
           script: |
             // Do some dumb retries on requests.
-            function sleep(ms) {
-              return new Promise((resolve) => {
-                setTimeout(resolve, ms);
-              });
-            }
+            const retries = 7;
+            const baseBackoff = 100;
+            const sleep = timeout => new Promise(resolve => setTimeout(resolve, timeout));
             github.hook.wrap('request', async (request, options) => {
-              try {
-                return request(options)
-              } catch (error) {
-                options.request.retries = (options.request.retries || 0) + 1
-                if (options.request.retries > 5) {
-                  throw error;
+              for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                  return await request(options);
+                } catch (err) {
+                  if (attempt < retries) {
+                    core.warning(`Request getting retried. Attempt: ${attempt}`);
+                    await sleep(baseBackoff * Math.pow(2, attempt));
+                    continue;
+                  }
+                  throw err;
                 }
-                await sleep(5000);
-                return request(options)
               }
             });
 

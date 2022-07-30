@@ -1,5 +1,5 @@
 name: 🚀 Feature request
-description: Submit a proposal/request for a new pytorch feature
+description: Submit a proposal/request for a new PyTorch feature
 
 body:
 - type: textarea

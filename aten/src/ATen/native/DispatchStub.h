@@ -197,8 +197,8 @@ struct RegisterHIPDispatch {
     stub.set_cuda_dispatch_ptr(value);
   }
 };
-} // anonymous namespace
 
+} // anonymous namespace
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
 // the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
 // adding parentheses and using helper struct to get rid of the parentheses, do

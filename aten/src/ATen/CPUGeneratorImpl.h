@@ -2,8 +2,8 @@
 
 #include <ATen/core/Generator.h>
 #include <ATen/core/MT19937RNGEngine.h>
-#include <c10/util/Optional.h>
 #include <c10/core/GeneratorImpl.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 
@@ -29,7 +29,7 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   at::mt19937 engine();
   void set_engine(at::mt19937 engine);
 
-private:
+ private:
   CPUGeneratorImpl* clone_impl() const override;
   at::mt19937 engine_;
   c10::optional<float> next_float_normal_sample_;
@@ -39,8 +39,9 @@ private:
 namespace detail {
 
 TORCH_API const Generator& getDefaultCPUGenerator();
-TORCH_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
+TORCH_API Generator
+createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
 
 } // namespace detail
 
-}
+} // namespace at

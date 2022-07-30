@@ -10,20 +10,20 @@ enum class BuiltinCommHookType {
   FP16_COMPRESS = 2,
 };
 
-class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
+class AllReduceCommHook : public CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>> {
  public:
-  explicit AllReduceCommHook(ProcessGroup* state)
-      : CppCommHookInterface<ProcessGroup*>(state) {}
+  explicit AllReduceCommHook(const c10::intrusive_ptr<ProcessGroup>& state)
+      : CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>>(state) {}
 
   ~AllReduceCommHook() override = default;
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
 
-class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
+class FP16CompressCommHook : public CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>> {
  public:
-  explicit FP16CompressCommHook(ProcessGroup* state)
-      : CppCommHookInterface<ProcessGroup*>(state) {}
+  explicit FP16CompressCommHook(const c10::intrusive_ptr<ProcessGroup>& state)
+      : CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>>(state) {}
 
   ~FP16CompressCommHook() override = default;
 
@@ -35,10 +35,10 @@ class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
 // over all the input parameters, when no communication hook is provided by the user.
 // Only used internally and not released as a public built-in communication hook.
 class _AllReduceBySumCommHook
-    : public CppCommHookInterface<ProcessGroup*> {
+    : public CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>> {
  public:
-  explicit _AllReduceBySumCommHook(ProcessGroup* state)
-      : CppCommHookInterface<ProcessGroup*>(state) {}
+  explicit _AllReduceBySumCommHook(const c10::intrusive_ptr<ProcessGroup>& state)
+      : CppCommHookInterface<c10::intrusive_ptr<ProcessGroup>>(state) {}
 
   ~_AllReduceBySumCommHook() override = default;
 

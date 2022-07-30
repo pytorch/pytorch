@@ -451,6 +451,18 @@ result = torch.Tensor([1,2,3])
   EXPECT_TRUE(w_grad0.equal(w_grad1));
 }
 
+TEST(TorchpyTest, ImportlibMetadata) {
+  torch::deploy::InterpreterManager m(1);
+  m.registerModuleSource("importlib_test", R"PYTHON(
+from importlib.metadata import version
+
+result = version("torch")
+)PYTHON");
+  auto I = m.allInstances()[0].acquireSession();
+  auto ver = I.global("importlib_test", "result").toIValue().toString();
+  ASSERT_EQ(ver->string(), "0.0.1+fake_multipy");
+}
+
 // OSS build does not have bultin numpy support yet. Use this flag to guard the
 // test case.
 #if HAS_NUMPY
