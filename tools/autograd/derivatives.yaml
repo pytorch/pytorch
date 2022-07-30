@@ -343,8 +343,8 @@
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
 - name: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
-  self: _NestedTensor_GeneralizedBMM(grad, mat2.transpose(1, 2).conj())
-  mat2: _NestedTensor_GeneralizedBMM(self.transpose(1, 2).conj(), grad)
+  self: _NestedTensor_GeneralizedBMM(grad, mat2.transpose(-2, -1).conj())
+  mat2: _NestedTensor_GeneralizedBMM(self.transpose(-2, -1).conj(), grad)
   result: _NestedTensor_GeneralizedBMM(self_t, mat2_p) + _NestedTensor_GeneralizedBMM(self_p, mat2_t)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor

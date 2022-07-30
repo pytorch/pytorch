@@ -967,6 +967,16 @@ class TestNestedTensorDeviceType(TestCase):
         actual = torch.matmul(nt0, nt1).to_padded_tensor(0.0)
         expect = torch.matmul(nt0.to_padded_tensor(0.0), nt1.to_padded_tensor(0.0))
         self.assertEqual(actual, expect)
+        # normal nested tensor: 5D
+        nt0 = torch.nested_tensor([torch.randn((8, 9, 2, 4)),
+                                   torch.randn((8, 9, 3, 7))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((8, 9, 4, 6)),
+                                   torch.randn((8, 9, 7, 5))],
+                                  device=device, dtype=dtype)
+        actual = torch.matmul(nt0, nt1).to_padded_tensor(0.0)
+        expect = torch.matmul(nt0.to_padded_tensor(0.0), nt1.to_padded_tensor(0.0))
+        self.assertEqual(actual, expect)
 
     # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
@@ -1266,8 +1276,8 @@ class TestNestedTensorAutograd(TestCase):
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
     def test_nested_tensor_matmul_backward(self):
-        nt0 = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
-        nt1 = torch.nested_tensor([torch.randn((6, 4)), torch.randn((6, 5))]).requires_grad_(True)
+        nt0 = torch.nested_tensor([torch.randn((7, 2, 6)), torch.randn((7, 3, 6))]).requires_grad_(True)
+        nt1 = torch.nested_tensor([torch.randn((7, 6, 4)), torch.randn((7, 6, 5))]).requires_grad_(True)
         with torch.no_grad():
             pt0 = nt0.to_padded_tensor(0.0).requires_grad_(True)
             pt1 = nt1.to_padded_tensor(0.0).requires_grad_(True)
