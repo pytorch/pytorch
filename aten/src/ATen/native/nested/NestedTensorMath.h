@@ -13,12 +13,19 @@ struct NestedTensorImpl;
 // TODO: cache this and only do it once per NestedTensor
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
 
-inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
-    at::Tensor nested_size_tensor) {
-  TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
+inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor));
+}
+
+inline at::Tensor wrap_buffer(
+    at::Tensor buffer, at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor, const std::vector<int64_t>& offsets) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
+  return at::detail::make_tensor<NestedTensorImpl>(
+      std::move(buffer), std::move(nested_size_tensor),
+      std::move(nested_stride_tensor), offsets);
 }
 
 TORCH_API std::vector<int64_t> NestedTensor_get_max_size(
