@@ -348,6 +348,10 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
+
+        if kwargs.get("device", None) is not None:
+            meta_kwargs["device"] = "meta"
+
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -404,7 +408,6 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.arange: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
@@ -432,9 +435,7 @@ meta_function_expected_failures = {
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.linspace: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.logcumsumexp : {f64, bf16, f32},
-    torch.logspace: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
