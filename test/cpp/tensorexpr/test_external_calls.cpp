@@ -944,6 +944,7 @@ TEST(ExternalCall, JitCustomFusionOp) {
       [external_func_name](
           const std::vector<torch::jit::tensorexpr::ArgValue>& inputs,
           const std::vector<torch::jit::tensorexpr::ExprHandle>& output_shape,
+          const std::vector<torch::jit::tensorexpr::ExprHandle>& output_strides,
           const c10::optional<torch::jit::tensorexpr::ScalarType>& output_type,
           at::Device device) {
         auto output_dtype = Dtype(*output_type);

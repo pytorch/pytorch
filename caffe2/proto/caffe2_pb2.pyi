@@ -25,7 +25,7 @@ class _DeviceTypeProto(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapp
     PROTO_FPGA = DeviceTypeProto.V(7)
     PROTO_ORT = DeviceTypeProto.V(8)
     PROTO_XLA = DeviceTypeProto.V(9)
-    PROTO_MLC = DeviceTypeProto.V(10)
+    PROTO_MPS = DeviceTypeProto.V(10)
     PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = DeviceTypeProto.V(11)
 class DeviceTypeProto(metaclass=_DeviceTypeProto):
     V = typing.NewType('V', int)
@@ -39,7 +39,7 @@ PROTO_HIP = DeviceTypeProto.V(6)
 PROTO_FPGA = DeviceTypeProto.V(7)
 PROTO_ORT = DeviceTypeProto.V(8)
 PROTO_XLA = DeviceTypeProto.V(9)
-PROTO_MLC = DeviceTypeProto.V(10)
+PROTO_MPS = DeviceTypeProto.V(10)
 PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = DeviceTypeProto.V(11)
 
 class TensorProto(google.protobuf.message.Message):

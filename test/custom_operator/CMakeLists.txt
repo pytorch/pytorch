@@ -2,6 +2,10 @@
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 project(custom_ops)
 
+if(USE_ROCM)
+include(utils)
+include(LoadHIP)
+endif()
 find_package(Torch REQUIRED)
 
 add_library(custom_ops SHARED op.cpp)

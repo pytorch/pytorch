@@ -142,7 +142,7 @@ def instantiate_scriptable_remote_module_template(
 
 
 def instantiate_non_scriptable_remote_module_template():
-    generated_module_name = f"{_FILE_PREFIX}non_sriptable"
+    generated_module_name = f"{_FILE_PREFIX}non_scriptable"
     str_dict = dict(
         assign_module_interface_cls="module_interface_cls = None",
         args="*args",

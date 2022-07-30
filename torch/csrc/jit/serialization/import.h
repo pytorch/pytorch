@@ -58,6 +58,12 @@ TORCH_API Module import_ir_module(
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
 
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files);
+
 /// Loads a serialized `Module` from the given `istream`.
 ///
 /// The istream must contain a serialized `Module`, exported via
@@ -103,6 +109,20 @@ TORCH_API Module jitModuleFromSourceAndConstants(
     const ExtraFilesMap& source,
     const std::vector<IValue>& constants,
     int32_t version);
+
+extern Module (*_load_jit_module_from_flatbuffer_bytes)(
+    // comp unit
+    std::shared_ptr<char>,
+    size_t,
+    ExtraFilesMap&,
+    c10::optional<at::Device>);
+
+extern Module (*_load_jit_module_from_flatbuffer_bytes)(
+    // comp unit
+    std::shared_ptr<char>,
+    size_t,
+    ExtraFilesMap&,
+    c10::optional<at::Device>);
 
 } // namespace jit
 } // namespace torch

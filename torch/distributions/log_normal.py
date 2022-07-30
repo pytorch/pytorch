@@ -3,6 +3,7 @@ from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['LogNormal']
 
 class LogNormal(TransformedDistribution):
     r"""
@@ -45,6 +46,10 @@ class LogNormal(TransformedDistribution):
     @property
     def mean(self):
         return (self.loc + self.scale.pow(2) / 2).exp()
+
+    @property
+    def mode(self):
+        return (self.loc - self.scale.square()).exp()
 
     @property
     def variance(self):

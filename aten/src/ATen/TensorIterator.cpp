@@ -572,19 +572,19 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // can just return contiguous output
         // it is faster because it avoids allocating 0 size tensor and
         // resizing and restriding it
-        set_output(i, tensor_shape, {}, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, {}, original_options(op), names_);
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (const auto dim : c10::irange(ndim())) {
           tensor_stride[dim] /= element_size;
         }
-        set_output(i, tensor_shape, tensor_stride, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op), names_);
       }
       op.current_dtype = op.target_dtype;
     } else if (op.tensor_base().defined()) {
       // Even if we don't resize, we still need to tell set_output about
       // the output, so that we properly set guard and propagate names
-      set_output(i, op.tensor_base().sizes(), {}, original_options(op), names_);
+      set_output_raw_strided(i, op.tensor_base().sizes(), {}, original_options(op), names_);
     }
   }
 }
@@ -946,6 +946,8 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& out, const TensorBase& a,
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
+      .promote_inputs_to_common_dtype(true)
+      .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b)
@@ -1334,7 +1336,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous), names_);
         }
         break;
       }
@@ -1345,7 +1347,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast), names_);
         }
         break;
       }
@@ -1362,7 +1364,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, tensor_base(i_defined).strides(), original_options(op), names_);
+          set_output_raw_strided(i, shape_, tensor_base(i_defined).strides(), original_options(op), names_);
         }
         break;
       }
@@ -1518,7 +1520,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
-void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
@@ -1585,7 +1587,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
 // This is the "traditional" implementation of set_output.  On TensorIterator
 // instances, it is invoked directly from various call sites in this file.  No
 // funny business.
-void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
   // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);

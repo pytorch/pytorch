@@ -492,8 +492,8 @@ std::vector<at::IValue> readWrappedPayload(
   // Read the additional payload remove it from the payload.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t additionalPayloadSize;
+  TORCH_INTERNAL_ASSERT(payload.size() >= sizeof(int64_t));
   size_t indexToRead = payload.size() - sizeof(int64_t);
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
   torch::utils::THP_decodeInt64Buffer(
       &additionalPayloadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,

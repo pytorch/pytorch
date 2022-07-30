@@ -15,7 +15,7 @@
 
 namespace torch {
 namespace lazy {
-namespace  {
+namespace {
 
 std::string GetEnvString(const char* name, const std::string& defval) {
   const char* env = std::getenv(name);
@@ -47,9 +47,9 @@ std::unordered_set<std::string>* LoadExperiments() {
   return xset.release();
 }
 
-}  // namespace
+} // namespace
 
-std::vector<SourceLocation> NoPythonFrames(){
+std::vector<SourceLocation> NoPythonFrames() {
   SourceLocation dummy_loc;
   dummy_loc.file = "No Python Frames";
   return {dummy_loc};
@@ -66,7 +66,6 @@ DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
 }
 
 std::string GetFirstUserFrameInPython() {
-
   std::string empty;
   if (!torch::lazy::GetPythonFramesFunction()) {
     return empty;
@@ -78,18 +77,17 @@ std::string GetFirstUserFrameInPython() {
     auto& loc = frames[i - 1];
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
-      ss << loc.file << " "
-        << loc.function << " "
-        << loc.line;
+      ss << loc.file << " " << loc.function << " " << loc.line;
       return ss.str();
     }
   }
   return empty;
 }
 
-std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
-                                           const std::vector<size_t>* indices,
-                                           GraphFormat format) {
+std::string DebugUtil::GetTensorsGraphInfo(
+    c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
+    const std::vector<size_t>* indices,
+    GraphFormat format) {
   std::vector<torch::lazy::Node*> root_nodes;
   std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
@@ -117,7 +115,8 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending on runtime
+  // Call into a function pointer that may backed by python or empty depending
+  // on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
@@ -149,11 +148,13 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
   return ss.str();
 }
 
-void DebugUtil::SaveTensorsGraphInfo(const char* name,
-                                     c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
-                                     const std::vector<size_t>* indices,
-                                     GraphFormat format) {
-  static const std::string save_file = GetEnvString("LTC_SAVE_TENSORS_FILE", "");
+void DebugUtil::SaveTensorsGraphInfo(
+    const char* name,
+    c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
+    const std::vector<size_t>* indices,
+    GraphFormat format) {
+  static const std::string save_file =
+      GetEnvString("LTC_SAVE_TENSORS_FILE", "");
   if (!save_file.empty()) {
     static std::mutex lock;
     std::string info = GetTensorsGraphInfo(tensors, indices, format);
@@ -168,5 +169,5 @@ bool DebugUtil::ExperimentEnabled(const std::string& name) {
   return xset->find(name) != xset->end();
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch
