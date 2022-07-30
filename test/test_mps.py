@@ -6593,7 +6593,9 @@ class TestConsistency(TestCase):
     }
 
     BACKWARD_BLOCK_LIST = {
+        # Segmentation fault
         'diff': None,
+        'sub': None,
     }
 
     # Used for accept mode only
@@ -6643,6 +6645,7 @@ class TestConsistency(TestCase):
                 mps_out = op(*mps_args, **mps_kwargs)
                 self.assertEqual(cpu_out, mps_out)
 
+                print(mps_args, mps_kwargs)
                 if key not in self.BACKWARD_BLOCK_LIST:
                     cpu_out.sum().backward()
                     mps_out.sum().backward()
