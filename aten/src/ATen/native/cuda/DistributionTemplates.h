@@ -630,8 +630,8 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   const auto p_type = self.dtype() == at::kDouble ? at::kDouble : at::kFloat;
   auto p_cuda = p_.to(TensorOptions().device(self.device()).dtype(p_type));
   auto p = expand_inplace(self, p_cuda);
-  AT_DISPATCH_ALL_TYPES_AND3(
-    at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    kHalf, kBFloat16, kBool, kComplexHalf, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       if (std::is_same<scalar_t, double>::value) {
         return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
       } else {
@@ -642,8 +642,8 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
 
 template<typename RNG>
 void bernoulli_kernel(TensorIteratorBase& iter, double p, RNG gen) {
-  AT_DISPATCH_ALL_TYPES_AND3(
-    at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    kHalf, kBFloat16, kBool, kComplexHalf, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
       using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
       // define lambda for bernoulli transformation
       auto bernoulli_func = [p] __device__ (accscalar_t rand) {
