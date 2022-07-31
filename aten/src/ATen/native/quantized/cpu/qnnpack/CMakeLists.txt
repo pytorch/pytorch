@@ -55,7 +55,7 @@ if(NOT CMAKE_SYSTEM_PROCESSOR)
   else()
     message(FATAL_ERROR "CMAKE_SYSTEM_PROCESSOR is not defined")
   endif()
-elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86_64|armv[5-8].*|aarch64|arm64)$")
+elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86_64|armv[5-8].*|aarch64|arm64|ppc64le)$")
   message(FATAL_ERROR "Unrecognized CMAKE_SYSTEM_PROCESSOR = ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
@@ -266,6 +266,31 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/x8zip/x4-sse2.c
   src/x8zip/xm-sse2.c)
 
+set(PYTORCH_QNNPACK_PPC64LE_VSX_UKERNELS
+  src/q8avgpool/mp16x9p8q-vsx.c
+  src/q8avgpool/up16x9-vsx.c
+  src/q8avgpool/up16xm-vsx.c
+  src/q8conv/4x4c2-vsx.c
+  src/q8dwconv/mp16x25-vsx.c
+  src/q8dwconv/mp16x25-vsx-per-channel.c
+  src/q8dwconv/mp16x27-vsx.c
+  src/q8dwconv/up16x9-vsx.c
+  src/q8dwconv/up16x9-vsx-per-channel.c
+  src/q8gavgpool/mp16x7p7q-vsx.c
+  src/q8gavgpool/up16x7-vsx.c
+  src/q8gavgpool/up16xm-vsx.c
+  src/u8maxpool/16x9p8q-vsx.c
+  src/u8maxpool/sub16-vsx.c
+  src/q8gemm/4x4c2-dq-vsx.c
+  src/q8gemm/4x4c2-vsx.c
+  src/q8vadd/vsx.c
+  src/u8clamp/vsx.c
+  src/u8rmax/vsx.c
+  src/x8zip/x2-vsx.c
+  src/x8zip/x3-vsx.c
+  src/x8zip/x4-vsx.c
+  src/x8zip/xm-vsx.c)
+
 set(PYTORCH_QNNPACK_UKERNELS ${PYTORCH_QNNPACK_SCALAR_UKERNELS} ${PYTORCH_QNNPACK_PSIMD_UKERNELS})
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
   list(APPEND PYTORCH_QNNPACK_UKERNELS ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS})
@@ -277,6 +302,9 @@ if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(aarch64|arm64)$" OR IOS_ARCH MATC
 endif()
 if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(i[3-6]86|x86_64)$" OR IOS_ARCH MATCHES "^(i386|x86_64)$")
   list(APPEND PYTORCH_QNNPACK_UKERNELS ${PYTORCH_QNNPACK_X86_SSE2_UKERNELS})
+endif()
+if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^ppc64le$")
+  list(APPEND PYTORCH_QNNPACK_UKERNELS ${PYTORCH_QNNPACK_PPC64LE_VSX_UKERNELS})
 endif()
 
 if(PYTORCH_QNNPACK_LIBRARY_TYPE STREQUAL "default")
@@ -306,6 +334,9 @@ if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(aarch64|arm64)$" OR IOS_ARCH MATC
 endif()
 if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(i[3-6]86|x86_64)$" OR IOS_ARCH MATCHES "^(i386|x86_64)$")
   set_property(SOURCE ${PYTORCH_QNNPACK_X86_SSE2_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -msse2 ")
+endif()
+if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^ppc64le$")
+  set_property(SOURCE ${PYTORCH_QNNPACK_PPC64LE_VSX_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -mvsx ")
 endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
   set_property(SOURCE ${PYTORCH_QNNPACK_PSIMD_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -marm -mfpu=neon ")

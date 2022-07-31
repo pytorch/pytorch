@@ -23,10 +23,13 @@ extern "C" {
 
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x2__neon)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x2__sse2)
+DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x2__vsx)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x3__neon)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x3__sse2)
+DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x3__vsx)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__neon)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__sse2)
+DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__vsx)
 
 #define DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(           \
@@ -34,6 +37,7 @@ DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__sse2)
 
 DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_xm__neon)
 DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_xm__sse2)
+DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_xm__vsx)
 
 #ifdef __cplusplus
 } /* extern "C" */

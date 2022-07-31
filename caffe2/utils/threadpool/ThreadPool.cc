@@ -41,6 +41,13 @@ namespace {
 }
 
 size_t getDefaultNumThreads() {
+#if CPUINFO_ARCH_PPC64
+  /* As cpuinfo does not support ppc64le, we set 32 threads manually since this
+   * configuration results in better performance compared to other thread
+   * configurations over 10+ computer vision models on Power8, Power9 and
+   * Power10. */
+  return 32;
+#endif
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 

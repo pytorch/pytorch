@@ -23,6 +23,7 @@ extern "C" {
 
 DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(pytorch_u8rmax_ukernel__neon)
 DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(pytorch_u8rmax_ukernel__sse2)
+DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(pytorch_u8rmax_ukernel__vsx)
 
 #ifdef __cplusplus
 } /* extern "C" */

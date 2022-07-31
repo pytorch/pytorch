@@ -31,8 +31,10 @@ extern "C" {
 
 DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_16x9p8q__neon)
 DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_16x9p8q__sse2)
+DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_16x9p8q__vsx)
 DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_sub16__neon)
 DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_sub16__sse2)
+DECLARE_PYTORCH_U8MAXPOOL_UKERNEL_FUNCTION(pytorch_u8maxpool_ukernel_sub16__vsx)
 
 #ifdef __cplusplus
 } /* extern "C" */

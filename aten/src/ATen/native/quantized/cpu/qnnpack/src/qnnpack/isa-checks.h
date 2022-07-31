@@ -30,3 +30,11 @@
       return;                                                          \
     }                                                                  \
   } while (0)
+
+// cpuinfo does not support ppc64le/VSX
+#define TEST_REQUIRES_VSX \
+  do {                    \
+    if (0) {              \
+      return;             \
+    }                     \
+  } while (0)
