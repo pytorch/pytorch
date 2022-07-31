@@ -68,7 +68,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNodeImpl.h>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -475,7 +475,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline bool is_symint_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymbolicIntNode>();
+  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
   // TODO: switch this to `isinstance`
   if (obj.get_type().equal(tp_symn)) {
     TORCH_CHECK(
@@ -487,7 +487,7 @@ inline bool is_symint_node(py::handle obj) {
 
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    return py::cast(symint.toSymbolicIntNode()).release().ptr();
+    return py::cast(symint.toSymIntNodeImpl()).release().ptr();
   } else {
     return THPUtils_packInt64(symint.data());
   }
@@ -507,7 +507,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   }
 
   if (size1 > 0 && torch::is_symint_node(py::handle(args[i]))) {
-    auto si = py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+    auto si = py::handle(args[i]).cast<c10::SymIntNodeImpl*>()->toSymInt();
     return std::vector<c10::SymInt>(size1, si);
   }
 
@@ -522,8 +522,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       if (is_symint_node(py::handle(obj))) {
-        res.push_back(
-            py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
+        res.push_back(py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
       } else {
         // Elements of torch.Size are tensors during tracing, and we need to
         // record extra information before they are turned into an IntArrayRef
@@ -855,7 +854,7 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
         signature.params[i].name, idx, var, c10::IntType::get());
   }
   if (torch::is_symint_node(py::handle(args[i]))) {
-    return py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+    return py::handle(args[i]).cast<c10::SymIntNodeImpl*>()->toSymInt();
   }
   return c10::SymInt(THPUtils_unpackLong(args[i]));
 }
