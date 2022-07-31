@@ -11,6 +11,7 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/utils/pybind.h>
 
 struct THPSize {
   PyTupleObject tuple;
@@ -58,6 +59,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
       auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
+      if (!py_symint)
+        throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
       if (torch::jit::tracer::isTracing()) {
