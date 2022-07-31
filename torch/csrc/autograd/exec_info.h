@@ -4,15 +4,16 @@
 // is run in a "default" mode, which means that all next_edges we encounter
 // should get executed. If it's not empty, only functions that have an entry
 // and this entry has needed == True should be executed. exec_info is only empty
-// when the graph is executed via .backward() and the inputs parameter is not passed.
-// Otherwise, when executed through .grad(), or when inputs arg is specified for
-// .backward(), exec_info will be non-empty.
+// when the graph is executed via .backward() and the inputs parameter is not
+// passed. Otherwise, when executed through .grad(), or when inputs arg is
+// specified for .backward(), exec_info will be non-empty.
 //
 
 #include <ATen/Tensor.h>
 #include <vector>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ExecInfo {
@@ -50,4 +51,5 @@ struct ExecInfo {
 const std::unordered_map<Node*, ExecInfo>* get_current_graph_task_exec_info();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

@@ -661,7 +661,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
         else:
             if "grad_input_mask" in formula:
-                masks = [f"task_should_compute_output({{ {n}_ix }})," for n in var_names]
+                masks = [
+                    f"task_should_compute_output({{ {n}_ix }})," for n in var_names
+                ]
                 grad_input_mask = GRAD_INPUT_MASK.substitute(
                     masks=masks, n=len(var_names)
                 )
