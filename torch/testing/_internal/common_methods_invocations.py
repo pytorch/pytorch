@@ -18797,7 +18797,7 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
         ref=_NOTHING,
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Probably because we have used lambda for the op here
@@ -18806,7 +18806,15 @@ op_db: List[OpInfo] = [
             # inplace variant dispatches to dropout kernel, while on CUDA
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
@@ -18875,8 +18883,7 @@ op_db: List[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: 0.0003662109375 at index (0, 1, 3, 3) (up to 1e-05 allowed)
             # Greatest relative difference: 0.0018483049938318318 at index (0, 1, 3, 3) (up to 0.001 allowed)
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', "test_complex_half_reference_testing"),
-        ),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', "test_complex_half_reference_testing"),),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -18892,7 +18899,7 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="without_train",
         ref=_NOTHING,
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
