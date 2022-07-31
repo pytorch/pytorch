@@ -18,7 +18,11 @@ class MatmulParam {
   struct DoubleBufferOptions {
     bool double_buffer_smem_write = false;
     bool double_buffer_smem_read = false;
+    int smem_double_buffer_stage = 2;
   };
+
+  //! (Ampere+) Use cp.async to load operands.
+  bool async_gmem_load_operands = false;
 
   //! Specifies the tiling hierarchy on block,
   //!  warp, and instruction levels.

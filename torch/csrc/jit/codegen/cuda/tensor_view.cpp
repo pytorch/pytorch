@@ -211,6 +211,8 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       memory_type_(src->memory_type_),
       swizzle_type_(src->swizzle_type_),
       is_double_buffered_(src->is_double_buffered_),
+      is_circular_buffered_(src->is_circular_buffered_),
+      circular_buffer_stage_(src->circular_buffer_stage_),
       cpu_scalar_(src->cpu_scalar_),
       has_swizzle_op_(src->has_swizzle_op_) {
   for (const auto id : src->axesToSwizzle()) {
@@ -1125,6 +1127,21 @@ void TensorView::doubleBuffer() {
   // be finalized until lowering.
   validateDoubleBufferedTensor(this);
   is_double_buffered_ = true;
+}
+
+void TensorView::circularBuffer(unsigned int stage) {
+  // Early correctness checking. May miss eventual errors as the
+  // checks depend on memory types and parallelization, which may not
+  // be finalized until lowering.
+  TORCH_INTERNAL_ASSERT(stage > 1, "Unsupported stage number");
+  if (stage == 2) {
+    // Re-direct to double buffer interface if stage is 2;
+    doubleBuffer();
+    return;
+  }
+  validateDoubleBufferedTensor(this);
+  is_circular_buffered_ = true;
+  circular_buffer_stage_ = stage;
 }
 
 bool TensorView::isEmptyTensor() const {

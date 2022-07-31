@@ -157,6 +157,15 @@ DEVICE_INLINE void cpAsyncBarrier() {
   asm volatile("cp.async.wait_all;");
 }
 
+DEVICE_INLINE void cpAsyncCommit() {
+  asm volatile("cp.async.commit_group;");
+}
+
+template <int keep_stages>
+DEVICE_INLINE void cpAsyncPartialBarrier() {
+  asm volatile("cp.async.wait_group %0;\n" ::"n"(keep_stages));
+}
+
 } // namespace Ampere
 
 #endif // Arch 80

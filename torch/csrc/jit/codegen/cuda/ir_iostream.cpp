@@ -599,6 +599,10 @@ void IrPrinter::handle(const kir::BlockSync* node) {
 }
 
 void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT(" << node->keepStages() << ")\n";
+}
+
+void IrPrinter::handle(const kir::CpAsyncCommit* node) {
   indent() << "CPASYNC_WAIT()\n";
 }
 

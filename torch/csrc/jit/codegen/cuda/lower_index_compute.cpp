@@ -150,10 +150,13 @@ IndexingParameters getGlobalIndexParameters(
 
         auto concrete_loop_id = ir_utils::caMapExactConcreteId(loop_id);
 
+        auto stage_depth =
+            GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+                loop->iter_domain());
         index_parameters.initial_concrete_id_index[concrete_loop_id] =
             SimplifyingIrBuilder::addExpr(
                 index_parameters.initial_concrete_id_index[concrete_loop_id],
-                GpuLower::current()->kernel()->oneVal());
+                SimplifyingIrBuilder::create<Int>(stage_depth - 1));
       }
     }
   }
@@ -380,9 +383,12 @@ IndexingParameters getPredicateInitialIndexParameters(
       // be true that that index has been modified to support
       // unswitch. In that case, it is not necessary to move ahead the
       // index for double buffering.
+      auto stage_depth =
+          GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+              db_loop->iter_domain());
       if (cur_index == db_loop->index()) {
         loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
-            cur_index, GpuLower::current()->kernel()->oneVal());
+            cur_index, SimplifyingIrBuilder::create<Int>(stage_depth - 1));
       }
     }
   }

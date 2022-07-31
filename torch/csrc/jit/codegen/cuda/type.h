@@ -128,6 +128,7 @@ enum class ExprType {
   BlockSync,
   GridSync,
   CpAsyncWait,
+  CpAsyncCommit,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,

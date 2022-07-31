@@ -630,7 +630,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           //  Double buffered local tensors need indexed initialization,
           //   so will need to use `arraySet` option.
           if (out_tv->getMemoryType() == MemoryType::Local &&
-              !out_tv->isDoubleBuffered()) {
+              !(out_tv->isDoubleBuffered() || out_tv->isCircularBuffered())) {
             // Vectorized initialization
             indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
           } else {
@@ -2344,7 +2344,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const kir::CpAsyncWait* cpasync_wait) final {
-    indent() << "Ampere::cpAsyncBarrier();\n";
+    if (cpasync_wait->keepStages() > 0) {
+      // Perform partial sync, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncPartialBarrier<" << cpasync_wait->keepStages()
+               << ">();\n";
+    } else {
+      // Perform sync all, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncBarrier();\n";
+    }
+  }
+
+  void handle(const kir::CpAsyncCommit* cpasync_wait) final {
+    // Commit inflight cp.async transfers. See comment on kir::CpAsyncCommit.
+    indent() << "Ampere::cpAsyncCommit();\n";
   }
 
   void handle(const kir::GridSync* sync) final {

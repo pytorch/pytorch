@@ -112,8 +112,12 @@ void scheduleMatmul(
   auto mma_options = mma_builder.build();
 
   // Staging register for global memory load
-  auto ar = a->cacheAfter();
-  auto br = b->cacheAfter();
+  TensorView *ar = a, *br = b;
+
+  if (!params.async_gmem_load_operands) {
+    ar = a->cacheAfter();
+    br = b->cacheAfter();
+  }
 
   // TODO:
   //  Significant build out needed here
@@ -153,8 +157,14 @@ void scheduleMatmul(
     }
 
   } else {
-    acw_smem = ar->cacheAfter();
-    bcw_smem = br->cacheAfter();
+    // Use cp.async as requested in scheduler params.
+    c10::optional<LoadStoreOpType> load_op = c10::nullopt;
+    if (params.async_gmem_load_operands) {
+      load_op = LoadStoreOpType::CpAsync;
+    }
+
+    acw_smem = ar->cacheAfter(load_op);
+    bcw_smem = br->cacheAfter(load_op);
     acr = acw_smem->cacheAfter(
         mma_builder.operand(MmaOptions::Operand::A).ldMatrix());
     bcr = bcw_smem->cacheAfter(
@@ -280,8 +290,19 @@ void scheduleMatmul(
 
   // Propagate mma output swizzle and parallelization down the DAG
   if (params.double_buffer_options.double_buffer_smem_write) {
-    acw_smem->doubleBuffer();
-    bcw_smem->doubleBuffer();
+    TORCH_CHECK(
+        params.double_buffer_options.smem_double_buffer_stage > 1,
+        "Invalid buffer stage config")
+    if (params.double_buffer_options.smem_double_buffer_stage > 2) {
+      TORCH_CHECK(
+          params.async_gmem_load_operands,
+          "Circular buffer only supports async load");
+    }
+
+    acw_smem->circularBuffer(
+        params.double_buffer_options.smem_double_buffer_stage);
+    bcw_smem->circularBuffer(
+        params.double_buffer_options.smem_double_buffer_stage);
   }
 
   if (params.double_buffer_options.double_buffer_smem_read) {

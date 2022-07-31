@@ -330,6 +330,8 @@ static const char* expr_type2string(ExprType t) {
       return "GridSync";
     case ExprType::CpAsyncWait:
       return "CpAsyncWait";
+    case ExprType::CpAsyncCommit:
+      return "CpAsyncCommit";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:

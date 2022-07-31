@@ -1148,8 +1148,11 @@ indexMapFromTV(
     }
 
     if (loop == double_buffer_loop) {
+      auto stage_depth =
+          GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+              loop->iter_domain());
       idx = SimplifyingIrBuilder::addExpr(
-          idx, GpuLower::current()->kernel()->oneVal());
+          idx, SimplifyingIrBuilder::create<Int>(stage_depth - 1));
     }
 
     loop_to_ind_map[loop] = idx;
@@ -1811,14 +1814,16 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
-  if (producer_tv->isDoubleBuffered()) {
+  if (producer_tv->isDoubleBuffered() || producer_tv->isCircularBuffered()) {
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         producer_tv, loops, true);
     if (db_loop != nullptr) {
+      auto stage_depth = gpu_lower->doubleBufferInfo().getStageDepthFor(
+          db_loop->iter_domain());
       auto loop_index =
           db_loop->isTrivial() ? db_loop->start() : db_loop->index();
       auto db_switch_index = SimplifyingIrBuilder::modExpr(
-          loop_index, SimplifyingIrBuilder::create<Int>(2));
+          loop_index, SimplifyingIrBuilder::create<Int>(stage_depth));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
       auto db_strided_index =
@@ -2077,14 +2082,36 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
 
-  if (consumer_tv->isDoubleBuffered()) {
-    auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
-        consumer_tv, loops, true);
-    if (db_loop != nullptr) {
-      auto db_switch_index = SimplifyingIrBuilder::subExpr(
-          gpu_lower->kernel()->oneVal(),
-          SimplifyingIrBuilder::modExpr(
-              db_loop->index(), SimplifyingIrBuilder::create<Int>(2)));
+  if (consumer_tv->isDoubleBuffered() || consumer_tv->isCircularBuffered()) {
+    auto db_loop =
+        gpu_lower->doubleBufferInfo().getDoubleBufferLoop(consumer_tv, loops);
+    auto stage_depth =
+        gpu_lower->doubleBufferInfo().getStageDepthFor(db_loop->iter_domain());
+    bool is_circular_buffer_loop = stage_depth > 2;
+    bool is_prolog =
+        db_loop->doubleBufferLoopStage() == DoubleBufferLoopStage::Prolog;
+
+    Val* db_switch_index = nullptr;
+
+    // In double buffered we don't materialize the prolog loop as there will
+    //  be only one iteration. In circular buffer case we materialize the
+    //  prolog loop as well covering the first N-1 iterations, N being the
+    //  stage depth.
+    if (!is_prolog || is_circular_buffer_loop) {
+      if (is_prolog && is_circular_buffer_loop) {
+        // The buffer switching logic is the same as original index
+        //  in the case of circular buffer prolog.
+        db_switch_index = db_loop->index();
+      } else {
+        // Switching index generated for main loop or epilog component.
+        db_switch_index = SimplifyingIrBuilder::modExpr(
+            SimplifyingIrBuilder::addExpr(
+                db_loop->index(),
+                SimplifyingIrBuilder::create<Int>(stage_depth - 1)),
+            SimplifyingIrBuilder::create<Int>(stage_depth));
+      }
+
+      // Use the generated switching buffer index to access the buffer space.
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(consumer_tv);
       auto db_strided_index =
@@ -2119,7 +2146,8 @@ std::vector<Val*> Index::getProducerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_indices.size() ==
       producer->getMaybeRFactorDomain().size() +
-          (producer->isDoubleBuffered() ? 1 : 0));
+          (producer->isDoubleBuffered() || producer->isCircularBuffered() ? 1
+                                                                          : 0));
 
   return strided_indices;
 }

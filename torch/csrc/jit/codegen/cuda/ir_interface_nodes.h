@@ -450,8 +450,24 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   // Apply double buffering transformation
   void doubleBuffer();
 
+  // Apply circular buffering transformation
+  void circularBuffer(unsigned int number_of_stage);
+
+  // Returns true if this tensor is double buffered.
   bool isDoubleBuffered() const {
     return is_double_buffered_;
+  }
+
+  // Returns true if this tensor is circular buffered.
+  bool isCircularBuffered() const {
+    return is_circular_buffered_;
+  }
+
+  // Returns the depth of circular buffering if applicable.
+  unsigned int circularBufferDepth() const {
+    TORCH_INTERNAL_ASSERT(
+        is_circular_buffered_, toString(), "not circular buffered");
+    return circular_buffer_stage_;
   }
 
   //! Transforms the innermost iterdomains according to the given mma swizzle,
@@ -509,6 +525,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
   bool is_double_buffered_ = false;
+
+  //! Indicates if the tensor is circular buffered.
+  bool is_circular_buffered_ = false;
+
+  //! Indicates the circular buffering stage depth if applicable.
+  unsigned int circular_buffer_stage_ = 0;
+
   // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that only
   // have one value). This is only used if on an input value, otherwise ignored.
   // This is important as special handling because these "scalars" should be
