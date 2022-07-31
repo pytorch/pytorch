@@ -459,7 +459,7 @@ class TestProfiler(TestCase):
             self.payload(use_cuda=use_cuda)
         output = p.key_averages().table(
             sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total", row_limit=-1)
-        # print(output)
+        print(output)
         found_gemm = False
         found_memcpy = False
         found_mm = False
