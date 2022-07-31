@@ -123,6 +123,18 @@ def maybe_disable_tensor_mode(tensor_mode_class):
 maybe_disable_fake_tensor_mode = functools.partial(maybe_disable_tensor_mode, FakeTensorMode)
 
 
+def unwrap_elem(e):
+    if isinstance(e, ProxyTensor):
+        return e.elem
+    if isinstance(e, torch._C.SymIntNode):
+        if isinstance(e.get_pyobj(), ProxySymInt):
+            return e.get_pyobj().sym_int
+        else:
+            raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
+                               f"even though it's not a ProxySymInt. This is a bug.")
+    return e
+
+
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
@@ -142,18 +154,6 @@ def proxy_call(func_overload, args, kwargs=None):
 
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        if isinstance(e, torch._C.SymIntNode):
-            if isinstance(e.get_pyobj(), ProxySymInt):
-                return e.get_pyobj().sym_int
-            else:
-                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
-                                   f"even though it's not a ProxySymInt. This is a bug.")
-
-        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -551,31 +551,10 @@ def get_isolated_graphmodule(func, args, kwargs):
         fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
         return func(*fn_args, **fn_kwargs)
 
-    # create a new tracer object
-    graph = torch.fx.Graph()
-    new_tracer = PythonKeyTracer()
-    new_tracer.graph = graph
-
-    # detach proxy tensors from the current tracer
-    detached_all_args = [
-        ProxyTensor(
-            a.elem,
-            torch.fx.Proxy(
-                graph.create_node(
-                    a.proxy.node.op,
-                    a.proxy.node.target,
-                    a.proxy.node.args,
-                    a.proxy.node.kwargs,
-                    a.proxy.node.name,
-                ),
-                tracer=new_tracer,
-            ),
-        )
-        if isinstance(a, ProxyTensor) else a for a in all_args
-    ]
+    unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
     with contextlib.ExitStack() as stack:
         while torch._C._get_torch_dispatch_mode() is not None:
             stack.enter_context(maybe_disable_proxy_tensor_mode())
-        gm = make_fx(wrapped)(detached_all_args)
+        gm = make_fx(wrapped)(unwrapped_all_args)
     return gm
