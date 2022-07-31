@@ -20,6 +20,13 @@ on:
         type: string
         default: ""
         description: What xcode version to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID:
@@ -76,6 +83,7 @@ jobs:
           sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+          echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
 
       - name: Get workflow job id
         id: get-job-id
@@ -94,7 +102,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
         run: |
-          zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json
+          zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on GHA
         uses: actions/upload-artifact@v2
