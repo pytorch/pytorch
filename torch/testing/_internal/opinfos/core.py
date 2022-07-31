@@ -9,6 +9,7 @@ from torchgen.utils import dataclass_repr
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes,
