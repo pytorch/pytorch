@@ -169,13 +169,13 @@ struct EventFieldsVisitor {
   }
 
   void setPythonMetadata(std::shared_ptr<Result> result) {
-    result->visit([&](const auto& i) -> void {
+    result->visit([&, this](const auto& i) -> void {
       c10::guts::if_constexpr<is_py_fields<decltype(i)>()>([&](auto _) {
         addMetadata("Python thread", std::to_string(_(i).python_tid_));
         addMetadata("Python id", std::to_string(_(i).id_));
 
         std::string parent_id = "null";
-        auto update_parent_id = [&](const auto& j) {
+        auto update_parent_id = [&](const auto& j) -> bool {
           // Update parent_id the first time we see a Python Result
           c10::guts::if_constexpr<is_py_fields<decltype(j)>()>(
               [&](auto _) { parent_id = std::to_string(_(j).python_tid_); });
