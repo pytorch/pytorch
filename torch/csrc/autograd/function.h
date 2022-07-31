@@ -370,6 +370,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
+  /// The difference between functions `should_compute_output` and
+  /// `task_should_compute_output`: `should_compute_output` is called
+  /// when constructing the node that is irreverent to the graph_task ,
+  /// `task_should_compute_output` is called during the node execution.
+  ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
