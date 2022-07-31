@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
+#include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
 #include <torch/csrc/distributed/c10d/exception.h>

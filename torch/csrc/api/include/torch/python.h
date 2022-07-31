@@ -8,8 +8,12 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_tuples.h>
 
 #include <iterator>
 #include <string>
