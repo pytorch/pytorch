@@ -573,7 +573,11 @@ TensorView* TensorView::swizzle(
   return this;
 }
 
-TensorView* TensorView::swizzle(Swizzle2DType swizzle_type, int x, int y) {
+TensorView* TensorView::swizzle(
+    Swizzle2DType swizzle_type,
+    int x,
+    int y,
+    SwizzleMode swizzle_mode) {
   has_swizzle_op_ = true;
   if (x < 0) {
     x += domain()->nDims();
@@ -647,7 +651,7 @@ TensorView* TensorView::swizzle(Swizzle2DType swizzle_type, int x, int y) {
     }
   }
 
-  domain()->swizzle(swizzle_type, x, y);
+  domain()->swizzle(swizzle_type, x, y, swizzle_mode);
 
   return this;
 }

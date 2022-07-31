@@ -130,6 +130,13 @@ class IndexCompute : public BackwardVisitor {
   // map rather than the actual IDs used in the ID expressions.
   bool concrete_id_pass_ = false;
 
+  // Mode of swizzle that are activated in this index compute
+  //  instance. Will treat swizzles of different mode as no-op.
+  // Currently data mode swizzles are handled same as before in IndexSwizzle
+  //  pass, while loop mode swizzles are handled early on in concrete indexing
+  //  pass. See also [Note on swizzle mode]
+  SwizzleMode swizzle_mode_ = SwizzleMode::NoSwizzle;
+
  public:
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
     return index_map_;

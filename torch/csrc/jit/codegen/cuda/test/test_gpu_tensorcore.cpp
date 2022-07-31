@@ -78,6 +78,80 @@ bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
     COMPILE_FUSION;                                                          \
   }
 
+// util to track support matmul operand layout.
+using MatmulLayout = MmaOptions::MmaInputLayout;
+
+static constexpr std::array<MatmulLayout, 3> kAllSupportedLayout = {
+    MatmulLayout::TT,
+    MatmulLayout::NT,
+    MatmulLayout::TN};
+
+// Generic interface to get matmul op with the given layout.
+TensorView* matmul(TensorView* a, TensorView* b, MatmulLayout layout) {
+  TORCH_CHECK(
+      a->nDims() == 2 && b->nDims() == 2, "only pure matmuls for these tests");
+  TensorView *tv2 = nullptr, *tv0b = nullptr, *tv1b = nullptr;
+  switch (layout) {
+    case MatmulLayout::TT:
+      tv0b = broadcast(a, {false, false, true});
+      tv1b = broadcast(b, {true, false, false});
+      tv2 = fusedMultiplySum(tv0b, tv1b, {1});
+      break;
+    case MatmulLayout::TN:
+      tv0b = broadcast(a, {false, true, false});
+      tv1b = broadcast(b, {true, false, false});
+      tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+      break;
+    case MatmulLayout::NT:
+      tv0b = broadcast(a, {false, false, true});
+      tv1b = broadcast(b, {false, true, false});
+      tv2 = fusedMultiplySum(tv0b, tv1b, {0});
+      break;
+    default:
+      TORCH_CHECK(false, "unsupported data layout.");
+  }
+  return tv2;
+}
+
+// Utility to generate matmul input tensors based on given layout
+at::Tensor atMatmul(at::Tensor a, at::Tensor b, MatmulLayout layout) {
+  switch (layout) {
+    case MatmulLayout::TT:
+      return a.matmul(b);
+    case MatmulLayout::TN:
+      return a.matmul(b.t());
+    case MatmulLayout::NT:
+      return a.t().matmul(b);
+    default:
+      TORCH_CHECK(false, "unsupported data layout.");
+  }
+  return at::Tensor();
+}
+
+// Utility to generate reference results based on given layout
+std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
+    int M,
+    int N,
+    int K,
+    MatmulLayout layout) {
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+
+  switch (layout) {
+    case MatmulLayout::TT:
+      return std::make_pair(
+          at::randn({M, K}, options), at::randn({K, N}, options));
+    case MatmulLayout::TN:
+      return std::make_pair(
+          at::randn({M, K}, options), at::randn({N, K}, options));
+    case MatmulLayout::NT:
+      return std::make_pair(
+          at::randn({K, M}, options), at::randn({K, N}, options));
+    default:
+      TORCH_CHECK(false, "unsupported data layout.");
+  }
+  return std::make_pair(at::Tensor(), at::Tensor());
+}
+
 #define REQUIRE_DEVICE_SMEM_SIZE(required_size, device_idx)                 \
   if (at::cuda::getDeviceProperties(device_idx)->sharedMemPerBlockOptin <   \
       required_size) {                                                      \
@@ -315,310 +389,93 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
 }
 
-// Gemm test for Volta MMA: TT
-//  This is the only example that is fully manual,
-//    the rest of them are facilitated by gemm utils.
-TEST_F(NVFuserTest, FusionVoltaMatMulTT_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
+// Matmul test for Volta MMA: across supported layouts
+TEST_F(NVFuserTest, FusionVoltaMatmul_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
-  int M = 264, N = 120, K = 248;
+  int M = 264, N = 136, K = 248;
 
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
 
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
+    auto tv2 = matmul(tv0, tv1, layout);
 
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
+    fusion.addOutput(tv2);
 
-  fusion.addOutput(tv2);
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 16, 4);
 
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
+            .layout(layout);
 
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::TT);
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    scheduleMatmul(tv2, tv0, tv1, params);
 
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
 
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        7, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
-// Gemm test for Volta MMA: TN
-TEST_F(NVFuserTest, FusionVoltaMatMulTN_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 120, N = 264, K = 56;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
-
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::TN);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Gemm test for Volta MMA: NT
-TEST_F(NVFuserTest, FusionVoltaMatMulNT_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 240, N = 320, K = 136;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
-
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::NT);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).t().matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-TEST_F(NVFuserTest, FusionVoltaMatMulTTRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
+// Matmul test for Volta MMA: across supported layouts
+TEST_F(NVFuserTest, FusionVoltaMatmulRegDoubleBuffer_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
-  int M = 264, N = 120, K = 248;
+  int M = 264, N = 136, K = 248;
 
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
 
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
+    auto tv2 = matmul(tv0, tv1, layout);
 
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
+    fusion.addOutput(tv2);
 
-  fusion.addOutput(tv2);
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 16, 4);
 
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
+            .layout(layout);
 
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::TT);
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    params.double_buffer_options.double_buffer_smem_read = true;
+    scheduleMatmul(tv2, tv0, tv1, params);
 
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
 
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Gemm test for Volta MMA: TN
-TEST_F(NVFuserTest, FusionVoltaMatMulTNRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 120, N = 264, K = 56;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
-
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::TN);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Gemm test for Volta MMA: NT
-TEST_F(NVFuserTest, FusionVoltaMatMulNTRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 240, N = 320, K = 136;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 4);
-
-  auto mma_builder = MmaBuilder(MmaOptions::MacroType::Volta_16_16_4, gemm_tile)
-                         .layout(MmaOptions::MmaInputLayout::NT);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto tref = t0.to(at::kFloat).t().matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        7, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
 // MMA unit test on Ampere
@@ -848,505 +705,155 @@ TEST_F(NVFuserTest, FusionAmpereMMANT_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
 }
 
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTN_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
+// Matmul test for Ampere MMA: across supported layouts
+TEST_F(NVFuserTest, FusionAmpereMatmul_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
 
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
+    auto tv2 = matmul(tv0, tv1, layout);
 
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+    fusion.addOutput(tv2);
 
-  fusion.addOutput(tv2);
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 8, 16);
 
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
+            .layout(layout);
 
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    params.async_gmem_load_operands = true;
+    params.double_buffer_options.double_buffer_smem_write = true;
+    params.double_buffer_options.smem_double_buffer_stage = 4;
+    scheduleMatmul(tv2, tv0, tv1, params);
 
-  // Call scheduler
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
 
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulNT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTNPipelined_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-  // Require 70KB of Shared mem on device 0 to run
+// Matmul test for Ampere MMA: with pipelined gmem load
+TEST_F(NVFuserTest, FusionAmpereMatmulPipelineGmem_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
   REQUIRE_DEVICE_SMEM_SIZE(70 << 10, 0);
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
+  // Gmem pipeline stage
+  for (auto stage : {3, 4}) {
+    for (auto layout : kAllSupportedLayout) {
+      Fusion fusion;
+      FusionGuard fg(&fusion);
+      auto tv0 = makeContigTensor(2, DataType::Half);
+      auto tv1 = makeContigTensor(2, DataType::Half);
 
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+      fusion.addInput(tv0);
+      fusion.addInput(tv1);
 
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
+      auto tv2 = matmul(tv0, tv1, layout);
 
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+      fusion.addOutput(tv2);
 
-  fusion.addOutput(tv2);
+      MatMulTileOptions gemm_tile;
+      gemm_tile.cta_tile = GemmTile(128, 128, 32);
+      gemm_tile.warp_tile = GemmTile(64, 64, 32);
+      gemm_tile.instruction_tile = GemmTile(16, 8, 16);
 
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+      auto mma_builder =
+          MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
+              .layout(layout);
 
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
+      MatmulParam params(mma_builder);
+      params.tile_sizes = gemm_tile;
+      params.tile_sizes = gemm_tile;
+      params.async_gmem_load_operands = true;
+      params.double_buffer_options.double_buffer_smem_write = true;
+      params.double_buffer_options.smem_double_buffer_stage = stage;
+      scheduleMatmul(tv2, tv0, tv1, params);
 
-  // Call scheduler
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.async_gmem_load_operands = true;
-  params.double_buffer_options.double_buffer_smem_write = true;
-  params.double_buffer_options.smem_double_buffer_stage = 4;
-  scheduleMatmul(tv2, tv0, tv1, params);
+      at::manual_seed(0);
+      auto inputs = fp16MatmulAtInput(M, N, K, layout);
 
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+      FusionExecutor fe;
+      NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+          8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+      auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+      auto tref = atMatmul(
+          inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+      TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    }
+  }
 }
 
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTTPipelined_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-  // Require 70KB of Shared mem on device 0 to run
+TEST_F(NVFuserTest, FusionAmpereMatmulRegDbouleBuffer_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
   REQUIRE_DEVICE_SMEM_SIZE(70 << 10, 0);
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 120;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.async_gmem_load_operands = true;
-  params.double_buffer_options.double_buffer_smem_write = true;
-  params.double_buffer_options.smem_double_buffer_stage = 3;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulNTPipelined_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-  // Require 70KB of Shared mem on device 0 to run
-  REQUIRE_DEVICE_SMEM_SIZE(70 << 10, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 136;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.async_gmem_load_operands = true;
-  params.double_buffer_options.double_buffer_smem_write = true;
-  params.double_buffer_options.smem_double_buffer_stage = 3;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulNTRegDoubleBuffer_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTNRegDoubleBuffer_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
-
-  // Call scheduler
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere
-TEST_F(NVFuserTest, FusionAmpereMatmulTTRegDoubleBuffer_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  params.double_buffer_options.double_buffer_smem_read = true;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  // Gmem pipeline stage
+  for (auto stage : {3, 4}) {
+    for (auto layout : kAllSupportedLayout) {
+      Fusion fusion;
+      FusionGuard fg(&fusion);
+      auto tv0 = makeContigTensor(2, DataType::Half);
+      auto tv1 = makeContigTensor(2, DataType::Half);
+
+      fusion.addInput(tv0);
+      fusion.addInput(tv1);
+
+      auto tv2 = matmul(tv0, tv1, layout);
+
+      fusion.addOutput(tv2);
+
+      MatMulTileOptions gemm_tile;
+      gemm_tile.cta_tile = GemmTile(128, 128, 32);
+      gemm_tile.warp_tile = GemmTile(64, 64, 32);
+      gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+
+      auto mma_builder =
+          MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
+              .layout(layout);
+
+      MatmulParam params(mma_builder);
+      params.tile_sizes = gemm_tile;
+      params.tile_sizes = gemm_tile;
+      params.async_gmem_load_operands = true;
+      params.double_buffer_options.double_buffer_smem_write = true;
+      params.double_buffer_options.smem_double_buffer_stage = stage;
+      params.double_buffer_options.double_buffer_smem_read = true;
+      scheduleMatmul(tv2, tv0, tv1, params);
+
+      at::manual_seed(0);
+      auto inputs = fp16MatmulAtInput(M, N, K, layout);
+
+      FusionExecutor fe;
+      NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+          8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+      auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+      auto tref = atMatmul(
+          inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+      TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    }
+  }
 }
 
 // Matmul-Matmul fusion test on Ampere
@@ -2232,314 +1739,48 @@ TEST_F(NVFuserTest, FusionTuringMMANT_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
 }
 
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulTN_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulTT_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulNT_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulTNRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulTTRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing
-TEST_F(NVFuserTest, FusionTuringMatmulNTRegDoubleBuffer_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+// Matmul test for Turing MMA: across supported layouts
+TEST_F(NVFuserTest, FusionTuringMatmul_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
+
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    auto tv2 = matmul(tv0, tv1, layout);
+
+    fusion.addOutput(tv2);
+
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
+            .layout(layout);
+
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    scheduleMatmul(tv2, tv0, tv1, params);
+
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
+
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        7, 5, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
 // Matmul test on ampere, using ampere memory ops
@@ -3527,319 +2768,93 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNSwizzled_CUDA) {
 }
 
 // Matmul test on Ampere using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionAmpereMatmulTNLarge_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
+TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoad_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+    auto tv2 = matmul(tv0, tv1, layout);
 
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
+    fusion.addOutput(tv2);
 
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 16, 16);
 
-  fusion.addOutput(tv2);
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Ampere_16_16_16, gemm_tile)
+            .layout(layout);
 
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    params.async_gmem_load_operands = true;
+    params.double_buffer_options.double_buffer_smem_write = true;
+    params.double_buffer_options.smem_double_buffer_stage = 4;
+    scheduleMatmul(tv2, tv0, tv1, params);
 
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
 
-  // Call scheduler
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
-// Matmul test on Ampere using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionAmpereMatmulNTLarge_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Ampere using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionAmpereMatmulTTLarge_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
-
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Ampere_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionTuringMatmulTNLarge_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 511, N = 257, K = 88;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [N,K]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,N,K]
-  auto tv0b = broadcast(tv0, {false, true, false});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TN);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({N, K}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionTuringMatmulTTLarge_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [M,K]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [M,K,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {true, false, false});
-
-  // Leaving both sets of mma inputs for volta outside
-  //  currently since they need to be swizzled.
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::TT);
-
-  mma_builder.configureMma(tv2);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({M, K}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
-}
-
-// Matmul test on Turing using ldmatrix.x4 to load operands
-TEST_F(NVFuserTest, FusionTuringMatmulNTLarge_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  int M = 512, N = 256, K = 128;
-
-  // [K,M]
-  auto tv0 = makeContigTensor(2, DataType::Half);
-  // [K,N]
-  auto tv1 = makeContigTensor(2, DataType::Half);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  // [K,M,N]
-  auto tv0b = broadcast(tv0, {false, false, true});
-  auto tv1b = broadcast(tv1, {false, true, false});
-
-  auto tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-
-  fusion.addOutput(tv2);
-
-  MatMulTileOptions gemm_tile;
-  gemm_tile.cta_tile = GemmTile(128, 128, 32);
-  gemm_tile.warp_tile = GemmTile(64, 64, 32);
-  gemm_tile.instruction_tile = GemmTile(16, 16, 16);
-
-  auto mma_builder =
-      MmaBuilder(MmaOptions::MacroType::Turing_16_16_16, gemm_tile)
-          .layout(MmaOptions::MmaInputLayout::NT);
-
-  MatmulParam params(mma_builder);
-  params.tile_sizes = gemm_tile;
-  scheduleMatmul(tv2, tv0, tv1, params);
-
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto t0 = at::randn({K, M}, options);
-  auto t1 = at::randn({K, N}, options);
-
-  FusionExecutor fe;
-  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
-
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
-
-  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+// Matmul test for Turing MMA: across supported layouts
+TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
+
+  for (auto layout : kAllSupportedLayout) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    auto tv0 = makeContigTensor(2, DataType::Half);
+    auto tv1 = makeContigTensor(2, DataType::Half);
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    auto tv2 = matmul(tv0, tv1, layout);
+
+    fusion.addOutput(tv2);
+
+    MatMulTileOptions gemm_tile;
+    gemm_tile.cta_tile = GemmTile(128, 128, 32);
+    gemm_tile.warp_tile = GemmTile(64, 64, 32);
+    gemm_tile.instruction_tile = GemmTile(16, 16, 16);
+
+    auto mma_builder =
+        MmaBuilder(MmaOptions::MacroType::Turing_16_16_16, gemm_tile)
+            .layout(layout);
+
+    MatmulParam params(mma_builder);
+    params.tile_sizes = gemm_tile;
+    scheduleMatmul(tv2, tv0, tv1, params);
+
+    at::manual_seed(0);
+    auto inputs = fp16MatmulAtInput(M, N, K, layout);
+
+    FusionExecutor fe;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        7, 5, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+    auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
+    auto tref = atMatmul(
+        inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
+    TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+  }
 }
 
 #undef NVFUSER_TEST_CUDA_ARCH_GUARD

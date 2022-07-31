@@ -258,6 +258,8 @@ static const char* val_type2string(ValType t) {
       return "Predicate";
     case ValType::TensorIndex:
       return "TensorIndex";
+    case ValType::IntPair:
+      return "IntPair";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -1015,6 +1017,26 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
       break;
     case Swizzle2DType::Scatter:
       os << "Scatter";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const SwizzleMode& swizzle) {
+  switch (swizzle) {
+    case SwizzleMode::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case SwizzleMode::Loop:
+      os << "Loop";
+      break;
+    case SwizzleMode::Data:
+      os << "Data";
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");

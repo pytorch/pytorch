@@ -381,7 +381,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   //! Swizzle the rectangular tile defined by the iterdomains corresponding
   //!  to the 2 given indices.
-  TensorView* swizzle(Swizzle2DType swizzle_type, int x, int y);
+  TensorView* swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   // WARNING: rFactor does not return this TensorView, ir returns a new
   //  tensorview consumed by this!

@@ -991,7 +991,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   static std::pair<IterDomain*, IterDomain*> swizzle(
       Swizzle2DType swizzle_type,
       IterDomain* in_x,
-      IterDomain* in_y);
+      IterDomain* in_y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   bool isMmaSwizzled() const {
     return is_mma_swizzled_;
@@ -1198,7 +1199,11 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   //! Applies 2D swizzle on a rectangular tile defined by
   //!  a pair of iterdomains contained in this domain.
-  void swizzle(Swizzle2DType swizzle_type, int x, int y);
+  void swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   // Transform TensorView according to merge and split transformations
   TensorDomain* view(
@@ -1339,7 +1344,8 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
       IterDomain* out_y,
       IterDomain* in_x,
       IterDomain* in_y,
-      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle);
+      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
 
@@ -1359,8 +1365,12 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
     return in_y_;
   }
 
-  const auto& swizzleType() const {
+  auto swizzleType() const {
     return swizzle_type_;
+  }
+
+  auto swizzleMode() const {
+    return swizzle_mode_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -1377,7 +1387,50 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
 
   // The type of predefined 1-to-1 functions
   //  used for swizzling math.
-  Swizzle2DType swizzle_type_;
+  Swizzle2DType swizzle_type_ = Swizzle2DType::NoSwizzle;
+
+  // Swizzle mode of this swizzle instance.
+  // [Note on swizzle mode]
+  // On the current implementations we support two modes of
+  //  swizzle math, namely, data mode and loop mode.
+  // `Data` mode swizzling is a swizzle that will change the
+  //  data layout in shared memory, likely in global memory buffers
+  //  as well in the future. see also IndexSwizzle in index_compute.cpp.
+  //
+  //  Most important use cases are transpose bank conflict removal, and mma
+  //  swizzled shared memory layout. Example illustrated in 1D case:
+  //
+  // for (int i = 0; i<I; i++){
+  //   # This is a `Data` mode swizzle.
+  //  Tshared [swizzled(i)] = Tin[i];
+  // }
+  // # Now Tshared holds swizzled data, i.e. the data layout of
+  //    Tshared does not map to Tin with affine relationships.
+  //
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[swizzled(i)];
+  // }
+  //
+  // `Loop` mode swizzling does not affect the data layout of any buffer
+  //   but only permutes the iteration order of serial or parallel loop.
+  // This is useful when we want to designate non-affine mapping of thread
+  //   to data or we want to generate non-affine loops.
+  // Exampe illustrated in 1D case:
+  //   for (int i = 0; i<I; i++){
+  //     # This is a `Loop` mode swizzle
+  //    Tshared [swizzled(i)] = Tin[swizzled(i)];
+  //   }
+  // # Now Tshared holds normal data, i.e. it still has
+  //   the same data layout as if the swizzle wasn't there.
+  //
+  // # Consumers of Tshared does not need to know about the
+  //   loop swizzle at previous op if not inlined.
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[i];
+  // }
+  //  TODO: Loop swizzles eventually will be piped through in all mappings
+  //  and replay of the fusion IR infrastructure.
+  SwizzleMode swizzle_mode_ = SwizzleMode::Data;
 };
 
 //! Integer value which has a special name

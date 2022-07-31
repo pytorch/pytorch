@@ -329,6 +329,9 @@ enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
 //!    doesn't have the same type.
 enum class Swizzle2DType { NoSwizzle = 0, ZShape, Transpose, XOR, Scatter };
 
+//! Modes of swizzle, see [Note on swizzle mode].
+enum class SwizzleMode { NoSwizzle = 0, Data, Loop };
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
@@ -360,6 +363,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream&,
     const DoubleBufferLoopStage);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const Swizzle2DType&);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const SwizzleMode&);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);

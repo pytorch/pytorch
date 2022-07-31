@@ -257,6 +257,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Validate mma data format and compatibility if any on the fusion.
   validateMma(fusion_);
 
+  // Validate swizzle usage on the fusion schedule.
+  validateSwizzle(fusion_);
+
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 

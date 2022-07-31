@@ -224,6 +224,10 @@ void scheduleMatmul(
   //   and needs more configurability.
   // ------------------------------------------------------------------
   // CTA tile:
+
+  // Swizzle block tiles:
+  c->swizzle(Swizzle2DType::ZShape, 0, 1, SwizzleMode::Loop);
+
   a->computeAt(c, 2);
   b->computeAt(c, 2);
 

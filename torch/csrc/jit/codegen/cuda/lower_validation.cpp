@@ -1059,17 +1059,76 @@ void validateMma(Fusion* fusion) {
   }
 }
 
+namespace {
+
+// Utility function to validate a loop swizzle:
+//  1. Throws an error if any output of the swizzle is not in leaf_domain set.
+//  2. Warns if any output of the swizzle is not the concrete id of the loop
+//  map.
+// The second case would make the codegen ignore this swizzle, as if it was not
+// there at all.
+void validateLoopSwizzle(
+    Expr* swizzle_expr,
+    std::unordered_set<IterDomain*>& leaf_domains) {
+  for (auto out_id :
+       ir_utils::filterByType<IterDomain>(swizzle_expr->outputs())) {
+    TORCH_INTERNAL_ASSERT(
+        leaf_domains.count(out_id),
+        "Loop swizzle can only be direct producer of leaf domains.");
+    if (GpuLower::current()->caMap()->getConcreteMappedID(
+            out_id, IdMappingMode::LOOP) != out_id) {
+      TORCH_WARN_ONCE("Ignored loop swizzle :", swizzle_expr->toString());
+    }
+  }
+}
+
+} // namespace
+
 void validateSwizzle(Fusion* fusion) {
   auto used_vals = fusion->usedMathVals();
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     if (tv->hasSwizzleOp()) {
+      std::unordered_set<IterDomain*> tv_leaf_domain_set(
+          tv->domain()->domain().begin(), tv->domain()->domain().end());
+
       // Make sure no swizzle op is inlined:
       auto inlined_swizzles = ir_utils::getAllSwizzlesBetween(
           tv->getMaybeRFactorDomain(),
           {tv->domain()->domain().begin(),
            tv->domain()->domain().begin() + tv->getComputeAtPosition()});
-      TORCH_INTERNAL_ASSERT(
-          inlined_swizzles.empty(), "No support for inlined swizzles");
+
+      auto not_inlined_swizzles = ir_utils::getAllSwizzlesBetween(
+          tv->getMaybeRFactorDomain(),
+          {tv->domain()->domain().begin() + tv->getComputeAtPosition(),
+           tv->domain()->domain().end()});
+
+      // Check inlined swizzles: only loop swizzles can be inlined currently
+      //  as inlining data swizzles would require addtional support of unswizzle
+      //  operator, which currently doesn't have important use cases.
+      for (auto swizzle_expr : inlined_swizzles) {
+        TORCH_INTERNAL_ASSERT(
+            swizzle_expr->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Loop,
+            "Only support inlining loop swizzles");
+        validateLoopSwizzle(swizzle_expr, tv_leaf_domain_set);
+      }
+
+      std::unordered_set<Expr*> inlined_swizzle_set(
+          inlined_swizzles.begin(), inlined_swizzles.end());
+
+      // Check not inlined swizzles:
+      //  Apply the loop swizzle check when it applies, and
+      // also make sure that the no swizzle is also in inlined_swizzle set.
+      // The latter would mean that one output of the swizzle is inlined while
+      //  the other is not. Such case will not be supported.
+      for (auto swizzle_expr : not_inlined_swizzles) {
+        TORCH_INTERNAL_ASSERT(
+            !inlined_swizzle_set.count(swizzle_expr),
+            "Cannot partially inline across swizzle domains.",
+            swizzle_expr->toString());
+        if (swizzle_expr->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Loop) {
+          validateLoopSwizzle(swizzle_expr, tv_leaf_domain_set);
+        }
+      }
     }
   }
 }

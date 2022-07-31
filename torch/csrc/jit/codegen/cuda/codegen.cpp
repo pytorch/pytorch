@@ -2414,11 +2414,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const kir::IntPair* int_pair) {
     const auto def = int_pair->definition();
-    if (print_inline_) {
-      code_ << gen(def);
-    } else {
-      code_ << varName(int_pair);
-    }
+    TORCH_INTERNAL_ASSERT(
+        def != nullptr, "no support for un-inlined int pair yet.");
+    code_ << gen(def);
   }
 
   void handle(const kir::PairSelect* pair_select) {

@@ -527,13 +527,43 @@ void IndexCompute::handle(Swizzle2D* swizzle_2d) {
   const auto out_x_ind = out_x_it->second;
   const auto out_y_ind = out_y_it->second;
 
-  // Actual swizzle operation is handled via IndexSwizzle pass
-  //  all behavior in this pass is directly forward through the
-  //  index and extent.
-  index_map_[in_x_id] = out_x_ind;
-  index_map_[in_y_id] = out_y_ind;
-  extent_map_[in_y_id] = getExtent(out_y_id);
-  extent_map_[in_x_id] = getExtent(out_x_id);
+  if (swizzle_mode_ == SwizzleMode::NoSwizzle ||
+      swizzle_mode_ != swizzle_2d->swizzleMode()) {
+    // Handle inactive swizzles by just passing through index
+    //  and extend information.
+
+    TORCH_INTERNAL_ASSERT(
+        index_map_.count(in_x_id) == index_map_.count(in_y_id),
+        "input index should be either both defined or both undefined");
+    if (index_map_.count(in_x_id)) {
+      // Only propagate original index through if
+      //  the input index hasn't been computed.
+      // TODO:
+      //  This part should be cleaner once we remove the
+      // second index traversal pass.
+      return;
+    }
+    index_map_[in_x_id] = out_x_ind;
+    index_map_[in_y_id] = out_y_ind;
+    extent_map_[in_y_id] = getExtent(out_y_id);
+    extent_map_[in_x_id] = getExtent(out_x_id);
+  } else {
+    // Generate integer swizzle math if the
+    //  swizzle is activated. See also
+    //  [Note on swizzle mode].
+
+    auto out_pair = IrBuilder::swizzle2DIntExpr(
+        out_x_ind,
+        out_y_ind,
+        getExtent(out_x_id),
+        getExtent(out_y_id),
+        swizzle_2d->swizzleType());
+
+    index_map_[in_x_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
+    index_map_[in_y_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
+  }
 }
 
 void IndexCompute::handle(Expr* e) {
@@ -616,9 +646,31 @@ IndexCompute::IndexCompute(
       reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
   FUSER_PERF_SCOPE("GpuLower::Lower::IndexCompute::IndexCompute");
   concrete_id_pass_ = true;
+  swizzle_mode_ = SwizzleMode::Loop;
 }
 
 void IndexCompute::run(const LoopIndexing& loop_indexing) {
+  // Apply loop swizzles if there are any that outputs to
+  //  the loop domains.
+  // Currently only support loop swizzles that directly output
+  //  to concrete loop domains and these are validated in
+  //  validate swizzle pass.
+  // TODO:
+  //  will gradually enable replaying and mapping of loop
+  // swizzles in the IR infrastructure and once that's piped
+  // through this part of logic will be removed.
+  std::unordered_set<Expr*> visited;
+  for (auto loop_id : loop_indexing.loopDomains()) {
+    auto loop_id_def = loop_id->definition();
+    if (loop_id_def != nullptr && loop_id_def->isA<Swizzle2D>()) {
+      if (visited.insert(loop_id_def).second) {
+        handle(loop_id_def);
+      }
+    }
+  }
+
+  // Run through the loop indexing expressions and generate
+  //  the indexing integer math for the concrete ids.
   for (auto expr : loop_indexing.getBackwardExprList()) {
     handle(expr);
   }
@@ -955,6 +1007,7 @@ void IndexSwizzle::run() {
     UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
     index_map_ = update_leaves.indexMap();
     extent_map_ = update_leaves.extentMap();
+    IndexCompute::swizzle_mode_ = SwizzleMode::Data;
     IndexCompute::run();
   }
 }
@@ -969,7 +1022,8 @@ void IndexSwizzle::handle(Expr* e) {
             return swizzled_ids_.find(id) != swizzled_ids_.end();
           }) ||
       (e->isA<Swizzle2D>() &&
-       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle);
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
+       e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data);
   if (!needs_update) {
     return;
   }
@@ -983,8 +1037,6 @@ void IndexSwizzle::handle(Expr* e) {
 void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
   auto out_x_id = swizzle_2d->outX();
   auto out_y_id = swizzle_2d->outY();
-  auto in_x_id = swizzle_2d->inX();
-  auto in_y_id = swizzle_2d->inY();
 
   auto out_x_it = index_map_.find(out_x_id);
   auto out_y_it = index_map_.find(out_y_id);
@@ -998,28 +1050,7 @@ void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
       out_x_it != index_map_.end() && out_y_it != index_map_.end(),
       "Swizzle output indices were not propagated through");
 
-  const auto out_x_ind = out_x_it->second;
-  const auto out_y_ind = out_y_it->second;
-
-  // Can propagate zero only for a few
-  //  swizzle types (TODO)
-
-  if (swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle) {
-    auto out_pair = IrBuilder::swizzle2DIntExpr(
-        out_x_ind,
-        out_y_ind,
-        getExtent(out_x_id),
-        getExtent(out_y_id),
-        swizzle_2d->swizzleType());
-
-    index_map_[in_x_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
-    index_map_[in_y_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
-
-    swizzled_ids_.insert(in_x_id);
-    swizzled_ids_.insert(in_y_id);
-  }
+  IndexCompute::handle(swizzle_2d);
 }
 
 // Used for local and shared index mapping. Returns a map from loops

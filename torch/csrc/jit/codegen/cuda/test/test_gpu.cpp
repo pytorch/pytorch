@@ -23871,6 +23871,136 @@ TEST_F(NVFuserTest, FusionSwizzleMapping_CUDA) {
       tv1->axis(-1), swizzle_op->outY(), IdMappingMode::PERMISSIVE));
 }
 
+// Test a basic loop swizzle pattern
+TEST_F(NVFuserTest, FusionLoopSwizzle0_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv2);
+
+  tv2->split(-1, 16);
+  tv2->split(-1, 4);
+  //[O, 4, 4]
+
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1, SwizzleMode::Loop);
+
+  tv0->computeAt(tv2, -1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 32}, options);
+  auto t2 = t0 + 2.0;
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+// Outer block zshape pattern
+TEST_F(NVFuserTest, FusionLoopSwizzle1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv2);
+
+  tv2->split(-2, 8);
+  tv2->split(-1, 4);
+  //[I0o, I0i, I1o, I1i]
+  tv2->reorder({{1, 2}, {2, 1}});
+  //[I0o, I1o, I0i, I1i]
+
+  tv2->swizzle(Swizzle2DType::ZShape, 0, 1, SwizzleMode::Loop);
+  tv0->computeAt(tv2, -1);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDy);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({45, 77}, options);
+  auto t2 = t0 + 2.0;
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+// Test assertion in unsupported pattern: non-leaf loop swizzle.
+TEST_F(NVFuserTest, FusionLoopSwizzleCheck0_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv2);
+
+  tv2->split(-1, 16);
+  tv2->split(-1, 4);
+  //[O, 4, 4]
+
+  // Swizzle the inner tile.
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1, SwizzleMode::Loop);
+
+  // Make swizzle output not a leaf domain.
+  tv2->merge(-2);
+
+  tv0->computeAt(tv2, -1);
+
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+// Test assertion in unsupported pattern: half-inlined loop swizzle.
+TEST_F(NVFuserTest, FusionLoopSwizzleCheck1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv3);
+
+  //[O, 4, 4]
+  tv2->split(-1, 16);
+  tv2->split(-1, 4);
+
+  //[O, 4, 4]
+  tv3->split(-1, 16);
+  tv3->split(-1, 4);
+
+  // Swizzle inner tile of tv2
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1, SwizzleMode::Loop);
+
+  // Make tv2 swizzled and half-inlined (unsupported).
+  tv0->computeAt(tv3, -2);
+
+  fusion.print();
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
 TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
