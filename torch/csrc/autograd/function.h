@@ -398,7 +398,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       if (exec_info && !exec_info->empty()) {
         auto it = exec_info->find(next.function.get());
         if (it == exec_info->end() || !it->second.should_execute()) {
-          return false;
+          return false; // this edge is not needed for the current graph_task
         }
       }
       return true;
