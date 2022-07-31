@@ -125,3 +125,59 @@ TEST(U8CLAMP__SSE2, qmax) {
   }
 }
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
+
+#if CPUINFO_ARCH_PPC64
+TEST(U8CLAMP__VSX, n_eq_8) {
+  TEST_REQUIRES_VSX;
+  ClampMicrokernelTester().n(8).test(pytorch_u8clamp_ukernel__vsx);
+}
+
+TEST(U8CLAMP__VSX, n_div_8) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 8; n < 512; n += 8) {
+    ClampMicrokernelTester().n(n).test(pytorch_u8clamp_ukernel__vsx);
+  }
+}
+
+TEST(U8CLAMP__VSX, n_gt_8) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 9; n < 16; n++) {
+    ClampMicrokernelTester().n(n).test(pytorch_u8clamp_ukernel__vsx);
+  }
+}
+
+TEST(U8CLAMP__VSX, n_lt_8) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 1; n < 8; n++) {
+    ClampMicrokernelTester().n(n).test(pytorch_u8clamp_ukernel__vsx);
+  }
+}
+
+TEST(U8CLAMP__VSX, inplace) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 1; n < 128; n += 5) {
+    ClampMicrokernelTester().iterations(1).n(n).inplace(true).test(
+        pytorch_u8clamp_ukernel__vsx);
+  }
+}
+
+TEST(U8CLAMP__VSX, qmin) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 1; n < 128; n += 11) {
+    for (uint8_t qmin = 1; qmin < 255; qmin++) {
+      ClampMicrokernelTester().iterations(1).n(n).qmin(qmin).test(
+          pytorch_u8clamp_ukernel__vsx);
+    }
+  }
+}
+
+TEST(U8CLAMP__VSX, qmax) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 1; n < 128; n += 11) {
+    for (uint8_t qmax = 1; qmax < 255; qmax++) {
+      ClampMicrokernelTester().iterations(1).n(n).qmax(qmax).test(
+          pytorch_u8clamp_ukernel__vsx);
+    }
+  }
+}
+#endif /* CPUINFO_ARCH_PPC64 */
