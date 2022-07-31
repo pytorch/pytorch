@@ -96,6 +96,16 @@ void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   customClassMethods().emplace_back(std::move(fn));
 }
 
+void deregisterCustomClassMethod(const c10::QualifiedName& name) {
+  auto& methods = customClassMethods();
+  methods.erase(
+      std::remove_if(
+          methods.begin(),
+          methods.end(),
+          [&name](const auto& method) { return method->qualname() == name; }),
+      methods.end());
+}
+
 std::vector<c10::FunctionSchema> customClassSchemasForBCCheck() {
     auto& methods = customClassMethods();
     return c10::fmap(methods, [](const std::unique_ptr<jit::Function>& fn) {

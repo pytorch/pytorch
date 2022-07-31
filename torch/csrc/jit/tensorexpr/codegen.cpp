@@ -49,6 +49,10 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
   stmt_factory_methods_[name] = stmt_factory_method;
 }
 
+void RegisterCodeGenList::RemoveStmtFactoryMethod(const std::string& name) {
+  stmt_factory_methods_.erase(name);
+}
+
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     StmtPtr stmt,

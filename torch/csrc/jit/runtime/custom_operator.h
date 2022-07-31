@@ -22,10 +22,18 @@ struct TORCH_API RegisterOperators {
   explicit RegisterOperators(std::vector<c10::optional<Operator>> operators) {
     for (c10::optional<Operator>& o : operators) {
       if (o) {
+        registered_schemas.push_back(o.value().schema());
         registerOperator(std::move(o.value()));
       }
     }
   }
+
+  ~RegisterOperators() {
+    for (const auto& s : registered_schemas)
+      deregisterOperator(s);
+  }
+
+  std::vector<c10::FunctionSchema> registered_schemas;
 };
 
 } // namespace jit
