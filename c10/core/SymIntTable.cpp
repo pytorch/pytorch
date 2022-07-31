@@ -5,7 +5,7 @@ namespace c10 {
 uint64_t SymIntTable::addNode(SymIntNode sin) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto index = nodes_.size();
-  nodes_.push_back(sin);
+  nodes_.push_back(std::move(sin));
   return index;
 }
 SymIntNode SymIntTable::getNode(size_t index) {
@@ -17,7 +17,7 @@ SymIntNode SymIntTable::getNode(size_t index) {
 c10::SymInt SymIntNodeImpl::toSymInt() {
   // We will need to figure out a way
   // to dedup nodes
-  auto sit_sp = this->shared_from_this();
+  auto sit_sp = SymIntNode::reclaim_copy(this);
   return SymInt::toSymInt(sit_sp);
 }
 
