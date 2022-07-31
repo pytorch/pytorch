@@ -487,7 +487,7 @@ inline bool is_symint_node(py::handle obj) {
 
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    auto r = py::cast(symint.toSymIntNodeImpl().get()).release().ptr();
+    auto r = py::cast(symint.toSymIntNodeImpl()).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
   } else {
