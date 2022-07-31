@@ -20,6 +20,10 @@ struct RecordFunctor {
       : args(std::move(_args)), outputs(std::move(_outputs)) {}
   virtual ~RecordFunctor() = default;
 
+  virtual size_t hash() const {
+    return 0;
+  }
+
   //! The base virtual equality operator is defined so all child
   //! classes can utilize the check for the same args and outputs.
   virtual bool operator==(const RecordFunctor& other) const {
@@ -534,3 +538,21 @@ struct VarianceOpRecord : RecordFunctor {
 };
 
 } // namespace nvfuser
+
+namespace std {
+using namespace nvfuser;
+
+template <>
+struct hash<RecordFunctor> {
+  size_t operator()(RecordFunctor const& p) const {
+    return p.hash();
+  }
+};
+template <>
+struct equal_to<RecordFunctor>
+    : public binary_function<RecordFunctor, RecordFunctor, bool> {
+  bool operator()(RecordFunctor const& p, RecordFunctor const& q) const {
+    return p.operator==(q);
+  }
+};
+} // namespace std
