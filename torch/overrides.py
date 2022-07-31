@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -279,8 +279,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor,
-        Tensor.sym_size
+        Tensor.to_padded_tensor
     }
 
 
@@ -924,6 +923,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
+        torch.linalg.vecdot: lambda input, other, dim=-1, out=None: -1,
         torch.view_as_real: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
@@ -1073,6 +1073,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.true_divide: lambda input, other: -1,
         torch.trunc: lambda input, out=None: -1,
         torch.unbind: lambda input, dim=0: -1,
+        torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
@@ -1830,7 +1831,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
           ``NotImplemented``.
 
     Independent subclasses of :class:`TorchFunctionMode` are compositional:
-    modes can be pushed onto a stack with :func:`push_torch_function_mode`.
+    modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_function__`` implementation, by default, they will forward on to
     the next mode on the mode stack.  If you want recursively call back into
@@ -1859,6 +1860,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)
@@ -1869,8 +1871,9 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
 
     @classmethod
     def push(cls, *args, **kwargs):
-        return push_torch_function_mode(functools.partial(cls, *args, **kwargs))
-
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -1894,8 +1897,7 @@ def _no_torch_function_mode() -> Iterator[None]:
 
 class _TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode)
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
 
     def get_mode(self):
         return _get_torch_function_mode()
@@ -1910,8 +1912,8 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     Context manager that sets the current :class:`TorchFunctionMode`; see the
     class for more information on what modes are.  This function is
     non-compositional; if there is already an existing mode, it will raise an
-    error; prefer using :func:`push_torch_function_mode` if your
-    ``__torch_function__`` implementation can defer to an inner mode.
+    error; prefer using ``with MyMode():`` if your ``__torch_function__``
+    implementation can defer to an inner mode.
 
     This function is safe to use inside a ``__torch_function__`` mode handler,
     as the mode is guaranteed to be disabled in this context.  You can use
@@ -1935,25 +1937,6 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
             and overwrite it with the passed mode.
     """
     return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
-
-@contextlib.contextmanager
-def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
-    """
-    Context manager that pushes a :class:`TorchFunctionMode` onto the current
-    mode stack; see the class for more information on what modes are.  Stacked
-    modes can delegate to each other by invoking the ``__torch_function__``
-    method for the ``inner`` mode.
-
-    Args:
-        ctor: a function that when invoked as ``ctor(inner=...)`` produces
-            a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
-            has no ``__init__`` implementation, you can simply pass the class
-            itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
-            use ``functools.partial`` to partially apply the constructor with all
-            non-inner arguments (e.g.,
-            ``push_torch_function_mode(partial(MyMode, arg))``)
-    """
-    return _push_mode(ctor, _TorchFunctionModeInfo())
 
 class enable_reentrant_dispatch():
     def __enter__(self):

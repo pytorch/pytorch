@@ -731,6 +731,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
+  } else if (ivalue.isGenerator()) {
+    return py::cast(ivalue.toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -850,7 +852,7 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl())
                             : py::cast(si.expect_int());
   } else {
     AT_ERROR(
@@ -1232,13 +1234,6 @@ inline py::object _get_operation_for_overload_or_packet(
   }
   if (overloaded_args.size() > 0 ||
       at::impl::PythonTorchFunctionTLS::get_mode()) {
-    std::vector<py::object> overloaded_types;
-    overloaded_types.reserve(overloaded_args.size());
-    for (auto& oarg : overloaded_args) {
-      overloaded_types.push_back(
-          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
-    }
-    py::tuple py_types = py::cast(overloaded_types);
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();

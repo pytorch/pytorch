@@ -52,8 +52,6 @@ namespace meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
-    IntArrayRef dim,
-    bool keepdim,
     const optional<ScalarType>& opt_dtype,
     const Tensor& result) {
   // 'opt_dtype' has the priority for both cases.
@@ -187,9 +185,9 @@ TORCH_META_FUNC(cumprod)
 }
 
 TORCH_META_FUNC2(sum, dim_IntList)
-(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto out_dtype = infer_dtype_from_optional(self, opt_dtype, maybe_get_output());
+  resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(prod, dim_int)
@@ -197,12 +195,12 @@ TORCH_META_FUNC2(prod, dim_int)
  int64_t dim,
  bool keepdim,
  c10::optional<ScalarType> dtype) {
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, dtype, maybe_get_output());
+  auto out_dtype = infer_dtype_from_optional(self, dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(mean, dim)
-(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
 
   if (!at::isFloatingType(in_dtype) && !at::isComplexType(in_dtype)) {
@@ -221,8 +219,8 @@ TORCH_META_FUNC2(mean, dim)
         "Got: ", dtype);
   }
 
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+  auto out_dtype = infer_dtype_from_optional(self, opt_dtype, maybe_get_output());
+  resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
 ScalarType get_result_or_self_value_dtype(
@@ -1061,11 +1059,11 @@ inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dty
 
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
- IntArrayRef dim,
+ OptionalIntArrayRef opt_dim,
  bool keepdim,
  optional<ScalarType> opt_dtype,
  const Tensor& result) {
-  auto iter = meta::make_reduction_from_out_ty(self, result, dim, keepdim, result.scalar_type());
+  auto iter = meta::make_reduction_from_out_ty(self, result, opt_dim, keepdim, result.scalar_type());
   if (iter.numel() == 0) {
     result.zero_();
   } else {
@@ -1079,6 +1077,10 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
 
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
 }
 
 Tensor& sum_out(const Tensor& self, DimnameList dim,
@@ -1189,7 +1191,7 @@ Tensor& prod_out(const Tensor& self, Dimname dim,
 
 TORCH_IMPL_FUNC(mean_out)
 (const Tensor& self,
- IntArrayRef dim,
+ OptionalIntArrayRef opt_dim,
  bool keepdim,
  c10::optional<ScalarType> opt_dtype,
  const Tensor& result) {
@@ -1200,19 +1202,19 @@ TORCH_IMPL_FUNC(mean_out)
   // in lieu of the sum + divide implementation below.
   if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
-    if (dim.size() == 0 || self.ndimension() == 0) {
+    if (!opt_dim.has_value() || opt_dim.value().size() == 0 || self.ndimension() == 0) {
       dim_prod = self.numel();
     } else {
+      auto dim = opt_dim.value();
       for (auto d : dim) {
         dim_prod *= self.size(d);
       }
     }
     auto& result_mut = const_cast<Tensor&>(result);
-    at::sum_out(result_mut, self, dim, keepdim, dtype).div_(dim_prod);
+    at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
   } else {
-    DimVector dims(dim);
     auto iter = at::meta::make_reduction_from_out_ty(
-        self, result, dims, keepdim, dtype);
+        self, result, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
       result.fill_(std::numeric_limits<double>::quiet_NaN());
     } else {

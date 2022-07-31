@@ -569,8 +569,8 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch._UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -1351,7 +1351,6 @@ class TestCuda(TestCase):
                 out = cudart.cudaStreamDestroy(stream.value)
                 self.assertEqual(out, 0)
 
-    @skipIfRocm
     def test_external_streams(self):
         device = torch.cuda.device(0)
         with self._get_external_stream(device) as stream_v:
@@ -1359,7 +1358,6 @@ class TestCuda(TestCase):
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
@@ -2806,7 +2804,11 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_not_implemented = 'cudnn' in op or 'prelu' in op or 'thnn' in op \
+                should_error_from_cudnn = 'cudnn' in op and not\
+                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
+                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
@@ -3950,6 +3952,15 @@ torch.cuda.synchronize()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUDA_VISIBLE_DEVICES")
+    @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
+    def test_lazy_init(self):
+        """ Validate that no CUDA calls are made during `import torch` call"""
+        from subprocess import check_output
+        test_script = "import os; import torch;os.environ['CUDA_VISIBLE_DEVICES']='32';print(torch.cuda.device_count())"
+        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        self.assertEqual(rc, "0")
 
 
 class TestCudaComm(TestCase):
