@@ -556,7 +556,8 @@ public:
   }
 
   IValue(c10::SymInt i) : tag(Tag::SymInt) {
-    payload.u.as_int = i.data();
+    // TODO: needs to be changed when SymInt becomes owning
+    payload.u.as_int = i.as_int_unchecked();
   }
 
   IValue(c10::SymIntArrayRef v);

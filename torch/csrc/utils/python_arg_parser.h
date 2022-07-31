@@ -491,7 +491,7 @@ inline PyObject* toPyObject(c10::SymInt symint) {
     TORCH_INTERNAL_ASSERT(r);
     return r;
   } else {
-    return THPUtils_packInt64(symint.data());
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 
