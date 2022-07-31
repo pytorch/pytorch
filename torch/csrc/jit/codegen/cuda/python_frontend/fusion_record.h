@@ -112,7 +112,7 @@ struct OpRecord : RecordFunctor {
             fd.getFusionState(args.at(Is)))...);
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     using arg_tuple_t = std::tuple<ArgTypes...>;
     auto indices =
         std::make_index_sequence<std::tuple_size<arg_tuple_t>::value>();
@@ -169,7 +169,7 @@ struct BroadcastOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
 
     const auto arg_ndims = arg->domain()->noReductions().size();
@@ -239,7 +239,7 @@ struct CastOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto arg = dynamic_cast<ArgType>(fd.getFusionState(args.at(0)));
     auto output = fusion_op_(dtype_, arg);
     fd.setFusionState(outputs.at(0), output);
@@ -269,7 +269,7 @@ struct ConstantRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     NvfVal* output = IrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs.at(0), output);
   }
@@ -323,7 +323,7 @@ struct InputTensorRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto tv = TensorViewBuilder()
                   .ndims(symbolic_sizes_.size())
                   .contiguity(contiguous_info_)
@@ -363,7 +363,7 @@ struct OutputRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto input = fd.getFusionState(args.at(0));
 
     // With C++17, this statement should be "if constexpr"
@@ -424,7 +424,7 @@ struct ReductionOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<NvfTensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs.at(0), output);
@@ -459,7 +459,7 @@ struct ScalarRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     NvfVal* output = nullptr;
     if (dtype_ == NvfDataType::Double) {
       output = IrBuilder::create<torch::jit::fuser::cuda::Double>();
@@ -517,7 +517,7 @@ struct VarianceOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
     auto output =
         torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
