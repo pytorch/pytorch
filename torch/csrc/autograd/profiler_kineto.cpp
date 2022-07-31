@@ -170,26 +170,29 @@ struct EventFieldsVisitor {
 
   void setPythonMetadata(std::shared_ptr<Result> result) {
     result->visit([&, this](const auto& i) -> void {
-      c10::guts::if_constexpr<is_py_fields<decltype(i)>()>([&](auto _) {
-        addMetadata("Python thread", std::to_string(_(i).python_tid_));
-        addMetadata("Python id", std::to_string(_(i).id_));
+      c10::guts::if_constexpr<is_py_fields<decltype(i)>()>(
+          [&, this](auto _) -> void {
+            addMetadata("Python thread", std::to_string(_(i).python_tid_));
+            addMetadata("Python id", std::to_string(_(i).id_));
 
-        std::string parent_id = "null";
-        auto update_parent_id = [&](const auto& j) -> bool {
-          // Update parent_id the first time we see a Python Result
-          c10::guts::if_constexpr<is_py_fields<decltype(j)>()>(
-              [&](auto _) { parent_id = std::to_string(_(j).python_tid_); });
+            std::string parent_id = "null";
+            auto update_parent_id = [&](const auto& j) -> bool {
+              // Update parent_id the first time we see a Python Result
+              constexpr bool is_python_parent = is_py_fields<decltype(j)>();
+              c10::guts::if_constexpr<is_python_parent>([&](auto _) {
+                parent_id = std::to_string(_(j).python_tid_);
+              });
 
-          // And then break out of the update loop.
-          return !is_py_fields<decltype(j)>();
-        };
+              // And then break out of the update loop.
+              return !is_python_parent;
+            };
 
-        auto parent = result->parent_.lock();
-        while (parent && parent->visit(update_parent_id)) {
-          parent = parent->parent_.lock();
-        }
-        addMetadata("Python parent id", parent_id);
-      });
+            std::shared_ptr<Result> parent = result->parent_.lock();
+            while (parent && parent->visit(update_parent_id)) {
+              parent = parent->parent_.lock();
+            }
+            addMetadata("Python parent id", parent_id);
+          });
     });
   }
 
