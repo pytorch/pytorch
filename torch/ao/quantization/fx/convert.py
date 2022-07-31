@@ -38,7 +38,10 @@ from torch.ao.quantization.backend_config.utils import (
     get_fused_module_classes,
     get_qat_module_classes,
 )
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    get_native_backend_config,
+)
 from .graph_module import (
     QuantizedGraphModule,
     is_observed_module,
@@ -304,7 +307,7 @@ def convert_standalone_module(
         modules: Dict[str, torch.nn.Module],
         model: torch.fx.GraphModule,
         is_reference: bool,
-        backend_config_dict: Optional[Dict[str, Any]]):
+        backend_config: Optional[BackendConfig]):
     """ Converts a observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
     changing this behavior in the future (e.g. separating quantization and lowering for
@@ -316,7 +319,7 @@ def convert_standalone_module(
       - model: original model
       - is_reference: a flag from parent provided by user to decide if we want to
         produce a reference model or a fbgemm/qnnpack model
-      - backend_config_dict: backend configuration of the target backend of quantization
+      - backend_config: backend configuration of the target backend of quantization
     """
     # TODO: remove is_reference flag
     if is_reference:
@@ -353,11 +356,11 @@ def convert_standalone_module(
         # we'll just add a dequantize node after this node
         insert_dequantize_node(node, model.graph)
 
-    # TODO: allow convert_custom_config to override backend_config_dict
+    # TODO: allow convert_custom_config to override backend_config
     # for standalone module
     quantized_standalone_module = convert_fn(
         observed_standalone_module,
-        backend_config_dict=backend_config_dict)
+        backend_config=backend_config)
     parent_name, name = _parent_name(node.target)
     # update the modules dict
     setattr(modules[parent_name], name, quantized_standalone_module)
@@ -368,7 +371,7 @@ def convert_weighted_module(
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
         qconfig_map: Dict[str, QConfigAny],
-        backend_config_dict: Dict[str, Any]):
+        backend_config: BackendConfig):
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -382,7 +385,7 @@ def convert_weighted_module(
     original_module = modules[str(node.target)]
     qconfig: QConfigAny = original_module.qconfig  # type: ignore[assignment]
     weight_post_process = None
-    qat_module_classes = get_qat_module_classes(backend_config_dict)
+    qat_module_classes = get_qat_module_classes(backend_config)
 
     if isinstance(
             original_module,
@@ -402,7 +405,7 @@ def convert_weighted_module(
         return
 
     # skip converting to reference quantized module if the qconfig is not supported
-    pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
+    pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs = pattern_to_dtype_configs.get(type(original_module), [])
     if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
         return
@@ -461,7 +464,7 @@ def convert_weighted_module(
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
     # root_module_to_quantized_reference_module: module mapping from root (floating point) module class
     # to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
-    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
+    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config)
     ref_qmodule_cls = root_module_to_quantized_reference_module.get(type_before_parametrizations(float_module), None)
     assert (
         ref_qmodule_cls is not None
@@ -544,7 +547,7 @@ def convert(
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
         qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
-        backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
+        backend_config: Union[BackendConfig, Dict[str, Any], None] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
     quantized model, the rule is simple:
@@ -708,13 +711,13 @@ def convert(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
 
-    if backend_config_dict is None:
-        backend_config_dict = get_native_backend_config_dict()
-    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
+    if backend_config is None:
+        backend_config = get_native_backend_config()
+    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
-    qat_module_classes = get_qat_module_classes(backend_config_dict)
-    fused_module_classes = get_fused_module_classes(backend_config_dict)
+    qat_module_classes = get_qat_module_classes(backend_config)
+    fused_module_classes = get_fused_module_classes(backend_config)
     statically_quantized_custom_module_nodes: Set[Node] = set()
 
     for node in list(model.graph.nodes):
@@ -759,7 +762,7 @@ def convert(
                         qconfig_map)
             elif is_observed_standalone_module(modules[node.target]):
                 convert_standalone_module(
-                    node, modules, model, is_reference, backend_config_dict)
+                    node, modules, model, is_reference, backend_config)
             # below this point `type_before_parametrizations` is used
             # instead of `type` to handle situations with fx quant + sparsity
             elif type_before_parametrizations(modules[node.target]) in set(
@@ -770,7 +773,7 @@ def convert(
                    type_before_parametrizations(modules[node.target][0]) not in root_module_classes:
                     continue
                 convert_weighted_module(
-                    node, modules, observed_node_names, qconfig_map, backend_config_dict)
+                    node, modules, observed_node_names, qconfig_map, backend_config)
             elif type_before_parametrizations(modules[node.target]) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

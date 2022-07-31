@@ -151,10 +151,19 @@ class BackendConfig:
 
     def set_backend_pattern_config(self, config: BackendPatternConfig) -> BackendConfig:
         """
-        Set the config for an op that can be run on the target backend.
-        This overrides any existing config for the given op.
+        Set the config for an pattern that can be run on the target backend.
+        This overrides any existing config for the given pattern.
         """
         self.configs[config.pattern] = config
+        return self
+
+    def set_backend_pattern_configs(self, configs: List[BackendPatternConfig]) -> BackendConfig:
+        """
+        Set the configs for patterns that can be run on the target backend.
+        This overrides any existing config for a given pattern if it was previously registered already.
+        """
+        for conf in configs:
+            self.set_backend_pattern_config(conf)
         return self
 
     @classmethod
@@ -237,6 +246,14 @@ class BackendPatternConfig:
         Register a set of supported input/output activation, weight, and bias data types for this pattern.
         """
         self.dtype_configs.append(dtype_config)
+        return self
+
+    def set_dtype_configs(self, dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
+        """
+        Set the supported input/output activation, weight, and bias data types for this pattern,
+        overriding all previously registered data types.
+        """
+        self.dtype_configs = dtype_configs
         return self
 
     def set_root_module(self, root_module: torch.nn.Module) -> BackendPatternConfig:
