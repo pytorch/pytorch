@@ -47,7 +47,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 std::string getMPSTypeString(ScalarType scalar_type);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
+std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = false);
 double getMPSScalarValue(const Tensor& t);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
@@ -95,6 +95,7 @@ void printTensorNDArray(const Tensor& t);
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 
@@ -109,11 +110,25 @@ struct MPSCachedGraph
    [_object release];
    _object = nullptr;
   }
+
+  template<typename T>
+  inline T* as() {
+    return static_cast<T*>(this);
+  }
+
   MPSGraph *graph() const { return (MPSGraph *)_object; }
   NSObject *object() const { return _object; }
 private:
   NSObject *_object = nullptr;
 };
+
+struct MPSUnaryCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil;
+};
+
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
@@ -190,6 +205,11 @@ struct MPSGraphCache
       }
     });
     return result;
+  }
+
+  template<typename T>
+  inline T* LookUpAs(const std::string& key) const {
+    return static_cast<T *>(LookUp(key));
   }
 
   void FindAndRemoveViewEntry(void* ptr) {

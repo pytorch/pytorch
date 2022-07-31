@@ -1,13 +1,14 @@
 import os
 import platform
-from glob import glob
 import shutil
+from glob import glob
 from typing import Dict, Optional
 
-from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
-from .setup_helpers.cmake import USE_NINJA, CMake
-
 from setuptools import distutils  # type: ignore[import]
+
+from .setup_helpers.cmake import CMake, USE_NINJA
+
+from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
 
 
 def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
