@@ -96,62 +96,8 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-
-
 inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
-// The sizes of the underlying tensors
-inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* self_ptr) {
-  int64_t ntensors = self_ptr->size(0);
-  std::vector<IntArrayRef> sizes(ntensors);
-  if (ntensors == 0) {
-    return sizes;
-  }
-  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
-  int64_t orig_dim = sizemat.size(1);
-  // nesting scalars has empty sizes
-  if (orig_dim == 0) {
-    return sizes;
-  }
-  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
-    sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
-    sizemat_ptr += orig_dim;
-  }
-  return sizes;
-}
-
-inline std::vector<IntArrayRef> NestedTensor_get_sizes(const at::Tensor& self) {
-  const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
-  return NestedTensor_get_sizes(self_ptr);
-}
-
-// The strides of the underlying tensors
-inline std::vector<IntArrayRef> NestedTensor_get_strides(const NestedTensorImpl* self_ptr) {
-  int64_t ntensors = self_ptr->size(0);
-  std::vector<IntArrayRef> strides(ntensors);
-  if (ntensors == 0) {
-    return strides;
-  }
-  const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
-  int64_t orig_dim = stridemat.size(1);
-  // nesting scalars has empty strides
-  if (orig_dim == 0) {
-    return strides;
-  }
-  const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
-    strides[i] = IntArrayRef(stridemat_ptr, stridemat_ptr + orig_dim);
-    stridemat_ptr += orig_dim;
-  }
-  return strides;
-}
-
-inline std::vector<IntArrayRef> NestedTensor_get_strides(const at::Tensor& self) {
-  const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
-  return NestedTensor_get_strides(self_ptr);
 }
 
 std::vector<at::Tensor> NestedTensor_unbind(
@@ -814,6 +760,13 @@ Tensor softmax_nested(
 }
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
+  if (self.is_nested() && !mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
+  }
+  else if (!self.is_nested() && mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a non-nested self and nested other");
+  }
+  // dispatcher should have guaranteed that at least one is nested
   auto self_ptr = get_nested_tensor_impl(self);
   auto mat2_ptr = get_nested_tensor_impl(mat2);
   TORCH_CHECK(self_ptr->dim() == 3, "batch1 must be a 3D tensor");
@@ -862,6 +815,132 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
     at::mm_out(output_unbind[i],
                self_buffer.as_strided(self_sizes[i], self_strides[i], self_offsets[i]),
                mat2_buffer.as_strided(mat2_sizes[i], mat2_strides[i], mat2_offsets[i]));
+  }
+  return output;
+}
+
+// utilities support _NestedTensor_GeneralizedBMM
+namespace {
+inline std::tuple<std::vector<int64_t>, Tensor>
+_NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+    const std::vector<IntArrayRef>& self_sizes,
+    const std::vector<IntArrayRef>& mat2_sizes,
+    const c10::TensorOptions& buffer_op,
+    const c10::TensorOptions& sizemat_op) {
+  int64_t ntensors = self_sizes.size(),
+      ndims = self_sizes[0].size();
+  std::vector<int64_t> batch_sizes(ntensors, 1);
+  Tensor sizemat = at::empty({ntensors, ndims}, sizemat_op);
+  int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+  int64_t numel = 0;
+  for (int64_t i = 0; i < ntensors; i++) {
+    const IntArrayRef& self_size = self_sizes[i],
+        & mat2_size = mat2_sizes[i];
+    int64_t& batch_size = batch_sizes[i];
+    // batch dimensions
+    for (int64_t j = 0; j < ndims - 2; j++) {
+      const int64_t& self_sizej = self_size[j],
+          & mat2_sizej = mat2_size[j];
+      TORCH_CHECK(
+          self_sizej == mat2_sizej,
+          "matmul: For nested tensors, no broadcasting is currently performed: ",
+          i, "-th nested matrices in batch at dimension ", j + 1,
+          " have mismatching sizes ", self_sizej, " and ", mat2_sizej);
+      sizemat_ptr[j] = self_sizej;
+      batch_size *= sizemat_ptr[j];
+    }
+    // matrix multiplication dimensions
+    const int64_t& self_size0 = self_size[ndims - 2], & self_size1 = self_size[ndims - 1],
+        & mat2_size0 = mat2_size[ndims - 2], & mat2_size1 = mat2_size[ndims - 1];
+    TORCH_CHECK(
+        self_size1 == mat2_size0,
+        "matmul: ",
+        i, "-th nested matrices in batch cannot be multiplied (",
+        self_size0, "x", self_size1, " and ",
+        mat2_size0, "x", mat2_size1, ")");
+    sizemat_ptr[ndims - 2] = self_size0;
+    sizemat_ptr[ndims - 1] = mat2_size1;
+    sizemat_ptr += ndims;
+    numel += batch_size * self_size0 * mat2_size1;
+  }
+  Tensor buffer = at::empty(numel, buffer_op);
+  Tensor output = wrap_buffer(buffer, sizemat);
+  return std::make_tuple(batch_sizes, output);
+}
+}
+
+// This is a generalized batched matmul dedicated to nested tensors,
+// where `self` and `mat2` have same number (>= 3) of dimensions.
+// The last 2 dimensions will be considered as matrix dimensions,
+// so they should be matrix-multiplicable.
+// The leading dimensions are considered as batch dimensions,
+// and since nested tensor does not support broadcasting for now,
+// for each batch dimension `self` and `mat2` must have same size.
+Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
+  if (self.is_nested() && !mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
+  }
+  else if (!self.is_nested() && mat2.is_nested()) {
+    AT_ERROR("Expected both to be nested, but got a non-nested self and nested other");
+  }
+  // dispatcher should have guaranteed that at least one is nested
+  auto self_ptr = get_nested_tensor_impl(self),
+      mat2_ptr = get_nested_tensor_impl(mat2);
+  int64_t self_dim = self_ptr->dim(),
+      mat2_dim = mat2_ptr->dim();
+  TORCH_CHECK(
+      self_dim >= 3,
+      "matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: ",
+      self_dim);
+  TORCH_CHECK(
+      mat2_dim >= 3,
+      "matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 2nd input has rank: ",
+      mat2_dim);
+  TORCH_CHECK(self_dim == mat2_dim, "matmul: both inputs must have same rank");
+  int64_t ntensors = self_ptr->size(0),
+      ntensors2 = mat2_ptr->size(0);
+  TORCH_CHECK(ntensors == ntensors2,
+      "matmul: Expected size for the 1st dimension of 2nd input tensor to be: ", ntensors,
+      " but got: ", ntensors2, ".");
+  const Tensor& self_buffer = self_ptr->get_buffer(),
+      & mat2_buffer = mat2_ptr->get_buffer();
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr),
+      mat2_sizes = NestedTensor_get_sizes(mat2_ptr),
+      self_strides = NestedTensor_get_strides(self_ptr),
+      mat2_strides = NestedTensor_get_strides(mat2_ptr);
+  const std::vector<int64_t>& self_offsets = self_ptr->get_offsets(),
+      & mat2_offsets = mat2_ptr->get_offsets();
+  // create a contiguous output
+  std::vector<int64_t> batch_sizes;
+  Tensor output;
+  std::tie(batch_sizes, output) = _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+      self_sizes, mat2_sizes, self_buffer.options(), self_ptr->get_nested_size_tensor().options());
+  // call tensor matmul
+  // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
+  //       until we have specialized nested tensor bmm kernel
+  //       useful resource: `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
+  //                        `aten/src/ATen/native/cuda/Blas.cpp/baddbmm_out_cuda_impl`
+  std::vector<Tensor> output_unbind = output.unbind();
+  for (int64_t i = 0; i < ntensors; i++) {
+    const IntArrayRef& self_size = self_sizes[i],
+        & mat2_size = mat2_sizes[i];
+    const int64_t& batch_size = batch_sizes[i];
+    if (batch_size == 1) {
+      at::mm_out(
+          output_unbind[i],
+          self_buffer.as_strided(self_size, self_strides[i], self_offsets[i]),
+          mat2_buffer.as_strided(mat2_size, mat2_strides[i], mat2_offsets[i])
+          );
+    }
+    else {
+      at::bmm_out(
+          output_unbind[i],
+          self_buffer.as_strided(self_size, self_strides[i], self_offsets[i])
+              .reshape({batch_size, self_size[self_dim - 1 - 2], self_size[self_dim - 1 - 1]}),
+          mat2_buffer.as_strided(mat2_size, mat2_strides[i], mat2_offsets[i])
+              .reshape({batch_size, mat2_size[self_dim - 1 - 2], mat2_size[self_dim - 1 - 1]})
+          );
+    }
   }
   return output;
 }
