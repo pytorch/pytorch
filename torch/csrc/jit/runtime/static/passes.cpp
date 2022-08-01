@@ -639,7 +639,7 @@ void ReplaceWithMaybeCopy(
     static const auto select_tensor_symbol =
         fromQualString("static_runtime::select_tensor");
     auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
-    DCHECK_EQ(new_node->outputs().size(), 2);
+    TORCH_DCHECK_EQ(new_node->outputs().size(), 2);
     select_tensor_node->addInput(n->input(0));
     for (auto* output : new_node->outputs()) {
       select_tensor_node->addInput(output);
@@ -872,6 +872,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR(
           "torcharrow::inference_wrapper_run_flat",
           "static_runtime::fused_inference_wrapper_run_flat"),
+      OP_PAIR(
+          "torcharrow::variadic_inference_wrapper_run_flat",
+          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),

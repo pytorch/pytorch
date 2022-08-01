@@ -32,6 +32,7 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/index_utils.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/swizzle.cu",
     "torch/csrc/jit/codegen/cuda/runtime/memory.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
@@ -132,6 +133,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
+    "torch/csrc/profiler/itt_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -642,6 +644,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
+    "torch/csrc/jit/codegen/cuda/inline_propagator.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at_map.cpp",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
     "torch/csrc/jit/codegen/cuda/contiguity.cpp",
@@ -656,7 +659,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/grouped_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_builder.cpp",
@@ -699,6 +702,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
+    "torch/csrc/jit/codegen/cuda/maxinfo_propagator.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/non_divisible_split.cpp",
     "torch/csrc/jit/codegen/cuda/ops/alias.cpp",
@@ -869,6 +873,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.cpp",
+    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
@@ -933,6 +938,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
+    "torch/csrc/utils/verbose.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
@@ -1059,10 +1065,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
-    "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
-    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
-    "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
-    "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
     "aten/src/ATen/native/mkldnn/Copy.cpp",
@@ -1083,6 +1085,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+    # This is moved to aten_cpu because some of the custom ops use empty_with_tail_padding
+    # which was available only within aten_native_cpu. Ideally the right fix is to make
+    # empty_with_tail_padding into an op and use dispatcher with it. But exposing it as an op
+    # has limited use and hence does not seem to really make sense.
+    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
@@ -1091,6 +1098,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
+    "aten/src/ATen/native/verbose_wrapper.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1353,8 +1361,13 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
+    "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/nested/NestedTensorTransformerFunctions.cpp",
+    "aten/src/ATen/native/nested/NestedTensorBackward.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseBlas.cpp",
@@ -1366,9 +1379,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseFactories.cpp",
+    "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
-    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",

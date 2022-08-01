@@ -409,6 +409,31 @@ std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
 }
 
+IterDomain* caMapExactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
+
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {

@@ -47,7 +47,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 std::string getMPSTypeString(ScalarType scalar_type);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
+std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = false);
 double getMPSScalarValue(const Tensor& t);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
@@ -95,6 +95,7 @@ void printTensorNDArray(const Tensor& t);
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 
