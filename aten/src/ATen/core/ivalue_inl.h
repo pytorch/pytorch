@@ -215,6 +215,10 @@ inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
+inline c10::SymInt IValue::toSymInt() const {
+  AT_ASSERT(isSymInt(), "Expected SymInt but got ", tagKind());
+  return c10::SymInt::toSymInt(toIntrusivePtr<c10::SymIntNodeImpl>());
+}
 
 namespace ivalue {
 

@@ -29,8 +29,35 @@ namespace c10 {
 // named data_.
 class C10_API SymInt {
  public:
+  // TODO: this needs to only accept integers, not pointers
   /*implicit*/ SymInt(int64_t d) : data_(d){};
   SymInt() = default;
+
+  // TODO: these implementations are bad
+  SymInt(const SymInt& s) : data_(0) {
+    if (s.is_symbolic()) {
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+    } else {
+      data_ = s.data_;
+    }
+  }
+  SymInt(SymInt&& s) : data_(s.data_) {
+    s.data_ = 0;
+  }
+
+  SymInt& operator=(const SymInt& s) {
+    if (s.is_symbolic()) {
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+    } else {
+      data_ = s.data_;
+    }
+    return *this;
+  }
+  SymInt& operator=(SymInt&& s) {
+    data_ = s.data_;
+    if (s.is_symbolic()) s.data_ = 0;
+    return *this;
+  }
 
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
@@ -71,12 +98,6 @@ class C10_API SymInt {
   static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
-    return data_;
-  }
-
-  // This is needed for interoperability with IValue
-  // TODO: this is wrong
-  int64_t data() const {
     return data_;
   }
 

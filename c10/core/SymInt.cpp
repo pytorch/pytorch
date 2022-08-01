@@ -1,4 +1,3 @@
-
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
@@ -15,11 +14,11 @@ std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
-    a = common->wrap(a_.data());
+    a = common->wrap(a_.as_int_unchecked());
     a_.toSymInt(a); //
   }
   if (!b) {
-    b = common->wrap(b_.data());
+    b = common->wrap(b_.as_int_unchecked());
     b_.toSymInt(b);
   }
   return {a, b};
@@ -93,13 +92,6 @@ bool SymInt::operator!=(int64_t sci) const {
 SymInt SymInt::operator*(int64_t sci) const {
   TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
   return SymInt(data_ * sci);
-}
-
-c10::SymInt SymIntNodeImpl::toSymInt() {
-  // We will need to figure out a way
-  // to dedup nodes
-  auto sit_sp = SymIntNode::reclaim_copy(this);
-  return SymInt::toSymInt(sit_sp);
 }
 
 } // namespace c10
