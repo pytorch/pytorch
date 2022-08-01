@@ -1546,7 +1546,7 @@ class TestMPS(TestCase):
     # See https://github.com/pytorch/pytorch/issues/82427
     # Test should not crash
     def test_bool_full(self):
-      x = torch.full((3, 3), True, device='mps')
+        x = torch.full((3, 3), True, device='mps')
 
 
 class TestLogical(TestCase):
