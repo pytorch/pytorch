@@ -53,7 +53,7 @@ def fuser(name):
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._jit_set_llga_enabled(False)
-    elif name == 'fuser3': # oneDNN Graph
+    elif name == 'fuser3':  # oneDNN Graph
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         old_profiling_mode = torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
