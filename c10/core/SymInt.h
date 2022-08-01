@@ -62,11 +62,6 @@ class C10_API SymInt {
     return data_;
   }
 
-  // This is needed for interoperability with IValue
-  int64_t data() const {
-    return data_;
-  }
-
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
     return i > MIN_INT;

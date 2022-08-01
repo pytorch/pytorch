@@ -555,8 +555,15 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) : tag(Tag::SymInt) {
-    payload.u.as_int = i.data();
+  IValue(c10::SymInt i) {
+    if (i.is_symbolic()) {
+      // TODO: needs to be changed when SymInt becomes owning
+      tag = Tag::SymInt;
+      payload.u.as_int = i.as_int_unchecked();
+    } else {
+      tag = Tag::Int;
+      payload.u.as_int = i.as_int_unchecked();
+    }
   }
 
   IValue(c10::SymIntArrayRef v);

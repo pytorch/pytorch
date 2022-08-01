@@ -166,7 +166,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   virtual SymIntNode dispatch_common_(
       const char* fname,
       const SymIntNode& other) {
-    auto* pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
+    auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());

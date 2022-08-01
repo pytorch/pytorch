@@ -58,7 +58,7 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       copyDataInline(rhs);
     } else {
@@ -94,13 +94,13 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       copyDataInline(rhs);
     } else {
       // They're outline. We're going to steal their vector.
       if (!isInline()) {
-        free(outOfLineStorage_);
+        delete[] outOfLineStorage_;
       }
       outOfLineStorage_ = rhs.outOfLineStorage_;
       rhs.outOfLineStorage_ = nullptr;
@@ -311,9 +311,9 @@ class C10_API SizesAndStrides {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     auto* newStorage = new SymInt[storageElems(newSize)];
     TORCH_CHECK(
-        newStorage,
-        "Could not allocate memory for Tensor SizesAndStrides!");
-    for (size_t i = 0; i < newSize && i < size_; i++) {
+        newStorage, "Could not allocate memory for Tensor SizesAndStrides!");
+    for (size_t i = 0; i < storageElems(newSize) && i < storageElems(size_);
+         i++) {
       newStorage[i] = std::move(outOfLineStorage_[i]);
     }
     delete[] outOfLineStorage_;
@@ -321,7 +321,7 @@ class C10_API SizesAndStrides {
   }
 
   void copyDataOutline(const SizesAndStrides& rhs) noexcept {
-    for (size_t i = 0; i < rhs.size_; i++) {
+    for (size_t i = 0; i < storageElems(rhs.size_); i++) {
       outOfLineStorage_[i] = rhs.outOfLineStorage_[i];
     }
   }

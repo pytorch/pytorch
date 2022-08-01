@@ -25,7 +25,9 @@ bool checkMetaData(
     if (line.find(op_name) != std::string::npos) {
       while (std::getline(trace_file, line)) {
         if (line.find(metadata_name) != std::string::npos) {
-          return (line.find(metadata_val) != std::string::npos);
+          if (line.find(metadata_val) != std::string::npos) {
+            return true;
+          }
         }
       }
     }
@@ -120,6 +122,39 @@ TEST(MobileProfiler, Backend) {
   metadata_name = "Backend";
   ASSERT_TRUE(
       checkMetaData("aten::add", metadata_name, "test_backend", trace_file));
+}
+
+TEST(MobileProfiler, BackendMemoryEvents) {
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  testModelFile.append("test_backend_for_profiling.ptl");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(at::rand({64, 64}));
+  inputs.emplace_back(at::rand({64, 64}));
+  std::string trace_file_name("/tmp/test_trace_backend_memory.trace");
+
+  mobile::Module bc = _load_for_mobile(testModelFile);
+  {
+    mobile::KinetoEdgeCPUProfiler profiler(
+        bc,
+        trace_file_name,
+        false, // record input_shapes
+        true, // profile memory
+        true, // record callstack
+        false, // record flops
+        true); // record module hierarchy
+    bc.forward(inputs);
+  }
+  std::ifstream trace_file(trace_file_name);
+  std::string line;
+  ASSERT_TRUE(trace_file.is_open());
+  trace_file.seekg(0, std::ios_base::beg);
+  std::string metadata_name("Bytes");
+  ASSERT_TRUE(checkMetaData("[memory]", metadata_name, "16384", trace_file));
+  trace_file.seekg(0, std::ios_base::beg);
+  metadata_name = "Total Reserved";
+  ASSERT_TRUE(checkMetaData("[memory]", metadata_name, "49152", trace_file));
 }
 
 } // namespace mobile
