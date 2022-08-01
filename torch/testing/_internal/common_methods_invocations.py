@@ -20691,7 +20691,8 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
 
             # Prims arange does not follow aten
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.int64,)),
         ),
         supports_nvfuser=False,
     ),
