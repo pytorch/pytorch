@@ -15,6 +15,7 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -1257,6 +1258,26 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
+  });
+
+  py_module.def("_add_meta_to_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    local_keyset.included_ = local_keyset.included_ | key_set;
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    local_keyset.included_ = local_keyset.included_.remove_backend(k);
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+
+  py_module.def("_dump_local_tls_set", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

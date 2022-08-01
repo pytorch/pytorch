@@ -10,6 +10,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.testing import FileCheck
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch import nn
 import unittest
@@ -94,6 +95,18 @@ class FakeTensorTest(TestCase):
             with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
                 x = torch.rand([16, 1], device=device)
                 x[..., 0] = 0
+
+    def test_fake_dispatch_keys(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.rand([4])
+            f = FileCheck().check("CPU").check("ADInplaceOrView").check("AutogradCPU").check("AutocastCPU")
+            f.run(torch._C._dispatch_key_set(x))
+
+            with torch.inference_mode():
+                x = torch.rand([4])
+                y = x + x
+                FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
+                FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
 
     def test_constructor(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
@@ -334,7 +347,9 @@ class FakeTensorTest(TestCase):
             a = torch.rand([16, 1])
             self.checkType(a.new(10, 10), "cpu", [10, 10])
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
-            self.checkType(a.new(device='cuda'), "cuda", [0])
+            b = torch.rand([4, 4], device='cuda')
+            self.checkType(b.new(device='cuda'), "cuda", [0])
+
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
