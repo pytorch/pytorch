@@ -58,6 +58,9 @@ __all__ = [
     "rendezvous",
     "timedelta",
     # Python
+    "default_pg_timeout",
+    "register_rendezvous_handler",
+    "rendezvous",
     "logger",
     "supports_complex",
     "Backend",
