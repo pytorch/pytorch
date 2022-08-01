@@ -1,14 +1,34 @@
 import sys
+from typing import Optional, Tuple
 
 import torch
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import utils
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, utils
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 # This file exports ONNX ops for opset 12
+
+__all__ = [
+    "argmax",
+    "argmin",
+    "binary_cross_entropy_with_logits",
+    "celu",
+    "cross_entropy_loss",
+    "dropout",
+    "einsum",
+    "einsum_helper",
+    "ge",
+    "le",
+    "native_dropout",
+    "nll_loss",
+    "nll_loss2d",
+    "nll_loss_nd",
+    "outer",
+    "pow",
+    "tensordot",
+    "unfold",
+]
 
 
 def einsum_helper(g, equation, tensors):
@@ -47,16 +67,29 @@ def outer(g, input, other):
     return einsum_helper(g, "i,j->ij", [input, other])
 
 
-@symbolic_helper.parse_args("v", "f", "i")
-def dropout(g, input, p, train):
+def _dropout_returns_masked_input_and_mask(
+    g, input: torch._C.Value, p: float, train: bool
+) -> Tuple[torch._C.Value, Optional[torch._C.Value]]:
     symbolic_helper.check_training_mode(train, "dropout")
-    # if train is False, dropout is no-op
+    # In eval mode, dropout is non-op. That is, if the node's
+    # train param is set to False, dropout just returns its inputs.
     if not train:
-        return input
+        return input, None
     p = g.op("Constant", value_t=torch.tensor(p))
     t = g.op("Constant", value_t=torch.tensor(train, dtype=torch.bool))
-    r, _ = g.op("Dropout", input, p, t, outputs=2)
-    return r
+    r, mask = g.op("Dropout", input, p, t, outputs=2)
+    return r, mask
+
+
+@symbolic_helper.parse_args("v", "f", "i")
+def dropout(g, input, p, train):
+    masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
+    return masked
+
+
+@symbolic_helper.parse_args("v", "f", "i")
+def native_dropout(g, input, p, train):
+    return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 
 def nll_loss(g, self, target, weight, reduction, ignore_index):

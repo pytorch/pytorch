@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
-
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = [
     "DefaultFuseHandler",
@@ -91,7 +91,7 @@ class DefaultFuseHandler(FuseHandler):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
             if isinstance(m, torch.nn.Module):
-                return type(m)
+                return type_before_parametrizations(m)
             return m
 
         matched_module_types = get_matched_types(matched_modules)
