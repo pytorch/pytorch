@@ -1,19 +1,19 @@
 
 #include <c10/core/SymInt.h>
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNodeImpl.h>
 #include <array>
 
 namespace c10 {
 
-std::array<std::shared_ptr<SymbolicIntNode>, 2> normalize_symints(
+std::array<std::shared_ptr<SymIntNodeImpl>, 2> normalize_symints(
     SymInt a_,
     SymInt b_) {
-  std::shared_ptr<SymbolicIntNode> a =
-      a_.is_symbolic() ? a_.toSymbolicIntNode() : nullptr;
-  std::shared_ptr<SymbolicIntNode> b =
-      b_.is_symbolic() ? b_.toSymbolicIntNode() : nullptr;
+  std::shared_ptr<SymIntNodeImpl> a =
+      a_.is_symbolic() ? a_.toSymIntNodeImpl() : nullptr;
+  std::shared_ptr<SymIntNodeImpl> b =
+      b_.is_symbolic() ? b_.toSymIntNodeImpl() : nullptr;
 
-  SymbolicIntNode* common = a ? a.get() : b.get();
+  SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
     a = common->wrap(a_.data());
@@ -26,16 +26,16 @@ std::array<std::shared_ptr<SymbolicIntNode>, 2> normalize_symints(
   return {a, b};
 }
 
-std::shared_ptr<SymbolicIntNode> SymInt::toSymbolicIntNode() const {
+std::shared_ptr<SymIntNodeImpl> SymInt::toSymIntNodeImpl() const {
   auto& st = getSymIntTable();
   TORCH_CHECK(is_symbolic());
   return st.getNode(static_cast<uint64_t>(data_) & ~MASK);
 }
 
-c10::SymInt SymInt::toSymInt(std::shared_ptr<SymbolicIntNode> sin_sp) {
+c10::SymInt SymInt::toSymInt(std::shared_ptr<SymIntNodeImpl> sin_sp) {
   auto& sit = getSymIntTable();
   uint64_t idx = sit.addNode(sin_sp);
-  TORCH_CHECK(idx < MAX_SYM_IDX, "SymbolicIntNode index overflow: ", idx);
+  TORCH_CHECK(idx < MAX_SYM_IDX, "SymIntNodeImpl index overflow: ", idx);
   uint64_t data = idx | IS_SYM;
   return c10::SymInt(static_cast<int64_t>(data));
 }
