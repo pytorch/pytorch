@@ -180,6 +180,9 @@ enum class UnaryOpType {
   Tanh,
   Trunc,
 
+  // Tools to help debugging
+  Print,
+
   // Might be a bitwise operator or boolean operator.
   Not,
 

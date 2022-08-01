@@ -245,6 +245,9 @@ TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
 // isreal
 TORCH_CUDA_CU_API Val* isreal(Val*);
 TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
+// print
+TORCH_CUDA_CU_API Val* print(Val*);
+TORCH_CUDA_CU_API TensorView* print(TensorView*);
 
 // Broadcasts inp based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be

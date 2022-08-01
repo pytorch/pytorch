@@ -25371,6 +25371,44 @@ TEST_F(NVFuserTest, FusionIdGraphTrivialReduction_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionPrint_CUDA) {
+  auto dtypes = {
+      at::kFloat,
+      at::kDouble,
+      at::kHalf,
+      at::kBFloat16,
+      at::kInt,
+      at::kLong,
+      at::kBool};
+  for (auto dtype : dtypes) {
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
+
+    auto tv0 = makeSymbolicTensor(1, aten_to_data_type(dtype));
+    fusion->addInput(tv0);
+    auto tv1 = print(tv0);
+    auto tv2 = sin(tv1);
+    fusion->addOutput(tv2);
+
+    // There is no way to check if anything is printed to the console, but we
+    // can validate that when print exist, compilation and computation are not
+    // broken.
+    auto options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+    at::Tensor t0 = at::arange(2, options).to(dtype);
+
+    FusionExecutorCache executor_cache(std::move(fusion));
+    auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+    testValidate(
+        executor_cache.fusion(),
+        cg_outputs,
+        {t0},
+        {t0.sin()},
+        __LINE__,
+        __FILE__);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

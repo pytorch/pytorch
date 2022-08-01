@@ -380,6 +380,7 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
+    case UnaryOpType::Print:
       return false;
     default:
       return true;
@@ -436,6 +437,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "neg";
     case UnaryOpType::Not:
       return "not";
+    case UnaryOpType::Print:
+      return "print";
     case UnaryOpType::RandLike:
       return "randLike";
     case UnaryOpType::Reciprocal:
