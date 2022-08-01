@@ -1137,10 +1137,7 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
-        raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}." +
-                           " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
-                           " (optionally with the ciflow/trunk to get land signals)"
-                           ' or use `@pytorchbot merge -f "<some reason here>". ')
+        raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}")
     if len(pending_checks) > 0:
         raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
 
@@ -1241,6 +1238,10 @@ def main() -> None:
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
+        if land_checks:
+            msg += (" If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
+                    " (optionally with the ciflow/trunk to get land signals)" +
+                    ' or use `@pytorchbot merge -f "<some reason here>".')
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
