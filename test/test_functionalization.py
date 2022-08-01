@@ -3,7 +3,6 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from functorch.experimental import functionalize
@@ -243,6 +242,18 @@ def forward(self, x_1):
     return detach_default_5
     """)
 
+
+    def test_tensor_list_mixed_functional_nonfunctional(self):
+        nonfunctional_tensor = torch.ones(2, dtype=torch.long)
+
+        def f(x):
+            # simple test: 1 view op, 1 inplace op
+            functional_tensor = torch.ones(2, dtype=torch.long)
+            out = x[functional_tensor, nonfunctional_tensor]
+            return out
+        out = f(torch.ones(2, 2))
+        out_functional = functionalize(f)(torch.ones(2, 2))
+        self.assertEqual(out, out_functional)
 
     def test_inplace_on_non_view(self):
         def f(x):
@@ -768,7 +779,7 @@ def forward(self, x_1):
     diagonal_scatter_default_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter_default, add_tensor);  diagonal_scatter_default = add_tensor = None
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_default_1);  diagonal_scatter_default_1 = None
     return diagonal_copy_default_1
-    """)
+    """)  # noqa: B950
 
         reinplaced_logs = self.get_logs(f, torch.ones(2), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -783,7 +794,7 @@ def forward(self, x_1):
     diagonal_scatter_default_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter_default, add_tensor);  diagonal_scatter_default = add_tensor = None
     diagonal_default_1 = torch.ops.aten.diagonal.default(diagonal_scatter_default_1);  diagonal_scatter_default_1 = None
     return diagonal_default_1
-    """)
+    """)  # noqa: B950
 
         # Test 2: copy_() with same dtype, different shape
         self.assert_functionalization(f, torch.ones(1))
@@ -801,7 +812,7 @@ def forward(self, x_1):
     diagonal_scatter_default_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter_default, add_tensor);  diagonal_scatter_default = add_tensor = None
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_default_1);  diagonal_scatter_default_1 = None
     return diagonal_copy_default_1
-    """)
+    """)  # noqa: B950
 
         reinplaced_logs = self.get_logs(f, torch.ones(1), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -817,7 +828,7 @@ def forward(self, x_1):
     diagonal_scatter_default_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter_default, add_tensor);  diagonal_scatter_default = add_tensor = None
     diagonal_default_1 = torch.ops.aten.diagonal.default(diagonal_scatter_default_1);  diagonal_scatter_default_1 = None
     return diagonal_default_1
-    """)
+    """)  # noqa: B950
 
         # Test 3: copy_() with different dtype, same shape
         self.assert_functionalization(f, torch.ones(2, dtype=torch.long))
