@@ -12,6 +12,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterable,
     Iterator,
     List,
@@ -23,6 +24,8 @@ from typing import (
     TypeVar,
     Union,
 )
+
+from typing_extensions import Literal
 
 from torchgen.code_template import CodeTemplate
 
@@ -456,3 +459,50 @@ class NamespaceHelper:
         Return default if namespace string is empty.
         """
         return self.cpp_namespace_ if self.cpp_namespace_ else default
+
+
+class OrderedSet(Generic[T]):
+    storage: Dict[T, Literal[None]]
+
+    def __init__(self, iterable: Optional[Iterable[T]] = None):
+        if iterable is None:
+            self.storage = {}
+        else:
+            self.storage = {k: None for k in iterable}
+
+    def __contains__(self, item: T) -> bool:
+        return item in self.storage
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self.storage.keys())
+
+    def update(self, items: "OrderedSet[T]") -> None:
+        self.storage.update(items.storage)
+
+    def add(self, item: T) -> None:
+        self.storage[item] = None
+
+    def copy(self) -> "OrderedSet[T]":
+        ret: OrderedSet[T] = OrderedSet()
+        ret.storage = self.storage.copy()
+        return ret
+
+    @staticmethod
+    def union(*args: "OrderedSet[T]") -> "OrderedSet[T]":
+        ret = args[0].copy()
+        for s in args[1:]:
+            ret.update(s)
+        return ret
+
+    def __or__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+        return OrderedSet.union(self, other)
+
+    def __ior__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+        self.update(other)
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, OrderedSet):
+            return self.storage == other.storage
+        else:
+            return set(self.storage.keys()) == other
