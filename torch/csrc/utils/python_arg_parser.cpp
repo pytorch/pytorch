@@ -335,6 +335,9 @@ auto handle_torch_function_no_python_arg_parser(
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
+      if (!torch_function) {
+        TORCH_INTERNAL_ASSERT(0);
+      }
 
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
