@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import contextlib
+import copy
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -575,8 +576,9 @@ def get_isolated_graphmodule(func, args, kwargs):
 
         # Enable all torch dispatch modes except ProxyTorchDispatchMode
         for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
-            # mode.restore() doesn't work because mode.inner might be ProxyTorchDispatchMode
-            # mode.push() is restricted to modes that don't take any arguments
-            stack.enter_context(mode.push())
+            mode = copy.copy(mode)
+            mode.inner = torch._C._get_torch_dispatch_mode()
+            mode.ancestors = set() if mode.inner is None else mode.inner.ancestors.union({mode.inner})
+            stack.enter_context(mode.restore())
         gm = make_fx(wrapped)(unwrapped_all_args)
     return gm
