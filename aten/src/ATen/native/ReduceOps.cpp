@@ -1057,6 +1057,32 @@ inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dty
   }
 }
 
+// Copied from FunctionsManual.cpp, this function is mostly used
+// in the backward for reductions.
+Tensor unsqueeze_multiple(
+    const Tensor& t,
+    OptionalIntArrayRef opt_dim,
+    size_t n_dims) {
+  if (opt_dim.has_value()) {
+    IntArrayRef dim = opt_dim.value();
+    auto dim_size = dim.size();
+    // Optimisation for two common cases
+    if (dim_size == 0) {
+      return t;
+    } else if (dim_size == 1) {
+      return t.unsqueeze(dim[0]);
+    }
+  }
+  auto dims_to_unsqueeze = at::dim_list_to_bitset(opt_dim, n_dims);
+  Tensor res = t;
+  for (const auto i : c10::irange(n_dims)) {
+    if (dims_to_unsqueeze[i]) {
+      res = res.unsqueeze(i);
+    }
+  }
+  return res;
+}
+
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
  OptionalIntArrayRef opt_dim,
@@ -1086,6 +1112,29 @@ Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, 
 Tensor& sum_out(const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+Tensor sum_backward(const Tensor& grad, const Tensor& self,
+                    OptionalIntArrayRef opt_dims, bool keepdim) {
+  IntArrayRef sizes = self.sizes();
+  if (!keepdim && sizes.size() > 0) {
+    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
+      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
+    }
+  }
+  return grad.expand(sizes);
+}
+
+Tensor sum_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes,
+                           c10::SymIntArrayRef dims, bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_symint(sizes);
+  }
 }
 
 Tensor& nansum_out(const Tensor& self, IntArrayRef dim,

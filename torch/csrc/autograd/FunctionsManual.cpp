@@ -582,52 +582,25 @@ Tensor unsqueeze_multiple(
   return res;
 }
 
-Tensor sum_backward(
-    const Tensor& grad,
-    IntArrayRef sizes,
-    OptionalIntArrayRef opt_dims,
-    bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
-      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
-    }
-  }
-  return grad.expand(sizes);
-}
-
-Tensor sum_backward(
-    const Tensor& grad,
-    c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
-    bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
-    // we are only using `keepdim=true` path for SymInts for now
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Only the keepdim=true path is implemented to support symints in autograd");
-  } else {
-    return grad.expand_symint(sizes);
-  }
-}
-
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self.sizes(), dims, keepdim) *
+  return sum_backward(grad, self, dims, keepdim) *
       self.isnan().logical_not();
 }
 
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    const Tensor& self,
     OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim) {
+  auto shape = self.sizes();
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  return sum_backward(grad, shape, opt_dim, keepdim) / n;
+  return sum_backward(grad, self, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -1531,7 +1504,7 @@ Tensor var_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self,
         dim_opt.value_or(IntArrayRef({})),
         self.numel(),
         keepdim);
@@ -1556,7 +1529,7 @@ Tensor std_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self,
         dim_opt.value_or(IntArrayRef({})),
         self.numel(),
         keepdim);
