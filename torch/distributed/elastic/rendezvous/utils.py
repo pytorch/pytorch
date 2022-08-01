@@ -32,7 +32,7 @@ def nic_ip_address(nic_name: str) -> str:
 # Adapted from https://stackoverflow.com/a/27494105.
 def nic_info() -> List[Tuple[str, str]]:
     """Return a list of tuples containing each NIC's hostname and its IPv4."""
-    nics = []
+    nics: List[Tuple[str, str]] = []
     try:
         if_nameindex = socket.if_nameindex()
     except OSError:
