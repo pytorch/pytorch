@@ -539,7 +539,22 @@ class DistributedDataParallel(Module, Joinable):
         super(DistributedDataParallel, self).__init__()
         Joinable.__init__(self)
         self.logger = None
-        if not any((p.requires_grad for p in module.parameters())):
+
+
+        self._params_buffers_to_ignore = {}
+        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
+            self._params_buffers_to_ignore = module._ddp_params_and_buffers_to_ignore
+
+        self._module_parameters = [param for name, param in module.named_parameters() if name not in self._params_buffers_to_ignore]
+
+        if not self._module_parameters:
+            self._log_and_throw(
+                RuntimeError,
+                "DistributedDataParallel is not needed when a module doesn't have"
+                "any parameters that are not ignored."
+            )
+
+        if not any((p.requires_grad for p in self._module_parameters)):
             self._log_and_throw(
                 RuntimeError,
                 "DistributedDataParallel is not needed when a module "
@@ -551,8 +566,8 @@ class DistributedDataParallel(Module, Joinable):
                 ValueError, "device_ids can only be None or contain a single element."
             )
 
-        self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
-        distinct_device_types = {p.device.type for p in module.parameters()}
+        self.is_multi_device_module = len({p.device for p in self._module_parameters}) > 1
+        distinct_device_types = {p.device.type for p in self._module_parameters}
         if len(distinct_device_types) != 1:
             self._log_and_throw(
                 ValueError,
@@ -578,7 +593,7 @@ class DistributedDataParallel(Module, Joinable):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()},
+                        {p.device for p in self._module_parameters()},
                     ),
                 )
 
@@ -600,16 +615,13 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self.module.parameters())[0].device
+        self.device = self._module_parameters[0].device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
-        else:
-            self.parameters_to_ignore = []
+
 
         self._use_replicated_tensor_module = _ddp_with_replicated_tensor_enabled()
         self._build_replicated_tensor_module()
@@ -624,7 +636,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         # Check that a module does not have Uninitialized parameters
-        for param in module.parameters():
+        for param in self._module_parameters:
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 self._log_and_throw(
                     RuntimeError,
@@ -651,7 +663,7 @@ class DistributedDataParallel(Module, Joinable):
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=0,
-            params_and_buffers_to_ignore=self.parameters_to_ignore,
+            params_and_buffers_to_ignore=self._params_buffers_to_ignore,
         )
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
@@ -807,7 +819,7 @@ class DistributedDataParallel(Module, Joinable):
                 # parameters through _former_parameters.
                 for param_name, param in module.named_parameters(recurse=False)
                 if param.requires_grad
-                and f"{module_name}.{param_name}" not in self.parameters_to_ignore
+                and f"{module_name}.{param_name}" not in self._params_buffers_to_ignore
             ]
         ]
 
@@ -851,7 +863,7 @@ class DistributedDataParallel(Module, Joinable):
         named_module_buffers = [
             (buffer, buffer_name)
             for buffer_name, buffer in self.module.named_buffers()
-            if buffer_name not in self.parameters_to_ignore
+            if buffer_name not in self._params_buffers_to_ignore
         ]
         self.modules_buffers = [
             buffer
@@ -874,7 +886,7 @@ class DistributedDataParallel(Module, Joinable):
                 fqn = f"{module_name}.{param_name}"
                 # Bypass ignored parameters since those are not reduced by DDP
                 # to begin with.
-                if fqn not in self.parameters_to_ignore and param.requires_grad:
+                if fqn not in self._params_buffers_to_ignore and param.requires_grad:
                     if param not in param_set:
                         self._log_and_throw(
                             ValueError,
@@ -1120,7 +1132,7 @@ class DistributedDataParallel(Module, Joinable):
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=self._authoritative_rank,
-            params_and_buffers_to_ignore=self.parameters_to_ignore
+            params_and_buffers_to_ignore=self._params_buffers_to_ignore
         )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
@@ -1686,7 +1698,7 @@ class DistributedDataParallel(Module, Joinable):
         # This is a workaround to set parameters and buffers DDP should ignore
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
-        module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+        module._ddp_params_and_buffers_to_ignore = set(params_and_buffers_to_ignore)
 
     def _get_ddp_logging_data(self):
         r"""
