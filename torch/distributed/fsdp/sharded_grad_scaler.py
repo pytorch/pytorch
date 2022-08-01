@@ -71,8 +71,9 @@ class ShardedGradScaler(GradScaler):
             :meth:`update` if inf/NaN gradients occur in an iteration.
         growth_interval (int, optional, default=2000):  Number of consecutive iterations without inf/NaN gradients
             that must occur for the scale to be multiplied by ``growth_factor``.
-        enabled (bool, optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
+        enabled (bool, optional):  If ``False``, disables gradient scaling. :meth:`step` simply
             invokes the underlying ``optimizer.step()``, and other methods become no-ops.
+            Default: ``True``
         process_group (ProcessGroup, optional, default=torch.distributed.group.WORLD):
             process group for sharding
     """
