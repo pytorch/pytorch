@@ -254,6 +254,18 @@ def forward(self, a_1):
     """)
 
 
+    def test_tensor_list_mixed_functional_nonfunctional(self):
+        nonfunctional_tensor = torch.ones(2, dtype=torch.long)
+
+        def f(x):
+            # simple test: 1 view op, 1 inplace op
+            functional_tensor = torch.ones(2, dtype=torch.long)
+            out = x[functional_tensor, nonfunctional_tensor]
+            return out
+        out = f(torch.ones(2, 2))
+        out_functional = _functionalize(f, reapply_views=True)(torch.ones(2, 2))
+        self.assertEqual(out, out_functional)
+
     def test_inplace_on_non_view(self):
         def f(x):
             # test for the case where we functionalize an inplace op on the other tensor - not a view.
@@ -770,7 +782,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
+    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
     """)
 
@@ -782,8 +795,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
-    return add_tensor
+    copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
+    return diagonal_default
     """)
 
         # Test 2: copy_() with same dtype, different shape
@@ -796,8 +810,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2])
-    add_tensor = torch.ops.aten.add.Tensor(expand_copy_default, a_1);  expand_copy_default = a_1 = None
+    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
+    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
     """)
 
@@ -809,9 +823,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2])
-    add_tensor = torch.ops.aten.add_.Tensor(expand_copy_default, a_1);  a_1 = None
-    return expand_copy_default
+    copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
+    return diagonal_default
     """)
 
         # Test 3: copy_() with different dtype, same shape
@@ -824,10 +838,10 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    add_tensor = torch.ops.aten.add.Tensor(_to_copy_default, a_1);  _to_copy_default = a_1 = None
+    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
+    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
-    """)  # noqa: B950
+    """)
 
         reinplaced_logs = self.get_logs(f, torch.ones(2, dtype=torch.long), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -837,9 +851,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    add_tensor = torch.ops.aten.add_.Tensor(_to_copy_default, a_1);  a_1 = None
-    return _to_copy_default
+    copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
+    return diagonal_default
     """)  # noqa: B950
 
         # Test 4: copy_() with different dtype, different shape
@@ -852,11 +866,10 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    expand_copy_default = torch.ops.aten.expand_copy.default(_to_copy_default, [2]);  _to_copy_default = None
-    add_tensor = torch.ops.aten.add.Tensor(expand_copy_default, a_1);  expand_copy_default = a_1 = None
+    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
+    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
-    """)  # noqa: B950
+    """)
 
         reinplaced_logs = self.get_logs(f, torch.ones(1, dtype=torch.long), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -866,10 +879,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    expand_copy_default = torch.ops.aten.expand_copy.default(_to_copy_default, [2]);  _to_copy_default = None
-    add_tensor = torch.ops.aten.add_.Tensor(expand_copy_default, a_1);  a_1 = None
-    return expand_copy_default
+    copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
+    return diagonal_default
     """)  # noqa: B950
 
     def test_expand_symint(self):
