@@ -1774,6 +1774,11 @@ class TestFakeTensorNonErroring(TestCase):
                     # a `dynamic_output_shape` tag to an operator
 
                     check_strides = name not in fake_striding_skips
+
+                    # if there is a striding failure here as a result of adding a primtorch ref,
+                    # feel free to add the op to `fake_striding_skips` but please tag
+                    # @eellison on the pr.
+                    # see: https://github.com/pytorch/pytorch/issues/78050
                     prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
 
                     if name not in aliasing_failures:
