@@ -170,7 +170,7 @@ def compute_ufunc_cuda_functors(
         # functors per dtype, which is awful, so we're not going to do it unless
         # someone really forces us to)
         ufunc_name = None
-        supported_dtypes = OrderedSet()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for lk in [UfuncKey.ScalarOnly, UfuncKey.Generic]:
             if lk not in loops:
                 continue

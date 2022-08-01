@@ -464,7 +464,7 @@ class NamespaceHelper:
 class OrderedSet(Generic[T]):
     storage: Dict[T, Literal[None]]
 
-    def __init__(self, iterable: Iterable[T] = None):
+    def __init__(self, iterable: Optional[Iterable[T]] = None):
         if iterable is None:
             self.storage = {}
         else:
@@ -483,7 +483,7 @@ class OrderedSet(Generic[T]):
         self.storage[item] = None
 
     def copy(self) -> "OrderedSet[T]":
-        ret = OrderedSet()
+        ret: OrderedSet[T] = OrderedSet()
         ret.storage = self.storage.copy()
         return ret
 

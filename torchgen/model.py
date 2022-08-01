@@ -1059,7 +1059,7 @@ class UfuncInnerLoop:
         name, supported_dtypes_str = value.split(" ", 1)
         assert supported_dtypes_str[0] == "("
         assert supported_dtypes_str[-1] == ")"
-        supported_dtypes = OrderedSet()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for k in supported_dtypes_str[1:-1].split(", "):
             supported_dtypes |= ScalarType.parse_set(k)
         return UfuncInnerLoop(
