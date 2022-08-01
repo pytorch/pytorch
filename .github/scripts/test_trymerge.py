@@ -133,8 +133,8 @@ class DummyGitRepo(GitRepo):
         remote = remote or get_git_remote_name()
         super().__init__(path, remote, debug)
 
-    def commits_resolving_gh_pr(self, pr_num: int):
-        return [1111]
+    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+        return ["FakeCommitSha"]
 
     def commit_message(self, ref: str) -> str:
         return "super awsome commit message"
