@@ -1243,7 +1243,7 @@ def main() -> None:
             msg += (" If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
                     " (optionally with the ciflow/trunk to get land signals)" +
                     ' or use `@pytorchbot merge -f "<some reason here>".' +
-                    f" for more information see the [bot wiki]({BOT_COMMANDS_WIKI}).")
+                    f" For more information see the [bot wiki]({BOT_COMMANDS_WIKI}).")
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
