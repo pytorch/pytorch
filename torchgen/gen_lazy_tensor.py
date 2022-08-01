@@ -484,6 +484,7 @@ def run_gen_lazy_tensor(
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",
+                    "torch/csrc/lazy/core/helpers.h",
                     f"{output_dir}/{backend_key}NativeFunctions.h",
                     f"{output_dir}/LazyIr.h",
                 ]

@@ -53,6 +53,15 @@ std::vector<int64_t> GetCanonicalDimensionIndices(
   return canonical_dim_indices;
 }
 
+c10::optional<std::vector<int64_t>> GetCanonicalDimensionIndices(
+    at::OptionalIntArrayRef dim,
+    int64_t rank) {
+  if (dim) {
+    return {GetCanonicalDimensionIndices(*dim, rank)};
+  }
+  return c10::nullopt;
+}
+
 int64_t GetCanonicalPosition(
     c10::ArrayRef<int64_t> dimensions,
     int64_t dim,

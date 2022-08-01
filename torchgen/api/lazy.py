@@ -175,8 +175,16 @@ class LazyArgument:
 
     # true if this argument is or contains a lazy IR value
     is_lazy_value: bool
+    needs_canonicalization: bool
+    rank_name: Union[str, None]
 
-    def __init__(self, arg: Argument, properties: "LazyIrProperties"):
+    def __init__(
+        self,
+        arg: Argument,
+        properties: "LazyIrProperties",
+        needs_canon: bool = False,
+        rank_name: Union[str, None] = None,
+    ):
         self.name = arg.name
         self.orig_type = arg.type
         self.is_optional = isinstance(arg.type, OptionalType)
@@ -194,6 +202,12 @@ class LazyArgument:
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = isSymIntType(arg.type)
 
+        # This argument needs index canonicalization for negative values
+        self.needs_canonicalization = needs_canon
+
+        if self.needs_canonicalization:
+            assert rank_name
+        self.rank_name = rank_name
         self.is_lazy_value = not self.is_generator and isValueType(
             self.lazy_type, properties
         )
@@ -275,6 +289,19 @@ class LazyIrSchema:
     positional_args: Tuple[LazyArgument, ...]
     keyword_args: Tuple[LazyArgument, ...]
 
+    OpsWithDimenionsToCanonicalize: Dict[
+        OperatorName, Dict[str, List[Union[int, str]]]
+    ] = {
+        OperatorName.parse("mean.dim"): {
+            "argument_indices": [1],
+            "rank_names": ["self"],
+        },
+        OperatorName.parse("amin.dim"): {
+            "argument_indices": [1],
+            "rank_names": ["self"],
+        },
+    }
+
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple["Return", ...]
 
@@ -293,6 +320,7 @@ class LazyIrSchema:
     def __init__(
         self, func: FunctionSchema, properties: Optional[LazyIrProperties] = None
     ):
+
         if properties:
             self.properties = properties
 
@@ -302,10 +330,31 @@ class LazyIrSchema:
                 arg = getattr(func.arguments, "self_arg").argument
                 positional_args.append(LazyArgument(arg, self.properties))
             elif getattr(func.arguments, arg_field) is not None:
-                positional_args.extend(
-                    LazyArgument(arg, self.properties)
-                    for arg in getattr(func.arguments, arg_field)
+                offset = len(positional_args)
+                argument_indices = (
+                    LazyIrSchema.OpsWithDimenionsToCanonicalize[func.name][
+                        "argument_indices"
+                    ]
+                    if func.name in LazyIrSchema.OpsWithDimenionsToCanonicalize
+                    else []
                 )
+                for i, arg in enumerate(getattr(func.arguments, arg_field)):
+                    needs_canon = False
+                    rank_name = None
+                    if offset + i in argument_indices:
+                        rank_name_index = argument_indices.index(offset + i)
+                        needs_canon = True
+                        rank_name = LazyIrSchema.OpsWithDimenionsToCanonicalize[
+                            func.name
+                        ]["rank_names"][rank_name_index]
+                    positional_args.append(
+                        LazyArgument(
+                            arg,
+                            self.properties,
+                            needs_canon=needs_canon,
+                            rank_name=str(rank_name),  # str to pacify mypy
+                        )
+                    )
         self.positional_args = tuple(positional_args)
 
         keyword_args: List[LazyArgument] = []

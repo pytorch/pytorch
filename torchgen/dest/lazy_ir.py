@@ -33,60 +33,6 @@ from torchgen.model import (
 )
 
 
-def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
-    """
-    Given a LazyArgument,
-    generate a c++ string for materializing an rvalue of that arg for passing into
-    a lazy Node constructor.
-    """
-
-    if isValueType(arg.lazy_type):
-        if isinstance(arg.lazy_type, BaseCType):
-            if arg.is_wrapped_scalar:
-                return f"node_{arg.name}"
-            elif arg.lazy_type.type is tensorListValueT:
-                return f"lazy_{arg.name}_tensorlist"
-            elif arg.is_symint_or_list:
-                cpp_type = arg.lazy_type.cpp_type()
-                return f"{cpp_type}(dynamic_cast<torch::lazy::SymIntNodeImpl*>({arg.name}.toSymIntNodeImpl().get())->node_, 0)"
-            return f"lazy_{arg.name}->GetIrValue()"
-        elif isinstance(arg.lazy_type, OptionalCType):
-            if arg.is_wrapped_scalar:
-                return f"node_{arg.name}"
-            return (
-                f"lazy_{arg.name} ? "
-                f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
-                "c10::nullopt"
-            )
-        else:
-            raise AssertionError(
-                f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})"
-            )
-    else:
-        if isinstance(arg.lazy_type, VectorCType) and isinstance(
-            arg.lazy_type.elem, BaseCType
-        ):
-            return f"std::vector<{arg.lazy_type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
-        elif (
-            isinstance(arg.lazy_type, OptionalCType)
-            and isinstance(arg.lazy_type.elem, VectorCType)
-            and isinstance(arg.lazy_type.elem.elem, BaseCType)
-        ):
-            return f"torch::lazy::ToOptionalVector<{arg.lazy_type.elem.elem.type}>({arg.name})"
-        else:
-            return f"{arg.name}"
-
-
-def node_ctor_inputs(schema: LazyIrSchema) -> str:
-    """
-    Produce a formatted string with the arguments as passed into the constructor of a node class.
-    """
-    node_ctor_values = [
-        node_ctor_arg_rvalue_string(arg) for arg in schema.filtered_args()
-    ]
-    return ", ".join(node_ctor_values)
-
-
 def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
     """
     Generate code that falls back to eager conditioned on a predicate
@@ -522,8 +468,70 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         """
         return shape_str
 
+    def node_ctor_arg_rvalue_string(self, arg: LazyArgument) -> str:
+        """
+        Given a LazyArgument,
+        generate a c++ string for materializing an rvalue of that arg for passing into
+        a lazy Node constructor.
+        """
+
+        if isValueType(arg.lazy_type):
+            if isinstance(arg.lazy_type, BaseCType):
+                if arg.is_wrapped_scalar:
+                    return f"node_{arg.name}"
+                elif arg.lazy_type.type is tensorListValueT:
+                    return f"lazy_{arg.name}_tensorlist"
+                elif arg.is_symint_or_list:
+                    cpp_type = arg.lazy_type.cpp_type()
+                    return f"{cpp_type}(dynamic_cast<torch::lazy::SymIntNodeImpl*>({arg.name}.toSymIntNodeImpl().get())->node_, 0)"
+                return f"lazy_{arg.name}->GetIrValue()"
+            elif isinstance(arg.lazy_type, OptionalCType):
+                if arg.is_wrapped_scalar:
+                    return f"node_{arg.name}"
+                return (
+                    f"lazy_{arg.name} ? "
+                    f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
+                    "c10::nullopt"
+                )
+            else:
+                raise AssertionError(
+                    f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})"
+                )
+        else:
+            if isinstance(arg.lazy_type, VectorCType) and isinstance(
+                arg.lazy_type.elem, BaseCType
+            ):
+
+                if arg.needs_canonicalization:
+                    return f"{self.backend_namespace}::GetCanonicalDimensionIndices({arg.name}, {arg.rank_name}.ndimension())"
+                else:
+                    return f"std::vector<{arg.lazy_type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
+            elif (
+                isinstance(arg.lazy_type, OptionalCType)
+                and isinstance(arg.lazy_type.elem, VectorCType)
+                and isinstance(arg.lazy_type.elem.elem, BaseCType)
+            ):
+                # this implies that arg is OptionalIntArrayRef
+                # GetCanonicalDimensionIndices is oveloaded to accept both
+                # IntArrayRef and OptionalIntArrayRef
+                if arg.needs_canonicalization:
+                    return f"{self.backend_namespace}::GetCanonicalDimensionIndices({arg.name}, {arg.rank_name}.ndimension())"
+                else:
+                    return f"torch::lazy::ToOptionalVector<{arg.lazy_type.elem.elem.type}>({arg.name})"
+            else:
+                return f"{arg.name}"
+
+    def node_ctor_inputs(self, schema: LazyIrSchema) -> str:
+        """
+        Produce a formatted string with the arguments as passed into the constructor of a node class.
+        """
+        node_ctor_values = [
+            self.node_ctor_arg_rvalue_string(arg) for arg in schema.filtered_args()
+        ]
+        return ", ".join(node_ctor_values)
+
     def build_ir_node(self, func: NativeFunction, schema: LazyIrSchema) -> str:
-        node_ctor_input_str = node_ctor_inputs(schema)
+        node_ctor_input_str = self.node_ctor_inputs(schema)
         return f"""torch::lazy::NodePtr node = torch::lazy::ReuseNode<{schema.node_name}>({node_ctor_input_str});
         if (!node) {{
             {self.shape_inference(func, schema)}

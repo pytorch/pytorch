@@ -38,6 +38,10 @@ TORCH_API std::vector<int64_t> GetCanonicalDimensionIndices(
     c10::ArrayRef<int64_t> dimensions,
     int64_t rank);
 
+TORCH_API c10::optional<std::vector<int64_t>> GetCanonicalDimensionIndices(
+    at::OptionalIntArrayRef dim,
+    int64_t rank);
+
 // Returns the canonical position in the dim dimension, handling negative
 // values for the position.
 TORCH_API int64_t GetCanonicalPosition(
