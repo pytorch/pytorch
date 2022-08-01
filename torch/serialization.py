@@ -157,7 +157,7 @@ def _cuda_deserialize(obj, location):
         device = validate_cuda_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
             with torch.cuda.device(device):
-                return torch._UntypedStorage(obj.nbytes(), device=torch.device(location))
+                return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
         else:
             return obj.cuda(device)
 
@@ -171,7 +171,7 @@ register_package(20, _cuda_tag, _cuda_deserialize)
 register_package(21, _mps_tag, _mps_deserialize)
 
 
-def location_tag(storage: Union[Storage, torch.storage._TypedStorage, torch._UntypedStorage]):
+def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
@@ -423,10 +423,10 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                               "for correctness upon loading.")
             return ('module', obj, source_file, source)
 
-        if isinstance(obj, torch.storage._TypedStorage) or torch.is_storage(obj):
-            storage: torch._UntypedStorage
+        if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
+            storage: torch.UntypedStorage
 
-            if isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
                 storage = obj._storage
@@ -436,7 +436,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 dtype = obj.dtype
                 storage_numel = obj.size()
 
-            elif isinstance(obj, torch._UntypedStorage):
+            elif isinstance(obj, torch.UntypedStorage):
                 storage = obj
                 storage_dtype = torch.uint8
                 storage_type = normalize_storage_type(type(obj))
@@ -476,8 +476,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # effectively saving nbytes in this case.  We'll be able to load it
             # and the tensor back up with no problems in _this_ and future
             # versions of pytorch, but in older versions, here's the problem:
-            # the storage will be loaded up as a _UntypedStorage, and then the
-            # FloatTensor will loaded and the _UntypedStorage will be assigned to
+            # the storage will be loaded up as a UntypedStorage, and then the
+            # FloatTensor will loaded and the UntypedStorage will be assigned to
             # it. Since the storage dtype does not match the tensor dtype, this
             # will cause an error.  If we reverse the list, like `[tensor,
             # storage]`, then we will save the `tensor.storage()` as a faked
@@ -485,7 +485,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # dtype-specific numel count that old versions expect. `tensor`
             # will be able to load up properly in old versions, pointing to
             # a FloatStorage. However, `storage` is still being translated to
-            # a _UntypedStorage, and it will try to resolve to the same
+            # a UntypedStorage, and it will try to resolve to the same
             # FloatStorage that `tensor` contains. This will also cause an
             # error. It doesn't seem like there's any way around this.
             # Probably, we just cannot maintain FC for the legacy format if the
@@ -552,9 +552,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # see
         # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
-        if isinstance(obj, torch.storage._TypedStorage) or torch.is_storage(obj):
+        if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
 
-            if isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
                 storage = obj._storage
@@ -817,11 +817,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
                     dtype = storage_type.dtype
-                    obj = cast(Storage, torch._UntypedStorage)._new_with_file(f, torch._utils._element_size(dtype))
+                    obj = cast(Storage, torch.UntypedStorage)._new_with_file(f, torch._utils._element_size(dtype))
                     obj = restore_location(obj, location)
                     # TODO: Once we decide to break serialization FC, we can
-                    # stop wrapping with _TypedStorage
-                    deserialized_objects[key] = torch.storage._TypedStorage(
+                    # stop wrapping with TypedStorage
+                    deserialized_objects[key] = torch.storage.TypedStorage(
                         wrap_storage=obj,
                         dtype=dtype)
 
@@ -831,8 +831,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     element_size = torch._utils._element_size(root.dtype)
                     offset_bytes = offset * element_size
                     # TODO: Once we decide to break serialization FC, we can
-                    # stop wrapping with _TypedStorage
-                    deserialized_objects[target_cdata] = torch.storage._TypedStorage(
+                    # stop wrapping with TypedStorage
+                    deserialized_objects[target_cdata] = torch.storage.TypedStorage(
                         wrap_storage=root._storage[offset_bytes:offset_bytes + numel * element_size],
                         dtype=root.dtype)
 
@@ -879,11 +879,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                obj = cast(Storage, torch._UntypedStorage(nbytes))
+                obj = cast(Storage, torch.UntypedStorage(nbytes))
                 obj._torch_load_uninitialized = True
                 # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with _TypedStorage
-                deserialized_objects[root_key] = torch.storage._TypedStorage(
+                # stop wrapping with TypedStorage
+                deserialized_objects[root_key] = torch.storage.TypedStorage(
                     wrap_storage=restore_location(obj, location),
                     dtype=dtype)
 
@@ -894,8 +894,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 view_size_bytes = view_size * torch._utils._element_size(dtype)
                 if view_key not in deserialized_objects:
                     # TODO: Once we decide to break serialization FC, we can
-                    # stop wrapping with _TypedStorage
-                    deserialized_objects[view_key] = torch.storage._TypedStorage(
+                    # stop wrapping with TypedStorage
+                    deserialized_objects[view_key] = torch.storage.TypedStorage(
                         wrap_storage=typed_storage._storage[offset_bytes:offset_bytes + view_size_bytes],
                         dtype=dtype)
                 res = deserialized_objects[view_key]
@@ -1005,10 +1005,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
 
-        storage = zip_file.get_storage_from_record(name, numel, torch._UntypedStorage).storage()._untyped()
+        storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage).storage().untyped()
         # TODO: Once we decide to break serialization FC, we can
-        # stop wrapping with _TypedStorage
-        loaded_storages[key] = torch.storage._TypedStorage(
+        # stop wrapping with TypedStorage
+        loaded_storages[key] = torch.storage.TypedStorage(
             wrap_storage=restore_location(storage, location),
             dtype=dtype)
 
@@ -1020,7 +1020,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
-        if storage_type is torch._UntypedStorage:
+        if storage_type is torch.UntypedStorage:
             dtype = torch.uint8
         else:
             dtype = storage_type.dtype
