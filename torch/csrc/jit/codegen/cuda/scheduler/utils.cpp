@@ -1499,32 +1499,64 @@ void scheduleWarpTileWithReduction(TensorView* tv, MatMulTileOptions tile) {
   auto instruction_tile = tile.instruction_tile;
 
   TORCH_CHECK(
-      warp_tile.k == cta_tile.k,
-      "schedule warp tile: currently no support for splitting k dimension to different warps");
+      cta_tile.k % warp_tile.k == 0,
+      "Number of warp on k dimension need to be integer");
+
+  int num_warp_k = cta_tile.k / warp_tile.k;
 
   mma_util::checkDimSize(
       tv, {-3, -2, -1}, {cta_tile.m, cta_tile.n, cta_tile.k});
 
-  //       -3   -2  -1
-  //[...    M,   N,  K]
+  if (num_warp_k == 1) {
+    // Non split K over warp case:
 
-  // Distribute warp tile:
-  tv->split(-3, warp_tile.m);
-  tv->split(-2, warp_tile.n);
+    //       -3   -2  -1
+    //[...    M,   N,  K]
+    // Distribute warp tile:
+    tv->split(-3, warp_tile.m);
+    tv->split(-2, warp_tile.n);
 
-  //  -5   -4   -3   -2   -1
-  // [Mwo  Mw  Nwo   Nw   K]
-  tv->split(-4, instruction_tile.m);
-  tv->split(-2, instruction_tile.n);
-  tv->split(-1, instruction_tile.k);
+    //  -5   -4   -3   -2   -1
+    // [Mwo  Mw  Nwo   Nw   K]
+    tv->split(-4, instruction_tile.m);
+    tv->split(-2, instruction_tile.n);
+    tv->split(-1, instruction_tile.k);
 
-  //   -8  -7 -6 -5 -4 -3 -2 -1
-  // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
+    //   -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
 
-  tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+    tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+    //   -8  -7  -6 -5 -4 -3 -2 -1
+    // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+  } else {
+    // Split K over warp case:
+    // Main difference is that an additional
+    //  thread dimension needs to be reserved
+    //  for cross warp reduction:
+    //       -3   -2  -1
+    //[...    M,   N,  K]
+    // Distribute warp tile:
+    tv->split(-3, warp_tile.m);
+    tv->split(-2, warp_tile.n);
+    tv->split(-1, warp_tile.k);
 
-  //   -8  -7  -6 -5 -4 -3 -2 -1
-  // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+    //   -6  -5   -4   -3   -2 -1
+    // [Mwo  Mw  Nwo   Nw   K, Kw]
+    tv->split(-5, instruction_tile.m);
+    tv->split(-3, instruction_tile.n);
+    tv->split(-1, instruction_tile.k);
+
+    //  -9  -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo Mw Mi Nwo Nw Ni Kwo Kw Ki]
+
+    tv->reorder({{-8, -6}, {-7, -3}, {-6, -8}, {-4, -2}, {-3, -7}, {-2, -4}});
+    //  -9   -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo  Nwo Ko Mw Nw Kw, Mi Ni Ki]
+
+    tv->merge(-9);
+    //  -8  -7 -6 -5 -4   -3 -2 -1
+    // [MNwo Ko Mw Nw Kw, Mi Ni Ki]
+  }
 }
 
 void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
@@ -1535,6 +1567,12 @@ void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
   auto instruction_tile = tile.instruction_tile;
 
   mma_util::checkDimSize(tv, {-2, -1}, {cta_tile.m, cta_tile.n});
+
+  TORCH_CHECK(
+      cta_tile.k % warp_tile.k == 0,
+      "Number of warp on k dimension need to be integer");
+
+  int num_warp_k = cta_tile.k / warp_tile.k;
 
   //        -2  -1
   //[...    M,   N]
@@ -1555,6 +1593,14 @@ void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
 
   //  -6   -5  -4 -3 -2 -1
   // [Mwo  Nwo Mw Nw Mi Ni]
+
+  if (num_warp_k != 1) {
+    // The non reduction warps are merged together
+    //  to save one thread dim for cross dim reduce.
+    tv->merge(-6);
+    //  -5  -4 -3 -2 -1
+    // [MNo Mw Nw Mi Ni]
+  }
 }
 
 //! Split the innermost dim to a vectorized load
@@ -1568,9 +1614,21 @@ void scheduleContiguousVectorLoad(
   tv->split(-1, num_of_thread * vector_word);
   tv->split(-1, vector_word);
   // [..., thread, vec]
-  // distribute to warp:
+  // distribute to warp: for tidx
   tv->split(-2, 32);
-  tv->split(-3, warp_dims.n * warp_dims.k);
+
+  //      -3    -2    -1
+  // [...warp, lane, vec]
+
+  if (warp_dims.k == 1) {
+    //      -4     -3    -2    -1
+    // [...warpM, warpN, lane, vec]
+    tv->split(-3, warp_dims.n);
+  } else {
+    //      -4     -3    -2    -1
+    // [...warpMN, warpR, lane, vec]
+    tv->split(-3, warp_dims.k);
+  }
 
   tv->axis(-1)->parallelize(ParallelType::Vectorize);
   tv->axis(-2)->parallelize(ParallelType::TIDx);

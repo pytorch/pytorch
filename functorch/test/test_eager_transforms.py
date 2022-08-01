@@ -1,3 +1,5 @@
+# Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -3042,7 +3044,6 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         out2 = vmap(functionalize(jvp_wrapper))(x, t)
         self.assertEqual(out1, out2)
 
-    @unittest.skip("Disabling to land #81145")
     def test_functionalize_fx_simple(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -3082,7 +3083,6 @@ def forward(self, x_1) -> torch.Tensor:
     return transpose_copy_int
     """)
 
-    @unittest.skip("Disabling to land #81145")
     def test_functionalize_fx_out_op(self, device):
 
         def f(inpt: torch.Tensor) -> torch.Tensor:
@@ -3107,7 +3107,6 @@ def forward(self, inpt_1) -> torch.Tensor:
     return view_copy_default_2
     """)
 
-    @unittest.skip("Disabling to land #81145")
     def test_functionalize_fx_multi_out_op(self, device):
 
         def f(inpt: torch.Tensor) -> torch.Tensor:
@@ -3133,7 +3132,6 @@ def forward(self, inpt_1) -> torch.Tensor:
     return (view_copy_default_1, getitem)
     """)
 
-    @unittest.skip("Disabling to land #81145")
     def test_functionalize_fx_reapply_views_simple(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
