@@ -1,5 +1,9 @@
 #pragma once
 
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
@@ -8,9 +12,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #include <torch/custom_class.h>
-
-#include <string>
-#include <vector>
 
 /**
  * Defines the public API for loading flatbuffer-serialized mobile modules.
