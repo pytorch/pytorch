@@ -52,6 +52,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.nn.parameter import Parameter
+from spmd.tensor import Tensor as DistributedTensor
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -853,7 +854,7 @@ class FullyShardedDataParallel(nn.Module):
         # shard any leftover parameters.
         params = [
             p for p in module.parameters()
-            if p not in ignored_params and not isinstance(p, FlatParameter)
+            if p not in ignored_params and not type(p) is FlatParameter
         ]
 
         if sync_module_states:
@@ -4249,7 +4250,10 @@ def _get_param_to_unflat_param_names(
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 module_prefixed_param_names = (
-                    param._prefixed_param_names if isinstance(param, FlatParameter)
+                    param._prefixed_param_names
+                    if isinstance(param, FlatParameter)
+                    and not isinstance(param, ShardedTensor)
+                    and not isinstance(param, DistributedTensor)
                     else [param_name]
                 )  # prefixed from `module`
                 fully_prefixed_param_names = [

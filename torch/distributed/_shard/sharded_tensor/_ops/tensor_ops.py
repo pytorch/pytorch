@@ -64,6 +64,11 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     return self_st.local_shards()[0].tensor.device
 
 
+@_sharded_op_impl(torch.Tensor.is_meta.__get__)
+def st_is_meta(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().is_meta
+
+
 def sharded_type_as_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_type_as op such as the input needs to

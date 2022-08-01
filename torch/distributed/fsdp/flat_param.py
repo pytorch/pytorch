@@ -14,9 +14,15 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
+import torch.distributed._shard.sharding_spec as shard_spec
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from spmd.tensor import Tensor as DistributedTensor, DeviceMesh
+from spmd.tensor.placement_types import Placement
+
 
 __all__ = [
     "FlatParameter", "FlatParamHandle", "FlatParamShardMetadata",
@@ -68,6 +74,16 @@ class FlatParamShardMetadata(NamedTuple):
     param_shapes: Tuple[torch.Size, ...]
     param_numels: Tuple[int, ...]
     param_offsets: Tuple[Tuple[int, int], ...]
+
+
+class STShardingInfo(NamedTuple):
+    """:class:`ShardedTensor` sharding information."""
+
+    sharding_spec: Optional[shard_spec.ShardingSpec]
+    global_size: Optional[torch.Size]
+    process_group: Optional[dist.ProcessGroup]
+    device_mesh: Optional[DeviceMesh]
+    placements: Optional[List[Placement]]
 
 
 class FlatParameter(nn.Parameter):
@@ -142,6 +158,7 @@ class FlatParameter(nn.Parameter):
         shapes: List[torch.Size],
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
+        st_sharding_infos: List[Optional[STShardingInfo]],
     ) -> None:
         """
         Initializes attributes holding metadata about the original parameters
@@ -161,12 +178,14 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(numels)
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(prefixed_param_names)
+        assert len(param_infos) == len(st_sharding_infos)
         self._num_params = len(param_infos)
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
+        self._st_sharding_infos = tuple(st_sharding_infos)
         self._is_sharded = False
         self._unsharded_size = self.size()
 
@@ -221,6 +240,7 @@ class FlatParamHandle:
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
         params_to_flatten: List[nn.Parameter] = []
+        st_sharding_infos: List[Optional[STShardingInfo]] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
         for submodule_name, submodule in module.named_modules():
@@ -234,7 +254,7 @@ class FlatParamHandle:
                         prim_module, prim_module_name,
                     ))
                 else:
-                    if isinstance(param, FlatParameter):
+                    if type(param) is FlatParameter:
                         raise ValueError("`FlatParameter` does not support nesting")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
@@ -243,6 +263,30 @@ class FlatParamHandle:
                         )
                     if requires_grad is not None and param.requires_grad != requires_grad:
                         raise ValueError("`FlatParameter` requires uniform `requires_grad`")
+                    if isinstance(param, ShardedTensor):
+                        st_sharding_infos.append(
+                            STShardingInfo(
+                                param.sharding_spec(),
+                                param.size(),
+                                param._process_group,
+                                None,
+                                None,
+                            )
+                        )
+                        param = param.local_tensor()
+                    elif isinstance(param, DistributedTensor):
+                        st_sharding_infos.append(
+                            STShardingInfo(
+                                None,
+                                None,
+                                None,
+                                param.device_mesh,
+                                param.placements,
+                            )
+                        )
+                        param = param.local_tensor()
+                    else:
+                        st_sharding_infos.append(None)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
@@ -256,7 +300,12 @@ class FlatParamHandle:
         assert requires_grad is not None
         self.flat_param = FlatParamHandle.flatten_params(params_to_flatten, requires_grad)
         self.flat_param.init_metadata(
-            param_infos, numels, shapes, prefixed_param_names, shared_param_infos,
+            param_infos,
+            numels,
+            shapes,
+            prefixed_param_names,
+            shared_param_infos,
+            st_sharding_infos,
         )
 
     @staticmethod
@@ -302,8 +351,16 @@ class FlatParamHandle:
             f"Expects {flat_param._unsharded_size.numel()} numel but got " \
             f"{tensor.numel()} numel"
         views = (
-            subtensor.view(shape) for (subtensor, shape) in
-            zip(torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes)  # type: ignore[arg-type]
+            subtensor.view(shape)
+            if st_sharding_info is None
+            else FlatParamHandle._to_sharded_tensor(
+                subtensor.view(shape), st_sharding_info
+            )
+            for (subtensor, shape, st_sharding_info) in zip(
+                torch.split(tensor, flat_param._numels, dim=0),
+                flat_param._shapes,  # type: ignore[arg-type]
+                flat_param._st_sharding_infos,  # type: ignore[arg-type]
+            )
         )
         return views
 
@@ -526,3 +583,21 @@ class FlatParamHandle:
         return set(pi.module for pi in self.flat_param._param_infos).union(
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
+
+    @staticmethod
+    def _to_sharded_tensor(tensor: torch.Tensor, sharding_info: STShardingInfo):
+        if sharding_info.sharding_spec is not None:
+            sharded_tensor = ShardedTensor._init_from_local_tensor(
+                tensor,
+                sharding_info.sharding_spec,
+                sharding_info.global_size,
+                process_group=sharding_info.process_group,
+            )
+        else:
+            sharded_tensor = DistributedTensor.from_local(
+                tensor,
+                device_mesh=sharding_info.device_mesh,
+                placements=sharding_info.placements,
+            )
+        sharded_tensor._flattened = True
+        return sharded_tensor
