@@ -128,10 +128,8 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
     ]
 
 class DummyGitRepo(GitRepo):
-    def __init__(self, path: str = "", remote: str = "", debug: bool = False) -> None:
-        path = path or get_git_repo_dir()
-        remote = remote or get_git_remote_name()
-        super().__init__(path, remote, debug)
+    def __init__(self) -> None:
+        super().__init__(get_git_repo_dir(), get_git_remote_name(), debug)
 
     def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
         return ["FakeCommitSha"]
