@@ -295,7 +295,10 @@ class ProxyTensor(torch.Tensor):
                 else:
                     assert proxy_mode is arg.proxy_mode, "All arguments must be in the same proxy mode"
 
-        with enable_torch_dispatch_mode(proxy_mode):
+        # A workaround for .restore()
+        if not hasattr(proxy_mode, "ancestors"):
+            proxy_mode.ancestors = set()  # type: ignore[union-attr]
+        with proxy_mode.restore():  # type: ignore[union-attr]
             return func_overload(*args, **kwargs)
 
 
