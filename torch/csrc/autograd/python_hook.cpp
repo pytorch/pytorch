@@ -6,7 +6,6 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <sstream>

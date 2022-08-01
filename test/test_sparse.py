@@ -70,7 +70,7 @@ class CrossRefSparseFakeMode(TorchDispatchMode):
             from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
             from torch.utils._pytree import tree_map
             try:
-                with FakeTensorMode() as fake_mode:
+                with FakeTensorMode(allow_meta=True) as fake_mode:
                     fake_args, fake_kwargs = tree_map(on_tensor(fake_mode.from_tensor), (args, kwargs))
                     fake_r = func(*fake_args, **fake_kwargs)
             except UnsupportedFakeTensorException:

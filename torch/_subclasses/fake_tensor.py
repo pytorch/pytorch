@@ -344,8 +344,15 @@ class FakeTensor(torch.Tensor):
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
-        # (we are faking a meta tensor in that case)
-        # normalize cuda device
+        # (we are faking a meta tensor in that case).  However, it often
+        # indicates some sort of confusion (e.g., you accidentally passed
+        # in a meta tensor when you should have passed in the real tensor).
+        # So by default we disallow meta, and if you are working in a situation
+        # where it is helpful (e.g., crossref testing) you can turn it back
+        # on
+        if not fake_mode.allow_meta:
+            assert device.type != "meta"
+        # normalize cuda device.
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device
@@ -401,6 +408,12 @@ class FakeTensor(torch.Tensor):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        # Need this to handle infinite recursion with sparse tensors.
+        # Sparse tensors have custom stride policy which means that
+        # they will dispatch here on dispatch, and we need to trigger
+        # the default behavior.
+        # TODO: when we get other tensor types online they will also
+        # need to get entries here.
         elif func == torch.ops.aten.stride.default:
             return None
 
@@ -488,9 +501,10 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, allow_fallback_kernels=True):
+    def __init__(self, *, allow_fallback_kernels=True, allow_meta=False):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
+        self.allow_meta = allow_meta
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
@@ -576,6 +590,7 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(x, torch.Tensor)
                     and not isinstance(x, FakeTensor)
                     and type(x) is not torch.Tensor
+                    and type(x) is not torch.nn.Parameter
                 )
 
             tree_map(check_non_fake_tensor, args)
