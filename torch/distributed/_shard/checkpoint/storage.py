@@ -1,188 +1,227 @@
 import abc
-from typing import List, Union
+from dataclasses import dataclass
+from typing import List, Any
 
 from torch.futures import Future
 
 from .metadata import (
-    BytesReadRequest,
-    BytesWriteRequest,
     Metadata,
-    TensorReadRequest,
-    TensorWriteRequest,
+    MetadataIndex,
 )
+
+from .planner import (
+    LoadPlan,
+    SavePlan,
+    SavePlanner,
+    LoadPlanner,
+)
+
+@dataclass(frozen=True)
+class WriteResult:
+    index: MetadataIndex
+
+    size_in_bytes: int
+    storage_data: Any
 
 class StorageWriter(abc.ABC):
     """
     Interface used by ``save_state_dict`` to write to storage.
 
-    A subclass should expect the following sequence of calls by ``save_state_dict``
+    One StorageWriter instance acts as both the coordinator and the follower
+    in a distributed checkpoint. As part of initialization, each instance
+    is told its role.
 
-    1) (called once globally) prepare()
-    2) prepare_storage() with the writes that will be used with (3) and (4).
-    3) write_bytes
-    4) write_tensors.
-    5) Wait for (2) and (3) futures. If either fail, abort checkpoint.
-    6) (called once globally) finish().
+    A subclass should expect the following sequence of calls.
 
-    There's a single process that executes methods that are called once globally.
-    The writes from (3) and (4) are initiated before any waiting is done.
-    The last call to finish() has the semantics of commiting the checkpoint.
-
-
+    1) (all ranks) init()
+    2) (all ranks) prepare_local_plan()
+    3) (coordinator) prepare_global_plan()
+    4) (all ranks) write_data()
+    5) (coordinator) finish()
     """
-    @abc.abstractmethod
-    def prepare(self) -> None:
-        """
-        Initialize storage to receive the checkpoint.
-
-        This method is called once globally per checkpoint before any other method.
-        This is in contrast to ``prepare_storage`` which is called on each process
-        in parallel.
-
-        Returns:
-            Future to signal intialization is complete.
-        """
-        pass
 
     @abc.abstractmethod
-    def write_bytes(self, requests: List[BytesWriteRequest]) -> Future[None]:
+    def init(self, is_coordinator: bool) -> None:
         """
-        Initiate writes for all requests in `requests`.
-
-        Writing can happen asynchronously and/or concurrently. A blocking
-        implementation is valid.
+        Initialize this instance.
 
         Args:
-            requests (List[BytesWriteRequest]): A list of requests to write
-        Returns:
-            A future that completes once all writes have finished.
+            is_coordinator (bool): Whether this instance is reponsible for coordinating
+              the checkpoint.
         """
         pass
 
     @abc.abstractmethod
-    def write_tensors(self, requests: List[TensorWriteRequest]) -> Future[None]:
+    def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         """
-        Initiate writes for all requests in `requests`.
+        Perform storage-specific local planning.
 
-        Writing can happen asynchronously and/or concurrently. A blocking
-        implementation is valid.
-
-        Implementors are responsible for any device to host transfers required
-        to copy.
+        While this method can produce a completely different plan, the recomended
+        way is to store storage specific data in SavePlan::storage_data.
 
         Args:
-            requests (List[TensorWriteRequest]): A list of requests to write
+            plan (SavePlan): The local plan from the ``SavePlanner`` in use.
 
         Returns:
-            A future that completes once all writes have finished.
+            A transformed ``SavePlan`` after storage local planning
         """
         pass
 
     @abc.abstractmethod
-    def finish(self, metadata: Metadata) -> None:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         """
-        Writes the metadata and marks the current checkpoint as sucessfull.
+        Perform centralized planning of storage.
 
-        This method is called once globally after all data was writen
-        and is used to write its metadata and commit the checkpoint.
+        This method is only called on the coordinator instance.
 
-        The `metadata` object includes a global view of the checkpoint
-        and, while writing it is optional, it must be recoverable by the
-        StorageReader implementation.
+        While this method can produce a completely different plan, the prefered
+        way is to store storage specific data in SavePlan::storage_data.
 
-        The actual format/schema used for serializing `metadata` is
-        considered and implementation detail.
+        Args:
+            plans: A list of ``SavePlan`` instances, one for each rank.
+
+        Returns:
+            A list of transformed ``SavePlan`` after storage global planning
+        """
+        pass
+
+    @abc.abstractmethod
+    def write_data(
+        self,
+        plan: SavePlan,
+        planner: SavePlanner
+    ) -> Future[List[WriteResult]]:
+        """
+        Write all items from ``plan`` using ``planner`` to resolve the data.
+
+        A subclass should call ``SavePlanner::resolve_data`` on each item
+        from the plan to get access to the underlying object to write.
+
+        Subclasses should lazily call `resolve_data` as it can allocate memory.
+        In case of tensors, make following assuptions:
+
+        - They might be on any device, including not matching the one on ``WriteItem::tensor_data``
+        - They might be views or not contiguous. Only the projection needs to be saved.
+
+        Args:
+            plan (SavePlan): The save plan to execute.
+            planner (SavePlanner): Planner object to be used to resolve items to data.
+
+        Returns:
+            A future that completes to a list of WriteResult
+        """
+        pass
+
+    @abc.abstractmethod
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+        """
+        Writes the metadata and marks the current checkpoint as sucessful.
+
+        The actual format/schema used for serializing `metadata` is an
+        implemetation detail. The only requirement is that it's recoverable
+        in to the same object graph.
 
         Args:
             metadata (Metadata): metadata for the new checkpoint
+            results: A list of WriteResults from all ranks.
 
         Returns:
             None
         """
         pass
-
-    def prepare_storage(self, storage_writes: List[Union[TensorWriteRequest, BytesWriteRequest]]) -> None:
-        """
-        Prepare the underlying storage for upcoming writes.
-
-        This is an optional override intended for advanced scenarios where
-        a storage layer needs wants to do some work ahead of the writing itself.
-
-        This method is called on each process in parallel before any writes are performed.
-
-        The default implementation does nothing.
-
-        Args:
-            storage_writes (List[Union[TensorWriteRequest, BytesWriteRequest]]): A list of
-            all writes that will be submited.
-
-        Returns:
-            None
-        """
-        pass
-
 
 class StorageReader(abc.ABC):
     """
     Interface used by ``load_state_dict`` to read from storage.
 
+    One StorageReader instance acts as both the coordinator and the follower
+    in a distributed checkpoint. As part of initialization, each instance
+    is told its role.
+
     A subclass should expected the following sequence of calls by ``load_state_dict``:
 
-    1) read_metadata() - on all ranks
-    2) read_bytes
-    3) read_tensors
-
-    The reads from (2) and (3) are initiated before any waiting is done.
-
-    Implementors must ensure host/device synchronization as part of
-    completion of both read requests.
+    1) (all ranks) read_metadata()
+    2) (all ranks) init
+    3) (all ranks) prepare_local_plan
+    4) (coordinator) prepare_global_plan
+    5) (all ranks) read_data
     """
-
-    @abc.abstractmethod
-    def read_bytes(self, requests: List[BytesReadRequest]) -> Future[None]:
-        """
-        Initiate read for all requests in `requests`.
-
-        Reading happen asynchronously and/or concurrently. A blocking
-        implementation is valid.
-
-        Args:
-            requests (List[BytesReadRequest]): A list of requests to read.
-
-        Return:
-            A future that completes once all read have finished.
-        """
-        pass
-
-    @abc.abstractmethod
-    def read_tensors(self, requests: List[TensorReadRequest]) -> Future[None]:
-        """
-        Initiate read for all requests in `requests`.
-
-        Reading happen asynchronously and/or concurrently. A blocking
-        implementation is valid.
-
-        Implementors must not assume that the original device
-        at write time will be the same at read time.
-
-        If an implementation uses asynchronous copies to device, it must
-        ensure proper synchronization W.R.T. the returned future.
-
-        Args:
-            requests (List[BytesReadRequest]): A list of requests to read.
-
-        Returns:
-            A future that completes once all read have finished.
-        """
-        pass
-
     @abc.abstractmethod
     def read_metadata(self) -> Metadata:
         """
         Reads the checkpoint metadata.
 
-        Returnss:
+        Returns:
             The metatada object associated with the checkpoint being loaded.
 
+        """
+        pass
+
+    @abc.abstractmethod
+    def init(self, metadata: Metadata, is_coordinator: bool) -> None:
+        """
+        Initialize this instance.
+
+        Args:
+            metadata (Metadata): The metadata schema to use.
+            is_coordinator (bool): Whether this instance is reponsible for coordinating
+              the checkpoint.
+        """
+        pass
+
+    @abc.abstractmethod
+    def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
+        """
+        Perform storage-specific local planning.
+
+        While this method can produce a completely different plan, the recomended
+        way is to store storage specific data in LoadPlan::storage_data.
+
+        Args:
+            plan (LoadPlan): The local plan from the ``LoadPlan`` in use.
+
+        Returns:
+            A transformed ``LoadPlan`` after storage local planning
+        """
+        pass
+
+    @abc.abstractmethod
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+        """
+        Perform centralized planning of storage loading.
+
+        This method is only called on the coordinator instance.
+
+        While this method can produce a completely different plan, the prefered
+        way is to store storage specific data in LoadPlan::storage_data.
+
+        Args:
+            plans: A list of ``LoadPlan`` instances, one for each rank.
+
+        Returns:
+            A list of transformed ``LoadPlan`` after storage global planning
+        """
+        pass
+
+    @abc.abstractmethod
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        """
+        Reads all items from ``plan`` using ``planner`` to resolve the data.
+
+        A subclass should call ``LoadPlanner::load_bytes`` to deserialize a BytesIO
+        object into the right place.
+
+        A subclass should call ``LoadPlanner::resolve_tensor`` to get access to the
+        tensors that in should load data into.
+
+        It's the StorageLayer responsibility to properly schedule any cross device copies
+        required.
+
+        Args:
+            plan (LoadPlan): The local plan to execute on
+            planner (LoadPlanner): The planner object to use to resolve items.
+
+        Returns:
+            A future that completes once all reads are finished.
         """
         pass

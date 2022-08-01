@@ -18,6 +18,7 @@ from torch.distributed._shard.sharded_tensor.shard import Shard
 from .metadata import (
     STATE_DICT_TYPE,
     MetadataIndex,
+    ChunkStorageMetadata,
 )
 
 
@@ -272,5 +273,19 @@ def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) ->
     if isinstance(obj, ShardedTensor):
         return _find_shard(obj, index).tensor
     if index.offset is not None:
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset")
+        # special case looking up a tensor by origin
+        if isinstance(obj, torch.Tensor) and index.offset == torch.Size([0] * len(obj.size())):
+            return obj
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
     return obj
+
+def _find_chunk_index(list: List[ChunkStorageMetadata], index: MetadataIndex) -> int:
+    # index fast path
+    if index.index is not None:
+        if len(list) > index.index and list[index.index] == index.offset:
+            return index.index
+
+    for i, c in enumerate(list):
+        if c.offsets == index.offset:
+            return i
+    raise ValueError(f"Offset {index.offset} not found")
