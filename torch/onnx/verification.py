@@ -113,14 +113,29 @@ def _ort_session(
     return ort_session
 
 
-def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
+def _compare_ort_pytorch_outputs(
+    ort_outs, pt_outs, rtol, atol, acceptable_error_percentage: Optional[float]
+):
     pt_outs, _ = torch.jit._flatten(pt_outs)
     pt_outs = _unpack_to_numpy(pt_outs)
 
     assert len(pt_outs) == len(ort_outs), "number of outputs differ"
+    if acceptable_error_percentage:
+        assert (
+            acceptable_error_percentage <= 1.0 and acceptable_error_percentage >= 0.0
+        ), "if set, acceptable_error_percentage should be between 0.0 and 1.0"
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
-        np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
+        try:
+            np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
+        except AssertionError as e:
+            if acceptable_error_percentage:
+                error_percentage = 1 - np.sum(
+                    np.isclose(ort_out, pt_out, rtol=rtol, atol=atol)
+                ) / np.prod(ort_out.shape)
+                if error_percentage <= acceptable_error_percentage:
+                    continue
+            raise e
 
 
 def _prepare_input_for_pytorch(args, kwargs):
@@ -219,6 +234,7 @@ def _compare_ort_pytorch_model(
     flatten,
     rtol,
     atol,
+    accetable_error_persentage: Optional[float],
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -240,7 +256,9 @@ def _compare_ort_pytorch_model(
         )
         ort_outs = _run_ort(ort_session, ort_inputs)
 
-        _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol)
+        _compare_ort_pytorch_outputs(
+            ort_outs, pt_outs, rtol, atol, accetable_error_persentage
+        )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
 
@@ -520,6 +538,7 @@ def verify(
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
     rtol: float = 0.001,
     atol: float = 1e-7,
+    acceptable_error_percentage: Optional[float] = None,
     **_,
 ):
     """Verify model export to ONNX with ONNX Runtime.
@@ -553,6 +572,8 @@ def verify(
         ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+            It should be a float of value between 0.0 and 1.0.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
@@ -599,4 +620,5 @@ def verify(
             flatten,
             rtol,
             atol,
+            acceptable_error_percentage,
         )
