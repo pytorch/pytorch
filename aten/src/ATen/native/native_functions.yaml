@@ -594,6 +594,8 @@
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: allclose
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1997,7 +1999,7 @@
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
-    QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
+    QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
 # all calls to empty() in python used to go through the symint overload
 # even if all arguments were concerete integers.

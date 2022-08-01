@@ -33,7 +33,8 @@ class C10_API SymInt {
   /*implicit*/ SymInt(int64_t d) : data_(d){};
   SymInt() = default;
 
-  // TODO: these implementations are bad
+  // TODO: these implementations are not optimal because they allocate a
+  // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
     if (s.is_symbolic()) {
       *this = SymInt::toSymInt(s.toSymIntNodeImpl());
