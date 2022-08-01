@@ -154,7 +154,7 @@ bool SchemaInfo::may_alias(
     generateAliasMaps();
   }
   bool wildcard_alias_check =
-      wildcard_set_.count(lhs) && wildcard_set_.count(rhs);
+      wildcardSet().count(lhs) && wildcardSet().count(rhs);
   if (wildcard_alias_check) {
     return true;
   }
@@ -207,8 +207,8 @@ bool SchemaInfo::mayContainAliasImpl(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
       schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
-  return types_can_alias && container_set_.count(lhs) &&
-      wildcard_set_.count(rhs);
+  return types_can_alias && containerSet().count(lhs) &&
+      wildcardSet().count(rhs);
 }
 
 void SchemaInfo::ensureConservativity(
@@ -286,6 +286,11 @@ std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
 }
 
 void SchemaInfo::initSchemaInfo() {
+  if (has_init_) {
+    return;
+  }
+  has_init_ = true;
+
   std::unordered_set<at::Symbol> duplicates;
   auto init_schema_arguments = [this, &duplicates](
                                    const std::vector<c10::Argument>&
@@ -331,7 +336,19 @@ void SchemaInfo::initSchemaInfo() {
       duplicates, schema_.returns(), c10::SchemaArgType::output);
 }
 
+const std::unordered_set<c10::SchemaArgument>& SchemaInfo::wildcardSet() {
+  initSchemaInfo();
+  return wildcard_set_;
+}
+
+const std::unordered_set<c10::SchemaArgument>& SchemaInfo::containerSet() {
+  initSchemaInfo();
+  return container_set_;
+}
+
 void SchemaInfo::generateAliasMaps() {
+  initSchemaInfo();
+
   alias_maps_current_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());
