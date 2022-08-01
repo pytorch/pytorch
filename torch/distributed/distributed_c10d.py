@@ -119,28 +119,28 @@ _unpickler = pickle.Unpickler
 
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
+    __all__.append("ProcessGroupMPI")
 except ImportError:
     _MPI_AVAILABLE = False
-    __all__.append("ProcessGroupMPI")
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+    __all__.append("ProcessGroupNCCL")
 except ImportError:
     _NCCL_AVAILABLE = False
-    __all__.append("ProcessGroupNCCL")
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
     from torch._C._distributed_c10d import _ProcessGroupWrapper
+    __all__.append("ProcessGroupGloo")
 except ImportError:
     _GLOO_AVAILABLE = False
-    __all__.append("ProcessGroupGloo")
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
+    __all__.append("ProcessGroupUCC")
 except ImportError:
     _UCC_AVAILABLE = False
-    __all__.append("ProcessGroupUCC")
 
 logger = logging.getLogger(__name__)
 
