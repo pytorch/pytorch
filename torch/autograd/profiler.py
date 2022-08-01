@@ -522,9 +522,9 @@ class emit_itt(object):
         instance should be enabled at any given time.
 
     Args:
-        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the itt range wrapping
+        record_shapes (bool, optional): If ``record_shapes=True``, the itt range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
@@ -532,6 +532,7 @@ class emit_itt(object):
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
             on the Python side.  Also note that shape recording may increase the overhead of itt range creation.
+            Default: ``False``
 
     Example:
         >>> with torch.autograd.profiler.emit_itt():
@@ -588,9 +589,9 @@ class emit_nvtx(object):
         instance should be enabled at any given time.
 
     Args:
-        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+        record_shapes (bool, optional): If ``record_shapes=True``, the nvtx range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
@@ -598,6 +599,7 @@ class emit_nvtx(object):
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
             on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
+            Default: ``False``
 
     Example:
         >>> with torch.cuda.profiler.profile():
