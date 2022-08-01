@@ -40,11 +40,11 @@ Functions
 .. autofunction:: polygamma
 .. autofunction:: psi
 .. autofunction:: round
-.. autofunction:: scaled_modified_bessel_k0
-.. autofunction:: scaled_modified_bessel_k1
+.. autofunction:: exp_modified_bessel_k_0
+.. autofunction:: exp_modified_bessel_k_1
 .. autofunction:: sinc
 .. autofunction:: softmax
-.. autofunction:: spherical_bessel_j0
+.. autofunction:: spherical_bessel_j_0
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

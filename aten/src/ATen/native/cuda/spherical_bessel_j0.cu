@@ -21,23 +21,23 @@
 namespace at {
     namespace native {
         namespace {
-            const char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
+            const char spherical_bessel_j_0_name[] = "spherical_bessel_j_0_forward";
 
-            void spherical_bessel_j0_kernel_cuda(TensorIteratorBase& iterator) {
+            void spherical_bessel_j_0_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "spherical_bessel_j0_cuda", [&]() {
-                    jitted_gpu_kernel<spherical_bessel_j0_name, scalar_t, scalar_t, 1>(iterator, spherical_bessel_j0_string);
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "spherical_bessel_j_0_cuda", [&]() {
+                    jitted_gpu_kernel<spherical_bessel_j_0_name, scalar_t, scalar_t, 1>(iterator, spherical_bessel_j_0_string);
                 });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "spherical_bessel_j0_cuda", [&]() {
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "spherical_bessel_j_0_cuda", [&]() {
                     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-                        return spherical_bessel_j0_forward(a);
+                        return spherical_bessel_j_0_forward(a);
                     });
                 });
 #endif // AT_USE_JITERATOR()
             }
         }
 
-        REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_cuda);
+        REGISTER_DISPATCH(special_spherical_bessel_j_0_stub, &spherical_bessel_j_0_kernel_cuda);
     } // namespace native
 } // namespace at

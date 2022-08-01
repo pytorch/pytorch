@@ -95,6 +95,13 @@ EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
 file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
 file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
 
+FILE(
+  GLOB native_special_functions_cpp
+  "native/cpu/special_functions/*.cpp"
+  "native/special_functions/*.h"
+  "native/special_functions/detail/*.h"
+)
+
 file(GLOB native_ao_sparse_cpp
             "native/ao_sparse/*.cpp"
             "native/ao_sparse/cpu/*.cpp"
@@ -139,6 +146,7 @@ file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
 file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
 file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
+file(GLOB native_special_cuda_functions_cu "native/cuda/special_functions/*.cu")
 
 file(GLOB native_hip_hip "native/hip/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
@@ -173,12 +181,26 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
 else()
   set(
-    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
-    ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
-    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    all_cpu_cpp
+    ${base_cpp}
+    ${ATen_CORE_SRCS}
+    ${native_cpp}
+    ${native_ao_sparse_cpp}
+    ${native_special_functions_cpp}
+    ${native_sparse_cpp}
+    ${native_nested_cpp}
+    ${native_quantized_cpp}
+    ${native_mkl_cpp}
+    ${native_mkldnn_cpp}
     ${native_transformers_cpp}
-    ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
-    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+    ${native_utils_cpp}
+    ${native_xnnpack}
+    ${generated_sources}
+    ${core_generated_sources}
+    ${ATen_CPU_SRCS}
+    ${ATen_QUANTIZED_SRCS}
+    ${ATen_NNAPI_SRCS}
+    ${cpu_kernel_cpp}
   )
 endif()
 
@@ -221,6 +243,7 @@ if(USE_CUDA)
     ${native_sparse_cuda_cu}
     ${native_quantized_cuda_cu}
     ${native_transformers_cuda_cu}
+    ${native_special_functions_cuda_cu}
     ${cuda_generated_sources}
   )
   list(APPEND ATen_CUDA_CPP_SRCS

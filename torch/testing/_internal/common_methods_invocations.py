@@ -20152,7 +20152,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.bessel_j0',
+        'special.bessel_j_0',
         decorators=(
             precisionOverride(
                 {
@@ -20166,7 +20166,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.bessel_j1',
+        'special.bessel_j_1',
         decorators=(
             precisionOverride(
                 {
@@ -20180,7 +20180,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.bessel_y0',
+        'special.bessel_y_0',
         decorators=(
             precisionOverride(
                 {
@@ -20194,7 +20194,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.bessel_y1',
+        'special.bessel_y_1',
         decorators=(
             precisionOverride(
                 {
@@ -20299,7 +20299,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_i0',
+        'special.modified_bessel_i_0',
         decorators=(
             precisionOverride(
                 {
@@ -20313,7 +20313,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_i1',
+        'special.modified_bessel_i_1',
         decorators=(
             precisionOverride(
                 {
@@ -20327,7 +20327,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_k0',
+        'special.modified_bessel_k_0',
         decorators=(
             precisionOverride(
                 {
@@ -20341,7 +20341,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_k1',
+        'special.modified_bessel_k_1',
         decorators=(
             precisionOverride(
                 {
@@ -20355,7 +20355,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.scaled_modified_bessel_k0',
+        'special.exp_modified_bessel_k_0',
         decorators=(
             toleranceOverride(
                 {
@@ -20369,7 +20369,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.scaled_modified_bessel_k1',
+        'special.exp_modified_bessel_k_1',
         decorators=(
             toleranceOverride(
                 {
@@ -20431,7 +20431,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.spherical_bessel_j0',
+        'special.spherical_bessel_j_0',
         decorators=(
             toleranceOverride(
                 {

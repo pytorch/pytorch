@@ -1,0 +1,22 @@
+#define TORCH_ASSERT_NO_OPERATORS
+
+#include <ATen/Generator.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
+
+namespace at {
+namespace native {
+inline namespace CPU_CAPABILITY {
+static void sinh_pi_kernel(TensorIteratorBase &iterator) {
+  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinh_pi_cpu", [&]() {
+    cpu_kernel(iterator, [](scalar_t x) {
+      return special_functions::sinh_pi(x);
+    });
+  });
+} // static void sinh_pi_kernel(TensorIteratorBase &iterator)
+} // namespace CPU_CAPABILITY
+REGISTER_DISPATCH(special_sinh_pi_stub, &CPU_CAPABILITY::sinh_pi_kernel);
+} // namespace native
+} // namespace at

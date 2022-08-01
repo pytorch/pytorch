@@ -284,10 +284,15 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+
 DEFINE_DISPATCH(chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(elliptic_theta_1_stub);
+DEFINE_DISPATCH(elliptic_theta_2_stub);
+DEFINE_DISPATCH(elliptic_theta_3_stub);
+DEFINE_DISPATCH(elliptic_theta_4_stub);
 DEFINE_DISPATCH(hermite_polynomial_h_stub);
 DEFINE_DISPATCH(hermite_polynomial_he_stub);
 DEFINE_DISPATCH(laguerre_polynomial_l_stub);
@@ -356,6 +361,22 @@ TORCH_IMPL_FUNC(special_chebyshev_polynomial_v_out) (const Tensor& self, const T
 
 TORCH_IMPL_FUNC(special_chebyshev_polynomial_w_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
   chebyshev_polynomial_w_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_elliptic_theta_1_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_elliptic_theta_2_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_elliptic_theta_3_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_elliptic_theta_4_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_hermite_polynomial_h_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
@@ -512,6 +533,70 @@ Tensor& special_chebyshev_polynomial_w_out(const Scalar& self, const Tensor& n, 
 
 Tensor& special_chebyshev_polynomial_w_out(const Tensor& self, const Scalar& n, Tensor& result) {
   return at::special_chebyshev_polynomial_w_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_elliptic_theta_1(const Scalar& x, const Tensor& n) {
+  return at::special_elliptic_theta_1(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_elliptic_theta_1(const Tensor& x, const Scalar& n) {
+  return at::special_elliptic_theta_1(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_elliptic_theta_1_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_elliptic_theta_1_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_elliptic_theta_1_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_elliptic_theta_1_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_elliptic_theta_2(const Scalar& x, const Tensor& n) {
+  return at::special_elliptic_theta_2(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_elliptic_theta_2(const Tensor& x, const Scalar& n) {
+  return at::special_elliptic_theta_2(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_elliptic_theta_2_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_elliptic_theta_2_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_elliptic_theta_2_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_elliptic_theta_2_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_elliptic_theta_3(const Scalar& x, const Tensor& n) {
+  return at::special_elliptic_theta_3(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_elliptic_theta_3(const Tensor& x, const Scalar& n) {
+  return at::special_elliptic_theta_3(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_elliptic_theta_3_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_elliptic_theta_3_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_elliptic_theta_3_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_elliptic_theta_3_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_elliptic_theta_4(const Scalar& x, const Tensor& n) {
+  return at::special_elliptic_theta_4(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_elliptic_theta_4(const Tensor& x, const Scalar& n) {
+  return at::special_elliptic_theta_4(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_elliptic_theta_4_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_elliptic_theta_4_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_elliptic_theta_4_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_elliptic_theta_4_out(result, self, wrapped_scalar_tensor(n));
 }
 
 Tensor special_hermite_polynomial_h(const Scalar& x, const Tensor& n) {
