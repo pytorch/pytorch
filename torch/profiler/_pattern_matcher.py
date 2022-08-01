@@ -5,30 +5,11 @@ from typing import Dict, List, Set
 
 import torch
 from torch.profiler import profile
-<<<<<<< dest:   0c05cac65a5e - taylorrobie: [Profiler] Make KinetoEvent a vie...
 import torch.utils.benchmark as benchmark
-=======
-<<<<<<< dest:   34fa520c9922 - taylorrobie: [Profiler] Make KinetoEvent a vie...
->>>>>>> source: 4c7aa93103d5 - taylorrobie: [Profiler] Start moving python bi...
 from torch.profiler._utils import index_of_first_match
-from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
+from torch._C._profiler import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
-=======
-<<<<<<< dest:   6899c55b7741 - taylorrobie: [Profiler] Make KinetoEvent a vie...
-from torch._C._autograd import _ProfilerEvent
-=======
-<<<<<<< dest:   99145424bb4e - taylorrobie: [Profiler] Make KinetoEvent a vie...
-from torch.profiler._utils import index_of_first_match
-from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
-                                _ExtraFields_Backend, _ExtraFields_Allocation,
-                                _ExtraFields_PyCCall, _ExtraFields_PyCall,
-                                _EventType)
-=======
-from torch._C._profiler import _ProfilerEvent
->>>>>>> source: 4139735e47b0 - taylorrobie: [Profiler] Start moving python bi...
->>>>>>> source: 4cdaff1e11b4 - taylorrobie: [Profiler] Start moving python bi...
->>>>>>> source: aa1d1385d12c - taylorrobie: [Profiler] Start moving python bi...
 
 
 class Pattern:
