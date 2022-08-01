@@ -9,7 +9,7 @@ from typing import Callable, Union
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
-from torch._subclasses.meta_utils import MetaConverter, safe_is_leaf, WeakTensorRefKey
+from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
