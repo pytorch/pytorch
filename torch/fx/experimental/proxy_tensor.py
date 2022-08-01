@@ -295,9 +295,6 @@ class ProxyTensor(torch.Tensor):
                 else:
                     assert proxy_mode is arg.proxy_mode, "All arguments must be in the same proxy mode"
 
-        # A workaround for .restore()
-        if not hasattr(proxy_mode, "ancestors"):
-            proxy_mode.ancestors = set()  # type: ignore[union-attr]
         with proxy_mode.restore():  # type: ignore[union-attr]
             return func_overload(*args, **kwargs)
 
@@ -479,6 +476,10 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         return out
 
     def run(self, *args, **kwargs):
+        # Should enter the mode at least once for being able to restore it later
+        # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
+        with self.mode:
+            pass
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
