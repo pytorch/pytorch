@@ -21,6 +21,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -910,6 +911,18 @@ void initModule(PyObject* module);
 } // namespace torch
 #endif
 
+#ifdef USE_ITT
+namespace torch {
+namespace profiler {
+void initIttBindings(PyObject* module);
+} // namespace profiler
+} // namespace torch
+#endif
+
+namespace torch {
+void initVerboseBindings(PyObject* module);
+} // namespace torch
+
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1008,9 +1021,13 @@ PyObject* initModule() {
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
+#ifdef USE_ITT
+  torch::profiler::initIttBindings(module);
+#endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
 #ifdef USE_CUDA

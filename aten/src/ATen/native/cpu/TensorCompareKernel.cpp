@@ -113,7 +113,7 @@ static void min_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t min_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = self_data[i * self_dim_stride];
@@ -146,10 +146,10 @@ static void max_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t max_number = self_data[0];
+        scalar_t max_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) <= zabs_(max_number))) {
             max_number = value;
             index = i;
@@ -182,10 +182,10 @@ static void aminmax_kernel(
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        scalar_t min_number = self_data[0];
-        scalar_t max_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
+        scalar_t max_number = min_number;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           // note: comparison is written this way to handle NaN correctly
           if (!(value >= min_number)) {
             min_number = value;
@@ -257,7 +257,7 @@ static void mode_kernel_impl(
             int64_t max_freq = 0;
 
             for (const auto i : c10::irange(self_dim_size)) {
-              elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
+              elements[i] = std::make_pair(c10::load(&self_data[i * self_dim_stride]), i);
             }
 
             // Even though, theoretically, we don't need to specify this lambda

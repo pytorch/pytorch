@@ -17,7 +17,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef
+    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
     RUN_CUDA_MULTI_GPU, make_global
@@ -1795,6 +1795,7 @@ class TestTracer(JitTestCase):
         assert 'baz' in graph_str
         assert 'quick_brown_fox' in graph_str
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tracing_hooks(self):
         class Net(nn.Module):
             def __init__(self):
