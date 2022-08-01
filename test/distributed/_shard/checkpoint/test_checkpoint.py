@@ -33,6 +33,7 @@ from torch.distributed._shard.checkpoint.metadata import (
     Metadata,
     BytesReadRequest,
     BytesWriteRequest,
+    MetadataIndex,
     TensorReadRequest,
     TensorWriteRequest,
 )
@@ -144,7 +145,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             self.assertEqual(2, len(tensor_reqs))
 
             self.assertTrue('bytes' in metadata.state_dict_metadata)
-            self.assertTrue(('bytes', None) in metadata.storage_data)
+            self.assertTrue(MetadataIndex('bytes') in metadata.storage_data)
 
             # tensor ordering is unspecified
             if len(tensor_reqs[0].tensor.size()) == 1:
@@ -155,7 +156,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
                 shard = tensor_reqs[0]
 
             self.assertTrue('replicated' in metadata.state_dict_metadata)
-            storage_key = ('replicated', torch.Size([0]),)
+            storage_key = MetadataIndex('replicated', torch.Size([0]))
             self.assertTrue(storage_key in metadata.storage_data)
             self.assertTrue(metadata.storage_data[storage_key], replicated.storage_key)
         else:
@@ -165,7 +166,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             local_shard = state_dict["sharded"].local_shards()[0]
 
             self.assertTrue('sharded' in metadata.state_dict_metadata)
-            storage_key = ('sharded', torch.Size(local_shard.metadata.shard_offsets),)
+            storage_key = MetadataIndex('sharded', torch.Size(local_shard.metadata.shard_offsets))
             self.assertTrue(storage_key in metadata.storage_data)
             self.assertTrue(metadata.storage_data[storage_key], shard.storage_key)
 
