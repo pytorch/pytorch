@@ -575,6 +575,8 @@ def get_isolated_graphmodule(func, args, kwargs):
 
         # Enable all torch dispatch modes except ProxyTorchDispatchMode
         for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
+            # mode.restore() doesn't work because mode.inner might be ProxyTorchDispatchMode
+            # mode.push() is restricted to modes that don't take any arguments
             stack.enter_context(mode.push())
         gm = make_fx(wrapped)(unwrapped_all_args)
     return gm
