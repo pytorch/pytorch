@@ -2536,7 +2536,13 @@ def _arange_meta(
     else:
         dtype = torch.get_default_dtype()
     device = _get_default_device() if device is None else device
-    shape = (math.ceil((end - start) / step),)
+    if dtype == torch.int64:
+        # see arange_out in RangeFactories.cpp
+        xstart, xend, xstep = int(start), int(end), int(step)
+        sgn = (xstep > 0) - (xstep < 0)
+        shape = (math.ceil((xend - start + xstep - sgn) / xstep),)
+    else:
+        shape = (math.ceil((end - start) / step),)
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
 

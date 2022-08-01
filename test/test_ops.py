@@ -189,10 +189,12 @@ class TestCommon(TestCase):
                 continue
 
             if isinstance(result, torch.Tensor):
+                self.assertTrue(isinstance(meta_result, FakeTensor))
                 prims.utils.compare_tensor_meta(result, meta_result)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                        self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
     def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):

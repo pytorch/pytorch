@@ -20689,6 +20689,9 @@ python_ref_db = [
             # See https://github.com/pytorch/pytorch/issues/82364
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+
+            # Prims arange does not follow aten
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
         ),
         supports_nvfuser=False,
     ),

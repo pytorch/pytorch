@@ -547,7 +547,7 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
 
-        if "prims::" in func._schema.name:
+        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
             try:
                 torch._C._add_meta_to_tls_dispatch_include()
                 with no_dispatch():
@@ -565,12 +565,6 @@ class FakeTensorMode(TorchDispatchMode):
         with no_dispatch():
             # TODO: apply as no_dispatch decorator
             converter = self.fake_tensor_converter
-
-            def wrap(e, device=None):
-                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-                    return converter(self, e, device)
-                else:
-                    return e
 
             # if we are in the dispatch mode, we will enter this function even if the inputs
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
@@ -645,13 +639,25 @@ class FakeTensorMode(TorchDispatchMode):
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
+            # Lazily initialized, in case there are no tensor returns
+            common_device = None
+
+            def wrap(e, device=None):
+                nonlocal common_device
+                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+                    if common_device is None:
+                        common_device = FakeTensor._find_common_device(
+                            func, args, kwargs
+                        )
+                    return converter(self, e, device or common_device)
+                else:
+                    return e
+
             # if device is specified, use that
             if kwargs.get("device", None):
                 return tree_map(partial(wrap, device=kwargs["device"]), r)
 
-            common_device = FakeTensor._find_common_device(func, args, kwargs)
-
-            return tree_map(partial(wrap, device=common_device), r)
+            return tree_map(partial(wrap), r)
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
