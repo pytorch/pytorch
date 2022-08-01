@@ -42,6 +42,8 @@ bool test_sigmoid();
 bool test_hardsigmoid();
 bool test_hardswish_();
 bool test_hardswish();
+bool test_hardshrink_();
+bool test_hardshrink();
 bool test_leaky_relu_();
 bool test_leaky_relu();
 bool test_upsampling_nearest2d_vec();
