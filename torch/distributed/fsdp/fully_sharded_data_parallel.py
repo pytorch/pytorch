@@ -71,7 +71,7 @@ from ._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
 )
-from .flat_param import FlatParameter, FlatParamHandle, ParamInfo
+from .flat_param import FlatParameter, FlatParamHandle
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
@@ -1886,26 +1886,6 @@ class FullyShardedDataParallel(nn.Module):
         offload_to_cpu = self._state_dict_config.offload_to_cpu
         cpu_device = torch.device("cpu")
 
-        """
-        shared_param_infos = [
-            ParamInfo(param_name, module, module_name)
-            for (param_name, module, module_name, _, _, _)
-            in self._fsdp_wrapped_module.handle.flat_param._shared_param_infos
-        ]
-        for param_name, _, module_name in itertools.chain(
-            self._fsdp_wrapped_module.handle.flat_param._param_infos, shared_param_infos
-        ):
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            # Activation checkpoint adds a prefix that has to be
-            # removed as well.
-            module_name = module_name.replace(
-                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-            )
-            fqn = f"{prefix}{module_name}{param_name}"
-        """
         # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
         # processing buffers.
         for fqn, param_name, module_name in self._param_fqns:
@@ -2003,14 +1983,6 @@ class FullyShardedDataParallel(nn.Module):
         if not self._fsdp_wrapped_module.has_params:
             return state_dict
 
-        """
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            fqn = f"{prefix}{module_name}{param_name}"
-        """
         for fqn, _, _ in self._param_fqns:
             # Create a ShardedTensor for the unflattened, non-sharded parameter.
             fqn = f"{prefix}{fqn}"
