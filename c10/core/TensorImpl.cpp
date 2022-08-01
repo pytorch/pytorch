@@ -187,10 +187,7 @@ TensorImpl::TensorImpl(
 }
 
 void TensorImpl::_change_backend_component_keys(c10::Device device) {
-  DispatchKey device_key =
-      computeDispatchKey(c10::nullopt, c10::nullopt, device);
-  BackendComponent new_backend =
-      c10::DispatchKeySet(device_key).highestBackendKey();
+  BackendComponent new_backend = toBackendComponent(device.type());
   BackendComponent old_backend = key_set_.highestBackendKey();
 
   // following logic TensorImpl::TensorImpl, update the BackendComponent related
@@ -205,7 +202,7 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
   // See note [Removing keys from DispatchKeySet Only Affects Functionality
   // Keys]
   key_set = key_set.remove_backend(old_backend);
-  key_set_ = key_set | DispatchKeySet(device_key);
+  key_set_ = key_set | DispatchKeySet(new_backend);
 }
 
 void TensorImpl::HandleResize() {
