@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
 
 // NOTE: See [Sharded File] comment in VariableType
 
