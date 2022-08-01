@@ -6,6 +6,8 @@
 namespace torch {
 namespace utils {
 
+using SchemaSpecialCasePair =
+    std::pair<c10::FunctionSchema, std::unordered_set<std::string>>;
 /**
  * class SchemaInfo
  *
@@ -83,7 +85,7 @@ struct TORCH_API SchemaInfo {
 
   static std::vector<c10::FunctionSchema> getNonDeterministicOps();
 
-  static std::vector<c10::FunctionSchema> getTrainingOps();
+  static std::vector<SchemaSpecialCasePair> getTrainingOps();
 
   // Set of all wildcard arguments
   std::unordered_set<c10::SchemaArgument> wildcard_set_;
