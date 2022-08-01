@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -10,6 +9,7 @@
 
 namespace c10 {
 
+class SymInt;
 class SymIntNodeImpl;
 using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
 
@@ -74,17 +74,5 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
     return os;
   };
 };
-
-class C10_API SymIntTable {
- public:
-  uint64_t addNode(SymIntNode sin);
-  SymIntNode getNode(size_t index);
-
- private:
-  std::vector<SymIntNode> nodes_;
-  std::mutex mutex_;
-};
-
-C10_API SymIntTable& getSymIntTable();
 
 } // namespace c10
