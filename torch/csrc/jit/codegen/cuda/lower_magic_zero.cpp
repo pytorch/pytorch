@@ -176,8 +176,6 @@ IndexMagicZeroInfo protectPredicateIndexWithMagicZero(
         index_it != id_graph.initial_concrete_index_map.end(),
         "Index not found for loop: ",
         concrete_loop_id->toString());
-    TORCH_INTERNAL_ASSERT(
-        index_it != id_graph.initial_concrete_index_map.end());
     auto loop_index = index_it->second;
     loop_indices.insert(loop_index);
   }
