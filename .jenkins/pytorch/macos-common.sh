@@ -13,7 +13,7 @@ if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
     numpy \
     pyyaml \
     setuptools \
-    cmake=3.19 \
+    cmake \
     cffi \
     ninja \
     typing_extensions \
