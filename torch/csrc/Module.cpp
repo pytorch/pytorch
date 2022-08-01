@@ -52,6 +52,7 @@
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/profiler/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
@@ -1018,6 +1019,7 @@ PyObject* initModule() {
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
+  torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
 #ifdef USE_ITT
