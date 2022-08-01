@@ -560,6 +560,7 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(x, torch.Tensor)
                     and not isinstance(x, FakeTensor)
                     and type(x) is not torch.Tensor
+                    and type(x) is not torch.nn.Parameter
                 )
 
             tree_map(check_non_fake_tensor, args)

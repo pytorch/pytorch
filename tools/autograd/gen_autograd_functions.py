@@ -290,7 +290,7 @@ for (auto i : c10::irange(prop.size())) {
       auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
     } else {
-       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.data()));
+       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
     }
 }
 return tup;
