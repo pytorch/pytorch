@@ -86,7 +86,7 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
+def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -117,12 +117,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
-    # same_strides, idx = check_significant_strides(a, b)
-    # if not same_strides:
-    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-    #         a.stride(), b.stride(), idx
-    #     )
-    # raise RuntimeError(msg)
+    if check_strides:
+        same_strides, idx = check_significant_strides(a, b)
+        if not same_strides:
+            msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                a.stride(), b.stride(), idx
+            )
+            raise RuntimeError(msg)
 
 
 def check_significant_strides(
