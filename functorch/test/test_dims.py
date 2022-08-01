@@ -8,7 +8,8 @@ from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from unittest import TestCase, main, skip
+from unittest import main, skip
+from torch.testing._internal.common_utils import TestCase
 import torch
 import gc
 
