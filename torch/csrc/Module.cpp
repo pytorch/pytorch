@@ -21,6 +21,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <unordered_map>
 

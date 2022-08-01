@@ -389,6 +389,39 @@ command = [
 ]
 
 [[linter]]
+code = 'PYBIND11_INCLUDE'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'torch/csrc/utils/pybind.h',
+    'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
+    'caffe2/**/*',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=#include <pybind11\/',
+    '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
+    '--linter-name=PYBIND11_INCLUDE',
+    '--match-first-only',
+    '--error-name=direct include of pybind11',
+    # https://stackoverflow.com/a/33416489/23845
+    # NB: this won't work if the pybind11 include is on the first line;
+    # but that's fine because it will just mean the lint will still fail
+    # after applying the change and you will have to fix it manually
+    '--replace-pattern=1,/(#include <pybind11\/)/ s/(#include <pybind11\/)/#include <torch\/csrc\/utils\/pybind.h>\n\1/',
+    """--error-description=\
+        This #include directly includes pybind11 without also including \
+        #include <torch/csrc/utils/pybind.h>;  this means some important \
+        specializations may not be included.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYPIDEP'
 include_patterns = ['.github/**']
 exclude_patterns = [
