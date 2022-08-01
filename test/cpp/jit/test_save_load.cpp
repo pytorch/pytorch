@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -257,6 +258,18 @@ TEST(SerializationTest, ParentDirNotExist) {
         torch::save(t, "./doesnotexist/file.pt");
       },
       "Parent directory ./doesnotexist does not exist.");
+}
+
+TEST(SerializationTest, CalculateNecessaryArgsTest) {
+  auto schema = torch::schema(
+      "sync_stream(int stream_id = -1) -> ()",
+      c10::AliasAnalysisKind::CONSERVATIVE);
+
+  auto graph = std::make_shared<Graph>();
+  auto one_val = graph->insertConstant(-1);
+  auto necessary = CalculateNecessaryArgs(schema.arguments(), {one_val}, true);
+  EXPECT_EQ(0, necessary.first);
+  EXPECT_EQ(0, necessary.second);
 }
 
 } // namespace jit

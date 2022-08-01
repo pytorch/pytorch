@@ -2981,9 +2981,9 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
 
   // Return the simplified ret1/ret2 if the compare result is deterministic.
   // Otherwise, return the simplified CompareSelect directly.
-  auto ret_expr = (cmp_res == analysis::CmpEvalResult::TRUE)
+  auto ret_expr = (cmp_res == analysis::CmpEvalResult::True)
       ? simplified_ret1
-      : ((cmp_res == analysis::CmpEvalResult::FALSE)
+      : ((cmp_res == analysis::CmpEvalResult::False)
              ? simplified_ret2
              : simplified_cmp_select_expr);
   GRAPH_DEBUG("(SimplifierUnderContext) Final: ", std::to_string(ret_expr));

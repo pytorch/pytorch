@@ -5,10 +5,15 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 // Enables caching on for dynamic shapes (aka disable hash on shapes)
-C10_DEFINE_bool(ltc_enable_dynamic_shapes, false, "Whether dynamic shape is enabled");
+C10_DEFINE_bool(
+    ltc_enable_dynamic_shapes,
+    false,
+    "Whether dynamic shape is enabled");
 
 namespace torch {
 namespace lazy {
+
+static const torch::lazy::Output kNullOutput = torch::lazy::Output();
 
 size_t Output::Hasher::operator()(const Output& output) const {
   return StdHashCombine(
@@ -31,8 +36,8 @@ std::string Output::ToString() const {
 
 bool Output::operator==(const Value& rhs) const {
   // Either side could be kNullValue which has node as nullptr
-  return (!node == !rhs.node) && (!node ||
-      (node->hash() == rhs.node->hash() && index == rhs.index));
+  return (!node == !rhs.node) &&
+      (!node || (node->hash() == rhs.node->hash() && index == rhs.index));
 }
 
 hash_t Value::hash() const {
@@ -57,18 +62,19 @@ bool Node::enableDynamicShape() {
 }
 
 Node::Node(OpKind op, size_t num_outputs)
-    : op_(op),
-      num_outputs_(num_outputs),
-      metadata_(GetMetaDataIfDebugging()) {}
+    : op_(op), num_outputs_(num_outputs), metadata_(GetMetaDataIfDebugging()) {}
 
-Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_outputs)
+Node::Node(
+    OpKind op,
+    OpList operands,
+    std::vector<Shape>&& shapes,
+    size_t num_outputs)
     : Node(op, num_outputs) {
-
   // Move shapes into node
   shapes_.insert(
-    shapes_.end(),
-    std::make_move_iterator(shapes.begin()),
-    std::make_move_iterator(shapes.end()));
+      shapes_.end(),
+      std::make_move_iterator(shapes.begin()),
+      std::make_move_iterator(shapes.end()));
 
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
@@ -83,7 +89,11 @@ Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_o
   }
 }
 
-Node::Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, size_t num_outputs)
+Node::Node(
+    OpKind op,
+    OpList operands,
+    const std::function<Shape()>& shape_fn,
+    size_t num_outputs)
     : Node(op, operands, std::vector<Shape>{}, num_outputs) {
   addComputedShape(shape_fn);
 }
@@ -91,15 +101,16 @@ Node::Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, s
 Node::Node(OpKind op, OpList operands, size_t num_outputs)
     : Node(op, operands, std::vector<Shape>{}, num_outputs) {}
 
-Node::Node(OpKind op, Shape shape, size_t num_outputs)
-    : Node(op, num_outputs) {
+Node::Node(OpKind op, Shape shape, size_t num_outputs) : Node(op, num_outputs) {
   shapes_.push_back(std::move(shape));
 }
 
 Node::~Node() = default;
 
 // Retrieves the full shape of the IR Node.
-c10::ArrayRef<Shape> Node::shapes() const { return shapes_; }
+c10::ArrayRef<Shape> Node::shapes() const {
+  return shapes_;
+}
 
 // Retrieves the shape of the output at a given index.
 const Shape& Node::shape(size_t output_index) const {
@@ -129,8 +140,15 @@ Shape Node::computeShape(const std::function<Shape()>& shape_fn) {
 const std::vector<Output>& Node::operands() const {
   return operands_as_outputs_;
 }
+
 const Output& Node::operand(size_t i) const {
   return operands_as_outputs_.at(i);
+}
+
+const Output& Node::nullable_operand(size_t i) const {
+  // We use kNullOutput instead of kNullValue here to avoid implicit casting,
+  // which would prevent this method from returning a reference.
+  return i < operands_as_outputs_.size() ? operand(i) : kNullOutput;
 }
 
 std::string Node::ToString() const {
@@ -147,11 +165,10 @@ std::string Node::ToString() const {
 }
 
 void Node::AddOperand(NodePtr node, size_t index) {
-  CHECK_LT(index, node->num_outputs());
+  TORCH_CHECK_LT(index, node->num_outputs());
   operands_.push_back(node);
   operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }
-
 
 } // namespace lazy
 } // namespace torch

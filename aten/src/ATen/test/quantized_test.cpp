@@ -9,7 +9,7 @@
 #include <sstream>
 #include <type_traits>
 // For quantize_val
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <ATen/quantized/Quantizer.h>
@@ -214,7 +214,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
 TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   const float scale = 0.1;
   const int64_t zero_point = 10;
-  std::vector<int64_t> shape = {10, 10};
+  std::vector<int64_t> shape = {5, 10};
   auto numel = c10::multiply_integers(shape);
 
   TensorOptions options(at::kQUInt8);
@@ -239,6 +239,13 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
   for (const auto i : c10::irange(numel)) {
     ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+  }
+  for (int h = 0, i = 0; h < shape[0]; ++h) {
+    for (int w = 0; w < shape[1]; ++w, ++i) {
+      ASSERT_EQ(
+          qtensor[h][w].item<float>(),
+          (custom_data[i] - zero_point) * scale);
+    }
   }
   ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
   ASSERT_EQ(qtensor.q_zero_point(), zero_point);

@@ -125,6 +125,16 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
   changed_ = true;
   if (is_cpu_scalar(tensor)) {
     switch (tensor.scalar_type()) {
+      case c10::ScalarType::ComplexDouble:
+        arguments_.push_back(std::make_unique<CpuScalarTensorArg<
+                                 CpuScalarTensorCodegen<c10::complex<double>>>>(
+            tensor.data_ptr<c10::complex<double>>()[0]));
+        break;
+      case c10::ScalarType::ComplexFloat:
+        arguments_.push_back(std::make_unique<CpuScalarTensorArg<
+                                 CpuScalarTensorCodegen<c10::complex<float>>>>(
+            tensor.data_ptr<c10::complex<float>>()[0]));
+        break;
       case c10::ScalarType::Double:
         arguments_.push_back(
             std::make_unique<

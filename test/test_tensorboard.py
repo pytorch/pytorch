@@ -493,6 +493,9 @@ class TestTensorBoardSummary(BaseTestCase):
     def test_scalar_new_style(self):
         scalar = summary.scalar('test_scalar', 1.0, new_style=True)
         self.assertTrue(compare_proto(scalar, self))
+        with self.assertRaises(AssertionError):
+            summary.scalar('test_scalar2', torch.Tensor([1, 2, 3]), new_style=True)
+
 
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')

@@ -1309,7 +1309,7 @@ struct TORCH_API SymIntType : public Type {
     return "SymInt";
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    // TODO: will become a Union[SymIntNodeImpl|int] in the near future
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
@@ -2225,7 +2225,11 @@ struct InferredType {
   /* implicit */ InferredType(std::string reason)
       : type_(nullptr), reason_(std::move(reason)) {}
   TypePtr type() const {
-    TORCH_INTERNAL_ASSERT(type_);
+    TORCH_INTERNAL_ASSERT(
+        type_,
+        "Tried to get the type from an InferredType but the type is null. ",
+        "Reason: ",
+        reason_);
     return type_;
   }
   bool success() const {

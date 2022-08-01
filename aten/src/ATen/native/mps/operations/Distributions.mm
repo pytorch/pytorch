@@ -11,11 +11,9 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
+
 namespace at {
 namespace native {
-namespace templates {
-
-}
 
 Tensor& uniform_mps_(Tensor& input, double from, double to, c10::optional<Generator> gen_)
 {
@@ -125,6 +123,62 @@ Tensor& normal_mps_(Tensor& self, double mean, double std, c10::optional<Generat
   std_t.fill_(std);
 
   return normal_mps_out(mean_t, std_t, gen, self);
+}
+
+Tensor normal_mps(const Tensor& mean, double std, c10::optional<Generator> gen) {
+  Tensor output = empty_mps(
+                      mean.sizes(),
+                      mean.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+
+  Tensor std_t = empty_mps(
+                      output.sizes(),
+                      output.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+  std_t.fill_(std);
+
+  return normal_mps_out(mean, std_t, gen, output);
+}
+
+Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) {
+  Tensor output = empty_mps(
+                      std.sizes(),
+                      std.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+
+  Tensor mean_t = empty_mps(
+                      output.sizes(),
+                      output.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+  mean_t.fill_(mean);
+
+  return normal_mps_out(mean_t, std, gen, output);
+}
+
+Tensor normal_mps(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+
+  Tensor output = empty_mps(
+                      shape,
+                      mean.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+
+  return normal_mps_out(mean, std, gen, output);
 }
 
 Tensor& normal_mps_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
@@ -454,6 +508,70 @@ Tensor& random_mps_
    c10::optional<Generator> gen) {
 
   return random_mps_(self, 0, to, gen);
+}
+
+// Exponential distribution
+
+Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+
+  using namespace mps;
+
+  if (self.numel() == 0) {
+    return self;
+  }
+
+  TORCH_CHECK(lambda > 0, "exponential_mps_: lambda must be greater than zero")
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  MPSStream* stream = getCurrentMPSStream();
+  uint64_t seed_ = c10::detail::getNonDeterministicRandom(true);
+
+  @autoreleasepool {
+    MPSShape* self_shape = getMPSShape(self);
+
+    MPSGraph* mpsGraph = make_mps_graph();
+    // TODO: right now taking the default seed. Extend it to be extracted from the
+    // MPSGenerator
+    MPSGraphTensor* randomTensor = [mpsGraph randomUniformTensorWithShape:self_shape
+                                                                     seed:seed_
+                                                                     name:nil];
+    MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0f
+                                                     dataType:MPSDataTypeFloat32];
+    MPSGraphTensor* minusLambdaTensor = [mpsGraph constantWithScalar:-lambda
+                                                       dataType:MPSDataTypeFloat32];
+    MPSGraphTensor* subtractTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
+                                                            secondaryTensor:randomTensor
+                                                                       name:nil];
+    MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:subtractTensor
+                                                         name:nil];
+    MPSGraphTensor* outputTensor = [mpsGraph divisionWithPrimaryTensor:logTensor
+                                                       secondaryTensor:minusLambdaTensor
+                                                                  name:nil];
+
+    if(getMPSDataType(self.scalar_type()) != MPSDataTypeFloat32)
+      outputTensor = [mpsGraph castTensor:outputTensor
+                                   toType:getMPSDataType(self.scalar_type())
+                                     name:@"output"];
+
+    auto outputPlaceholder = Placeholder(outputTensor, self);
+    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = nil;
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    runMPSGraph(stream, mpsGraph, feeds, results);
+
+  }
+
+  return self;
+
 }
 
 } // namespace native

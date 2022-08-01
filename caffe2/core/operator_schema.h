@@ -466,6 +466,10 @@ class TORCH_API OpSchemaRegistry {
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line);
 
+  static void RemoveSchema(const std::string& key) {
+    map().erase(key);
+  }
+
   static const OpSchema* Schema(const string& key) {
     auto& m = map();
     auto it = m.find(key);
@@ -583,10 +587,22 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                               \
-  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =             \
-      &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+#define OPERATOR_SCHEMA(name)                                                 \
+  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};   \
+  static OpSchema& RegisterOpSchema_##name() {                                \
+    struct OpSchemaRegisterer_##name {                                        \
+      OpSchemaRegisterer_##name()                                             \
+          : schema(OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)) {} \
+      ~OpSchemaRegisterer_##name() {                                          \
+        OpSchemaRegistry::RemoveSchema(#name);                                \
+      }                                                                       \
+      OpSchema& schema;                                                       \
+    };                                                                        \
+    static OpSchemaRegisterer_##name op_schema_registerer_##name;             \
+    return op_schema_registerer_##name.schema;                                \
+  }                                                                           \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =               \
+      &RegisterOpSchema_##name()
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
