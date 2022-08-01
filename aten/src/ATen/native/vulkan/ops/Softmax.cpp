@@ -62,12 +62,6 @@ Tensor softmax_internal(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
