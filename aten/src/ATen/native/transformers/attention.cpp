@@ -663,10 +663,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 // greater than 0.0 is specified.
 //
 // Args:
-//     query (Tensor): Query tensor; shape (N, L, E)
-//     key (Tensor): Key tensor; shape (N, S, E)
-//     value (Tensor): Value tensor; shape (N, S, E)
-//     attn_mask (optional Tensor): Attention mask; shape (N, L, S) or (L, S). Currently, only a boolean mask
+//     query (Tensor): Query tensor; shape (N, ..., L, E)
+//     key (Tensor): Key tensor; shape (N, ..., S, E)
+//     value (Tensor): Value tensor; shape (N, ..., S, E)
+//     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
 //         is supported, where a value of True indicates that the element *should* take part in attention.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
 //     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
@@ -677,11 +677,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
 // Returns a tuple containing:
-//     output (Tensor): Attention output; shape (N, L, E)
-//     attn_weights (Tensor): Attention weighting; shape (N, L, S)
+//     output (Tensor): Attention output; shape (N, ..., L, E)
+//     attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
 //
 // Shape legend:
 //     N: Batch size
+//     ...: Any number of other batch dimensions (optional)
 //     S: Source sequence length
 //     L: Target sequence length
 //     E: Embedding dimension
@@ -714,14 +715,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
         attn_mask = new_attn_mask;
     }
-    auto attn = attn_mask.has_value() ?
-        at::baddbmm(*attn_mask, query, key.transpose(-2, -1)) :
-        at::bmm(query, key.transpose(-2, -1));
+    auto attn = at::matmul(query, key.transpose(-2, -1));
+    if (attn_mask.has_value()) {
+        attn.add_(*attn_mask);
+    }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
         at::dropout_(attn, dropout_p, true);
     }
-    const auto output = at::bmm(attn, value);
+    const auto output = at::matmul(attn, value);
     return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, Tensor()));
 }
 
