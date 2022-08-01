@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
