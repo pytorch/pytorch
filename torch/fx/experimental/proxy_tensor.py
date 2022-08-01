@@ -581,4 +581,6 @@ def get_isolated_graphmodule(func, args, kwargs):
             mode.ancestors = set() if mode.inner is None else mode.inner.ancestors.union({mode.inner})
             stack.enter_context(mode.restore())
         gm = make_fx(wrapped)(unwrapped_all_args)
+    assert all(m1 == m2 for m1, m2 in zip(modes, get_torch_dispatch_modes()))
+    assert all(m1.inner == m2.inner for m1, m2 in zip(modes, get_torch_dispatch_modes()))
     return gm
