@@ -18,14 +18,13 @@ using SchemaSpecialCasePair =
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(const c10::FunctionSchema& schema)
-      : schema_(std::move(schema)), alias_maps_current_(false) {
-    initSchemaInfo();
-  }
+      : schema_(std::move(schema)),
+        alias_maps_current_(false),
+        has_init_(false) {}
   explicit SchemaInfo(const char* signature)
       : schema_(torch::jit::parseSchema(signature)),
-        alias_maps_current_(false) {
-    initSchemaInfo();
-  }
+        alias_maps_current_(false),
+        has_init_(false) {}
 
   bool is_mutable();
 
@@ -87,6 +86,10 @@ struct TORCH_API SchemaInfo {
 
   static std::vector<SchemaSpecialCasePair> getTrainingOps();
 
+  const std::unordered_set<c10::SchemaArgument>& wildcardSet();
+
+  const std::unordered_set<c10::SchemaArgument>& containerSet();
+
   // Set of all wildcard arguments
   std::unordered_set<c10::SchemaArgument> wildcard_set_;
 
@@ -105,6 +108,8 @@ struct TORCH_API SchemaInfo {
   const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;
+
+  bool has_init_;
 };
 } // namespace utils
 } // namespace torch
