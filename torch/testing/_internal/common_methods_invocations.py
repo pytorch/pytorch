@@ -14861,6 +14861,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_expanded_weight=True,
            decorators=(
+               # Strides are not the same!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
