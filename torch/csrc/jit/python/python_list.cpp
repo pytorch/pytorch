@@ -4,7 +4,6 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_list.h>
-#include <torch/csrc/utils/pybind.h>
 #include <stdexcept>
 
 namespace torch {
