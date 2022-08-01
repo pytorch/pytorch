@@ -316,7 +316,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
 
   // Add angle in bbox deltas
   int num_boxes = scores.size();
-  CHECK_EQ(bbx.size() / 4, num_boxes);
+  TORCH_CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
@@ -516,7 +516,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
 
   // Add angle in bbox deltas
   int num_boxes = scores.size();
-  CHECK_EQ(bbx.size() / 4, num_boxes);
+  TORCH_CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.

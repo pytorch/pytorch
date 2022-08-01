@@ -5,9 +5,15 @@ import math
 import torch.utils._pytree as pytree
 import copy
 import os
+from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
+from . import config
+
+AOT_PARTITIONER_DEBUG = config.debug_partitioner
+
+INDUCTOR = False
 
 
 class InvalidNodeBase(object):
@@ -268,11 +274,16 @@ def min_cut_rematerialization_partition(
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
     aten = torch.ops.aten
+    prims = torch.ops.prims
 
     pointwise_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward]  # noqa: E501
+    if INDUCTOR:
+        pointwise_ops += [prims.div, prims.convert_element_type, aten.sign, aten.clone]  # noqa: E501
     misc_ops = [aten.to, aten.type_as, operator.getitem]
 
     reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
+    if INDUCTOR:
+        reduction_ops += [prims.var, prims.sum, aten.var]
 
     # not recomputed by default since these are kinda expensive/hard to fuse into
     # norm_ops = [aten.instance_norm, aten._batch_norm_impl_index, aten.native_batch_norm, aten.batch_norm, aten._batch_norm_impl_index_backward, aten.native_layer_norm, aten.layer_norm, aten.native_layer_norm_backward]  # noqa: E501
@@ -282,8 +293,11 @@ def min_cut_rematerialization_partition(
 
     # These are the view ops that NVFuser can fuse
     view_ops = [aten.squeeze, aten.unsqueeze]
+    if INDUCTOR:
+        view_ops += [prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors]  # noqa: E501
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d]  # noqa: E501
+
     unrecomputable_ops = random_ops + compute_intensive_ops
 
     recomputable_ops = set(
@@ -293,6 +307,15 @@ def min_cut_rematerialization_partition(
         + view_ops
     )
     fusible_ops = recomputable_ops | set(random_ops)
+    if AOT_PARTITIONER_DEBUG:
+        joint_module_ops = set(
+            str(node.target._overloadpacket)
+            for node in joint_module.graph.nodes
+            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+        )
+        ops_ignored = joint_module_ops - set([str(i) for i in recomputable_ops])
+        print("Ops banned from rematerialization: ", ops_ignored)
+        print()
 
     AGGRESSIVE_RECOMPUTATION = False
 
@@ -304,13 +327,15 @@ def min_cut_rematerialization_partition(
                 return False
             if get_aten_target(node) not in recomputable_ops:
                 return True
-            # If the output of the reduction is 4x smaller (arbitrary choice),
+            if node.target == operator.getitem:
+                return False
+            # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
-            if get_aten_target(node) in reduction_ops:
-                input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
-                output_size = _size_of(node.meta['tensor_meta'])
-                return (output_size * 4 < input_tensors_size)
-            return False
+            if 'tensor_meta' not in node.meta:
+                return False
+            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
+            output_size = _size_of(node.meta['tensor_meta'])
+            return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
@@ -325,7 +350,9 @@ def min_cut_rematerialization_partition(
         mem_sz = _size_of(node.meta['tensor_meta'])
 
         # Heuristic to bias towards nodes closer to the backwards pass
-        mem_sz = int(mem_sz + node.dist_from_bw)
+        # Complete guess about current value
+        mem_sz = int(mem_sz * (1.5 ** max(min(node.dist_from_bw, 100), 1)))
+        # mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
             return mem_sz
@@ -375,7 +402,20 @@ def min_cut_rematerialization_partition(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
-    return _extract_fwd_bwd_modules(joint_module, saved_values)
+    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values)
+    if AOT_PARTITIONER_DEBUG:
+        print("Theoretical Activations Stored: ", sum([_size_of(i.meta['tensor_meta']) for i in saved_values]) / 1e9)
+        fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
+        bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
+        remat_nodes = fw_module_nodes & bw_module_nodes
+
+        counts = defaultdict(int)
+        for node in fw_module.graph.nodes:
+            if node.name in remat_nodes and hasattr(node.target, '_overloadpacket'):
+                counts[str(node.target._overloadpacket)] += 1
+        print("# nodes rematerialized: ", len(remat_nodes))
+        print("Count of Ops Rematerialized: ", sorted(counts.items(), key=lambda x: x[1], reverse=True))
+    return fw_module, bw_module
 
 
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
