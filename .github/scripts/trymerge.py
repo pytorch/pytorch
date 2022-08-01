@@ -1138,7 +1138,7 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
 
     if len(failed_checks) > 0:
         raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}." +
-                           " If you believe this is an error, you can revert to the old behavior with `@pytorchbot merge -g`" +
+                           " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
                            " (optionally with the ciflow/trunk to get land signals)"
                            ' or use `@pytorchbot merge -f "<some reason here>". ')
     if len(pending_checks) > 0:
