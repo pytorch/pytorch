@@ -1073,7 +1073,7 @@ class P2POp(object):
     ``batch_isend_irecv`` for point-to-point communications.
 
     Args:
-        op (callable): A function to send data to or receive data from a peer process.
+        op (Callable): A function to send data to or receive data from a peer process.
             The type of ``op`` is either ``torch.distributed.isend`` or
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
