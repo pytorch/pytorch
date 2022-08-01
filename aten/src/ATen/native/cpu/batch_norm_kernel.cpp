@@ -18,6 +18,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at { namespace native {
