@@ -1,11 +1,11 @@
 #pragma once
 
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/utils/grad_layout_contract.h>
-#include <torch/csrc/Export.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/utils/grad_layout_contract.h>
+#include <torch/csrc/autograd/variable.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -15,18 +15,26 @@
 
 #include <mutex>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
-#define CHECK_RESULT(RESULT, VAR) \
-  if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || VAR.is_sparse_csr())) { \
-    if (!utils::obeys_layout_contract(RESULT, VAR)) { \
-      TORCH_WARN_ONCE("grad and param do not obey the gradient layout contract. " \
-                      "This is not an error, but may impair performance.\n" \
-                      "grad.sizes() = ", RESULT.sizes(), \
-                      ", strides() = ", RESULT.strides(), "\n", \
-                      "param.sizes() = ", VAR.sizes(), \
-                      ", strides() = ", VAR.strides()); \
-    } \
+#define CHECK_RESULT(RESULT, VAR)                                          \
+  if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
+        VAR.is_sparse_csr())) {                                            \
+    if (!utils::obeys_layout_contract(RESULT, VAR)) {                      \
+      TORCH_WARN_ONCE(                                                     \
+          "grad and param do not obey the gradient layout contract. "      \
+          "This is not an error, but may impair performance.\n"            \
+          "grad.sizes() = ",                                               \
+          RESULT.sizes(),                                                  \
+          ", strides() = ",                                                \
+          RESULT.strides(),                                                \
+          "\n",                                                            \
+          "param.sizes() = ",                                              \
+          VAR.sizes(),                                                     \
+          ", strides() = ",                                                \
+          VAR.strides());                                                  \
+    }                                                                      \
   }
 
 struct TORCH_API AccumulateGrad : public Node {
@@ -34,9 +42,7 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(
-      const Variable& variable,
-      at::Tensor new_grad) {
+  static at::Tensor callHooks(const Variable& variable, at::Tensor new_grad) {
     for (auto& hook : impl::hooks(variable)) {
       new_grad = (*hook)({new_grad})[0];
     }
@@ -64,20 +70,20 @@ struct TORCH_API AccumulateGrad : public Node {
   //
   // If variable's grad already exists (variable_grad.defined()), new_grad must
   // be added to variable_grad.  If we aren't setting up for double backward
-  // (!GradMode::is_enabled()), AccumulateGrad performs "variable_grad += new_grad"
-  // in-place, which keeps variable_grad's layout. We assume (hope) variable_grad
-  // was created obeying (1) or (2) at some point in the past.
+  // (!GradMode::is_enabled()), AccumulateGrad performs "variable_grad +=
+  // new_grad" in-place, which keeps variable_grad's layout. We assume (hope)
+  // variable_grad was created obeying (1) or (2) at some point in the past.
   //
   // If we are setting up for double backward, AccumulateGrad updates the grad
-  // out-of-place via "variable_grad + new_grad."  TensorIterator operator+ decides
-  // result's layout.  Typically TensorIterator matches strides of the first arg,
-  // so we once again assume (hope) variable_grad was originally created obeying
-  // (1) or (2).
+  // out-of-place via "variable_grad + new_grad."  TensorIterator operator+
+  // decides result's layout.  Typically TensorIterator matches strides of the
+  // first arg, so we once again assume (hope) variable_grad was originally
+  // created obeying (1) or (2).
   //
-  // AccumulateGrad does not enforce the contract with 100% certainty.  Examples:
+  // AccumulateGrad does not enforce the contract with 100% certainty. Examples:
   //  - If a user manually permutes a param or its grad, then runs a fwd+bwd,
-  //    variable_grad += new_grad keeps variable_grad's layout without rechecking
-  //    the contract.
+  //    variable_grad += new_grad keeps variable_grad's layout without
+  //    rechecking the contract.
   //  - If TensorIterator changes its corner cases about operator+'s result
   //    (for example, giving more or less priority to channels_last inputs, see
   //    https://github.com/pytorch/pytorch/pull/37968) the result may not obey.
@@ -88,7 +94,7 @@ struct TORCH_API AccumulateGrad : public Node {
 
   // variable: the variable whose grad we're accumulating.
   // variable_grad: the current grad for the variable.
-  // new_grad: new grad we want to acummulate for the variable.
+  // new_grad: new grad we want to accumulate for the variable.
   // num_expected_refs: the number of refs we expect to hold internally
   //                    such that it is safe to avoid cloning the grad
   //                    if use_count() of the grad is less than or equal
@@ -104,17 +110,19 @@ struct TORCH_API AccumulateGrad : public Node {
       size_t num_expected_refs,
       const T& update_grad) {
     if (!variable_grad.defined()) {
-      if (!GradMode::is_enabled() &&
-          !new_grad.is_sparse() && !new_grad.is_sparse_csr() &&
+      if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
+          !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           new_grad.use_count() <= num_expected_refs &&
-          (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
+          (new_grad.is_mkldnn() ||
+           utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
-        // new_grad obeys the "Gradient Layout Contract", there has a special case,
-        // For MKLDNN tensor, which is a opaque tensor, assuming it obeys layout_contract.
-        // Under these conditions, we can steal new_grad without a deep copy.
+        // new_grad obeys the "Gradient Layout Contract", there has a special
+        // case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
+        // layout_contract. Under these conditions, we can steal new_grad
+        // without a deep copy.
         update_grad(new_grad.detach());
       } else if (
           !GradMode::is_enabled() && new_grad.is_sparse() &&
@@ -140,7 +148,8 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.sizes(),
             new_grad.options()));
       } else {
-        if (new_grad.is_sparse() || new_grad.is_sparse_csr()) {
+        if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
+            new_grad.is_nested()) {
           update_grad(new_grad.clone());
         } else {
           if (new_grad.is_mkldnn()) {
@@ -166,8 +175,8 @@ struct TORCH_API AccumulateGrad : public Node {
       } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
         // Ideally we'd perform an in-place operation to avoid changing
         // the grad tensor. However, if that's impossible because the grads
-        // are vmap-incompatible (See NOTE: [vmap-incompatible in-place operations]),
-        // then we just add them out-of-place.
+        // are vmap-incompatible (See NOTE: [vmap-incompatible in-place
+        // operations]), then we just add them out-of-place.
         auto result = variable_grad + new_grad;
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
@@ -199,7 +208,8 @@ struct TORCH_API AccumulateGrad : public Node {
         // } else {
         //   result = at::empty_strided(variable.sizes(), variable.strides(),
         //                              variable.options().memory_format(c10::nullopt));
-        //   update_grad(at::native::add_out(result, variable_grad, new_grad, 1.0);
+        //   update_grad(at::native::add_out(result, variable_grad,
+        //   new_grad, 1.0);
         // }
         // However, that accumulation is sometimes in place and sometimes not,
         // which may break user code.
@@ -207,11 +217,13 @@ struct TORCH_API AccumulateGrad : public Node {
     } else {
       at::Tensor result;
       if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-        // CPU backend throws an error on sparse + dense, so prefer dense + sparse here.
+        // CPU backend throws an error on sparse + dense, so prefer dense +
+        // sparse here.
         result = new_grad + variable_grad;
       } else {
         // Assumes operator+ result typically matches strides of first arg,
-        // and hopes variable_grad was originally created obeying layout contract.
+        // and hopes variable_grad was originally created obeying layout
+        // contract.
         result = variable_grad + new_grad;
       }
       CHECK_RESULT(result, variable);
@@ -225,12 +237,12 @@ struct TORCH_API AccumulateGrad : public Node {
       // such that the stashed grad is likely to have the right strides if
       // either variable_grad or new_grad already has the right strides.
       // We could enforce the contract with certainty by saying
-      // auto result = variable_grad + new_grad (or vice versa), checking result's
-      // layout, and copying to an obedient clone if necessary before update_grad.
-      // The copy would require another gmem pass.  We can't create empty result with
-      // the right layout then add_out into it with a single kernel, because GradMode
-      // is enabled in this branch, and add_out isn't differentiable.
-      // Maybe more trouble than it's worth.
+      // auto result = variable_grad + new_grad (or vice versa), checking
+      // result's layout, and copying to an obedient clone if necessary before
+      // update_grad. The copy would require another gmem pass.  We can't create
+      // empty result with the right layout then add_out into it with a single
+      // kernel, because GradMode is enabled in this branch, and add_out isn't
+      // differentiable. Maybe more trouble than it's worth.
     }
   }
 

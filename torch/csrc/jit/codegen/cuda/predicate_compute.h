@@ -166,6 +166,9 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
       MergedPredicates::Info& merged_predicate_info,
       bool is_start);
 
+  //! Adds new predicates for parallelized domains
+  void addParallelizedDomainPredicates(Expr*);
+
  private:
   //! Track which iter domains have been predicated
   std::unordered_set<UnswitchPredicateKey, UnswitchPredicateKeyHash>

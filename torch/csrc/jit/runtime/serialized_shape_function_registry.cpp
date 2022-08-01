@@ -1714,6 +1714,21 @@ def transpose(self: List[int],
   return output_size
 
 )=====")
++ std::string(R"=====(def conv_backwards(grad_output: List[int],
+    input: List[int],
+    weight: List[int],
+    biases: Optional[List[int]]) -> Tuple[List[int], List[int], List[int]]:
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  out0 = annotate(List[int], [])
+  for _2 in range(torch.len(weight)):
+    elem0 = weight[_2]
+    _3 = torch.append(out0, elem0)
+  return (out, out0, [grad_output[1]])
+
+)=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
     end_dim: int) -> List[int]:
@@ -2100,11 +2115,15 @@ def transpose(self: List[int],
   return _1
 
 )=====")
-+ std::string(R"=====(def mean_dim(self: List[int],
-    dims: List[int],
++ std::string(R"=====(def sum_mean_dim(self: List[int],
+    opt_dims: Optional[List[int]],
     keep_dim: bool,
     dt: Any) -> List[int]:
   out = annotate(List[int], [])
+  if opt_dims is None:
+    dims:List[int] = []
+  else:
+    dims = opt_dims
   for idx in range(torch.len(self)):
     is_mean_dim = False
     for _0 in range(torch.len(dims)):
@@ -2662,6 +2681,24 @@ def native_batch_norm(input: List[int],
     _6 = torch.append(out, elem)
   return out
 
+def nonzero_lower_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  return [0, torch.len(input)]
+
+def nonzero_upper_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  numel = 1
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    numel = torch.mul(numel, elem)
+  return [numel, torch.len(input)]
+
 )=====")
 ;
 
@@ -2669,6 +2706,7 @@ def native_batch_norm(input: List[int],
 const std::string& GetSerializedShapeFunctions() {
   return shape_funcs;
 }
+
 
 const OperatorMap<std::string>& GetShapeFunctionMappings() {
  static const OperatorMap<std::string> shape_mappings {
@@ -2707,14 +2745,15 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
+    {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
-    {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-    {"aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+    {"aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
+    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
     {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
@@ -2734,6 +2773,14 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
+  };
+
+  return shape_mappings;
+}
+
+const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings() {
+ static const OperatorMap<std::pair<std::string, std::string>> shape_mappings {
+    {"aten::nonzero(Tensor self) -> (Tensor)", {"nonzero_lower_bound", "nonzero_upper_bound"}},
   };
 
   return shape_mappings;

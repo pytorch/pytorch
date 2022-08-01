@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
 #include <ATen/MetaFunctions.h>
+#include <torch/torch.h>
 
 #include <vector>
 

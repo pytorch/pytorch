@@ -3,24 +3,26 @@ import functools
 import hashlib
 import os
 import re
+import sys
 import textwrap
 from argparse import Namespace
+from dataclasses import fields, is_dataclass
+from enum import Enum
 from typing import (
-    Tuple,
-    List,
+    Any,
+    Callable,
+    Dict,
     Iterable,
     Iterator,
-    Callable,
-    Sequence,
-    TypeVar,
-    Optional,
-    Dict,
-    Any,
-    Union,
-    Set,
+    List,
     NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
 )
-from enum import Enum
 
 from torchgen.code_template import CodeTemplate
 
@@ -287,3 +289,170 @@ def make_file_manager(
     return FileManager(
         install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run
     )
+
+
+# Helper function to create a pretty representation for dataclasses
+def dataclass_repr(
+    obj: Any,
+    indent: int = 0,
+    width: int = 80,
+) -> str:
+    # built-in pprint module support dataclasses from python 3.10
+    if sys.version_info >= (3, 10):
+        from pprint import pformat
+
+        return pformat(obj, indent, width)
+
+    return _pformat(obj, indent=indent, width=width)
+
+
+def _pformat(
+    obj: Any,
+    indent: int,
+    width: int,
+    curr_indent: int = 0,
+) -> str:
+    assert is_dataclass(obj), f"obj should be a dataclass, received: {type(obj)}"
+
+    class_name = obj.__class__.__name__
+    # update current indentation level with class name
+    curr_indent += len(class_name) + 1
+
+    fields_list = [(f.name, getattr(obj, f.name)) for f in fields(obj) if f.repr]
+
+    fields_str = []
+    for name, attr in fields_list:
+        # update the current indent level with the field name
+        # dict, list, set and tuple also add indent as done in pprint
+        _curr_indent = curr_indent + len(name) + 1
+        if is_dataclass(attr):
+            str_repr = _pformat(attr, indent, width, _curr_indent)
+        elif isinstance(attr, dict):
+            str_repr = _format_dict(attr, indent, width, _curr_indent)
+        elif isinstance(attr, (list, set, tuple)):
+            str_repr = _format_list(attr, indent, width, _curr_indent)
+        else:
+            str_repr = repr(attr)
+
+        fields_str.append(f"{name}={str_repr}")
+
+    indent_str = curr_indent * " "
+    body = f",\n{indent_str}".join(fields_str)
+    return f"{class_name}({body})"
+
+
+def _format_dict(
+    attr: Dict[Any, Any],
+    indent: int,
+    width: int,
+    curr_indent: int,
+) -> str:
+    curr_indent += indent + 3
+    dict_repr = []
+    for k, v in attr.items():
+        k_repr = repr(k)
+        v_str = (
+            _pformat(v, indent, width, curr_indent + len(k_repr))
+            if is_dataclass(v)
+            else repr(v)
+        )
+        dict_repr.append(f"{k_repr}: {v_str}")
+
+    return _format(dict_repr, indent, width, curr_indent, "{", "}")
+
+
+def _format_list(
+    attr: Union[List[Any], Set[Any], Tuple[Any, ...]],
+    indent: int,
+    width: int,
+    curr_indent: int,
+) -> str:
+    curr_indent += indent + 1
+    list_repr = [
+        _pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
+        for l in attr
+    ]
+    start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")
+    return _format(list_repr, indent, width, curr_indent, start, end)
+
+
+def _format(
+    fields_str: List[str],
+    indent: int,
+    width: int,
+    curr_indent: int,
+    start: str,
+    end: str,
+) -> str:
+    delimiter, curr_indent_str = "", ""
+    # if it exceed the max width then we place one element per line
+    if len(repr(fields_str)) >= width:
+        delimiter = "\n"
+        curr_indent_str = " " * curr_indent
+
+    indent_str = " " * indent
+    body = f", {delimiter}{curr_indent_str}".join(fields_str)
+    return f"{start}{indent_str}{body}{end}"
+
+
+class NamespaceHelper:
+    """A helper for constructing the namespace open and close strings for a nested set of namespaces.
+
+    e.g. for namespace_str torch::lazy,
+
+    prologue:
+    namespace torch {
+    namespace lazy {
+
+    epilogue:
+    } // namespace lazy
+    } // namespace torch
+    """
+
+    def __init__(self, namespace_str: str, entity_name: str = "", max_level: int = 2):
+        # cpp_namespace can be a colon joined string such as torch::lazy
+        cpp_namespaces = namespace_str.split("::")
+        assert (
+            len(cpp_namespaces) <= max_level
+        ), f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        self.cpp_namespace_ = namespace_str
+        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
+        self.epilogue_ = "\n".join(
+            [f"}} // namespace {n}" for n in reversed(cpp_namespaces)]
+        )
+        self.namespaces_ = cpp_namespaces
+        self.entity_name_ = entity_name
+
+    @staticmethod
+    def from_namespaced_entity(
+        namespaced_entity: str, max_level: int = 2
+    ) -> "NamespaceHelper":
+        """
+        Generate helper from nested namespaces as long as class/function name. E.g.: "torch::lazy::add"
+        """
+        names = namespaced_entity.split("::")
+        entity_name = names[-1]
+        namespace_str = "::".join(names[:-1])
+        return NamespaceHelper(
+            namespace_str=namespace_str, entity_name=entity_name, max_level=max_level
+        )
+
+    @property
+    def prologue(self) -> str:
+        return self.prologue_
+
+    @property
+    def epilogue(self) -> str:
+        return self.epilogue_
+
+    @property
+    def entity_name(self) -> str:
+        return self.entity_name_
+
+    # Only allow certain level of namespaces
+    def get_cpp_namespace(self, default: str = "") -> str:
+        """
+        Return the namespace string from joining all the namespaces by "::" (hence no leading "::").
+        Return default if namespace string is empty.
+        """
+        return self.cpp_namespace_ if self.cpp_namespace_ else default

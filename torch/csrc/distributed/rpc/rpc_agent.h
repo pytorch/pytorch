@@ -52,31 +52,9 @@ struct RpcBackendOptions {
 
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo : torch::CustomClassHolder {
-  WorkerInfo(std::string name, int64_t id)
-      : WorkerInfo(std::move(name), (worker_id_t)id) {
-    TORCH_CHECK(
-        id <= std::numeric_limits<worker_id_t>::max(),
-        "RPC worker id ",
-        id,
-        " out of bound of int16_t.");
-  }
+  WorkerInfo(std::string name, int64_t id);
 
-  WorkerInfo(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {
-    bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
-    bool validChar =
-        std::find_if(name_.begin(), name_.end(), [](char c) {
-          return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
-        }) == name_.end();
-    TORCH_CHECK(
-        validSize && validChar,
-        "Worker name must match ^[A-Za-z0-9-_:]*$, "
-        "and must be non-empty and shorter than ",
-        MAX_NAME_LEN,
-        " chars, "
-        "but got ",
-        name_);
-  }
+  WorkerInfo(std::string name, worker_id_t id);
 
   bool operator==(const WorkerInfo& rhs) {
     return (id_ == rhs.id_) && (name_ == rhs.name_);
@@ -86,6 +64,10 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
 
   const std::string name_;
   const worker_id_t id_;
+};
+
+struct TORCH_API RegisterWorkerInfoOnce {
+  RegisterWorkerInfoOnce();
 };
 
 TORCH_API std::ostream& operator<<(

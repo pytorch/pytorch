@@ -1,11 +1,9 @@
 import torch
 from torch import Tensor
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor,
-    sharded_op_impl
-)
+from torch.distributed._shard.sharded_tensor import ShardedTensor, _sharded_op_impl
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard._utils import narrow_tensor
+
 
 def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
     """
@@ -33,7 +31,8 @@ def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
             res,
             rhs.sharding_spec(),
             rhs.size(),  # type: ignore[arg-type]
-            process_group=pg)
+            process_group=pg,
+        )
 
     elif isinstance(rhs, ReplicatedTensor):
         assert isinstance(lhs, ShardedTensor)
@@ -49,7 +48,8 @@ def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
             res,
             lhs.sharding_spec(),
             lhs.size(),  # type: ignore[arg-type]
-            process_group=pg)
+            process_group=pg,
+        )
 
     elif isinstance(lhs, (int, float)):
         assert isinstance(rhs, ShardedTensor)
@@ -58,7 +58,8 @@ def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
             res,
             rhs.sharding_spec(),
             rhs.size(),  # type: ignore[arg-type]
-            process_group=pg)
+            process_group=pg,
+        )
 
     elif isinstance(rhs, (int, float)):
         assert isinstance(lhs, ShardedTensor)
@@ -67,16 +68,20 @@ def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
             res,
             lhs.sharding_spec(),
             lhs.size(),  # type: ignore[arg-type]
-            process_group=pg)
+            process_group=pg,
+        )
     else:
         raise RuntimeError(
             f"torch function '{op.__name__}', with args: {args} and "
-            f"kwargs: {kwargs} not supported yet for ShardedTensor!")
+            f"kwargs: {kwargs} not supported yet for ShardedTensor!"
+        )
+
 
 def register_math_op(op):
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     def binary_math_op(types, args=(), kwargs=None, pg=None):
         return binary_math_op_impl(op, types, args, kwargs, pg)
+
 
 binary_ops = [
     # add

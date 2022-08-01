@@ -34,6 +34,7 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
 
   // See test_metadata_check_when_primal_has_neg_bit in test_autograd.py
   m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+  m.impl("_new_zeros_with_same_feature_meta", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
