@@ -621,7 +621,7 @@ class TestOperators(TestCase):
 
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('_masked.mean'),
+        xfail('_masked.mean', device_type='cpu'),
         xfail('_masked.prod'),
 
         # Not actually a problem: embedding with max_norm mutates the weight
