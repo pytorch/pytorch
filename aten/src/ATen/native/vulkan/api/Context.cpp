@@ -42,11 +42,10 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   const VkDescriptorSetLayout shader_layout =
-      shader_layout_cache().retrieve(shader_layout_signature);
+      shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
 
   const VkPipelineLayout pipeline_layout =
       pipeline_layout_cache().retrieve(shader_layout);
@@ -59,7 +58,7 @@ DescriptorSet Context::submit_compute_prologue(
   command_buffer.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
 
   return descriptor_pool().get_descriptor_set(
-      shader_layout, shader_layout_signature);
+      shader_layout, shader_descriptor.kernel_layout);
 }
 
 void Context::submit_compute_epilogue(
