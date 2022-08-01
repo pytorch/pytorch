@@ -20,8 +20,19 @@ struct RecordFunctor {
       : args(std::move(_args)), outputs(std::move(_outputs)) {}
   virtual ~RecordFunctor() = default;
 
+  //! The base class is placing the args and outputs hashed as follows:
+  //! |  0  -  15 | 16 -  31 | 32       -        63 |
+  //! | Outputs   | Args     | Child Class Specified|
   virtual size_t hash() const {
-    return 0;
+    size_t arg_hash = 0;
+    for (auto arg : args) {
+      arg_hash ^= arg;
+    }
+    size_t output_hash = 0;
+    for (auto output : outputs) {
+      output_hash ^= output;
+    }
+    return ((output_hash & 0xffff) << 48) | ((arg_hash & 0xffff) << 32);
   }
 
   //! The base virtual equality operator is defined so all child
@@ -539,6 +550,8 @@ struct VarianceOpRecord : RecordFunctor {
 
 } // namespace nvfuser
 
+//! Creating the template specialized hash and equal_to functions for a
+//! RecordFunctor object in order to use hash maps (unordered_maps) in STL.
 namespace std {
 using namespace nvfuser;
 
