@@ -342,7 +342,7 @@ class Module:
         Buffers can be accessed as attributes using given names.
 
         Args:
-            name (string): name of the buffer. The buffer can be accessed
+            name (str): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor or None): buffer to be registered. If ``None``, then operations
                 that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
@@ -387,7 +387,7 @@ class Module:
         The parameter can be accessed as an attribute using given name.
 
         Args:
-            name (string): name of the parameter. The parameter can be accessed
+            name (str): name of the parameter. The parameter can be accessed
                 from this module using the given name
             param (Parameter or None): parameter to be added to the module. If
                 ``None``, then operations that run on parameters, such as :attr:`cuda`,
@@ -429,7 +429,7 @@ class Module:
         The module can be accessed as an attribute using the given name.
 
         Args:
-            name (string): name of the child module. The child module can be
+            name (str): name of the child module. The child module can be
                 accessed from this module using the given name
             module (Module): child module to be added to the module.
         """
@@ -1705,7 +1705,7 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, Parameter): Tuple containing the name and parameter
+            (str, Parameter): Tuple containing the name and parameter
 
         Example::
 
@@ -1753,7 +1753,7 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, torch.Tensor): Tuple containing the name and buffer
+            (str, torch.Tensor): Tuple containing the name and buffer
 
         Example::
 
@@ -1782,7 +1782,7 @@ class Module:
         the name of the module as well as the module itself.
 
         Yields:
-            (string, Module): Tuple containing a name and child module
+            (str, Module): Tuple containing a name and child module
 
         Example::
 
@@ -1835,7 +1835,7 @@ class Module:
                 or not
 
         Yields:
-            (string, Module): Tuple of name and module
+            (str, Module): Tuple of name and module
 
         Note:
             Duplicate modules are returned only once. In the following
