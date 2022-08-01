@@ -1,4 +1,3 @@
-#include <flatbuffers/base.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 
 #include <ATen/ATen.h>
@@ -21,9 +20,8 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 #include <torch/custom_class.h>
-
-#include <flatbuffers/flatbuffers.h>
 
 #ifndef DISABLE_UPGRADER
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -48,10 +46,6 @@
 
 namespace torch {
 namespace jit {
-
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
 
 static constexpr c10::string_view kCustomClassPrefix =
     "__torch__.torch.classes";
@@ -648,19 +642,60 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 }
 
 mobile::Module parse_and_initialize_mobile_module(
-    std::shared_ptr<char> data,
+    void* data,
     size_t,
     c10::optional<at::Device>,
-    ExtraFilesMap* extra_files) {
+    ExtraFilesMap* extra_files,
+    bool should_copy_tensor_memory) {
   TORCH_CHECK(
-      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
-      "Format error");
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
-  m.set_delete_memory(std::move(data));
+      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
+
+  FlatbufferLoader loader;
+  loader.setShouldCopyTensorMemory(should_copy_tensor_memory);
+
+  // Flatbuffer doesn't seem to have a way to provide the buffer size when
+  // interacting with the buffer.
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
+  mobile::Module m = loader.parseModule(flatbuffer_module);
   if (extra_files != nullptr) {
     parseExtraFiles(flatbuffer_module, *extra_files);
   }
+  return m;
+}
+
+mobile::Module parse_and_initialize_mobile_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    c10::optional<at::Device> device,
+    ExtraFilesMap* extra_files) {
+  mobile::Module m = parse_and_initialize_mobile_module(
+      data.get(),
+      size,
+      device,
+      extra_files,
+      /*should_copy_tensor_memory=*/false);
+  m.set_delete_memory(std::move(data));
+  return m;
+}
+
+mobile::Module parse_and_initialize_mobile_module_for_jit(
+    void* data,
+    size_t,
+    ExtraFilesMap& jit_sources,
+    std::vector<IValue>& jit_constants,
+    c10::optional<at::Device>,
+    ExtraFilesMap* extra_files) {
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
+
+  FlatbufferLoader loader;
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
+  mobile::Module m = loader.parseModule(flatbuffer_module);
+  if (extra_files != nullptr) {
+    parseExtraFiles(flatbuffer_module, *extra_files);
+  }
+
+  loader.extractJitSourceAndConstants(&jit_sources, &jit_constants);
   return m;
 }
 
