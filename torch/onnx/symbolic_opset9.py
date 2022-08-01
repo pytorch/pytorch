@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -17,8 +17,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import _patch_torch, symbolic_helper  # noqa: F401
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -211,6 +210,7 @@ __all__ = [
     "multinomial",
     "mv",
     "narrow",
+    "native_layer_norm",
     "ne",
     "neg",
     "new_empty",
@@ -355,17 +355,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("add", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("sub", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
@@ -1922,6 +1919,13 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    return log_softmax(g, input, dim)
+
+
 @symbolic_helper.parse_args(
     "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
 )
@@ -2201,8 +2205,16 @@ def batch_norm(
         return res
 
 
-@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
-def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+def _layer_norm_returns_normalized_input_mean_rstd(
+    g,
+    input: _C.Value,
+    normalized_shape: Sequence[int],
+    weight: _C.Value,
+    bias: _C.Value,
+    eps: float,
+    cudnn_enable: bool,
+    return_mean_rstd: bool,
+) -> Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
@@ -2213,7 +2225,6 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
             eps_f=eps,
             cudnn_enable_i=cudnn_enable,
         )
-
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
@@ -2225,14 +2236,33 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     denominator = sqrt(g, add(g, variance, eps_cst))
 
-    layer_norm = g.op("Div", numerator, denominator)
+    normalized = g.op("Div", numerator, denominator)
 
     if not (weight is None or symbolic_helper._is_none(weight)):
-        layer_norm = mul(g, layer_norm, weight)
+        normalized = mul(g, normalized, weight)
     if not (bias is None or symbolic_helper._is_none(bias)):
-        layer_norm = add(g, layer_norm, bias)
+        normalized = add(g, normalized, bias)
 
-    return layer_norm
+    if return_mean_rstd:
+        # rdenominator = 1 / sqrt(variance + eps)
+        rdenominator = reciprocal(g, denominator)
+        return normalized, mean, rdenominator
+    return normalized, None, None
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f")
+def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
+    return _layer_norm_returns_normalized_input_mean_rstd(
+        g, input, normalized_shape, weight, bias, eps, False, True
+    )
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
+        g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
+    )
+    return normalized
 
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
