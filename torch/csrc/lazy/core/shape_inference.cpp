@@ -208,6 +208,24 @@ std::vector<Shape> compute_shape_binary_cross_entropy_backward(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_bitwise_and(
+    const at::Tensor& self,
+    const at::Scalar& other) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_bitwise_or(
+    const at::Tensor& self,
+    const at::Scalar& other) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_bitwise_xor(
+    const at::Tensor& self,
+    const at::Scalar& other) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_constant_pad_nd(
     const at::Tensor& self,
     at::IntArrayRef pad,
@@ -704,12 +722,6 @@ std::vector<Shape> compute_shape_random(
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
-std::vector<Shape> compute_shape_bitwise_and(
-    const at::Tensor& self,
-    const at::Scalar& other) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
