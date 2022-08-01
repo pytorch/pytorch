@@ -71,7 +71,7 @@ class L1Loss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -160,7 +160,7 @@ class NLLLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``None``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,
             ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -260,7 +260,7 @@ class PoissonNLLLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -321,7 +321,7 @@ class GaussianNLLLoss(_Loss):
             calculation. Default: ``False``.
         eps (float, optional): value used to clamp ``var`` (see note below), for
             stability. Default: 1e-6.
-        reduction (string, optional): specifies the reduction to apply to the
+        reduction (str, optional): specifies the reduction to apply to the
             output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
             will be applied, ``'mean'``: the output is the average of all batch
             member losses, ``'sum'``: the output is the sum of all batch member
@@ -438,7 +438,7 @@ class KLDivLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is `False`, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: `True`
-        reduction (string, optional): Specifies the reduction to apply to the output. Default: `"mean"`
+        reduction (str, optional): Specifies the reduction to apply to the output. Default: `"mean"`
         log_target (bool, optional): Specifies whether `target` is the log space. Default: `False`
 
     Shape:
@@ -507,7 +507,7 @@ class MSELoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -587,7 +587,7 @@ class BCELoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -684,7 +684,7 @@ class BCEWithLogitsLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -758,7 +758,7 @@ class HingeEmbeddingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -813,7 +813,7 @@ class MultiLabelMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -903,7 +903,7 @@ class SmoothL1Loss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -965,7 +965,7 @@ class HuberLoss(_Loss):
         between the two losses.
 
     Args:
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
@@ -1005,7 +1005,7 @@ class SoftMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1112,7 +1112,7 @@ class CrossEntropyLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,
             ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1199,7 +1199,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1249,7 +1249,7 @@ class CosineEmbeddingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1297,7 +1297,7 @@ class MarginRankingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1369,7 +1369,7 @@ class MultiMarginLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1449,7 +1449,7 @@ class TripletMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1540,7 +1540,7 @@ class TripletMarginWithDistanceLoss(_Loss):
             V. Balntas, E. Riba et al. If True, and if the positive example is closer to the
             negative example than the anchor is, swaps the positive example and the anchor in
             the loss computation. Default: ``False``.
-        reduction (string, optional): Specifies the (optional) reduction to apply to the output:
+        reduction (str, optional): Specifies the (optional) reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
@@ -1617,7 +1617,7 @@ class CTCLoss(_Loss):
 
     Args:
         blank (int, optional): blank label. Default :math:`0`.
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: ``'mean'``
