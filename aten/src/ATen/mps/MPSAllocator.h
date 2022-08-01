@@ -26,6 +26,23 @@
 namespace at {
 namespace mps {
 
+class IMpsAllocatorCallback {
+ public:
+  enum class EventType {
+    ALLOCATED, // buffer got allocated to be used immediately
+    RECYCLED,  // buffer pulled from free list to be reused
+    FREED,     // buffer put to free list for future recycling
+    RELEASED,  // buffer memory released
+  };
+  virtual ~IMpsAllocatorCallback() = default;
+  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
+};
+
+// MPS allocator will execute every registered callback when a block of memory is freed.
+C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+#define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
+  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
+
 namespace HeapAllocator {
 
 #define MB(x) round_page(x * 1048576UL)
@@ -46,13 +63,18 @@ struct HeapBlock;
 struct BufferBlock
 {
   id<MTLBuffer> buffer;
-  size_t size;
+  size_t size; // size after alignment
+  size_t requested_size; // requested size (before alignment)
+  // buffer shape is used for retrieving base of views in cached graphs
+  std::vector<int64_t> shape;
   bool in_use;
   HeapBlock* heap;
   id_t buf_id;
 
-  BufferBlock(size_t Size, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr, id_t BufID = 0) :
-            buffer(Buffer), size(Size), in_use(false), heap(Heap), buf_id(BufID) { }
+  BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr,
+              HeapBlock* Heap = nullptr, id_t BufID = 0) :
+              buffer(Buffer), size(Size), requested_size(RequestedSize),
+              in_use(false), heap(Heap), buf_id(BufID) { }
 
   static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
     return (a->size != b->size) ? a->size < b->size : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
@@ -176,6 +198,9 @@ public:
   void Free(void* ptr);
   void EmptyCache();
   bool isSharedBuffer(void* ptr);
+  ssize_t getRequestedBufferSize(void* ptr);
+  void setBufferShape(void* ptr, const IntArrayRef& shape);
+  IntArrayRef getBufferShape(void* ptr);
 
   inline id<MTLDevice> Device() const { return m_device; }
   void enable_debug_info() { m_enable_debug_info = true; }
@@ -209,6 +234,7 @@ private:
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(const AllocParams& p);
   bool release_cached_buffers();
+  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event);
 
   BufferPool& get_pool(size_t Size, bool useShared) {
       return Size <= kMaxSmallAlloc ? (useShared ? m_small_pool_shared : m_small_pool_private) :

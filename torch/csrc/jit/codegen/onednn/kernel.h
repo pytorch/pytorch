@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
+#include <c10/util/CallOnce.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -83,7 +85,7 @@ class LlgaKernel {
   ArgSpecs outputSpecs_;
   std::vector<dnnl::graph::logical_tensor> constantLogicalTensors_;
   std::string debugName_;
-  std::once_flag initialized_flag;
+  c10::once_flag initialized_flag;
   bool is_initialized_ = false;
 };
 

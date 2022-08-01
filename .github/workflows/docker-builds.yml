@@ -6,6 +6,15 @@ on:
     paths:
       - .circleci/docker/**
       - .github/workflows/docker-builds.yml
+  push:
+    branches:
+      - master
+      - main
+      - release/*
+      - landchecks/*
+    paths:
+      - .circleci/docker/**
+      - .github/workflows/docker-builds.yml
   schedule:
     - cron: 1 3 * * 3
 
@@ -27,17 +36,20 @@ jobs:
           - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
           - docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
           - docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+          - docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
-          - docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
-          - docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+          - docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
+          - docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+          - docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+          - docker-image-name: pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12
           - docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
           - docker-image-name: pytorch-linux-xenial-py3-clang5-asan
-          - docker-image-name: pytorch-linux-xenial-py3-clang7-asan
           - docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
-          - docker-image-name: pytorch-linux-xenial-py3.7-gcc7
           - docker-image-name: pytorch-linux-focal-py3.7-gcc7
+          - docker-image-name: pytorch-linux-focal-py3-clang7-asan
+          - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
@@ -59,9 +71,14 @@ jobs:
       - name: Build docker image
         id: build-docker-image
         uses: ./.github/actions/calculate-docker-image
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          skip_push: false
+          force_push: true
+          push-ghcr-image: ${{ github.event_name == 'push' }}
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image

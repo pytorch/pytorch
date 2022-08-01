@@ -44,6 +44,7 @@
 // See also the function comment of gridReduce.
 
 namespace reduction {
+
 // Reduces all the reduction blocks in each reduction segment. This is the
 // "cleanup" stage of a grid reduction.
 //
@@ -203,10 +204,6 @@ __device__ void gridReduce(
     const nvfuser_index_t n_entrances) {
   T block_reduction_val = init_val;
 
-  // entrance index only matters for non-persistent re-entrant grid reductions.
-  const nvfuser_index_t entrance_ind_ = PERSISTENT_REDUCTION ? 0 : entrance_ind;
-  const nvfuser_index_t n_entrances_ = PERSISTENT_REDUCTION ? 1 : n_entrances;
-
   // Do block reduction when required
   if (X_THREAD || Y_THREAD || Z_THREAD) {
     blockReduce<X_THREAD, Y_THREAD, Z_THREAD>(
@@ -266,7 +263,7 @@ __device__ void gridReduce(
   } else {
     // Use a different sync flag for each call
     grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
-        sync_flags[entrance_ind_ * grid_segment_size + idx_in_grid_segment],
+        sync_flags[entrance_ind * grid_segment_size + idx_in_grid_segment],
         grid_reduction_segment_size);
   }
 
@@ -293,6 +290,72 @@ __device__ void gridReduce(
         sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
   }
 }
+
+// This is just a wrapper of the above grid reduction routine to
+// measure the elapsed cycles. The measurement must be done just by
+// one thread, and in this case it should be done by one of the
+// threads in the last thread block.
+#ifdef PYTORCH_NVFUSER_PROFILE_KERNEL
+template <
+    bool X_BLOCK,
+    bool Y_BLOCK,
+    bool Z_BLOCK,
+    bool X_THREAD,
+    bool Y_THREAD,
+    bool Z_THREAD,
+    bool PERSISTENT_REDUCTION,
+    typename T,
+    typename Func>
+__device__ void gridReduce(
+    T& out,
+    const T& inp_val,
+    Func reduction_op,
+    volatile T* work_buf,
+    int64_t* sync_flags,
+    T* shared_buf,
+    bool read_pred,
+    bool write_pred,
+    T init_val,
+    const nvfuser_index_t entrance_ind,
+    const nvfuser_index_t n_entrances,
+    int64_t& cycles,
+    int64_t& count) {
+  int64_t start_counter = 0;
+
+  if (index_utils::maskedIsLast<true, true, true>(blockIdx, gridDim) &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    start_counter = readCycleCounter();
+  }
+
+  gridReduce<
+      X_BLOCK,
+      Y_BLOCK,
+      Z_BLOCK,
+      X_THREAD,
+      Y_THREAD,
+      Z_THREAD,
+      PERSISTENT_REDUCTION,
+      T,
+      Func>(
+      out,
+      inp_val,
+      reduction_op,
+      work_buf,
+      sync_flags,
+      shared_buf,
+      read_pred,
+      write_pred,
+      init_val,
+      entrance_ind,
+      n_entrances);
+
+  if (index_utils::maskedIsLast<true, true, true>(blockIdx, gridDim) &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    cycles += readCycleCounter() - start_counter;
+    ++count;
+  }
+}
+#endif // PYTORCH_NVFUSER_PROFILE_KERNEL
 
 template <
     bool X_BLOCK,
@@ -371,7 +434,9 @@ __device__ void gridReduceGroup(
     int64_t* sync_flags,
     void* shared_buf,
     bool read_pred,
-    bool write_pred) {
+    bool write_pred,
+    const nvfuser_index_t entrance_ind,
+    const nvfuser_index_t n_entrances) {
   // Number of values to reduce in the reduction segment
   const auto grid_reduction_segment_size =
       index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
@@ -387,13 +452,18 @@ __device__ void gridReduceGroup(
   const auto block_reduction_segment_size =
       index_utils::maskedSize<!X_THREAD, !Y_THREAD, !Z_THREAD>(blockDim);
 
+  // Number of reductions in the grid
+  const nvfuser_index_t grid_segment_size = PERSISTENT_REDUCTION
+      ? 1
+      : index_utils::maskedSize<!X_BLOCK, !Y_BLOCK, !Z_BLOCK>(gridDim);
+
   // advance to the offset for this segment
   // index of reduction * size of the reduction * size of threads
-  work_buf1 += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
+  work_buf1 += (entrance_ind * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
 
-  work_buf2 += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
+  work_buf2 += (entrance_ind * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
 
   gridReduce2PartialReduction<
       X_BLOCK,
@@ -429,8 +499,14 @@ __device__ void gridReduceGroup(
       idx_in_grid_segment,
       block_reduction_segment_size);
 
-  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
-      sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  if (PERSISTENT_REDUCTION) {
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  } else {
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[entrance_ind * grid_segment_size + idx_in_grid_segment],
+        grid_reduction_segment_size);
+  }
 
   bool last_block =
       index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
@@ -464,5 +540,81 @@ __device__ void gridReduceGroup(
         sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
   }
 }
+
+#ifdef PYTORCH_NVFUSER_PROFILE_KERNEL
+template <
+    bool X_BLOCK,
+    bool Y_BLOCK,
+    bool Z_BLOCK,
+    bool X_THREAD,
+    bool Y_THREAD,
+    bool Z_THREAD,
+    bool PERSISTENT_REDUCTION,
+    typename T1,
+    typename Func1,
+    typename T2,
+    typename Func2>
+__device__ void gridReduceGroup(
+    T1& out1,
+    const T1& inp_val1,
+    T1 init_val1,
+    Func1 reduction_op1,
+    volatile T1* work_buf1,
+    T2& out2,
+    const T2& inp_val2,
+    T2 init_val2,
+    Func2 reduction_op2,
+    volatile T2* work_buf2,
+    int64_t* sync_flags,
+    void* shared_buf,
+    bool read_pred,
+    bool write_pred,
+    const nvfuser_index_t entrance_ind,
+    const nvfuser_index_t n_entrances,
+    int64_t& cycles,
+    int64_t& count) {
+  int64_t start_counter = 0;
+
+  if (index_utils::maskedIsLast<true, true, true>(blockIdx, gridDim) &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    start_counter = readCycleCounter();
+  }
+
+  gridReduceGroup<
+      X_BLOCK,
+      Y_BLOCK,
+      Z_BLOCK,
+      X_THREAD,
+      Y_THREAD,
+      Z_THREAD,
+      PERSISTENT_REDUCTION,
+      T1,
+      Func1,
+      T2,
+      Func2>(
+      out1,
+      inp_val1,
+      init_val1,
+      reduction_op1,
+      work_buf1,
+      out2,
+      inp_val2,
+      init_val2,
+      reduction_op2,
+      work_buf2,
+      sync_flags,
+      shared_buf,
+      read_pred,
+      write_pred,
+      entrance_ind,
+      n_entrances);
+
+  if (index_utils::maskedIsLast<true, true, true>(blockIdx, gridDim) &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    cycles += readCycleCounter() - start_counter;
+    ++count;
+  }
+}
+#endif // PYTORCH_NVFUSER_PROFILE_KERNEL
 
 } // namespace reduction

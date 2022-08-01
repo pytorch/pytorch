@@ -354,10 +354,8 @@ Bool* PredicateCompute::getInlinePredicate(
         ->as<Bool>();
   }
 
-  auto pred_info_vec =
-      Index::getReferenceRootPredicates(
-          out_tv, loops, nullptr, pred_type == PredicateType::Padding)
-          .first;
+  auto pred_info_vec = Index::getReferenceRootPredicates(
+      out_tv, loops, nullptr, pred_type == PredicateType::Padding);
 
   std::vector<Bool*> preds;
 
@@ -440,7 +438,14 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   }
 
   const auto gpu_lower = GpuLower::current();
-  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+
+  // FIXME:
+  //   Needed to keep the predicate of cp.async initialization to get the
+  //   inverted predicate,
+  // see [Predicate Inversion for CpAsync]. In a follow up both this part and
+  // the [Predicate Inversion for CpAsync] should be cleaned up together.
+  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr) &&
+      !ir_utils::isCpAsyncInit(tv_expr)) {
     addParallelizedDomainPredicates(tv_expr);
     return;
   }
@@ -459,7 +464,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   // temporarily placed in the predicated_keys map and the final
   // predicates are generated in the finalize function.
 
-  for (const auto& pred_info : ref_pred_info.first) {
+  for (const auto& pred_info : ref_pred_info) {
     TORCH_INTERNAL_ASSERT(pred_info.startPredicate() != nullptr);
     TORCH_INTERNAL_ASSERT(pred_info.stopPredicate() != nullptr);
 

@@ -3,22 +3,21 @@
 import unittest
 
 import onnxruntime  # noqa: F401
-from test_pytorch_common import (
+
+import torch
+from pytorch_test_common import (
     skipIfNoBFloat16Cuda,
     skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
-
-# TODO(justinchuby): Remove reference to other unit tests.
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
-
-import torch
 from torch.cuda.amp import autocast
 from torch.onnx._globals import GLOBALS
+from torch.testing._internal import common_utils
 
 
-class TestONNXRuntime_cuda(unittest.TestCase):
+class TestONNXRuntime_cuda(common_utils.TestCase):
 
     opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = True
@@ -150,4 +149,4 @@ TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
 TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
 
 if __name__ == "__main__":
-    unittest.main(TestONNXRuntime_cuda())
+    common_utils.run_tests()

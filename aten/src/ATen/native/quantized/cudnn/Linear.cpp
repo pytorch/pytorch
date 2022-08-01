@@ -13,7 +13,7 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/quantized/cudnn/utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/ScalarType.h>
