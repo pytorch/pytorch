@@ -352,6 +352,22 @@ class FlatParamHandle:
         finally:
             self._unflatten(as_params=False)
 
+    @torch.no_grad()
+    def _use_low_prec_shard(self):
+        """Allocates and uses the low precision shard."""
+        flat_param = self.flat_param
+        assert getattr(flat_param, "_mp_shard", None) is not None
+        self._alloc_storage(flat_param._mp_shard, flat_param._local_shard.size())
+        # The cast to low precision happens via the copy
+        flat_param._mp_shard.copy_(
+            flat_param._local_shard.to(flat_param._mp_shard.device, non_blocking=True)
+        )
+        flat_param.data = flat_param._mp_shard
+
+    def _flat_param_to(self, *args, **kwargs):
+        """Wraps an in-place ``to()`` call for the handle's ``FlatParameter."""
+        self.flat_param.data = self.flat_param.to(*args, **kwargs)
+
     def init_shard_metadata(
         self,
         sharded_flat_param_numel: int,
@@ -526,3 +542,12 @@ class FlatParamHandle:
         return set(pi.module for pi in self.flat_param._param_infos).union(
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
+
+    @staticmethod
+    def _alloc_storage(tensor: Tensor, size: torch.Size) -> None:
+        already_allocated = (
+            tensor.storage().size() == size.numel()
+        )
+        if not already_allocated:
+            assert tensor.storage().size() == 0, "Tensor storage should have been resized to zero"
+            tensor.storage().resize_(size.numel())

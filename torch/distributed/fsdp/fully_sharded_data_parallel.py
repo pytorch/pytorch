@@ -3250,26 +3250,25 @@ class FullyShardedDataParallel(nn.Module):
         # (because we need to ensure p._full_param_padded stays intact)
         output_tensors: List[Tuple[torch.Tensor, bool]] = []
         with torch.cuda.stream(self._streams["all_gather"]):
-            for p in self.params:
+            for handle in self._handles:
+                p = handle.flat_param
                 mixed_precision_cast_ran = (
                     self._mixed_precision_enabled_for_params()
                     and not force_full_precision
                 )
                 if mixed_precision_cast_ran:
-                    self._cast_param_shards_to_dtype()
-                    # TODO: remove below
-                    for p in self.params:
-                        assert p.dtype == self.mixed_precision.param_dtype
-                # We can skip moving params to GPU if mixed precision, as p.data
-                # would then be pointing to p._mp_shard which is already on
-                # self.compute_device.
+                    with torch.cuda.stream(self._streams["mixed_precision_params"]):
+                        # Since `_mp_shard` is always on GPU, this avoids an
+                        # additional CPU to GPU copy if CPU offloading
+                        handle._use_low_prec_shard()
+                    torch.cuda.current_stream().wait_stream(self._streams["mixed_precision_params"])
                 if self.cpu_offload.offload_params and not mixed_precision_cast_ran:
                     # Move params to GPU if needed. Note that we don't use
                     # self._full_param_padded.device here because the attr is
                     # not set always, i.e. when world_size=1 and
                     # p._is_sharded = False. However when it is set, the
                     # device is always self.compute_device.
-                    p.data = p.data.to(self.compute_device, non_blocking=True)
+                    handle._flat_param_to(self.compute_device, non_blocking=True)
                 # Check the validity of this `_rebuild_full_params()` call in
                 # terms of execution order (regardless of if FSDP actually
                 # needs to all-gather or not)
