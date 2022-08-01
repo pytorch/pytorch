@@ -18,6 +18,7 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fused_reduction.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_sync.cu

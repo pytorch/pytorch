@@ -18,6 +18,7 @@
 #include <nvfuser_resources/array.h>
 #include <nvfuser_resources/array_rocm.h>
 #include <nvfuser_resources/bf16_support.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
@@ -76,6 +77,8 @@ std::string kernelPreamble() {
 #define __align__(x) __attribute__((aligned(x)))
 #endif
   )";
+  // fp16 support is automatic, bf16 is not
+  ss << nvfuser_resources::bf16_support_rocm_cu;
 #endif
 
   // Base classes and helpers
