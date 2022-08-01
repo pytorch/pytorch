@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, slowTest, \
     is_iterable_of_tensors, freeze_rng_state
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
@@ -35,7 +35,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
+RUN_NVFUSER = RUN_CUDA
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
@@ -5001,18 +5001,8 @@ class TestEnableDisableCudaFuser(JitTestCase):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCM test only")
-    def test_register_fuser_rocm(self):
-        with self.assertRaises(RuntimeError):
-            torch._C._jit_set_nvfuser_enabled(True)
-            torch._C._jit_set_nvfuser_enabled(False)
-
     def test_can_be_enabled_nvfuser(self):
-        if TEST_WITH_ROCM:
-            expected = False
-        else:
-            expected = RUN_CUDA
+        expected = RUN_CUDA
 
         self.assertEqual(expected, torch._C._jit_nvfuser_can_be_enabled())
 
