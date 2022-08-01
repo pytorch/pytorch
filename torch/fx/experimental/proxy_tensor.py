@@ -556,6 +556,15 @@ def get_isolated_graphmodule(func, args, kwargs):
 
     unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
+    # Current implementation doesn't support the case when ProxyTensor is
+    # wrapped with another Tensor subclass
+    assert all(
+        getattr(a, "elem", None) is None
+        for a in unwrapped_all_args
+        if isinstance(a, torch.Tensor)
+    ), "ProxyTensor is wrapped with another Tensor subclass"
+
+
     with contextlib.ExitStack() as stack:
         modes = get_torch_dispatch_modes()
         # Disable all torch dispatch modes

@@ -214,6 +214,28 @@ class TestProxyTensor(TestCase):
         self.assertFalse(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
 
+        # Verify interaction with another tensor subclass
+        # This case currently doesn't work and should raise an error
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def f1_logging_tensor(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2_logging_tensor(x):
+            x = LoggingTensor(x)
+            gm = get_isolated_graphmodule(f1_logging_tensor, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        with self.assertRaisesRegex(AssertionError, "ProxyTensor is wrapped with another Tensor subclass"):
+            traced = make_fx(f2_logging_tensor)(torch.randn(3))
+            self.assertFalse(is_any_sum(traced))
+            self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+            self.assertTrue(is_any_digamma(traced))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
         mod = torchvision.models.resnet18()
