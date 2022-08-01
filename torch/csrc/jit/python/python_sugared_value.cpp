@@ -219,7 +219,6 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-#if !defined(USE_ROCM)
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     GraphFunction& m,
@@ -259,7 +258,6 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
-#endif
 
 Value* ModuleValue::asValue(const SourceRange& loc, GraphFunction& m) {
   return self_;
@@ -1199,12 +1197,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
-#ifndef USE_ROCM
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
     if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
-#endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
