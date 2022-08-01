@@ -1115,7 +1115,7 @@ class BackendIndex:
         elif isinstance(g, NativeFunctionsGroup):
             f = self.primary(g)
         else:
-            assert_never(f)
+            assert_never(g)
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
