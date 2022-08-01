@@ -3,9 +3,12 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#include <memory>
+
 namespace c10 {
 
-class SymbolicIntNode;
+class SymIntNodeImpl;
+using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -23,7 +26,7 @@ class SymbolicIntNode;
 // functions.
 //
 // SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymbolicIntNode*] which will be implemented as a single packed int64_t field
+// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
 class C10_API SymInt {
  public:
@@ -39,16 +42,10 @@ class C10_API SymInt {
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
   }
 
-  bool operator==(const SymInt& p2) const {
-    return data_ == p2.data_;
-  }
-
-  bool operator!=(const SymInt& p2) const {
-    return data_ != p2.data_;
-  }
-
   SymInt operator+(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  bool operator==(SymInt sci) const;
+  bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
 
@@ -57,8 +54,8 @@ class C10_API SymInt {
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
 
-  std::shared_ptr<SymbolicIntNode> toSymbolicIntNode() const;
-  static c10::SymInt toSymInt(std::shared_ptr<SymbolicIntNode> sin);
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
     return data_;
@@ -93,7 +90,7 @@ class C10_API SymInt {
   static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & ~(1ULL << 62);
+  static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 

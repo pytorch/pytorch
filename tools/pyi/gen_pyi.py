@@ -433,6 +433,12 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_from_functional_tensor": [
+                "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
+            "_to_functional_tensor": [
+                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -690,8 +696,8 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
