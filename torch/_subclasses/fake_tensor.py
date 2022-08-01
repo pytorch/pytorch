@@ -132,7 +132,10 @@ class FakeTensorConverter(object):
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
-            out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
+            meta_t = self.meta_converter(t)
+            if meta_t.device.type != "meta":
+                raise UnsupportedFakeTensorException("meta converter nyi")
+            out = FakeTensor(fake_mode, meta_t, existing_device)
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         self.set_tensor_memo(t, out)
@@ -146,10 +149,21 @@ class FakeTensorConverter(object):
         self.set_tensor_memo(t, out)
         return out
 
+    # There are two ways to call this.  First, you can have manually constructed
+    # a meta tensor and you need to turn it into a fake tensor.  In that case,
+    # pass a meta tensor and a device argument.  Alternately, you can have a
+    # real tensor that you need to convert into a fake tensor; in that case,
+    # omit the device.
+    #
+    # The disallowed case: if you specify the device, it MUST be a meta tensor.
+    # However, you're allowed to pass a meta tensor to be turned into a fake
+    # tensor; although an odd thing to do, this can occur if you're doing
+    # cross ref testing and the inner test is already operating on meta tensors
     def __call__(self, fake_mode, t, device=None):
         if device is None:
             return self.from_real_tensor(fake_mode, t)
         else:
+            assert t.device.type == "meta"
             return self.from_meta_and_device(fake_mode, t, device)
 
 
@@ -213,17 +227,8 @@ def resize_as_(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten._sparse_coo_tensor_with_dims_and_tensors.default)
 def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
-    # deal with device
-    # deal with non-meta inputs
-    sd, dd, sz, indices, values = args
-    if indices.fake_is_meta and values.fake_is_meta:
-        return constructors(fake_mode, func, *args, **kwargs)
-    else:
-        not_implemented_error = NotImplementedError("sparse coo tensor constructor")
-        if not fake_mode.allow_fallback_kernels:
-            raise not_implemented_error
-        r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
-        return fake_mode.fake_tensor_converter(fake_mode, r)
+    # TODO: remove me
+    return constructors(fake_mode, func, *args, **kwargs)
 
 
 # _to_copy fails when run with FakeTensors to cuda device
@@ -336,16 +341,16 @@ class FakeTensor(torch.Tensor):
         )
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
-        # elem does not need to be recorded, because FakeTensor *is a* elem
-        # assert elem.device.type == "meta", elem.device.type
+        assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
+        # NB: it is fine, if a little confusing, for device to be meta
+        # (we are faking a meta tensor in that case)
         # normalize cuda device
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device
         self.fake_mode = fake_mode
         self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
-        self.fake_is_meta = elem.device.type == "meta"
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -561,10 +566,9 @@ class FakeTensorMode(TorchDispatchMode):
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
             subclass_seen = False
-            non_meta_elem = False
 
             def check_non_fake_tensor(x):
-                nonlocal conversion_made, subclass_seen, non_meta_elem
+                nonlocal conversion_made, subclass_seen
                 conversion_made = conversion_made or (
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
                 )
@@ -572,9 +576,6 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(x, torch.Tensor)
                     and not isinstance(x, FakeTensor)
                     and type(x) is not torch.Tensor
-                )
-                non_meta_elem = non_meta_elem or (
-                    isinstance(x, FakeTensor) and not x.fake_is_meta
                 )
 
             tree_map(check_non_fake_tensor, args)
@@ -626,10 +627,6 @@ class FakeTensorMode(TorchDispatchMode):
 
             with in_kernel_invocation_manager(self):
                 try:
-                    if non_meta_elem:
-                        raise NotImplementedError(
-                            "one input is not representable as meta"
-                        )
                     r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
@@ -651,8 +648,6 @@ class FakeTensorMode(TorchDispatchMode):
                             func, args, kwargs
                         )
                     if is_fallback:
-                        # mikoHmm
-                        # assert torch.device(device or common_device) == e.device
                         return converter(self, e)
                     else:
                         return converter(self, e, device or common_device)
