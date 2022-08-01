@@ -8,8 +8,8 @@ from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from unittest import main, skip
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
+from unittest import skip
 import torch
 import gc
 
@@ -590,4 +590,4 @@ for n in skip_functorch_only:
 
 
 if __name__ == '__main__':
-    main()
+    run_tests()
