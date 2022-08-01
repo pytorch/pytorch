@@ -25,7 +25,7 @@ from typing import (
     Union,
 )
 
-from typing_extension import Literal
+from typing_extensions import Literal
 
 from torchgen.code_template import CodeTemplate
 
