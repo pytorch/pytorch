@@ -564,8 +564,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
-  // TODO: make it non-virtual after a change to XLA
-  virtual c10::SymInt sym_numel() const {
+  c10::SymInt sym_numel() const {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
@@ -764,7 +763,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
-    return numel_.expect_int();
+    return numel_.as_int_unchecked();
   }
 
  public:

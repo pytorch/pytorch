@@ -209,7 +209,9 @@ void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
   bool reset_tensor = false;
-  int concrete_numel = numel_.expect_int();
+
+  TORCH_CHECK(!numel_.is_symbolic(), "CAFFE2 doesn't support SymInts");
+  int concrete_numel = numel_.as_int_unchecked();
   if (reserved_) {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
@@ -699,7 +701,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
           (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
-  auto oldSize = numel_.expect_int();
+  auto oldSize = numel_.as_int_unchecked();
   Resize(newCapacity);
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
@@ -735,7 +737,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
       "Right now ReserveSpace is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "ReserveSpace() called on tensor with symbolic shape")
+      "ReserveSpace() called on tensor with symbolic shape");
 
   TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
@@ -767,7 +769,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
       "Right now Reshape is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "Reshape() called on tensor with symbolic shape")
+      "Reshape() called on tensor with symbolic shape");
 
   int64_t new_size = 1;
   for (auto d : dims) {
@@ -775,7 +777,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
     new_size *= d;
   }
   TORCH_CHECK(
-      new_size == numel_.expect_int(),
+      new_size == numel_.as_int_unchecked(),
       "New size and old size are not equal. You cannot use Reshape, "
       "but should use Resize."
       // TODO(jiayq): remove the following warning after pending diffs
@@ -837,8 +839,11 @@ void TensorImpl::ShareExternalPointer(
       data_type != ScalarType::Undefined,
       "To share with a raw external pointer you need to pass in an "
       "initialized data_type(TypeMeta).");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "ReserveSpace() called on tensor with symbolic shape");
   if (!size_bytes) {
-    size_bytes = numel_.expect_int() * data_type.itemsize();
+    size_bytes = numel_.as_int_unchecked() * data_type.itemsize();
   }
   if (storage_.unique()) {
     storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
