@@ -25163,6 +25163,41 @@ TEST_F(NVFuserTest, FusionInlinePropagatorMismatchedDims3_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionInlinePropagatorMismatchedDims4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 3, 4});
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = exp(tv1);
+  auto tv3 = relu(tv2);
+  auto tv4 = cos(tv3);
+  auto tv5 = tan(tv4);
+  fusion.addOutput(tv5);
+
+  tv3->merge(1);
+  InlinePropagator inline_propagator(tv0, -1, ComputeAtMode::MostInlined);
+  MaxRootDomainInfoSpanningTree(tv0).traverse(&inline_propagator);
+
+  TORCH_CHECK(tv5->getComputeAtPosition() == 3);
+  TORCH_CHECK(tv4->getComputeAtPosition() == 3);
+  TORCH_CHECK(tv3->getComputeAtPosition() == 1);
+  TORCH_CHECK(tv2->getComputeAtPosition() == 1);
+  TORCH_CHECK(tv1->getComputeAtPosition() == 3);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({2, 3, 4}, options);
+  auto output = input.sin().exp().relu().cos().tan();
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input});
+  auto cg_outputs = fe.runFusion({input});
+
+  testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionInlinePropagatorBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

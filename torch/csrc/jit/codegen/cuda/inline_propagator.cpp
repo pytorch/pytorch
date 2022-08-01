@@ -113,15 +113,15 @@ size_t MaxPosCalculator::getMaxProducerPosFromConsumer(
 
   for (size_t producer_pos = 0; producer_pos < producer->nDims();
        producer_pos++) {
+    // If the producer position is mismatching with the consumer, then we can
+    // not inline into this position, otherwise the max producer position of
+    // the consumer will become invalid and expression sort will fail.
+    if (TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+            consumer, producer, producer_pos + 1) < 0) {
+      return producer_pos;
+    }
     auto map_it = p2c_replay_map.find(producer->axis(producer_pos));
     if (map_it != p2c_replay_map.end()) {
-      // If the producer position is mismatching with the consumer, then we can
-      // not inline into this position, otherwise the max producer position of
-      // the consumer will become invalid and expression sort will fail.
-      if (TransformReplay::getMatchedLeafPosWithoutReplayCasP(
-              consumer, producer, producer_pos + 1) < 0) {
-        return producer_pos;
-      }
       auto c_id = map_it->second;
       if (!isAllowedID(c_id, consumer, true, false, true)) {
         return producer_pos;
