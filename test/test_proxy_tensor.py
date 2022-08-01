@@ -430,6 +430,8 @@ make_fx_failures = {
 
     # ???
     xfail('nn.functional.ctc_loss'),
+    # proxy tensor doesn't support sparse correctly right now
+    skip('to_sparse'),
     # segfaults
     skip('block_diag'),
 }

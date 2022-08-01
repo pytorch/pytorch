@@ -629,7 +629,9 @@ class FakeTensorMode(TorchDispatchMode):
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
                         raise not_implemented_error
-                    return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
+                    return run_fallback_kernel(
+                        self, func, args, kwargs, not_implemented_error
+                    )
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -697,7 +699,9 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
         # input impl
         for e in tree_flatten(r)[0]:
             if id(e) not in inp_impls and (
-                isinstance(e, torch.Tensor) and not e.is_sparse and e.storage()._cdata in storages
+                isinstance(e, torch.Tensor)
+                and not e.is_sparse
+                and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
 
