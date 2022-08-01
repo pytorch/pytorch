@@ -3,7 +3,6 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
 #include <c10/cuda/CUDAGuard.h>

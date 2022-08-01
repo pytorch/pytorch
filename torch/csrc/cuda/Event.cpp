@@ -4,7 +4,6 @@
 #include <torch/csrc/cuda/Event.h>
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 

@@ -8,7 +8,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
-#include <torch/csrc/utils/pybind.h>
 #include <climits>
 #include <memory>
 #include <sstream>

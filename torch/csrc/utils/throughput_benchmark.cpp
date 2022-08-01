@@ -2,7 +2,6 @@
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace throughput_benchmark {

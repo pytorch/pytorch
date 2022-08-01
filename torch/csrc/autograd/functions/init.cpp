@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/python_functions.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/autograd/python_variable.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #endif
