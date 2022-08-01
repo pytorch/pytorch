@@ -9,6 +9,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
