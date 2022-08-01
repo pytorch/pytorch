@@ -6,9 +6,20 @@ import re
 import textwrap
 import unittest
 
+import expecttest
+
 import torch
+from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+
+
+# These functions can vary from based on platform and build (e.g. with CUDA)
+# and generally distract from rather than adding to the test.
+PRUNE_FUNCTIONS = {
+    "torch/profiler/profiler.py(...): start",
+    "torch/profiler/profiler.py(...): stop_trace",
+}
 
 
 class ProfilerTree:
@@ -42,12 +53,22 @@ class ProfilerTree:
                 out = []
 
             for node in nodes:
-                out.append((depth, cls.fmt_name(node.name())))
-                flatten(node.children, depth + 1, out)
+                cls.validate_node(node)
+                name = cls.fmt_name(node.name())
+                if name.strip() not in PRUNE_FUNCTIONS:
+                    out.append((depth, name))
+                    flatten(node.children, depth + 1, out)
+                else:
+                    out.append((depth, "..."))
 
             return out
 
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
+
+        # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
+        if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-1]
+
         min_depth = min([d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0])
         return textwrap.indent(
             "\n".join([f"{'  ' * (d - min_depth)}{name.rstrip()}" for d, name in flat_nodes if d >= min_depth]),
@@ -62,7 +83,7 @@ class ProfilerTree:
 
         match = re.match(r"(.*)\.py\(([0-9]+)\): (.*)$", name)
         if match:
-            filename, lineno, fn = match.groups()
+            filename, _, fn = match.groups()
 
             # This test can appear as `test/test_profiler_tree.py` depending on
             # where it is run from.
@@ -73,13 +94,36 @@ class ProfilerTree:
             filename = filename.replace(os.sep, "/")
 
             # We don't want to have to update this test every time PyTorch changes.
-            lineno = lineno if os.path.split(filename.strip())[1] == "test_profiler_tree" else "..."
+            # At some point we should test some line numbers, but for now it's
+            # too brittle.
+            lineno = "..."
+
             return f"{filename}.py({lineno}): {fn}"
 
         return re.sub(
             "object at 0x[0-9a-fA-F]+>",
             "object at 0xXXXXXXXXXXXX>",
             name)
+
+    @classmethod
+    def validate_node(cls, node):
+        extra_fields = node.extra_fields
+        if isinstance(extra_fields, (_ExtraFields_PyCall, _ExtraFields_PyCCall)):
+            # Check that the lineage established by the profiler matches the
+            # caller recorded by the Python tracer.
+            parent = node.parent
+            while parent is not None:
+                if isinstance(parent.extra_fields, _ExtraFields_PyCall):
+                    break
+                parent = parent.parent
+
+            def to_string(frame_state):
+                return f"{frame_state.file_name}(...): {frame_state.function_name}"
+
+            if parent:
+                parent_name = to_string(parent.extra_fields.callsite)
+                caller_name = to_string(extra_fields.caller)
+                assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str):
@@ -96,6 +140,11 @@ class TestProfilerTree(TestCase):
         # simply coerce them into a platform independent form. If you made a
         # change in the codebase which changes the trace produced, simply use
         # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
+
+        # expecttest will not show the diff view if `len(actual) < len(expected)`
+        if not expecttest.ACCEPT:
+            actual = actual.ljust(len(expected))
+        self.maxDiff = None
 
         replicate = getattr(self, "tree_replicate", None)
         self.assertIsNotNone(replicate, "Please annotate test with `@ProfilerTree.test`")
@@ -297,7 +346,6 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(torch.has_cuda, "CUDA invokes extra Python functions.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -310,17 +358,9 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(304): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
-                torch/profiler/profiler.py(...): start
-                  torch/profiler/profiler.py(...): _transit_action
-                    torch/profiler/profiler.py(...): start_trace
-                      torch/autograd/profiler.py(...): _start_trace
-                      <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX>
-                      torch/profiler/profiler.py(...): _get_distributed_info
-                        torch/distributed/__init__.py(...): is_available
-                          <built-in function hasattr>
-                        torch/distributed/distributed_c10d.py(...): is_initialized
+                ...
               <built-in method add of type object at 0xXXXXXXXXXXXX>
                 aten::add
                   [memory]
@@ -401,13 +441,10 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    torch/profiler/profiler.py(...): stop_trace
-                      torch/autograd/profiler.py(...): __exit__
-                        <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""
+                    ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(torch.has_cuda, "CUDA invokes extra Python functions.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
@@ -432,24 +469,16 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(428): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
-                torch/profiler/profiler.py(...): start
-                  torch/profiler/profiler.py(...): _transit_action
-                    torch/profiler/profiler.py(...): start_trace
-                      torch/autograd/profiler.py(...): _start_trace
-                      <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX>
-                      torch/profiler/profiler.py(...): _get_distributed_info
-                        torch/distributed/__init__.py(...): is_available
-                          <built-in function hasattr>
-                        torch/distributed/distributed_c10d.py(...): is_initialized
+                ...
               <built-in method ones of type object at 0xXXXXXXXXXXXX>
                 aten::ones
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(422): forward
+                test_profiler_tree.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -490,7 +519,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(422): forward
+                test_profiler_tree.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -531,9 +560,7 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    torch/profiler/profiler.py(...): stop_trace
-                      torch/autograd/profiler.py(...): __exit__
-                        <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""
+                    ..."""
         )
 
 if __name__ == '__main__':
