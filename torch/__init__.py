@@ -1,7 +1,6 @@
 
 r"""
-The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
+PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
