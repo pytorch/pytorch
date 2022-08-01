@@ -594,6 +594,8 @@
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: allclose
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator

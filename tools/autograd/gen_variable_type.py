@@ -145,6 +145,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "isinf",
     "signbit",
     "isin",
+    "allclose",
     # Functions return none are not differentiable
     "record_stream",
     # These functions are not differentiable
