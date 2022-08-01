@@ -536,6 +536,15 @@ a bug if you need this)""")
 maybe_disable_proxy_tensor_mode = functools.partial(maybe_disable_tensor_mode, ProxyTorchDispatchMode)
 
 
+def get_torch_dispatch_modes():
+    modes = [torch._C._get_torch_dispatch_mode()]
+    if modes[-1] is None:
+        return list()
+    while modes[-1].inner is not None:
+        modes.append(modes[-1].inner)
+    return modes
+
+
 def get_isolated_graphmodule(func, args, kwargs):
     """A helper function used to get the GraphModule for the given func.
 
@@ -554,7 +563,14 @@ def get_isolated_graphmodule(func, args, kwargs):
     unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
     with contextlib.ExitStack() as stack:
-        while torch._C._get_torch_dispatch_mode() is not None:
-            stack.enter_context(maybe_disable_proxy_tensor_mode())
+        modes = get_torch_dispatch_modes()
+        # Disable all torch dispatch modes
+        for mode in modes:
+            stack.enter_context(enable_torch_dispatch_mode(mode.inner, replace=mode))
+        assert torch._C._get_torch_dispatch_mode() is None
+
+        # Enable all torch dispatch modes except ProxyTorchDispatchMode
+        for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
+            stack.enter_context(mode.push())
         gm = make_fx(wrapped)(unwrapped_all_args)
     return gm

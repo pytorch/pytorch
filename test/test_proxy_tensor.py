@@ -193,6 +193,27 @@ class TestProxyTensor(TestCase):
         self.assertTrue(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
 
+        # Verify interaction with non-ProxyTensor modes
+        from torch.testing._internal.logging_tensor import LoggingTensorMode
+
+        def f1_logging(x):
+            with LoggingTensorMode():
+                gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2_logging(x):
+            with LoggingTensorMode(), LoggingTensorMode():
+                gm = get_isolated_graphmodule(f1_logging, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2_logging)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
         mod = torchvision.models.resnet18()
