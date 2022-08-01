@@ -172,7 +172,8 @@ struct EventFieldsVisitor {
     result->visit([&, this](const auto& i) -> void {
       c10::guts::if_constexpr<is_py_fields<decltype(i)>()>(
           [&, this](auto _) -> void {
-            this->addMetadata("Python thread", std::to_string(_(i).python_tid_));
+            this->addMetadata(
+                "Python thread", std::to_string(_(i).python_tid_));
             this->addMetadata("Python id", std::to_string(_(i).id_));
 
             std::string parent_id = "null";
@@ -180,7 +181,7 @@ struct EventFieldsVisitor {
               // Update parent_id the first time we see a Python Result
               constexpr bool is_python_parent = is_py_fields<decltype(j)>();
               c10::guts::if_constexpr<is_python_parent>([&](auto _) -> void {
-                parent_id = std::to_string(_(j).python_tid_);
+                parent_id = std::to_string(_(j).id_);
               });
 
               // And then break out of the update loop.
