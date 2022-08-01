@@ -16,7 +16,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     NoReturn,
     Optional,
     Sequence,
@@ -25,6 +24,8 @@ from typing import (
     TypeVar,
     Union,
 )
+
+from typing_extension import Literal
 
 from torchgen.code_template import CodeTemplate
 
