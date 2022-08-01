@@ -5,39 +5,19 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
-import sys
-import os
-import platform
-import re
-import gc
-import types
-import math
+import sys, os, platform, re, gc, types, math
 from functools import partial
-import inspect
-import io
-import copy
-import operator
-import argparse
-import unittest
-import warnings
-import random
-import contextlib
-import shutil
-import threading
+import inspect, io, copy, operator, argparse, unittest, warnings, random, contextlib, shutil, threading
 from pathlib import Path
-import socket
-import subprocess
-import time
+import socket, subprocess, time
 from collections.abc import Sequence, Mapping
 from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
 from copy import deepcopy
-import tempfile
-import json
+import tempfile, json
 import __main__  # type: ignore[import]
-import errno
-import ctypes
+import errno, ctypes
 from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
 from unittest.mock import MagicMock
 
