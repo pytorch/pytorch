@@ -382,12 +382,12 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
 
 TORCH_IMPL_FUNC(mean_out_mps)
    (const Tensor& input_t,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> dtype,
     const Tensor& output_t) {
 
-    reduction_out_mps(input_t, dim, keepdim, dtype, output_t, MPSReductionType::MEAN, "mean_out_mps");
+    reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, MPSReductionType::MEAN, "mean_out_mps");
 }
 
 TORCH_IMPL_FUNC(norm_out_mps)

@@ -740,10 +740,6 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.empty_like(x), x)
 
-    def test_empty_like_opset7(self):
-        x = torch.randn(5, 8, requires_grad=True)
-        self.assertONNX(lambda x: torch.empty_like(x), x, opset_version=7)
-
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.zeros_like(x), x)

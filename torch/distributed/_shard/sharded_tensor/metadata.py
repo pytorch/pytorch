@@ -58,6 +58,15 @@ class TensorProperties(object):
 
         self.memory_format = memory_format
 
+    @staticmethod
+    def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        return TensorProperties(
+            dtype=tensor.dtype,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+            memory_format=torch.contiguous_format,
+            pin_memory=tensor.is_pinned()
+        )
 @dataclass
 class ShardedTensorMetadata(object):
     """
