@@ -216,6 +216,7 @@ class TestProxyTensor(TestCase):
 
         # Verify interaction with another tensor subclass
         # This case currently doesn't work and should raise an error
+        # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
         from torch.testing._internal.logging_tensor import LoggingTensor
 
         def f1_logging_tensor(x):

@@ -558,6 +558,7 @@ def get_isolated_graphmodule(func, args, kwargs):
 
     # Current implementation doesn't support the case when ProxyTensor is
     # wrapped with another Tensor subclass
+    # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
     assert all(
         getattr(a, "elem", None) is None
         for a in unwrapped_all_args
