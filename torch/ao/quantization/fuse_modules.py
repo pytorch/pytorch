@@ -154,7 +154,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         is_qat=False,
         inplace=inplace,
         fuser_func=fuse_known_modules,
-        fuse_custom_config_dict=None)
+        fuse_custom_config_dict=fuse_custom_config_dict)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     """ QAT version for `fuse_modules`
