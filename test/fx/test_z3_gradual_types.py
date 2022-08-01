@@ -769,31 +769,6 @@ class HFOperations(unittest.TestCase):
         assert s.model()[embedding_result].arg(1).arg(1) == B[1]
         assert s.model()[embedding_result].arg(2).arg(1) == B[2]
 
-        # # change the type. This should still be satisfiable
-        # for n in traced.graph.nodes:
-        #     if n.op == 'placeholder':
-        #         n.type = TensorType([Dyn, Dyn])
-        #
-        # transformed = transform_all_constraints(traced, counter=0)
-        # s = z3.Solver()
-        # s.add(transformed)
-        # self.assertEquals(s.check(), z3.sat)
-        # assert s.model()[embedding_result].arg(0).arg(0) == 0
-        # assert s.model()[embedding_result].arg(1).arg(0) == 0
-        # assert s.model()[embedding_result].arg(2).arg(1) == B[2]
-        #
-        # # change the type to Dyn. Here, we will get an arbitirary migration
-        # for n in traced.graph.nodes:
-        #     if n.op == 'placeholder':
-        #         n.type = Dyn
-        #
-        # transformed = transform_all_constraints(traced, counter=0)
-        # s = z3.Solver()
-        # s.add(transformed)
-        #
-        # self.assertEquals(s.check(), z3.sat)
-
-
     def test_size_two_args(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
