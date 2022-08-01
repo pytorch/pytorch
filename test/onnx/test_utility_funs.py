@@ -31,6 +31,7 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
@@ -1085,6 +1086,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[0].op_type, "Gelu")
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
+    @skipIfNoLapack
     @unittest.skip("It started failing after #80074")
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
@@ -1303,6 +1305,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 "Graph parameter names does not match model parameters.",
             )
 
+    @skipIfNoCaffe2
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
             def __init__(self):

@@ -138,7 +138,7 @@ class MIOPENWrapper
         {
           sync_state.state.reset(new MIOPENState(context_->device_id()));
         }
-        CHECK_NOTNULL(sync_state.state.get())->execute(context_->hip_stream(), f);
+        TORCH_CHECK_NOTNULL(sync_state.state.get())->execute(context_->hip_stream(), f);
     }
 
     protected:
