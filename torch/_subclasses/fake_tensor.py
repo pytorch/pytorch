@@ -9,7 +9,7 @@ from typing import Callable, Union
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
-from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
+from torch._subclasses.meta_utils import MetaConverter, safe_is_leaf, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
@@ -137,6 +137,8 @@ class FakeTensorConverter(object):
             out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
+        if safe_is_leaf(t) and t.grad is not None:
+            out.grad = self.from_real_tensor(fake_mode, t.grad)
         self.set_tensor_memo(t, out)
         return out
 
