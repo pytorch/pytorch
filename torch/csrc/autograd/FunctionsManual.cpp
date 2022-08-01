@@ -587,8 +587,7 @@ Tensor nansum_backward(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self, dims, keepdim) *
-      self.isnan().logical_not();
+  return sum_backward(grad, self, dims, keepdim) * self.isnan().logical_not();
 }
 
 Tensor mean_backward(
@@ -1503,11 +1502,7 @@ Tensor var_mean_backward(
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
-        gmean,
-        self,
-        dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
-        keepdim);
+        gmean, self, dim_opt.value_or(IntArrayRef({})), self.numel(), keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
   return gself;
@@ -1528,11 +1523,7 @@ Tensor std_mean_backward(
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
-        gmean,
-        self,
-        dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
-        keepdim);
+        gmean, self, dim_opt.value_or(IntArrayRef({})), self.numel(), keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
   return gself;
