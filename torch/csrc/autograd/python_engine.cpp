@@ -13,7 +13,6 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
 #ifndef _WIN32
