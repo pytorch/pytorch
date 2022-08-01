@@ -1727,7 +1727,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: _node_getitem(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
             if _need_symbolic_context(symbolic_fn):
                 ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1738,13 +1738,13 @@ def _run_symbolic_function(
             return symbolic_fn(g, *inputs, **attrs)
         elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: _node_getitem(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
         elif _should_aten_fallback(
             namespace, op_name, opset_version, operator_export_type
         ):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: _node_getitem(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
@@ -1768,7 +1768,7 @@ def _run_symbolic_function(
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: _node_getitem(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
@@ -1891,9 +1891,3 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
-
-
-def _node_getitem(node: _C.Node, key: str):
-    """Gets attributes of a node which is polymorphic over return type."""
-    sel = node.kindOf(key)
-    return getattr(node, sel)(key)
