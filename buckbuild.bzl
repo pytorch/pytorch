@@ -146,7 +146,7 @@ THIRD_PARTY_LIBS = {
 
 def third_party(name):
     if name not in THIRD_PARTY_LIBS:
-        fail("Cannot find thrid party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
+        fail("Cannot find third party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
     return THIRD_PARTY_LIBS[name][1] if IS_OSS else THIRD_PARTY_LIBS[name][0]
 
 def get_pt_compiler_flags():
