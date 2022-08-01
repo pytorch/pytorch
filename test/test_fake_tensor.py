@@ -143,7 +143,6 @@ class FakeTensorTest(TestCase):
         x.grad = torch.rand([4, 4])
         mode = FakeTensorMode()
         fake_x = mode.from_tensor(x)
-        self.assertEq
         prims.utils.compare_tensor_meta(fake_x, x)
         prims.utils.compare_tensor_meta(fake_x.grad, x.grad)
 
