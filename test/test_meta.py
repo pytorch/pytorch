@@ -872,6 +872,10 @@ class TestMeta(TestCase):
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
 
+    def test_empty_quantized(self):
+        r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
+        self.assertEqual(r.device.type, 'meta')
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):
