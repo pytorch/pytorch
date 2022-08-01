@@ -3464,7 +3464,7 @@ def eye(
         device=device,
         pin_memory=pin_memory,
         layout=layout,
-        requires_grad=requires_grad
+        requires_grad=requires_grad,
     )
 
     # cast to the right dtype and convert from a view
