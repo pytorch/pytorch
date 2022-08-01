@@ -1,5 +1,5 @@
-#include <c10/core/SymIntNodeImpl.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymIntNodeImpl.h>
 
 namespace c10 {
 

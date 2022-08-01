@@ -1,9 +1,9 @@
 #pragma once
 
+#include <c10/core/SymIntNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/core/SymIntNodeImpl.h>
 
 #include <memory>
 
@@ -55,7 +55,8 @@ class C10_API SymInt {
   }
   SymInt& operator=(SymInt&& s) {
     data_ = s.data_;
-    if (s.is_symbolic()) s.data_ = 0;
+    if (s.is_symbolic())
+      s.data_ = 0;
     return *this;
   }
 
@@ -64,12 +65,13 @@ class C10_API SymInt {
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
-    return static_cast<SymIntNodeImpl*>(reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
+    return static_cast<SymIntNodeImpl*>(
+        reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
   ~SymInt() {
     if (is_symbolic()) {
-      SymIntNode::reclaim(toSymIntNodeImplUnowned());  // steal
+      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
 
