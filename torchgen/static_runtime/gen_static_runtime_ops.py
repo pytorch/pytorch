@@ -16,9 +16,7 @@ from torchgen.static_runtime import config, generator
 
 NativeGroupT = TypeVar(
     "NativeGroupT",
-    NativeFunctionsGroup,
-    NativeFunctionsViewGroup,
-    Union[NativeFunctionsGroup, NativeFunctionsViewGroup],
+    bound=Union[NativeFunctionsGroup, NativeFunctionsViewGroup],
 )
 
 
