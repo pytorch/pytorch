@@ -1373,6 +1373,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: constant_pad_nd
+    MPS: constant_pad_nd_mps
 
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   variants: method
