@@ -623,16 +623,13 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
-            is_fallback = False
-
             with in_kernel_invocation_manager(self):
                 try:
                     r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
                         raise not_implemented_error
-                    is_fallback = True
-                    r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
+                    return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -647,10 +644,7 @@ class FakeTensorMode(TorchDispatchMode):
                         common_device = FakeTensor._find_common_device(
                             func, args, kwargs
                         )
-                    if is_fallback:
-                        return converter(self, e)
-                    else:
-                        return converter(self, e, device or common_device)
+                    return converter(self, e, device or common_device)
                 else:
                     return e
 
@@ -664,7 +658,8 @@ class FakeTensorMode(TorchDispatchMode):
         return self.fake_tensor_converter(self, tensor)
 
 
-def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
+# NB: returns fake tensors
+def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exception):
     # these should all be supported, just to be safe
     # avoid fallback for operators which inplace modify metadata
     # because the input fake tensors would be umodified
@@ -700,20 +695,20 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
         # proper aliasing/metadata relationship between outputs and inputs will
         # not be set up, bc of conversion to device, unless we can reuse an
         # input impl
-        """
         for e in tree_flatten(r)[0]:
             if id(e) not in inp_impls and (
                 isinstance(e, torch.Tensor) and not e.is_sparse and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
-        """
-
-    # the outputs which are are not reused from impls will be converted
-    # to fake tensors later
-    meta_converter = MetaConverter()
 
     def map_out(e):
-        return inp_impls.get(id(e), meta_converter(e))
+        if isinstance(e, torch.Tensor):
+            if id(e) in inp_impls:
+                return inp_impls[id(e)]
+            else:
+                return fake_mode.fake_tensor_converter(fake_mode, e)
+        else:
+            return e
 
     return tree_map(map_out, r)
 

@@ -430,8 +430,6 @@ make_fx_failures = {
 
     # ???
     xfail('nn.functional.ctc_loss'),
-    # Sparse tensors are not supported with faketensors for now
-    xfail('to_sparse'),
     # segfaults
     skip('block_diag'),
 }
