@@ -110,17 +110,14 @@ def wrap_output(inner_res, proxy_res, **kwargs):
         return inner_res
 
 
-def maybe_disable_tensor_mode(tensor_mode_class):
+def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mode = torch._C._get_torch_dispatch_mode()
-    if isinstance(mode, tensor_mode_class):
-        return enable_torch_dispatch_mode(mode.inner, replace=mode)
+    mb_fake_mode = torch._C._get_torch_dispatch_mode()
+    if isinstance(mb_fake_mode, FakeTensorMode):
+        return enable_torch_dispatch_mode(mb_fake_mode.inner, replace=mb_fake_mode)
     else:
         return nullcontext()
-
-
-maybe_disable_fake_tensor_mode = functools.partial(maybe_disable_tensor_mode, FakeTensorMode)
 
 
 def unwrap_elem(e):
@@ -531,9 +528,6 @@ a bug if you need this)""")
         return t
 
     return wrapped
-
-
-maybe_disable_proxy_tensor_mode = functools.partial(maybe_disable_tensor_mode, ProxyTorchDispatchMode)
 
 
 def get_torch_dispatch_modes():
