@@ -442,7 +442,7 @@ class ModuleDict(Module):
         r"""Remove key from the ModuleDict and return its module.
 
         Args:
-            key (string): key to pop from the ModuleDict
+            key (str): key to pop from the ModuleDict
         """
         v = self[key]
         del self[key]
@@ -734,7 +734,7 @@ class ParameterDict(Module):
         `default` defaults to `None`.
 
         Args:
-            key (string): key to set default for
+            key (str): key to set default for
             default (Any): the parameter set to the key
         """
 
@@ -752,7 +752,7 @@ class ParameterDict(Module):
         r"""Remove key from the ParameterDict and return its parameter.
 
         Args:
-            key (string): key to pop from the ParameterDict
+            key (str): key to pop from the ParameterDict
         """
         v = self[key]
         del self[key]
@@ -774,7 +774,7 @@ class ParameterDict(Module):
         Otherwise return default if provided, None if not.
 
         Args:
-            key (string): key to get from the ParameterDict
+            key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
         return self[key] if key in self else default

@@ -1389,6 +1389,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: constant_pad_nd
+    MPS: constant_pad_nd_mps
 
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   variants: method
@@ -2267,11 +2268,11 @@
 - func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
   variants: function, method
 
-- func: unflatten.int(Tensor(a) self, int dim, int[] sizes, Dimname[]? names=None) -> Tensor(a)
-  variants: method
+- func: unflatten.int(Tensor(a) self, int dim, int[] sizes) -> Tensor(a)
+  variants: function, method
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
-  variants: method
+  variants: function, method
 
 - func: fill.Scalar(Tensor self, Scalar value) -> Tensor
   variants: function
@@ -3286,14 +3287,14 @@
   dispatch:
     CompositeExplicitAutograd: mean
 
-- func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: mean.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     QuantizedCPU: mean_quantized_cpu
 
-- func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: mean.out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -4742,6 +4743,8 @@
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    NestedTensorCPU: NestedTensor_sum_dim_CPU
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
