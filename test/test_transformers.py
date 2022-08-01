@@ -653,7 +653,7 @@ class TestTransformers(NNTestCase):
 
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
-                 (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
+                  (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
                  name_fn=lambda input_dim, attn_dim, is_causal: (
                      f"{input_dim}D_input_dim_" + (
                          f"{attn_dim}D_{'causal_' if is_causal else ''}attn_mask"
