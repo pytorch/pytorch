@@ -2661,7 +2661,7 @@ class FullyShardedDataParallel(nn.Module):
             # altogether (by folding it into the method itself)
             # `_rebuild_full_params()` should really be side-effect-free if the
             # `FlatParameter` is already unsharded
-            if param.size() != param._unsharded_size:
+            if param.size() != param._unsharded_size or param.device != self.compute_device:
                 self._rebuild_full_params(params)
                 all_gathered = True
         if all_gathered:
@@ -3240,13 +3240,19 @@ class FullyShardedDataParallel(nn.Module):
 
                 # All-gather full parameters, moving them to compute device if
                 # necessary.
-                all_gathered = False
-                for param in params:
-                    if param.size() != param._unsharded_size:
-                        self._rebuild_full_params(params)
-                        all_gathered = True
-                if all_gathered:
-                    torch.cuda.current_stream().wait_stream(self._streams["all_gather"])    
+                if self._use_param_exec_order_policy:
+                    all_gathered = False
+                    for param in params:
+                        if param.size() != param._unsharded_size or param.device != self.compute_device:
+                            self._rebuild_full_params(params)
+                            all_gathered = True
+                    if all_gathered:
+                        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                else:
+                    # TODO (awgu): We need this stream sync for `BACKWARD_POST`
+                    # prefetching
+                    self._rebuild_full_params(params)
+                    torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
                 self._pre_backward_hook_full_params_prefetched = False
                 # Prefetch next layer's full params in backward pass,
