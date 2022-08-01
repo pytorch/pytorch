@@ -5,7 +5,9 @@ import math
 import torch.utils._pytree as pytree
 import copy
 import os
+from collections import OrderedDict
 from torch.fx.passes import graph_drawer
+from torch.fx.passes.utils import lift_subgraph_as_module
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 
@@ -157,6 +159,76 @@ def default_partition(
     saved_values = list(set(saved_values))
 
     return _extract_fwd_bwd_modules(joint_module, saved_values)
+
+def move_input_mutations_into_submodule(fx_g: fx.GraphModule):
+    mutable_nodes: List[Node] = []  # the copy_() and as_strided_() nodes, that we'll delete move to a submodule.
+    node_map: Dict[Node, Node] = {}
+    node_to_placeholder: Dict[Node, Node] = OrderedDict()  # mapping of nodes from old graph to placeholder in new graph
+    mutation_subgraph = fx.Graph()
+
+    def remap_inputs(x):
+        if x.op == "get_attr":
+            pass
+        if x in node_map:
+            return node_map[x]
+        if x not in node_to_placeholder:
+            # Add the copy_() arg inputs as a submodule input.
+            placeholder_node = mutation_subgraph.placeholder(x.name, type_expr=x.type)
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
+        return node_to_placeholder[x]
+
+    inpt_nodes = [n for n in fx_g.graph.nodes if n.op == 'placeholder']
+    for n in fx_g.graph.nodes:
+        if not isinstance(n.target, torch._ops.OpOverload):
+            continue
+        mutable_schema_args = [
+            a for a in n.target._schema.arguments
+            if a.alias_info is not None and a.alias_info.is_write
+        ]
+        if len(mutable_schema_args) == 0:
+            continue
+        # First some basic assertions.
+        # This graph should be entirely functional, but might contain
+        # some copy_() mutation nodes, that copy data back into program inputs.
+        # Any mutable ops that we find should correspond to copy_() nodes.
+        assert n.target == torch.ops.aten.copy_.default or \
+               n.target == torch.ops.aten.as_strided_.default, \
+               "Given a non-functionalized graph."
+        # Add the copy_() node to the submodule, remove it from the original graph.
+        mutable_nodes.append(n)
+        new_node = mutation_subgraph.node_copy(n, remap_inputs)
+        node_map[n] = new_node
+    # Add the submodule to the end of the original graph
+    mutation_subgraph.lint()
+    mutation_submodule = lift_subgraph_as_module(fx_g, mutation_subgraph)
+    submodule_name = 'input_mutation_submodule'
+    fx_g.add_submodule(submodule_name, mutation_submodule)
+
+    # Create a call_module node in main graph.
+    module_node = fx_g.graph.call_module(
+        submodule_name,
+        args=tuple(node_to_placeholder.keys()),
+        kwargs=None)
+
+    # ATen graphs that go through __torch_dispatch__ tracing have a large amount of structure.
+    # In particular, there should be a single "return" node that is the last node in the graph..
+    # Figuring out the right place to insert the submodule is tricky, so instead
+    # just re-generate the return to be the last node again.
+    all_nodes = list(fx_g.graph.nodes)
+    return_nodes = [n for n in all_nodes if n.op == 'output']
+    if len(return_nodes) > 0:
+        assert len(return_nodes) == 1 and return_nodes[0] is all_nodes[-2]
+        # erase and add back, so the return node comes at the end of the graph.
+        return_node = return_nodes[0]
+        fx_g.graph.output(return_node.args[0])
+        fx_g.graph.erase_node(return_node)
+
+    # Remove the mutable nodes from the original graph
+    for n in reversed(mutable_nodes):
+        fx_g.graph.erase_node(n)
+    fx_g.graph.lint()
+    fx_g.recompile()
 
 
 def _prod(x):

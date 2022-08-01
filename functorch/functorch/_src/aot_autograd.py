@@ -12,7 +12,7 @@ from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
 from .decompositions import register_decomposition
-from .partitioners import default_partition
+from .partitioners import default_partition, move_input_mutations_into_submodule
 from .named_members_polyfill import _named_parameters, _named_buffers
 from typing import Callable, List, Dict, Any, Tuple, Optional
 from functools import wraps
@@ -234,6 +234,7 @@ def create_aot_autograd_function(
 
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
+                    move_input_mutations_into_submodule(fw_module)
                 # print(fw_module.code, bw_module.code)
 
                 with track_graph_compiling("forward"):
