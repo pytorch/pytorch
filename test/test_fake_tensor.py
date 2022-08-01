@@ -14,8 +14,8 @@ from torch.testing import FileCheck
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch import nn
 import unittest
-import contextlib
 import torch._prims as prims
+import contextlib
 import copy
 
 class FakeTensorTest(TestCase):
@@ -137,6 +137,16 @@ class FakeTensorTest(TestCase):
         with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
             with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
                 y = x[0]
+
+    def test_fake_grad_copy(self):
+        x = torch.rand([4, 4], requires_grad=True)
+        x.grad = torch.rand([4, 4])
+        mode = FakeTensorMode()
+        fake_x = mode.from_tensor(x)
+        prims.utils.compare_tensor_meta(fake_x, x)
+        prims.utils.compare_tensor_meta(fake_x.grad, x.grad)
+
+        self.assertTrue(isinstance(fake_x.grad, FakeTensor))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
