@@ -875,6 +875,17 @@ class TestMeta(TestCase):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
 
+    def test_map_location_deserialize(self):
+        import io
+
+        t = torch.rand(10)
+        b = io.BytesIO()
+
+        torch.save(t, b)
+        b.seek(0)
+        r = torch.load(b, map_location=torch.device("meta"))
+        self.assertEqual(r.device.type, 'meta')
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):
