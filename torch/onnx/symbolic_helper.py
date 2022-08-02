@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import enum
 import functools
 import inspect
 import sys
 import warnings
-from typing import Set
+from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -140,7 +142,7 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
-def _unpack_list(list_value):
+def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     list_node = list_value.node()
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
@@ -236,15 +238,19 @@ def parse_args(*arg_descriptors):
     return decorator
 
 
-def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
+def quantized_args(
+    *arg_q_descriptors: bool,
+    scale: Optional[float] = None,
+    zero_point: Optional[int] = None,
+):
     """A decorator which extends support for quantized version of the base operator.
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
     If quantization is detected, the base operator symbolic function will be wrapped with
-    argument dequantization and output quantization.
+    argument de-quantization and output quantization.
 
-    Otherwise, only base symbolic function will be invoked.
+    Otherwise, only the base symbolic function will be invoked.
 
     For example:
 
@@ -267,11 +273,12 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
     ```
 
     Args:
-        arg_q_descriptors: list of bool, where each element represents if the
-          argument is QTensor for quantized version of this operator.
-        scale: float default None, quantized output scale. If None, derive from
+        arg_q_descriptors: A sequence of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator. It defaults
+          to False for unspecified (variable length) arguments.
+        scale: Quantized output scale. If None, derive from
           the first quantized input scale.
-        zero_point: int default None, quantized output zero point. If None,
+        zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
     """
 
@@ -288,19 +295,21 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
             if _zero_point is not None:
                 _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
 
-            # some args may be optional, so the length may be smaller
-            assert len(arg_q_descriptors) >= len(args)
-            desc_args = tuple(zip(arg_q_descriptors[: len(args)], args))
+            # Support variable length arguments by marking unspecified ones as non-quantized
+            arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
+                len(args) - len(arg_q_descriptors)
+            )
+            descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
-                (desc and arg.node().kind() == "prim::TupleConstruct")
-                for desc, arg in desc_args
+                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                for descriptor, arg in descriptor_args
             ):
                 return fn(g, *args, **kwargs)
 
             dequantized_args = []
-            for desc, arg in desc_args:
-                if desc:
+            for descriptor, arg in descriptor_args:
+                if descriptor:
                     dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
                     dequantized_args.append(dequantized_arg)
                     if _scale is None:
@@ -309,7 +318,8 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
                         _zero_point = zero_point
                 else:
                     dequantized_args.append(arg)
-            # TODO: only support single output
+            # TODO(justinchuby): Only single output is supported for now. We may want to
+            # support multiple outputs in the future.
             output = fn(g, *dequantized_args, **kwargs)
 
             return quantize_helper(g, output, _scale, _zero_point)
@@ -786,6 +796,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_c
 
 
 def _interpolate_helper(name, dim, interpolate_mode):
+    @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = _maybe_get_scalar(align_corners)
@@ -1113,13 +1124,17 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     return weight, bias, running_mean, running_var
 
 
-def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
+def _avgpool_helper(
+    tuple_fn: Callable[[Any], Sequence[int]],
+    padding: Union[int, Sequence[int]],
+    kernel_size,
+    stride,
+    divisor_override,
+    name,
+) -> Tuple[int, ...]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
-        return _unimplemented(name, "divisor_override")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(tuple_fn(padding))
-    return padding
+        _unimplemented(name, "divisor_override")
+    return tuple(tuple_fn(padding))
 
 
 def check_training_mode(op_train_mode, op_name):
@@ -1193,7 +1208,11 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
-def dequantize_helper(g, qtensor, qdtype=None):
+def dequantize_helper(
+    g,
+    qtensor: _C.Value,
+    qdtype: Optional[torch.onnx.TensorProtoDataType] = None,
+) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
@@ -1234,7 +1253,13 @@ def dequantize_helper(g, qtensor, qdtype=None):
     )
 
 
-def quantize_helper(g, tensor, scale, zero_point, axis=None):
+def quantize_helper(
+    g,
+    tensor: _C.Value,
+    scale: _C.Value,
+    zero_point: _C.Value,
+    axis: Optional[_C.Value] = None,
+) -> _C.Value:
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
     Args:
@@ -1258,11 +1283,13 @@ def quantize_helper(g, tensor, scale, zero_point, axis=None):
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":
+    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
+        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):
+    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
+        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",

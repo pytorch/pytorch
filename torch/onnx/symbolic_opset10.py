@@ -1,9 +1,11 @@
 import sys
 import warnings
+from typing import Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
@@ -141,15 +143,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Sequence[int],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -187,6 +190,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -544,6 +548,16 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -612,3 +626,19 @@ class Quantized:
         )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    @symbolic_helper.parse_args("v", "i", "v", "v")
+    def cat(
+        g,
+        q_inputs: _C.Value,
+        dim: int,
+        op_scale: _C.Value,
+        op_zero_point: _C.Value,
+    ) -> _C.Value:
+        unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
+        dequantized = [
+            symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
+        ]
+        concatenated = g.op("Concat", *dequantized, axis_i=dim)
+        return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)

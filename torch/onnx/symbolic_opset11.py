@@ -1,7 +1,11 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
+from typing import Tuple, Union
 
 import torch
+from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
@@ -143,7 +147,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":
+            if indices_list[idx_].type().scalarType() == "Bool":  # type: ignore[attr-defined]
+                # TODO(justinchuby): Remove type ignore after #81112 is checked in.
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -198,7 +203,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -258,6 +264,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
+@symbolic_helper.quantized_args(True, False, False, False, False, False, False)
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -415,15 +422,16 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(

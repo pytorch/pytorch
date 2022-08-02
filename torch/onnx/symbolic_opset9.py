@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -361,6 +361,8 @@ def atan(g, self):
     return g.op("Atan", self)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -1031,6 +1033,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if set(tuple_fn(dilation)) != {1}:
@@ -1117,15 +1120,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -1133,8 +1137,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
-        if ceil_mode:
-            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        adjusted_padding = padding
         if count_include_pad:
             input = g.op(
                 "Pad",
@@ -1143,17 +1146,20 @@ def _avg_pool(name, tuple_fn):
                 mode_s="constant",
                 value_f=0.0,
             )
-            padding = (0,) * len(padding)
+            adjusted_padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            adjusted_padding = adjusted_padding + tuple(
+                a + b for (a, b) in zip(padding_ceil, adjusted_padding)
+            )
         else:
-            padding = padding * 2
+            adjusted_padding = adjusted_padding * 2
         output = g.op(
             "AveragePool",
             input,
             kernel_shape_i=tuple_fn(kernel_size),
             strides_i=tuple_fn(stride),
-            pads_i=padding,
+            pads_i=adjusted_padding,
         )
         return output
 
@@ -2510,7 +2516,8 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()
+            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             dtype = symbolic_helper.scalar_type_to_onnx.index(
                 symbolic_helper.cast_pytorch_to_onnx[dtype]
             )
@@ -4963,7 +4970,12 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs):
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
+        if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
+            # Cancel the previous node if it is ListConstruct by returning its inputs
+            # TODO(justinchuby): Use a public method in the helper module
+            return symbolic_helper._unpack_list(inputs[0])
+
         return None
 
     @staticmethod
