@@ -20,9 +20,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
   cmake_policy(SET CMP0074 NEW)
 endif()
 
-# Files in CMAKE_MODULE_PATH are preferred over builtin modules
-cmake_policy(SET CMP0017 OLD)
-
 if(NOT CMAKE_VERSION VERSION_LESS 3.10)
   set(FIND_CUDA_MODULE_DEPRECATED ON)
 endif()
