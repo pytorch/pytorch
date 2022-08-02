@@ -17,7 +17,7 @@
 #include <functorch/csrc/CompileCache.h>
 #include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
-
+#include <functorch/csrc/dim/dim.h>
 
 namespace at {
 namespace functorch {
@@ -400,7 +400,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
+
   at::functorch::initCompileCacheBindings(m.ptr());
+
+  // initialize first-class dims and install it as a submodule on _C
+  auto dim = Dim_init();
+  if (!dim) {
+    throw py::error_already_set();
+  }
+  py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
 
   // Windows doesn't like this
 #ifndef _WIN32
