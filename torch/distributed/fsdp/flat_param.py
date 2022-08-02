@@ -354,15 +354,16 @@ class FlatParamHandle:
 
     @torch.no_grad()
     def _use_low_prec_shard(self):
-        """Allocates and uses the low precision shard."""
+        """Allocates and uses the low precision ``FlatParameter`` shard."""
         flat_param = self.flat_param
-        assert getattr(flat_param, "_mp_shard", None) is not None
-        self._alloc_storage(flat_param._mp_shard, flat_param._local_shard.size())
+        assert hasattr(flat_param, "_mp_shard")
+        assert hasattr(flat_param, "_local_shard")
+        self._alloc_storage(flat_param._mp_shard, flat_param._local_shard.size())  # type: ignore[attr-defined]
         # The cast to low precision happens via the copy
-        flat_param._mp_shard.copy_(
-            flat_param._local_shard.to(flat_param._mp_shard.device, non_blocking=True)
+        flat_param._mp_shard.copy_(  # type: ignore[attr-defined]
+            flat_param._local_shard.to(flat_param._mp_shard.device, non_blocking=True)  # type: ignore[attr-defined]
         )
-        flat_param.data = flat_param._mp_shard
+        flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
     def _flat_param_to(self, *args, **kwargs):
         """Wraps an in-place ``to()`` call for the handle's ``FlatParameter."""
