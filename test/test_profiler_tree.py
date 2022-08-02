@@ -535,12 +535,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -576,12 +578,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
