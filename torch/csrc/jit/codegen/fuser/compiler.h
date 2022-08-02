@@ -46,13 +46,19 @@ using FusedKernelConstructor = std::function<std::shared_ptr<FusedKernel>(
 TORCH_API void registerFusionBackend(
     at::Device::Type backend_type,
     FusedKernelConstructor ctor);
+TORCH_API void deregisterFusionBackend(at::Device::Type backend_type);
 TORCH_API bool hasFusionBackend(at::Device::Type backend_type);
 struct TORCH_API RegisterFusionBackend {
   RegisterFusionBackend(
       at::Device::Type backend_type,
-      FusedKernelConstructor ctor) {
+      FusedKernelConstructor ctor)
+      : backend_type(backend_type) {
     registerFusionBackend(backend_type, std::move(ctor));
   }
+  ~RegisterFusionBackend() {
+    deregisterFusionBackend(backend_type);
+  }
+  at::Device::Type backend_type;
 };
 
 } // namespace fuser

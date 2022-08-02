@@ -15,6 +15,7 @@ from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
+from torch import nn
 import re
 
 aten = torch.ops.aten
@@ -239,6 +240,28 @@ class TestProxyTensor(TestCase):
         # In case we mutated shared state in the g graph!
         self.assertEqual(g(), f())
 
+    def test_constant_unbind(self):
+        def f():
+            val = torch.tensor([2])
+            r, = torch.unbind(val, 0)
+            return r.item()
+
+        g = make_fx(f)()
+        self.assertEqual(g(), f())
+
+    def test_issue82547(self):
+        x = nn.Parameter(torch.randn(3, 3))
+
+        def f():
+            return torch.ops.aten.t.default(x)
+        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(3, 3))
+        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
+
     def test_use_fake_and_tensor(self):
         def f(x, y):
             z = torch.tensor([2.0, 3.0])
@@ -437,12 +460,7 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
-    xfail('complex'),
-    xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
-    xfail('linalg.matrix_power'),
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('mvlgamma', 'mvlgamma_p_1'),
@@ -455,6 +473,10 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -595,6 +617,7 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
     xfail('linalg.matrix_norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -819,6 +842,7 @@ symbolic_tensor_failures = {
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
+    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('var', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
