@@ -76,7 +76,7 @@ public:
     incr_n(offset);
   }
 
-  C10_HOST_DEVICE inline void reset_state(uint64_t seed = 67280421310721,
+  inline void reset_state(uint64_t seed = 67280421310721,
                                  uint64_t subsequence = 0) {
     key_[0] = static_cast<uint32_t>(seed);
     key_[1] = static_cast<uint32_t>(seed >> 32);
@@ -101,7 +101,10 @@ public:
     return ret;
   }
 
-  C10_HOST_DEVICE inline float randn(uint32_t n_rounds) {
+  inline float randn(uint32_t n_rounds) {
+    #ifdef __CUDA_ARCH__
+    AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
+    #endif
     reset_state(); // Reset state for randn - a little wasteful, but easier to ensure correctness.
     detail::UINT4 counter = counter_;
     detail::UINT2 key = key_;
@@ -207,11 +210,8 @@ private:
     return single_round(counter, key);
   }
 
-  C10_HOST_DEVICE inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
-    #ifdef __CUDA_ARCH__
-      // We use std:: below, and thus need a separate impl for CUDA.
-      AT_ASSERT(false, "PhiloxRNGEngine normalize_pair_uniform is not yet implemented for CUDA");
-    #endif
+  inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
+    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = in[0];
     float u2 = in[1];
 
