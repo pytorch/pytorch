@@ -579,23 +579,9 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-<<<<<<< dest:   2467cbaa0658 - generatedunixname89002005287564: [Codemod][And...
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-||||||| base
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_default = torch.ops.aten.zero.default(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-=======
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
->>>>>>> source: 93723eb6fc11 - ezyang: Add Python to CompositeImplicitAutogra...
     return add_tensor
     """)
 
@@ -607,24 +593,10 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-<<<<<<< dest:   2467cbaa0658 - generatedunixname89002005287564: [Codemod][And...
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-||||||| base
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_default = torch.ops.aten.zero.default(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-=======
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2])
     add_tensor = torch.ops.aten.add.Tensor(expand_copy_default, a_1);  expand_copy_default = a_1 = None
->>>>>>> source: 93723eb6fc11 - ezyang: Add Python to CompositeImplicitAutogra...
     return add_tensor
     """)
 
@@ -636,24 +608,10 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-<<<<<<< dest:   2467cbaa0658 - generatedunixname89002005287564: [Codemod][And...
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-||||||| base
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_default = torch.ops.aten.zero.default(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-=======
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(_to_copy_default, a_1);  _to_copy_default = a_1 = None
->>>>>>> source: 93723eb6fc11 - ezyang: Add Python to CompositeImplicitAutogra...
     return add_tensor
     """)  # noqa: B950
 
@@ -665,25 +623,11 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-<<<<<<< dest:   2467cbaa0658 - generatedunixname89002005287564: [Codemod][And...
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-||||||| base
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_default = torch.ops.aten.zero.default(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
-    copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-=======
     zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     expand_copy_default = torch.ops.aten.expand_copy.default(_to_copy_default, [2]);  _to_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(expand_copy_default, a_1);  expand_copy_default = a_1 = None
->>>>>>> source: 93723eb6fc11 - ezyang: Add Python to CompositeImplicitAutogra...
     return add_tensor
     """)  # noqa: B950
 

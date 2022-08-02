@@ -1540,8 +1540,11 @@ class TestTorchFunctionMode(TestCase):
 
         x = A(torch.randn(5))
         with torch._C.DisableTorchFunction():
-            with torch._C._EnableTorchFunction():
+            g = torch._C._EnableTorchFunction()
+            try:
                 self.assertIsInstance(torch.sum(x), A)
+            finally:
+                del g
 
 
 if __name__ == '__main__':
