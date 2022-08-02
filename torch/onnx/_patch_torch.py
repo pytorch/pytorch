@@ -4,7 +4,7 @@ from typing import Any, Iterable, Tuple, Union
 
 import torch
 from torch import _C
-import torch._C._onnx as _C_onnx
+from torch._C import _onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
 
 

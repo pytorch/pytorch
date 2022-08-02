@@ -1727,7 +1727,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
                 ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1738,13 +1738,19 @@ def _run_symbolic_function(
             return symbolic_fn(g, *inputs, **attrs)
         elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
         elif _should_aten_fallback(
             namespace, op_name, opset_version, operator_export_type
         ):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
