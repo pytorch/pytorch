@@ -30,21 +30,21 @@ class TORCH_API DetachedBuffer final {
   /// Creates a new DetachedBuffer with an optional data owner. This interface
   /// is provided to let users create objects of this type for testing.
   DetachedBuffer(
-      uint8_t* data,
+      void* data,
       size_t size,
-      void* internal__data_owner = nullptr)
-      : data_(data), size_(size), data_owner_(internal__data_owner) {}
+      void* internal_data_owner = nullptr)
+      : data_(data), size_(size), data_owner_(internal_data_owner) {}
 
   /// Returns a pointer to the data.
-  uint8_t* data() {
+  C10_NODISCARD void* data() {
     return data_;
   }
   /// Returns a pointer to the data.
-  const uint8_t* data() const {
+  C10_NODISCARD const void* data() const {
     return data_;
   }
   /// Returns the size of the data, in bytes.
-  size_t size() {
+  C10_NODISCARD size_t size() const {
     return size_;
   }
 
@@ -63,7 +63,7 @@ class TORCH_API DetachedBuffer final {
   friend struct DetachedBufferTestingFriend;
 
   /// Pointer to the data. Not owned by this class.
-  uint8_t* data_;
+  void* data_;
   /// The size of `data_`, in bytes.
   size_t size_;
   /// Opaque pointer to the underlying owner of `data_`. This class
