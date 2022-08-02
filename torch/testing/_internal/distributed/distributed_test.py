@@ -3069,6 +3069,53 @@ class DistributedTest:
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
+        def _test_all_gather_single_output_tensor_helper(
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+        ):
+            size = len(group)
+            tensor_in = _build_tensor(size, rank, dtype=dtype)
+            tensor_out = _build_tensor(size * len(group), -1, dtype=dtype)
+            allgather = dist.all_gather
+            if cuda:
+                tensor_in = tensor_in.cuda(rank_to_GPU[rank][0])
+                tensor_out = tensor_out.cuda(rank_to_GPU[rank][0])
+            if tensor_out.dtype == torch.complex64:
+                tensor_shapes = [torch.view_as_real(tensor_in).shape]
+            else:
+                tensor_shapes = [tensor_in.shape]
+            self.call_dist_op(
+                ":all_gather",
+                False,
+                allgather,
+                tensor_out,
+                tensor_in,
+                group_id,
+                False,
+                tensor_shapes=tensor_shapes,
+            )
+
+            expected_tensors = [
+                _build_tensor(size, i, dtype=dtype) for i in group
+            ]
+            for i in range(len(group)):
+                t1 = tensor_out[i * size : (i + 1) * size]
+                t2 = expected_tensors[i]
+                self.assertEqual(t1, t2)
+
+            self._barrier()
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_gather_single_output_tensor(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_gather_single_output_tensor_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
+        @skip_if_no_gpu
+        def test_all_gather_single_output_tensor_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            self._test_all_gather_single_output_tensor_helper(group, group_id, rank, True, rank_to_GPU)
+
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
         ):
