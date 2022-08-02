@@ -891,7 +891,9 @@ class NativeFunction:
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
         # See Note [resize_ in Functionalization] for more dtails
-        is_inplace_view = "inplace_view" in self.tags and str(self.func.name) != 'resize_'
+        is_inplace_view = (
+            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+        )
         is_wildcard_view = any(
             inp.annotation is not None and inp.annotation.alias_set_after != ""
             for inp in self.func.schema_order_arguments()
