@@ -70,7 +70,7 @@ def masked_tensor_str(data, mask, formatter):
 
 
 def get_data(a):
-    from maskedtensor import is_masked_tensor
+    from torch.masked.maskedtensor import is_masked_tensor
 
     if is_masked_tensor(a):
         return a.masked_data
@@ -78,7 +78,7 @@ def get_data(a):
 
 
 def get_mask(a):
-    from maskedtensor import is_masked_tensor
+    from torch.masked.maskedtensor import is_masked_tensor
 
     if is_masked_tensor(a):
         return a.masked_mask
@@ -320,7 +320,7 @@ class MaskedTensor(torch.Tensor):
             from .functions import multi_head_attention_forward as mha_mt
 
             return mha_mt(*args, **kwargs)
-        from maskedtensor import apply_reduction, is_reduction
+        from torch.masked.maskedtensor import apply_reduction, is_reduction
 
         if is_reduction(func):
             return apply_reduction(func, *args, **kwargs)
@@ -357,27 +357,27 @@ class MaskedTensor(torch.Tensor):
 
         func = func.overloadpacket
 
-        from maskedtensor import apply_reduction, is_reduction
+        from torch.masked.maskedtensor import apply_reduction, is_reduction
 
         if is_reduction(func):
             return apply_reduction(func, *args, **kwargs)
 
-        from maskedtensor import apply_pass_through_fn, is_pass_through_fn
+        from torch.masked.maskedtensor import apply_pass_through_fn, is_pass_through_fn
 
         if is_pass_through_fn(func):
             return apply_pass_through_fn(func, *args, **kwargs)
 
-        from maskedtensor import apply_native_unary, is_native_unary
+        from torch.masked.maskedtensor import apply_native_unary, is_native_unary
 
         if is_native_unary(func):
             return apply_native_unary(func, *args, **kwargs)
 
-        from maskedtensor import apply_native_binary, is_native_binary
+        from torch.masked.maskedtensor import apply_native_binary, is_native_binary
 
         if is_native_binary(func):
             return apply_native_binary(func, *args, **kwargs)
 
-        from maskedtensor import apply_native_matmul, is_native_matmul
+        from torch.masked.maskedtensor import apply_native_matmul, is_native_matmul
 
         if is_native_matmul(func):
             return apply_native_matmul(func, *args, **kwargs)
@@ -390,6 +390,8 @@ class MaskedTensor(torch.Tensor):
         # Doesn't work for addmm where the first argument is a Tensor
         data = get_data(args[0])
         mask = get_mask(args[0])
+        if func is torch.ops.aten.stride:
+            return None
         if func is torch.ops.prim.layout:
             return data.layout
         if func is torch.ops.aten.is_contiguous:

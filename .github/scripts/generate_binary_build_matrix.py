@@ -183,9 +183,14 @@ def generate_wheels_matrix(os: str,
 
     if python_versions is None:
         # Define default python version
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = list(FULL_PYTHON_VERSIONS)
         if os == "macos-arm64":
             python_versions = list_without(python_versions, ["3.7"])
+
+        if os == "linux":
+            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
+            # available on conda right now
+            python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures
@@ -201,6 +206,9 @@ def generate_wheels_matrix(os: str,
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            # Skip rocm 3.11 binaries for now as the docker image are not correct
+            if python_version == "3.11" and gpu_arch_type == "rocm":
+                continue
             ret.append(
                 {
                     "python_version": python_version,
