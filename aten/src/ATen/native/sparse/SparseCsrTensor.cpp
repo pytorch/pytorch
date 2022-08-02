@@ -762,7 +762,6 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
             return std::make_pair(self.ccol_indices(), self.row_indices());
           });
   auto n_batch = compressed_indices.dim() - 1;
-  auto n_dense = self.dim() - n_batch - 2;
 
   if (dim < n_batch) {
     // Selecting batch dimension
