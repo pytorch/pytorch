@@ -509,6 +509,20 @@ variable_list AutogradContext::get_saved_variables() const {
   return saved;
 }
 
+bool AutogradContext::task_should_compute_output(
+    size_t output_edge_index) const {
+  auto ptr = grad_fn_.lock();
+  TORCH_INTERNAL_ASSERT(ptr);
+  return ptr->task_should_compute_output(output_edge_index);
+}
+
+bool AutogradContext::task_should_compute_output(
+    std::initializer_list<IndexRange> idxs) const {
+  auto ptr = grad_fn_.lock();
+  TORCH_INTERNAL_ASSERT(ptr);
+  return ptr->task_should_compute_output(idxs);
+}
+
 void AutogradContext::mark_dirty(const variable_list& inputs) {
   dirty_inputs_.clear();
   dirty_inputs_.reserve(inputs.size());

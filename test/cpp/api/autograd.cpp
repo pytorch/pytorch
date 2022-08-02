@@ -276,6 +276,83 @@ TEST(CustomAutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}) * 2);
 }
 
+TEST(CustomAutogradTest, GraphTaskTrimEdges) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2,
+        int mul,
+        int expected_should_compute_idx,
+        int expected_should_not_compute_idx) {
+      // setup the expected should and should not compute idx
+      ctx->saved_data["should_idx"] = expected_should_compute_idx;
+      ctx->saved_data["should_not_idx"] = expected_should_not_compute_idx;
+
+      ctx->saved_data["mul"] = mul;
+      ctx->save_for_backward({var1, var2});
+      return var1 + mul * var2 + var1 * var2;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      // Test `task_should_compute_output` method is working correctly.
+      // We have to test this within the backward function.
+      int should_idx = ctx->saved_data["should_idx"].toInt();
+      int should_not_idx = ctx->saved_data["should_not_idx"].toInt();
+      EXPECT_TRUE(ctx->task_should_compute_output(should_idx));
+      EXPECT_FALSE(ctx->task_should_compute_output(should_not_idx));
+
+      int mul = ctx->saved_data["mul"].toInt();
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+
+      Variable grad_var1, grad_var2;
+      if (ctx->task_should_compute_output(0)) {
+        grad_var1 = grad_output[0] + grad_output[0] * var2;
+      }
+      if (ctx->task_should_compute_output(1)) {
+        grad_var2 = grad_output[0] * mul + grad_output[0] * var1;
+      }
+      variable_list output = {
+          grad_var1,
+          grad_var2,
+          Variable(),
+          Variable(),
+          Variable(),
+      };
+      return output;
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  auto go = torch::ones_like(x);
+  Variable out;
+
+  // grad_x
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* expected_should_compute_idx= */ 0,
+      /* expected_should_not_compute_idx= */ 1);
+  auto grad_x = torch::autograd::grad({out}, {x}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_x, y + torch::ones({5, 5}));
+
+  // grad_y
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* expected_should_compute_idx= */ 1,
+      /* expected_should_not_compute_idx= */ 0);
+  auto grad_y = torch::autograd::grad({out}, {y}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_y, x + torch::ones({5, 5}) * 2);
+}
+
 TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext* ctx, Variable var1) {
