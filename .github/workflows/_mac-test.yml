@@ -57,6 +57,11 @@ jobs:
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
+      - name: Cleanup Conda on long-lived arm machines
+        if: inputs.build-environment == 'macos-12-py3-arm64'
+        run: |
+          conda clean --all
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
