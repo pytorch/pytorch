@@ -889,7 +889,7 @@ class GitHubPR:
         gh_post_pr_comment(self.org, self.project, self.pr_num,
                            '@pytorchbot successfully started a merge and created land time checks.' +
                            f' See merge status [here]({os.getenv("GH_RUN_URL")}) ' +
-                           f'and [land check]{BOT_COMMANDS_WIKI}'
+                           f'and [land check]({BOT_COMMANDS_WIKI})'
                            f'progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})')
         return commit
 
