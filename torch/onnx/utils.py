@@ -1704,7 +1704,13 @@ def _run_symbolic_function(
     opset_version = GLOBALS.export_onnx_opset_version
 
     # See Note [Export inplace]
-    ns_op_name = n.kind()
+    node_kind = n.kind()
+    if node_kind.endswith("_"):
+        # Treat relu_ -> relu; add_ -> add etc.
+        ns_op_name = node_kind[:-1]
+    else:
+        ns_op_name = node_kind
+
     namespace, op_name = ns_op_name.split("::")
 
     try:
