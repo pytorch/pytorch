@@ -8,8 +8,9 @@ from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from torch.testing._internal.common_utils import TestCase, run_tests
-from unittest import skip
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA
+
+from unittest import skip, skipIf
 import torch
 import gc
 
@@ -189,7 +190,7 @@ class TestMin(TestCase):
 
         embeddings[indices[i], f] += values[i, f]
 
-
+    @skipIf(not TEST_CUDA, "no CUDA")
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
         self.attn(batch_size=256, hidden_size=768, sequence_length=128,
