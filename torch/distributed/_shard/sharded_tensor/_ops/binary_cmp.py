@@ -36,6 +36,10 @@ def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
     if distributed_c10d._rank_not_in_group(st1._process_group) or distributed_c10d._rank_not_in_group(st2._process_group):
         return distributed_c10d._rank_not_in_group(st1._process_group) == distributed_c10d._rank_not_in_group(st2._process_group)
 
+    # Verify metadata
+    if st1.metadata() != st2.metadata():
+        return _communicate_result(False, st1._process_group)
+
     # Verify number of local shards
     st1_local_shards = st1.local_shards()
     st2_local_shards = st2.local_shards()

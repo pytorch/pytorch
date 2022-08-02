@@ -68,7 +68,7 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertFalse(ones_st.requires_grad)
         with torch.no_grad():
             st_with_grad.copy_(ones_st)
-            self.assertTrue(torch.equal(st_with_grad, ones_st))
+            self.assertEqual(st_with_grad.local_tensor(), ones_st.local_tensor())
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
