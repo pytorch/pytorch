@@ -30,6 +30,14 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // can be infered from `nested_size_tensor`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
+  // This constructor is used creating view tensors from nested  tensors
+  explicit NestedTensorImpl(
+      Storage storage,
+      const at::Tensor& base_tensor,
+      at::Tensor nested_size_tensor,
+      at::Tensor nested_stride_tensor,
+      std::vector<int64_t> offsets);
+
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
@@ -71,6 +79,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
         Storage(storage_), buffer_key_set_, data_type_);
     buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size_));
     return Tensor(buffer_tensor_impl);
+  }
+
+  int64_t get_buffer_size() const {
+    return buffer_size_;
   }
 
  protected:

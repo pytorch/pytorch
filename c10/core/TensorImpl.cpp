@@ -127,7 +127,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     // NOLINTNEXTLINE(performance-move-const-arg)
-    : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
+    : TensorImpl(Storage{}, key_set, data_type, std::move(device_opt)) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -181,7 +181,6 @@ TensorImpl::TensorImpl(
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
-
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
 }

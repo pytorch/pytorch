@@ -177,6 +177,34 @@ NestedTensorImpl::NestedTensorImpl(
           construct_offsets(nested_size_tensor))
 {}
 
+NestedTensorImpl::NestedTensorImpl(
+    Storage storage,
+    const at::Tensor& base_tensor,
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    std::vector<int64_t> offsets)
+    : TensorImpl(c10::TensorImpl::VIEW, std::move(storage), base_tensor.key_set(), base_tensor.dtype()),
+      buffer_size_(get_nested_tensor_impl(base_tensor)-> get_buffer_size()),
+      nested_size_tensor_(std::move(nested_size_tensor)),
+      nested_stride_tensor_(std::move(nested_stride_tensor)),
+      offsets_(std::move(offsets)),
+      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+  TORCH_INTERNAL_ASSERT(base_tensor.is_nested());
+  TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
+  int64_t size_dim = nested_size_tensor_.dim();
+  TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.is_contiguous());
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.dim() == size_dim);
+  TORCH_INTERNAL_ASSERT(
+      nested_stride_tensor_.sizes() == nested_size_tensor_.sizes());
+  TORCH_INTERNAL_ASSERT(
+      (size_dim == 0 && (int64_t)offsets_.empty()) ||
+      (size_dim == 2 &&
+       nested_size_tensor_.size(0) == (int64_t)offsets_.size()));
+  refresh_dim();
+  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+}
+
 void NestedTensorImpl::refresh_dim() {
   const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
   sizes_and_strides_.resize(my_dim);

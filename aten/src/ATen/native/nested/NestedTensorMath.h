@@ -32,6 +32,34 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
+  /**
+   * Create a new nested tensor that is a view of base
+   *
+   * create_view_tensor calls a specialized constructor that copys the
+   * the keys from base onto the new view tensor being created
+   * the buffer is shared between the base and the returned view tensor
+   *
+   * @param base Base tensor to construct view from.
+   * @param nested_size_tensor View tensors' sizes.
+   * @param nested_stride_tensor View tensors' strides.
+   * @param offsets View tensors' offsets.
+   * @return A newly constructed view tensor
+   */
+  inline at::Tensor create_nested_view_tensor(
+      at::Tensor base,
+      at::Tensor nested_size_tensor,
+      at::Tensor nested_stride_tensor,
+      const std::vector<int64_t>& offsets) {
+    auto base_impl = get_nested_tensor_impl(base);
+
+    return at::detail::make_tensor<NestedTensorImpl>(
+        base_impl->storage(),
+        base,
+        std::move(nested_size_tensor),
+        std::move(nested_stride_tensor),
+        offsets);
+  }
+
 // The sizes of the underlying tensors
 inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* self_ptr) {
   int64_t ntensors = self_ptr->size(0);
