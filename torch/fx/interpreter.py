@@ -406,7 +406,8 @@ class Transformer(Interpreter):
                             name: Optional[str] = None, type_expr: Optional[Any] = None) -> Node:
                 node = super().create_node(kind, target, args, kwargs, name, type_expr)
                 # copy original node's stack_trace to the new node
-                node.stack_trace = self.interpreter.current_node.stack_trace
+                original_node = self.interpreter.current_node
+                node.stack_trace = original_node.stack_trace if original_node else None
                 return node
 
         self.tracer = TransformerTracer(self, self.new_graph)
@@ -429,7 +430,7 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
         placeholder_node = self.new_graph.placeholder(target, default_value=default_value)
-        placeholder_node.stack_trace = self.current_node.stack_trace
+        placeholder_node.stack_trace = self.current_node.stack_trace if self.current_node else None
         return Proxy(placeholder_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
@@ -448,7 +449,7 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         getattr_node = self.new_graph.get_attr(target)
-        getattr_node.stack_trace = self.current_node.stack_trace
+        getattr_node.stack_trace = self.current_node.stack_trace if self.current_node else None
         return Proxy(getattr_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
