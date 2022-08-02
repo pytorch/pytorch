@@ -1812,7 +1812,7 @@ class TestAllocator : public flatbuffers::Allocator {
   explicit TestAllocator(volatile int* deallocate_call_count)
       : deallocate_call_count_(deallocate_call_count) {}
 
-  void deallocate(uint8_t* p, size_t size) {
+  void deallocate(uint8_t* p, size_t /*size*/) override {
     *deallocate_call_count_ += 1;
     delete[] p;
   }
@@ -1820,7 +1820,8 @@ class TestAllocator : public flatbuffers::Allocator {
   uint8_t* allocate(size_t) override {
     TORCH_CHECK(false, "allocate() should not be called");
   }
-  uint8_t* reallocate_downward(uint8_t*, size_t, size_t, size_t, size_t) {
+  uint8_t* reallocate_downward(uint8_t*, size_t, size_t, size_t, size_t)
+      override {
     TORCH_CHECK(false, "reallocate_downward() should not be called");
   }
 

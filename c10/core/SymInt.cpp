@@ -6,17 +6,20 @@
 namespace c10 {
 
 std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
-  SymIntNode a = a_.is_symbolic() ? a_.toSymIntNodeImpl() : nullptr;
-  SymIntNode b = b_.is_symbolic() ? b_.toSymIntNodeImpl() : nullptr;
+  SymIntNode a, b;
+  if (a_.is_symbolic())
+    a = a_.toSymIntNodeImpl();
+  if (b_.is_symbolic())
+    b = b_.toSymIntNodeImpl();
 
   SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
-    a = common->wrap(a_.data());
+    a = common->wrap(a_.as_int_unchecked());
     a_.toSymInt(a); //
   }
   if (!b) {
-    b = common->wrap(b_.data());
+    b = common->wrap(b_.as_int_unchecked());
     b_.toSymInt(b);
   }
   return {a, b};

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-from torchgen.utils import assert_never, NamespaceHelper
+from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -290,8 +290,8 @@ class ScalarType(Enum):
         return mb_r
 
     @staticmethod
-    def parse_set(values: str) -> Set["ScalarType"]:
-        dtypes: Set[ScalarType] = set()
+    def parse_set(values: str) -> OrderedSet["ScalarType"]:
+        dtypes: OrderedSet[ScalarType] = OrderedSet()
         for value in values.split(", "):
             if value in DTYPE_CLASSES:
                 dtypes.update(DTYPE_CLASSES[value])
@@ -300,18 +300,22 @@ class ScalarType(Enum):
         return dtypes
 
 
-DTYPE_CLASSES: Dict[str, Set[ScalarType]] = {}
+DTYPE_CLASSES: Dict[str, OrderedSet[ScalarType]] = {}
 # NB: Integral doesn't include boolean
-DTYPE_CLASSES["Integral"] = {
-    ScalarType.Byte,
-    ScalarType.Char,
-    ScalarType.Int,
-    ScalarType.Long,
-    ScalarType.Short,
-}
+DTYPE_CLASSES["Integral"] = OrderedSet(
+    [
+        ScalarType.Byte,
+        ScalarType.Char,
+        ScalarType.Int,
+        ScalarType.Long,
+        ScalarType.Short,
+    ]
+)
 # NB: Floating doesn't include low precision types
-DTYPE_CLASSES["Floating"] = {ScalarType.Float, ScalarType.Double}
-DTYPE_CLASSES["Complex"] = {ScalarType.ComplexFloat, ScalarType.ComplexDouble}
+DTYPE_CLASSES["Floating"] = OrderedSet([ScalarType.Float, ScalarType.Double])
+DTYPE_CLASSES["Complex"] = OrderedSet(
+    [ScalarType.ComplexFloat, ScalarType.ComplexDouble]
+)
 DTYPE_CLASSES["All"] = DTYPE_CLASSES["Integral"] | DTYPE_CLASSES["Floating"]
 DTYPE_CLASSES["AllAndComplex"] = DTYPE_CLASSES["All"] | DTYPE_CLASSES["Complex"]
 DTYPE_CLASSES["FloatingAndComplex"] = (
@@ -1045,7 +1049,7 @@ class BackendMetadata:
 @dataclass(frozen=True)
 class UfuncInnerLoop:
     name: str
-    supported_dtypes: Set[ScalarType]
+    supported_dtypes: OrderedSet[ScalarType]
     # key is stored here because it affects the semantics of name,
     # so its helpful to have them together for further processing
     ufunc_key: UfuncKey
@@ -1055,7 +1059,7 @@ class UfuncInnerLoop:
         name, supported_dtypes_str = value.split(" ", 1)
         assert supported_dtypes_str[0] == "("
         assert supported_dtypes_str[-1] == ")"
-        supported_dtypes = set()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for k in supported_dtypes_str[1:-1].split(", "):
             supported_dtypes |= ScalarType.parse_set(k)
         return UfuncInnerLoop(
