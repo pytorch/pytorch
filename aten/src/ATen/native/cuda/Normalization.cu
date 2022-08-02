@@ -1,4 +1,4 @@
-// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
@@ -20,16 +20,10 @@
 #include <ATen/ops/batch_norm_stats_native.h>
 #include <ATen/ops/batch_norm_update_stats_native.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/from_blob.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/scalar_tensor.h>
-#endif
-
-// TODO: Doesn't exist in this branch
-#if 0
-#include <ATen/ops/from_blob.h>
-#else
-#include <ATen/Functions.h>
 #endif
 
 namespace at { namespace native {
