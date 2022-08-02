@@ -631,27 +631,23 @@ inline DispatchKey computeDispatchKey(
     case Layout::Strided: {
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {
-        case DeviceType::CPU: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedCPU;
-          }
-          return DispatchKey::CPU;
-        }
-        case DeviceType::CUDA: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedCUDA;
-          }
-          return DispatchKey::CUDA;
-        }
-        case DeviceType::IPU: {
-          return DispatchKey::IPU;
-        }
-        case DeviceType::XPU: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedXPU;
-          }
-          return DispatchKey::XPU;
-        }
+#define DO_CASE(device, _)                   \
+  case DeviceType::device: {                 \
+    if (isQIntType(dtype_)) {                \
+      return DispatchKey::Quantized##device; \
+    }                                        \
+    return DispatchKey::device;              \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+        case DeviceType::FPGA:
+          return DispatchKey::FPGA;
+        case DeviceType::ORT:
+          return DispatchKey::ORT;
+        case DeviceType::Vulkan:
+          return DispatchKey::Vulkan;
+        case DeviceType::Metal:
+          return DispatchKey::Metal;
         case DeviceType::MKLDNN:
         case DeviceType::OPENGL:
         case DeviceType::OPENCL:
@@ -661,31 +657,6 @@ inline DispatchKey computeDispatchKey(
               "This is a grandfathered Caffe2 device type ",
               device_.type(),
               ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
-        case DeviceType::HIP:
-          return DispatchKey::HIP;
-        case DeviceType::VE:
-          return DispatchKey::VE;
-        case DeviceType::FPGA:
-          return DispatchKey::FPGA;
-        case DeviceType::ORT:
-          return DispatchKey::ORT;
-        case DeviceType::XLA:
-          return DispatchKey::XLA;
-        case DeviceType::Lazy:
-          return DispatchKey::Lazy;
-        case DeviceType::MPS:
-          return DispatchKey::MPS;
-        case DeviceType::Vulkan:
-          return DispatchKey::Vulkan;
-        case DeviceType::Metal:
-          return DispatchKey::Metal;
-        case DeviceType::Meta:
-          return DispatchKey::Meta;
-        case DeviceType::HPU:
-          return DispatchKey::HPU;
-        case DeviceType::PrivateUse1: {
-          return DispatchKey::PrivateUse1;
-        }
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -695,16 +666,12 @@ inline DispatchKey computeDispatchKey(
     }
     case Layout::Sparse:
       switch (device_.type()) {
-        case DeviceType::CPU:
-          return DispatchKey::SparseCPU;
-        case DeviceType::CUDA:
-          return DispatchKey::SparseCUDA;
-        case DeviceType::HIP:
-          return DispatchKey::SparseHIP;
-        case DeviceType::VE:
-          return DispatchKey::SparseVE;
-        case DeviceType::XPU:
-          return DispatchKey::SparseXPU;
+#define DO_CASE(device, _)              \
+  case DeviceType::device: {            \
+    return DispatchKey::Sparse##device; \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -744,12 +711,10 @@ inline DispatchKey computeDispatchKey(
 
 inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
   switch (dispatch_key) {
-    case DispatchKey::SparseCPU:
-    case DispatchKey::SparseCUDA:
-    case DispatchKey::SparseHIP:
-    case DispatchKey::SparseVE:
-    case DispatchKey::SparseXPU:
-      return Layout::Sparse;
+#define DO_CASE(bc, _) case DispatchKey::Sparse##bc:
+    C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
+#undef DO_CASE
+    return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
       TORCH_CHECK(
@@ -767,53 +732,21 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
 inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
   switch (dispatch_key) {
     // stuff that's real
-    case DispatchKey::CPU:
-    case DispatchKey::SparseCPU:
+#define DO_CASE(suffix, prefix)     \
+  case DispatchKey::prefix##suffix: \
+    return DeviceType::suffix;
+#define DO_CASES(_, prefix) C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, prefix)
+    C10_FORALL_FUNCTIONALITY_KEYS(DO_CASES)
+#undef DO_CASES
+#undef DO_CASE
+
     case DispatchKey::MkldnnCPU:
-    case DispatchKey::QuantizedCPU:
-    case DispatchKey::AutogradCPU:
       return DeviceType::CPU;
-    case DispatchKey::CUDA:
-    case DispatchKey::SparseCUDA:
-    case DispatchKey::QuantizedCUDA:
-    case DispatchKey::AutogradCUDA:
-      return DeviceType::CUDA;
-    case DispatchKey::HIP:
-    case DispatchKey::SparseHIP:
-      return DeviceType::HIP;
-    case DispatchKey::VE:
-    case DispatchKey::SparseVE:
-      return DeviceType::VE;
-    case DispatchKey::XLA:
-    case DispatchKey::AutogradXLA:
-      return DeviceType::XLA;
-    case DispatchKey::Lazy:
-    case DispatchKey::AutogradLazy:
-      return DeviceType::Lazy;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
-    case DispatchKey::Meta:
-      return DeviceType::Meta;
 
-    // stuff that people are actively developing
-    case DispatchKey::IPU:
-    case DispatchKey::AutogradIPU:
-      return DeviceType::IPU;
-    case DispatchKey::XPU:
-    case DispatchKey::SparseXPU:
-    case DispatchKey::QuantizedXPU:
-    case DispatchKey::AutogradXPU:
-      return DeviceType::XPU;
-    case DispatchKey::MPS:
-    case DispatchKey::AutogradMPS:
-      return DeviceType::MPS;
-    case DispatchKey::HPU:
-    case DispatchKey::AutogradHPU:
-      return DeviceType::HPU;
     case DispatchKey::ORT:
       return DeviceType::ORT;
-    case DispatchKey::PrivateUse1:
-      return DeviceType::PrivateUse1;
     default:
       TORCH_CHECK(
           false,

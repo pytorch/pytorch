@@ -361,7 +361,7 @@ Tensor internal_new_from_data(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
             scalar_type,
-            " or an _UntypedStorage, but got ",
+            " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
             sizes,
@@ -414,8 +414,9 @@ Tensor internal_new_from_data(
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   // lift has no autograd implementation, so we need to make sure we don't try
   // to dispatch to it.
+  // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
-  return tensor.lift();
+  return at::lift_fresh(tensor);
 }
 
 Tensor new_from_data_copy(
@@ -641,7 +642,7 @@ Tensor legacy_tensor_generic_ctor_new(
           storage_scalar_type == scalar_type,
           "Expected a Storage of type ",
           scalar_type,
-          " or an _UntypedStorage, but got type ",
+          " or an UntypedStorage, but got type ",
           storage_scalar_type,
           " for argument 1 'storage'");
     }
