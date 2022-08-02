@@ -88,23 +88,29 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res, **kwargs):
-    def wrap_with_proxy(e, proxy):
+def wrap_output(inner_res, proxy_res, *, constant):
+    def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy, **kwargs)
+                return ProxyTensor(e, proxy, constant=constant)
         else:
             return e
+
+    def get_constant(idx):
+        if constant is None:
+            return None
+        else:
+            return constant[idx]
 
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple):
-        return tuple(wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res))
+        return tuple(wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res))
     elif isinstance(inner_res, list):
-        return list([wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res)])
+        return list([wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res)])
     elif isinstance(inner_res, torch.Tensor):
-        return wrap_with_proxy(inner_res, proxy_res)
+        return wrap_with_proxy(inner_res, proxy_res, constant)
     else:
         return inner_res
 
