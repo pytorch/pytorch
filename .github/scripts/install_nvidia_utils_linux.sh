@@ -20,7 +20,7 @@ install_nvidia_docker2_amzn2() {
 install_nvidia_driver_amzn2() {
     (
         set -x
-        sudo apt remove nvidia-*
+        sudo yum autoremove -y nvidia*
         sudo yum groupinstall -y "Development Tools"
         # ensure our kernel install is the same as our underlying kernel,
         # groupinstall "Development Tools" has a habit of mismatching kernel headers
