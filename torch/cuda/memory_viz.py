@@ -12,8 +12,9 @@ def _frame_fmt(f):
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
-        flamegraph_script = f'/tmp/{os.environ["USER"]}_flamegraph.pl'
+        flamegraph_script = f'/tmp/{os.getuid()}_flamegraph.pl'
     if not os.path.exists(flamegraph_script):
+        import urllib.request
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
         urllib.request.urlretrieve('https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl', flamegraph_script)
         subprocess.run(['chmod', '+x', flamegraph_script])
@@ -123,7 +124,6 @@ if __name__ == "__main__":
         sys.path.remove(thedir)
     from pprint import pprint
     import argparse
-    import urllib.request
 
     fn_name = 'torch.cuda.memory_dbg.snapshot()'
     pickled = f'pickled memory statistics from {fn_name}'

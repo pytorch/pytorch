@@ -16,7 +16,7 @@ __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_proce
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info"]
+           "mem_get_info", "save_memory_usage", "save_segment_usage", "enable_memory_history", "snapshot"]
 
 def _host_allocator():
     _lazy_init()

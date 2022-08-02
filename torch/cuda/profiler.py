@@ -1,8 +1,7 @@
 import tempfile
 import contextlib
-from . import cudart, check_error, init as cuda_init
-from .. import _C
-import subprocess
+from . import cudart, check_error
+
 
 DEFAULT_FLAGS = [
     "gpustarttimestamp",
