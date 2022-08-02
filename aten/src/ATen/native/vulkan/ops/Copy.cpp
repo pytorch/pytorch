@@ -135,12 +135,12 @@ void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
 void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
-  // Note that the float data type has been enforced for the storage buffer below.
-  // The reason for this is that the nchw_to_image and image_to_nchw shaders which
-  // perform the transfer to/from an image texture expect a buffer of floats as
-  // input. GLSL/Vulkan does not natively support 16 bit arithmetic types, so for
-  // now storage buffers created for compute shaders must define floats as their
-  // base data type.
+  // Note that the float data type has been enforced for the storage buffer
+  // below. The reason for this is that the nchw_to_image and image_to_nchw
+  // shaders which perform the transfer to/from an image texture expect a buffer
+  // of floats as input. GLSL/Vulkan does not natively support 16 bit arithmetic
+  // types, so for now storage buffers created for compute shaders must define
+  // floats as their base data type.
   api::StorageBuffer staging(context, at::kFloat, dst.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);

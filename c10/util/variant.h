@@ -2253,7 +2253,6 @@ class impl : public copy_assignment<traits<Ts...>> {
 
  public:
   C10_MPARK_INHERITING_CTOR(impl, super)
-  impl& operator=(const impl& other) = default;
 
   template <std::size_t I, typename Arg>
   inline void assign(Arg&& arg) {
