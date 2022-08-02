@@ -156,6 +156,10 @@ void IrCloner::handle(const Merge* merge) {
   clone_ = IrBuilder::clone(merge, this);
 }
 
+void IrCloner::handle(const Swizzle2D* swizzle) {
+  clone_ = IrBuilder::clone(swizzle, this);
+}
+
 TensorView* RecomputeTv::recompute(TensorView* tv) {
   FusionGuard fg(tv->fusion());
 

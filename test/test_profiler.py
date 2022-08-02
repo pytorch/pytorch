@@ -31,7 +31,10 @@ from torch.profiler import (
 from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              ExtraCUDACopyPattern,
                                              ForLoopIndexingPattern,
-                                             FP32MatMulPattern)
+                                             FP32MatMulPattern,
+                                             OptimizerSingleTensorPattern,
+                                             SynchronizedDataLoaderPattern,
+                                             GradNotSetToNonePattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1202,16 +1205,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._autograd._ExtraFields_TorchOp)
 
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
-        shape_info = [x.shape if x else None for x in input_info.tensor_metadata]
-        stride_info = [x.stride if x else None for x in input_info.tensor_metadata]
-
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
-        self.assertEqual(shape_info, [[4, 4], [4, 1], None])
-        self.assertEqual(stride_info, [[12, 3], [1, 1], None])
 
 
 @dataclass(frozen=True)
@@ -1565,7 +1565,7 @@ aten::mm""")
         )
         num_matched = []
         for _, fn in cases:
-            with profile(with_stack=True) as prof:
+            with profile(with_stack=True, record_shapes=True) as prof:
                 fn()
             pattern = ExtraCUDACopyPattern(prof)
             num_matched.append(len(pattern.matched_events()))
@@ -1618,6 +1618,81 @@ aten::mm""")
         has_tf32 = 0 if pattern.skip else 1
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern_benchmark(self):
+        with profile(with_stack=True, record_shapes=True) as prof:
+            x = torch.ones((100, 100)).to("cuda")
+            x = torch.ones((50, 50)).to("cuda")
+        pattern = ExtraCUDACopyPattern(prof)
+        shapes_factor_map = pattern.benchmark(pattern.matched_events())
+        self.assertEqual(len(shapes_factor_map), 2)
+
+    def test_profiler_optimizer_single_tensor_pattern(self):
+        x = torch.ones((100, 100))
+        cases = (
+            (1, lambda: torch.optim.Adam(model.parameters())),
+            (1, lambda: torch.optim.SGD(model.parameters(), lr=0.01)),
+            (1, lambda: torch.optim.AdamW(model.parameters())),
+            (0, lambda: torch.optim.Adam(model.parameters(), foreach=True)),
+            (0, lambda: torch.optim.SGD(model.parameters(), lr=0.01, foreach=True)),
+            (0, lambda: torch.optim.AdamW(model.parameters(), foreach=True)),
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                model = nn.Sequential(
+                    nn.Linear(100, 100),
+                    nn.ReLU(),
+                    nn.Linear(100, 10),
+                )
+                optimizer = fn()
+                optimizer.zero_grad()
+                y_hat = model(x)
+                loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+                loss.backward()
+                optimizer.step()
+            pattern = OptimizerSingleTensorPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+    def test_profiler_synchronized_dataloader_pattern(self):
+        dataset = torch.rand((100, 100))
+        sync_dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
+        async_dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=4)
+        with profile(with_stack=True) as prof:
+            next(iter(sync_dataloader))
+            next(iter(async_dataloader))
+        pattern = SynchronizedDataLoaderPattern(prof)
+        num_matched = len(pattern.matched_events())
+        self.assertEqual(num_matched, 1)
+
+    def test_profiler_grad_not_set_to_none_pattern(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+        optimizer = torch.optim.Adam(model.parameters())
+        cases = (
+            (1, lambda: optimizer.zero_grad()),
+            (1, lambda: model.zero_grad()),
+            (0, lambda: optimizer.zero_grad(set_to_none=True)),
+            (0, lambda: model.zero_grad(set_to_none=True))
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                y_hat = model(x)
+                loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+                loss.backward()
+                optimizer.step()
+                fn()
+            pattern = GradNotSetToNonePattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
 
 
 if __name__ == '__main__':

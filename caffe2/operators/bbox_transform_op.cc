@@ -100,7 +100,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
 
-  DCHECK_EQ(weights_.size(), 4);
+  TORCH_DCHECK_EQ(weights_.size(), 4);
 
   Eigen::Map<const ERArrXXf> boxes0(
       roi_in.data<float>(), roi_in.dim32(0), roi_in.dim32(1));
