@@ -157,7 +157,7 @@ class TestTorchDeviceType(TestCase):
         for i in range(10):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
-            self.assertEqual(scalar.storage()._untyped().tolist(), bytes_list)
+            self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
 
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
@@ -175,7 +175,7 @@ class TestTorchDeviceType(TestCase):
                 v_s[el_num],
                 v[dim0][dim1])
 
-        v_s_byte = v.storage()._untyped()
+        v_s_byte = v.storage().untyped()
         el_size = v.element_size()
 
         for el_num in range(v.numel()):
@@ -238,7 +238,7 @@ class TestTorchDeviceType(TestCase):
         a_s = a.storage()
         b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, b)
-        c = torch.tensor(a_s._untyped(), device=device, dtype=dtype).reshape(a.size())
+        c = torch.tensor(a_s.untyped(), device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, c)
 
         for error_dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -255,7 +255,7 @@ class TestTorchDeviceType(TestCase):
         a_s = a.storage()
         b = torch.tensor([], device=device, dtype=dtype).set_(a_s).reshape(a.size())
         self.assertEqual(a, b)
-        c = torch.tensor([], device=device, dtype=dtype).set_(a_s._untyped()).reshape(a.size())
+        c = torch.tensor([], device=device, dtype=dtype).set_(a_s.untyped()).reshape(a.size())
         self.assertEqual(a, c)
 
         for error_dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -267,11 +267,11 @@ class TestTorchDeviceType(TestCase):
 
     def _check_storage_meta(self, s, s_check):
         self.assertTrue(
-            isinstance(s, (torch._UntypedStorage, torch._TypedStorage)) and
+            isinstance(s, (torch.UntypedStorage, torch.TypedStorage)) and
             isinstance(s_check, type(s)),
             (
-                's and s_check must both be one of _UntypedStorage or '
-                '_TypedStorage, but got'
+                's and s_check must both be one of UntypedStorage or '
+                'TypedStorage, but got'
                 f' {type(s).__name__} and {type(s_check).__name__}'))
 
         self.assertEqual(s.device.type, 'meta')
@@ -282,9 +282,9 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r'Not available'):
             s[0]
 
-        if isinstance(s, torch._TypedStorage):
+        if isinstance(s, torch.TypedStorage):
             self.assertEqual(s.dtype, s_check.dtype)
-            self._check_storage_meta(s._untyped(), s_check._untyped())
+            self._check_storage_meta(s.untyped(), s_check.untyped())
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -296,8 +296,8 @@ class TestTorchDeviceType(TestCase):
             [[1, 2, 3, 4, 5, 6]],
         ]
         for args in args_list:
-            s_check = torch._TypedStorage(*args, dtype=dtype, device=device)
-            s = torch._TypedStorage(*args, dtype=dtype, device='meta')
+            s_check = torch.TypedStorage(*args, dtype=dtype, device=device)
+            s = torch.TypedStorage(*args, dtype=dtype, device='meta')
             self._check_storage_meta(s, s_check)
 
     @onlyNativeDeviceTypes
@@ -309,8 +309,8 @@ class TestTorchDeviceType(TestCase):
             [[1, 2, 3, 4, 5, 6]],
         ]
         for args in args_list:
-            s_check = torch._UntypedStorage(*args, device=device)
-            s = torch._UntypedStorage(*args, device='meta')
+            s_check = torch.UntypedStorage(*args, device=device)
+            s = torch.UntypedStorage(*args, device='meta')
             self._check_storage_meta(s, s_check)
 
     @onlyNativeDeviceTypes
@@ -326,7 +326,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_storage_meta_errors(self, device, dtype):
-        s0 = torch._TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
 
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s0.cpu()
@@ -361,7 +361,7 @@ class TestTorchDeviceType(TestCase):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
-            s1 = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+            s1 = torch.TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
@@ -6444,7 +6444,7 @@ class TestTorch(TestCase):
             torch.storage._LegacyStorage()
 
         for storage_class in torch._storage_classes:
-            if storage_class in [torch._UntypedStorage, torch._TypedStorage]:
+            if storage_class in [torch.UntypedStorage, torch.TypedStorage]:
                 continue
 
             device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
@@ -6475,9 +6475,9 @@ class TestTorch(TestCase):
             s = storage_class()
 
             with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
-                storage_class(0, wrap_storage=s._untyped())
+                storage_class(0, wrap_storage=s.untyped())
 
-            with self.assertRaisesRegex(TypeError, r"must be _UntypedStorage"):
+            with self.assertRaisesRegex(TypeError, r"must be UntypedStorage"):
                 storage_class(wrap_storage=s)
 
             if torch.cuda.is_available():
@@ -6493,40 +6493,40 @@ class TestTorch(TestCase):
                         s_other_device = s.cuda()
 
                     with self.assertRaisesRegex(RuntimeError, r"Device of 'wrap_storage' must be"):
-                        storage_class(wrap_storage=s_other_device._untyped())
+                        storage_class(wrap_storage=s_other_device.untyped())
 
-            # _TypedStorage constructor errors
+            # TypedStorage constructor errors
             with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
-                torch._TypedStorage(0, wrap_storage=s._untyped(), dtype=dtype)
+                torch.TypedStorage(0, wrap_storage=s.untyped(), dtype=dtype)
 
             with self.assertRaisesRegex(RuntimeError, r"Argument 'dtype' must be specified"):
-                torch._TypedStorage(wrap_storage=s._untyped())
+                torch.TypedStorage(wrap_storage=s.untyped())
 
             with self.assertRaisesRegex(TypeError, r"Argument 'dtype' must be torch.dtype"):
-                torch._TypedStorage(wrap_storage=s._untyped(), dtype=0)
+                torch.TypedStorage(wrap_storage=s.untyped(), dtype=0)
 
             with self.assertRaisesRegex(RuntimeError, r"Argument 'device' should not be specified"):
-                torch._TypedStorage(wrap_storage=s._untyped(), dtype=dtype, device=device)
+                torch.TypedStorage(wrap_storage=s.untyped(), dtype=dtype, device=device)
 
-            with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be _UntypedStorage"):
-                torch._TypedStorage(wrap_storage=s, dtype=dtype)
+            with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be UntypedStorage"):
+                torch.TypedStorage(wrap_storage=s, dtype=dtype)
 
             with self.assertRaisesRegex(RuntimeError, r"Storage device not recognized"):
-                torch._TypedStorage(dtype=dtype, device='xla')
+                torch.TypedStorage(dtype=dtype, device='xla')
 
             if torch.cuda.is_available():
                 if storage_class in quantized_storages:
                     with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
-                        torch._TypedStorage(dtype=dtype, device='cuda')
+                        torch.TypedStorage(dtype=dtype, device='cuda')
 
             with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
-                torch._TypedStorage(torch.tensor([]), dtype=dtype, device=device)
+                torch.TypedStorage(torch.tensor([]), dtype=dtype, device=device)
 
             with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
-                torch._TypedStorage(0, 0, dtype=dtype, device=device)
+                torch.TypedStorage(0, 0, dtype=dtype, device=device)
 
-            if isinstance(s, torch._TypedStorage):
-                s_other = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+            if isinstance(s, torch.TypedStorage):
+                s_other = torch.TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
 
                 with self.assertRaisesRegex(RuntimeError, r'cannot set item'):
                     s.fill_(s_other)
