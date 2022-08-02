@@ -672,7 +672,9 @@ class FakeTensorMode(TorchDispatchMode):
             except NotImplementedError as not_implemented_error:
                 if not self.allow_fallback_kernels:
                     raise not_implemented_error
-                return run_fallback_kernel(func, args, kwargs, not_implemented_error)
+                return run_fallback_kernel(
+                    self, func, args, kwargs, not_implemented_error
+                )
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
