@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import contextlib
 from typing import Dict, Any
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
@@ -112,7 +113,7 @@ class NodePyOP(NodePy):
         # Replace single quote which causes strange behavior in TensorBoard
         # TODO: See if we can remove this in the future
         self.attributes = str(
-            {k: node_cpp[k] for k in node_cpp.attributeNames()}
+            {k: _node_get(node_cpp, k) for k in node_cpp.attributeNames()}
         ).replace("'", " ")
         self.kind = node_cpp.kind()
 
@@ -331,9 +332,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
         `torch.jit.trace`. Pass False when you want the tracer to
         record your mutable container types (list, dict)
     """
-    with torch.onnx.select_model_mode_for_export(
-        model, torch.onnx.TrainingMode.EVAL
-    ):  # TODO: move outside of torch.onnx?
+    with _set_model_to_eval(model):
         try:
             trace = torch.jit.trace(model, args, strict=use_strict_trace)
             graph = trace.graph
@@ -362,3 +361,27 @@ def graph(model, args, verbose=False, use_strict_trace=True):
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
     # The producer version has been reverse engineered from standard
     # TensorBoard logged data.
+
+
+@contextlib.contextmanager
+def _set_model_to_eval(model):
+    """A context manager to temporarily set the training mode of ``model`` to eval."""
+    if not isinstance(model, torch.jit.ScriptFunction):
+        originally_training = model.training
+        model.train(False)
+        try:
+            yield
+        finally:
+            model.train(originally_training)
+    else:
+        # Do nothing for ScriptFunction
+        try:
+            yield
+        finally:
+            pass
+
+
+def _node_get(node: torch._C.Node, key: str):
+    """Gets attributes of a node which is polymorphic over return type."""
+    sel = node.kindOf(key)
+    return getattr(node, sel)(key)
