@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, Sequence
 
 import torch
 
+import torch._decomp
 import torch._prims
 
 import torch._refs
@@ -96,6 +97,14 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
+
+        # For torch.ops.aten.*, use registered decompositions from torch._decomp
+        # torch._decomp.decomposition_table provides a mapping from
+        # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
+        # implementations.
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+            func = torch._decomp.decomposition_table.get(orig_func, None)
+
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, func, args, kwargs):
