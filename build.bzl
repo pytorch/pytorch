@@ -144,6 +144,7 @@ GENERATED_H = [
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
+    "VmapGeneratedPlumbing.h",
 ]
 
 GENERATED_H_CORE = [
