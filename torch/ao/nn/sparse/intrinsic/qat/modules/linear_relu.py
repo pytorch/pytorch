@@ -9,8 +9,8 @@ class SparseQATLinearReLU(ao_iqsparsenn.SparseQuantizedLinearReLU):
     Note: There is no fused linear + relu for sparse quantized operation.
     This module replaces it with sparse_quantized followed by torch.relu.
 
-    Ideally, we would want to inherit from the spars
-    Script doesn't like
+    Ideally, we would want to inherit from the sparse.quantized.Linear, and
+    call `torch.relu(super().forward(x))`, but TorchScript doesn't like
     inheritance in the forward. That's why we use composition to override the
     behavior.
     """
