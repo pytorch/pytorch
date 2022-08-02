@@ -42,7 +42,8 @@ struct DisableFuncTorch {
 };
 
 struct EnableTorchFunction {
-  EnableTorchFunction() : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
     at::impl::PythonTorchFunctionTLS::set_disabled(false);
   }
   ~EnableTorchFunction() {
