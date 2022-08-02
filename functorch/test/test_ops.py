@@ -447,10 +447,18 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
+        # AssertionError: Tensor-likes are not close!
+        # Mismatched elements: 1 / 15 (6.7%)
+        # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
+        # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
+        # The failure occurred for item [0]
+        xfail('_masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
+        tol1('prod',
+             {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
     ))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -554,7 +562,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
-        xfail('_masked.prod'),  # calls aten::item
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
@@ -622,7 +629,6 @@ class TestOperators(TestCase):
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),
-        xfail('_masked.prod'),
 
         # Not actually a problem: embedding with max_norm mutates the weight
         # and causes different runs to produce different results.
@@ -829,7 +835,6 @@ class TestOperators(TestCase):
         xfail('unfold'),
         xfail('vdot'),
         xfail('nn.functional.dropout'),
-        xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('cross'),
@@ -1001,6 +1006,10 @@ class TestOperators(TestCase):
             self.assertEqual(jacobian_jvp, jacobian_vjp)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
+        tol1('_masked.prod',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
+    ))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].

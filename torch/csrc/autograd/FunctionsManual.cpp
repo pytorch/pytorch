@@ -708,7 +708,7 @@ Tensor prod_backward(
     return grad;
   }
   if (input.numel() == 0) {
-      return grad * (result / input).conj();
+    return input;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
@@ -723,9 +723,9 @@ Tensor prod_backward(
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   auto total_zeros = slice_zero_count.sum();
   if (isTensorSubclassLike(total_zeros)) {
-    auto false_case = grad * (result / input).conj();
-    auto true_case = prod_safe_zeros_backward(grad, input, dim);
-    return at::where(total_zeros.to(at::kBool), true_case, false_case);
+    // For Composite Compliance, always take the slower
+    // path.
+    return prod_safe_zeros_backward(grad, input, dim).view_as(input);
   } else {
     if (total_zeros.item<int64_t>() == 0) {
       return grad * (result / input).conj();
