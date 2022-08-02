@@ -6645,8 +6645,7 @@ class TestConsistency(TestCase):
                 mps_out = op(*mps_args, **mps_kwargs)
                 self.assertEqual(cpu_out, mps_out)
 
-
-                if key in self.BACKWARD_BLOCK_LIST or dtype not in ["torch.float16", "torch.float32"]:
+                if key in self.BACKWARD_BLOCK_LIST or str(dtype) not in ["torch.float16", "torch.float32"]:
                     continue
 
                 cpu_sample = cpu_sample.transform(lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) else x)
