@@ -1543,6 +1543,12 @@ class TestMPS(TestCase):
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu())
 
+    # See https://github.com/pytorch/pytorch/issues/82427
+    # Test should not crash
+    def test_bool_full(self):
+        x = torch.full((3, 3), True, device='mps')
+
+
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
