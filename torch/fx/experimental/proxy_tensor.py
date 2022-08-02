@@ -88,11 +88,11 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res, *, constant):
+def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy, constant=constant)
+                return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
         else:
             return e
 
