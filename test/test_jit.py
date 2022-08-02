@@ -5754,10 +5754,9 @@ a")
             return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
-        outputs = torch.ones(10, 10)
+        outputs = torch.ones(10, 10, dtype=torch.long)
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(cu.test_integral_shape_inference(*inputs), outputs)
+        self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
@@ -7327,9 +7326,7 @@ a")
                 if inp == 'empty_list':
                     # torchscript returns int tensor, python returns float tensor
                     self.assertNotEqual(t1.dtype, t2.dtype)
-
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(t1, t2)
+                self.assertEqual(t1, t2, exact_dtype=False)
                 self.assertEqual(t1.device, t2.device)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
