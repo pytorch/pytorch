@@ -91,7 +91,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         for dp in self.datapipes:
             try:
                 res.append(dp[index])
-            except (IndexError, KeyError):
+            except IndexError:
                 raise IndexError(f"Index {index} is out of range for one of the input MapDataPipes {dp}.")
         return tuple(res)
 
