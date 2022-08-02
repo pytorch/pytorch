@@ -1803,7 +1803,7 @@ class TestAllocator : public flatbuffers::Allocator {
   /**
    * *deallocate_call_count will be incremented whenever deallocate() is called.
    */
-  explicit TestAllocator(volatile int* deallocate_call_count)
+  explicit TestAllocator(int* deallocate_call_count)
       : deallocate_call_count_(deallocate_call_count) {}
 
   void deallocate(uint8_t* p, size_t /*size*/) override {
@@ -1820,7 +1820,7 @@ class TestAllocator : public flatbuffers::Allocator {
   }
 
  private:
-  volatile int* deallocate_call_count_;
+  int* deallocate_call_count_;
 };
 
 /// Provides access to DetachedBuffer::destroy().
@@ -1836,7 +1836,7 @@ struct DetachedBufferTestingFriend {
 TEST(FlatbufferTest, DetachedBufferSmoke) {
   // Use a custom Allocator to watch the lifecycle of a
   // flatbuffers::DetachedBuffer.
-  volatile int deallocate_call_count = 0;
+  int deallocate_call_count = 0;
   TestAllocator alloc(&deallocate_call_count);
 
   // Data for the buffer. TestAllocator will free it with `delete []`.
@@ -1858,7 +1858,9 @@ TEST(FlatbufferTest, DetachedBufferSmoke) {
   EXPECT_EQ(fb_buf_ptr->data(), data);
   EXPECT_EQ(fb_buf_ptr->size(), data_size);
   // The old object points to nothing.
+  // @lint-ignore CLANGTIDY bugprone-use-after-move
   EXPECT_EQ(fb_buf_local.data(), nullptr);
+  // @lint-ignore CLANGTIDY bugprone-use-after-move
   EXPECT_EQ(fb_buf_local.size(), 0);
 
   // The top-level torch::jit::DetachedBuffer.
