@@ -92,6 +92,11 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
     retstmnt;                                                                \
   }                                                                          \
+  catch (const c10::CUDAOutOfMemoryError& e) {                               \
+    auto msg = e.what();                                                     \
+    PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
+    retstmnt;                                                                \
+  }                                                                          \
   catch (const c10::Error& e) {                                              \
     auto msg = torch::get_cpp_stacktraces_enabled()                          \
         ? e.what()                                                           \
