@@ -7,6 +7,7 @@
 """
 Global flags for aot autograd
 """
+import os
 
 use_functionalize = False
 
@@ -18,3 +19,9 @@ use_functionalize = False
 #   fix for test_aot_autograd_exhaustive_sgn_cpu_float32 _efficientzerotensor
 #   fix for complex numbers
 use_fake_tensor = False
+
+debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
+# Prints out forward + backwards FX graphs
+debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
+# Prints out joint graph traced, before partitioning
+debug_joint = os.environ.get('AOT_FX_GRAPHS_JOINT', False)

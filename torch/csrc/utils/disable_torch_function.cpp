@@ -33,23 +33,6 @@ PyObject* disabled_torch_dispatch_impl() {
 void set_disabled_torch_dispatch_impl(PyObject* value) {
   disabled_torch_dispatch = value;
 }
-}
-
-PyObject* disabled_torch_function_impl() {
-  return disabled_torch_function;
-}
-
-void set_disabled_torch_function_impl(PyObject* value) {
-  disabled_torch_function = value;
-}
-
-PyObject* disabled_torch_dispatch_impl() {
-  return disabled_torch_dispatch;
-}
-
-void set_disabled_torch_dispatch_impl(PyObject* value) {
-  disabled_torch_dispatch = value;
-}
 } // namespace torch
 
 typedef struct {

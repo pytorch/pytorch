@@ -624,7 +624,7 @@ def gen_pyi(
             "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
             "_make_subclass": [
                 "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
-                " dispatch_device: _bool=False) -> Tensor: ..."
+                " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
@@ -695,8 +695,8 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
