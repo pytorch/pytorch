@@ -4776,9 +4776,10 @@
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
-- func: sum_backward(Tensor grad, Tensor self, int[1]? dim, bool keepdim) -> Tensor
+- func: sum_backward(Tensor grad, int[] sizes, int[1]? dim, bool keepdim, *, Tensor? self=None) -> Tensor
   variants: function
   dispatch:
+    CompositeImplicitAutograd: sum_backward
     NestedTensorCPU: NestedTensor_sum_dim_backward_CPU
 
 - func: sum_backward.SymInt(Tensor grad, SymInt[] size, SymInt[1] dim, bool keepdim) -> Tensor

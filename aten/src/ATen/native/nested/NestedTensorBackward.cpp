@@ -67,10 +67,15 @@ Tensor _reshape_nested_backward(const Tensor& self, const Tensor& grad) {
 // Rudimentary sum backward assuming the conditions in #82387
 Tensor NestedTensor_sum_dim_backward_CPU(
   const Tensor& grad,
-  const Tensor& self,
+  // sizes is a dummy right now, it exists so we can dispatch sum_backward to
+  // this function for NestedTensor, since we cannot change the signature of
+  // sum_backward
+  IntArrayRef sizes,
   OptionalIntArrayRef opt_dims,
-  bool keepdim) {
-  auto nt_self = get_nested_tensor_impl(self);
+  bool keepdim,
+  const c10::optional<Tensor>& nested_self) {
+  TORCH_CHECK(nested_self.has_value());
+  auto nt_self = get_nested_tensor_impl(nested_self.value());
   auto nt_grad = get_nested_tensor_impl(grad);
   const Tensor& grad_buffer = nt_grad->get_buffer();
   const Tensor& self_buffer = nt_self->get_buffer();

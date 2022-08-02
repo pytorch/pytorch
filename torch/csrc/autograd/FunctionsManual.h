@@ -319,7 +319,7 @@ at::Tensor std_backward(
     bool keepdim);
 Tensor mean_backward(
     const Tensor& grad,
-    const Tensor& self,
+    IntArrayRef shape,
     at::OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim);

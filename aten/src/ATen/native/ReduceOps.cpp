@@ -1114,9 +1114,13 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
-Tensor sum_backward(const Tensor& grad, const Tensor& self,
-                    OptionalIntArrayRef opt_dims, bool keepdim) {
-  IntArrayRef sizes = self.sizes();
+Tensor sum_backward(const Tensor& grad, IntArrayRef sizes,
+                    OptionalIntArrayRef opt_dims, bool keepdim,
+                    const c10::optional<Tensor>& self) {
+  if (sizes.size() == 1 && sizes.at(0) == -1) {
+    TORCH_CHECK(self.has_value());
+    sizes = self.value().sizes();
+  }
   if (!keepdim && sizes.size() > 0) {
     if (opt_dims.has_value() && opt_dims.value().size() > 0) {
       return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);

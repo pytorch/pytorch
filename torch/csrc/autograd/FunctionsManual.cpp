@@ -587,19 +587,19 @@ Tensor nansum_backward(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self, dims, keepdim) * self.isnan().logical_not();
+  return sum_backward(grad, self.sizes(), dims, keepdim) *
+      self.isnan().logical_not();
 }
 
 Tensor mean_backward(
     const Tensor& grad,
-    const Tensor& self,
+    IntArrayRef shape,
     OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim) {
-  auto shape = self.sizes();
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  return sum_backward(grad, self, opt_dim, keepdim) / n;
+  return sum_backward(grad, shape, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -1502,7 +1502,11 @@ Tensor var_mean_backward(
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
-        gmean, self, dim_opt.value_or(IntArrayRef({})), self.numel(), keepdim);
+        gmean,
+        self.sizes(),
+        dim_opt.value_or(IntArrayRef({})),
+        self.numel(),
+        keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
   return gself;
@@ -1523,7 +1527,11 @@ Tensor std_mean_backward(
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
-        gmean, self, dim_opt.value_or(IntArrayRef({})), self.numel(), keepdim);
+        gmean,
+        self.sizes(),
+        dim_opt.value_or(IntArrayRef({})),
+        self.numel(),
+        keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
   return gself;
