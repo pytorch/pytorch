@@ -2,6 +2,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
