@@ -31,86 +31,10 @@ from torch._six import string_classes
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
-__all__ = [
-    # C++
-    "AllToAllOptions",
-    "AllreduceCoalescedOptions",
-    "AllreduceOptions",
-    "BarrierOptions",
-    "BroadcastOptions",
-    "Callable",
-    "DebugLevel",
-    "Dict",
-    "GatherOptions",
-    "Optional",
-    "PrefixStore",
-    "ProcessGroup",
-    "ProcessGroupGloo",
-    "ReduceOp",
-    "ReduceOptions",
-    "ReduceScatterOptions",
-    "ScatterOptions",
-    "Store",
-    "Tuple",
-    "Union",
-    "get_debug_level",
-    "register_rendezvous_handler",
-    "rendezvous",
-    "timedelta",
-    # Python
-    "default_pg_timeout",
-    "register_rendezvous_handler",
-    "rendezvous",
-    "logger",
-    "supports_complex",
-    "Backend",
-    "dist_backend",
-    "group",
-    "GroupMember",
-    "is_mpi_available",
-    "is_nccl_available",
-    "is_gloo_available",
-    "is_ucc_available",
-    "is_initialized",
-    "is_torchelastic_launched",
-    "get_backend",
-    "init_process_group",
-    "destroy_process_group",
-    "get_rank",
-    "get_world_size",
-    "isend",
-    "irecv",
-    "send",
-    "recv",
-    "P2POp",
-    "batch_isend_irecv",
-    "broadcast_multigpu",
-    "broadcast",
-    "all_reduce_multigpu",
-    "all_reduce",
-    "all_reduce_coalesced",
-    "reduce_multigpu",
-    "reduce",
-    "all_gather_multigpu",
-    "all_gather_object",
-    "gather_object",
-    "broadcast_object_list",
-    "scatter_object_list",
-    "all_gather",
-    "all_gather_coalesced",
-    "gather",
-    "scatter",
-    "reduce_scatter_multigpu",
-    "reduce_scatter",
-    "all_to_all_single",
-    "all_to_all",
-    "all_to_all_single",
-    "barrier",
-    "monitored_barrier",
-    "new_group",
-    "new_subgroups",
-    "new_subgroups_by_enumeration",
-]
+
+# This module is wildcard imported from torch.distributed.
+# TODO: specify __all__
+
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -122,26 +46,22 @@ _unpickler = pickle.Unpickler
 
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
-    __all__.append("ProcessGroupMPI")
 except ImportError:
     _MPI_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
-    __all__.append("ProcessGroupNCCL")
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
     from torch._C._distributed_c10d import _ProcessGroupWrapper
-    __all__.append("ProcessGroupGloo")
 except ImportError:
     _GLOO_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
-    __all__.append("ProcessGroupUCC")
 except ImportError:
     _UCC_AVAILABLE = False
 
