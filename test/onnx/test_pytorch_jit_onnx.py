@@ -2,6 +2,7 @@
 import onnxruntime
 
 import torch
+from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
@@ -78,6 +79,36 @@ class _TestJITIRToONNX:
         b = torch.randn(2, 3)
         self.run_test(graph_ir, (a, b))
 
+    def test_add_sub_with_graph_inputs(self):
+        for op in ["add", "sub", "rsub"]:
+            graph_ir = f"""
+            graph(%1 : Float(2, 3),
+                  %2 : Float(2, 3),
+                  %3 : int):
+              %4 : Float(2, 3) = aten::{op}(%1, %2, %3)
+              return (%4)
+            """
+            a = torch.randn(2, 3)
+            b = torch.randn(2, 3)
+            self.run_test(graph_ir, (a, b, 2))
+
+    def test_native_layer_norm(self):
+        graph_ir = """
+        graph(%x : Float(2, 3, 2),
+              %w : Float(3, 2),
+              %b : Float(3, 2)):
+          %5 : int = prim::Constant[value=3]()
+          %6 : int = prim::Constant[value=2]()
+          %7 : int[] = prim::ListConstruct(%5, %6)
+          %10 : float = prim::Constant[value=1.0000000000000001e-05]()
+          %11 : Float(2, 3, 2), %12 : Float(2, 1, 1), %13 : Float(2, 1, 1) = aten::native_layer_norm(%x, %7, %w, %b, %10)
+          return (%11, %12, %13)
+        """
+        x = torch.randn(2, 3, 2)
+        w = torch.randn(3, 2)
+        b = torch.randn(3, 2)
+        self.run_test(graph_ir, (x, w, b))
+
     def test_convolution(self):
         graph_ir = """
         graph(%1 : Tensor,
@@ -93,6 +124,40 @@ class _TestJITIRToONNX:
         x = torch.randn(8, 1, 5, 5)
         w = torch.randn(4, 1, 3, 3)
         self.run_test(graph_ir, (x, w))
+
+    def test_log_softmax(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=0]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2)
+        self.run_test(graph_ir, (x,))
+
+    @skipIfNoCuda
+    def test_log_softmax_half_to_float(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=1]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2).half().to("cuda")
+        self.run_test(graph_ir, (x,))
+
+    def test_native_dropout(self):
+        graph_ir = """
+        graph(%1 : Float(2, 3)):
+          %2 : float = prim::Constant[value=0.0]()
+          %training : bool = prim::Constant[value=1]()
+          %3 : Tensor, %4 : Tensor = aten::native_dropout(%1, %2, %training)
+          return (%3, %4)
+        """
+        a = torch.randn(2, 3)
+        self.run_test(graph_ir, (a,))
 
 
 def MakeTestCase(opset_version: int) -> type:
