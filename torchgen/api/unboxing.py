@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
 from torchgen.api import cpp
-from torchgen.api.types import Binding, CppSignatureGroup, CType
+from torchgen.api.types import Binding, CppSignatureGroup, CType, BaseCType, iOptTensorListRefT
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -234,7 +234,7 @@ def _gen_code_list_type(
             )
         )
     # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
-    elif isinstance(t.elem, OptionalType):
+    elif isinstance(t.elem, OptionalType) and ctype != BaseCType(iOptTensorListRefT):
         code.extend(
             f"""
 {ctype.cpp_type(strip_ref=True)} {out_name};
@@ -247,17 +247,24 @@ for (c10::IValue {elem_name}: {in_name}) {{
             )
         )
     else:
-        # use ArrayRef as default.
-        vec_name = arg_name + "_vec"
-        # need to bring vector instantiation out of scope so that ArrayRef has valid data
-        decl.append(f"std::vector<{res_ctype.cpp_type(strip_ref=True)}> {vec_name};")
+        if isinstance(t.elem, OptionalType):
+            # use IOptTensorListRef as default.
+            container_type = "c10::List"
+        else:
+            # use ArrayRef and ITensorList as defaults.
+            container_type = "std::vector"
+
+        wrapper_name = arg_name + "_wrapper"
+        # need to bring owning container instantiation out of scope so that the actual
+        # unboxed list has valid data.
+        decl.append(f"{container_type}<{res_ctype.cpp_type(strip_ref=True)}> {wrapper_name};")
         code.extend(
             f"""
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
-    {vec_name}.push_back({res_name});
+    {wrapper_name}.push_back({res_name});
 }}
-{ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
+{ctype.cpp_type(strip_ref=True)} {out_name}({wrapper_name});
             """.split(
                 "\n"
             )
