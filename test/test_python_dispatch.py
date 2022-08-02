@@ -655,6 +655,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             elem: torch.Tensor
 
             __slots__ = ['elem']
+            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
@@ -673,10 +674,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                     return args[0].elem.clone()
                 raise RuntimeError("NYI")
 
-            # NB: The default Tensor.__torch_function__ implementation called for deepcopy
-            # disables __torch_function__ by the time we get to clone(), so there is no need to
-            # explicitly disable __torch_function__ for this subclass.
-
         x = MyWrapperTensor(torch.randn(3))
         with self.assertRaisesRegex(RuntimeError,
                                     "for which cloning returns another instance of the same subclass"):
@@ -686,10 +683,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
         # Ensure correct error is thrown for common error cases.
         class SubTensorError1(torch.Tensor):
-            # Default implementation of new_empty() returns a plain tensor.
-            pass
+            # Without __torch_function__, new_empty() by default returns a plain tensor.
+            __torch_function__ = torch._C._disabled_torch_function_impl
 
         class SubTensorError2(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
             # new_empty() incorrectly returns a different type (i.e. a plain tensor).
             def new_empty(self, shape):
                 return torch.Tensor(shape)
