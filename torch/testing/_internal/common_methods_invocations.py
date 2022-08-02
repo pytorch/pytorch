@@ -11217,7 +11217,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=False,
            sample_inputs_func=sample_inputs_allclose,
            skips=(
-               DecorateInfo(unittest.skip("Allowed exemption"), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
@@ -12783,8 +12782,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
            ),
@@ -20698,6 +20695,10 @@ python_ref_db = [
             # See https://github.com/pytorch/pytorch/issues/82364
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+
+            # Prims arange does not follow aten
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.int64,)),
         ),
         supports_nvfuser=False,
     ),
