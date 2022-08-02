@@ -235,6 +235,11 @@ class C10_API LinAlgError : public Error {
   using Error::Error;
 };
 
+// Used for CUDA out of memory errors
+class C10_API CUDAOutOfMemoryError : public c10::Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);

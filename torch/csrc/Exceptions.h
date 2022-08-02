@@ -20,10 +20,6 @@
 #include <torch/csrc/distributed/c10d/exception.h>
 #endif
 
-#if defined(USE_CUDA)
-#include <c10/cuda/CUDACachingAllocator.h>
-#endif
-
 static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());
 }
@@ -56,118 +52,58 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     torch::PyWarningHandler __enforce_warning_buffer; \
     try {
 // Only catch torch-specific exceptions
-#if defined(USE_CUDA)
-  #define CATCH_CORE_ERRORS(retstmnt)                                          \
-    catch (python_error & e) {                                                 \
-      e.restore();                                                             \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::IndexError& e) {                                         \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg));          \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::ValueError& e) {                                         \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg));          \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::TypeError& e) {                                          \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg));           \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::NotImplementedError& e) {                                \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::LinAlgError& e) {                                        \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::CUDAOutOfMemoryError& e) {                               \
-      auto msg = e.what();                                                     \
-      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg));        \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::Error& e) {                                              \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg));        \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (torch::PyTorchError & e) {                                          \
-      auto msg = torch::processErrorMsg(e.what());                             \
-      PyErr_SetString(e.python_type(), msg);                                   \
-      retstmnt;                                                                \
-    }
-#else
-  #define CATCH_CORE_ERRORS(retstmnt)                                          \
-    catch (python_error & e) {                                                 \
-      e.restore();                                                             \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::IndexError& e) {                                         \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg));          \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::ValueError& e) {                                         \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg));          \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::TypeError& e) {                                          \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg));           \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::NotImplementedError& e) {                                \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::LinAlgError& e) {                                        \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (const c10::Error& e) {                                              \
-      auto msg = torch::get_cpp_stacktraces_enabled()                          \
-          ? e.what()                                                           \
-          : e.what_without_backtrace();                                        \
-      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg));        \
-      retstmnt;                                                                \
-    }                                                                          \
-    catch (torch::PyTorchError & e) {                                          \
-      auto msg = torch::processErrorMsg(e.what());                             \
-      PyErr_SetString(e.python_type(), msg);                                   \
-      retstmnt;                                                                \
-    }
-#endif
+#define CATCH_CORE_ERRORS(retstmnt)                                          \
+  catch (python_error & e) {                                                 \
+    e.restore();                                                             \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::IndexError& e) {                                         \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg));          \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::ValueError& e) {                                         \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg));          \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::TypeError& e) {                                          \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg));           \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::NotImplementedError& e) {                                \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::LinAlgError& e) {                                        \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (const c10::Error& e) {                                              \
+    auto msg = torch::get_cpp_stacktraces_enabled()                          \
+        ? e.what()                                                           \
+        : e.what_without_backtrace();                                        \
+    PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg));        \
+    retstmnt;                                                                \
+  }                                                                          \
+  catch (torch::PyTorchError & e) {                                          \
+    auto msg = torch::processErrorMsg(e.what());                             \
+    PyErr_SetString(e.python_type(), msg);                                   \
+    retstmnt;                                                                \
+  }
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
 #define CATCH_C10D_ERRORS(retstmnt)              \
