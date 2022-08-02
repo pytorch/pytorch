@@ -129,6 +129,7 @@ jobs:
           python3 -c "import platform; print(platform.platform())"
           arch
 
+          conda activate build
           conda list
           python3 -mpip install dist/*.whl
           conda list
