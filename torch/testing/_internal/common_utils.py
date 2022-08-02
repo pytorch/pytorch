@@ -2148,7 +2148,7 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=()):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=(), dense_dims=0):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
@@ -2156,11 +2156,14 @@ class TestCase(expecttest.TestCase):
         assert len(size) >= sparse_dim
         if blocksize:
             assert len(blocksize) == 2, (size, blocksize)
-            assert size[-2] % blocksize[0] == 0, (size, blocksize)
-            assert size[-1] % blocksize[1] == 0, (size, blocksize)
+            assert size[-2 - dense_dims] % blocksize[0] == 0, (size, blocksize)
+            assert size[-1 - dense_dims] % blocksize[1] == 0, (size, blocksize)
             blocksize0, blocksize1 = blocksize
         else:
             blocksize0 = blocksize1 = 1
+
+        size = tuple(size)
+        dense_size = size[(len(size) - dense_dims):]
 
         def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
             compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
@@ -2171,44 +2174,43 @@ class TestCase(expecttest.TestCase):
                     torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor((nnz,) + blocksize, device=device, dtype=dtype, low=low, high=high)
+            values = make_tensor((nnz,) + blocksize + dense_size, device=device, dtype=dtype, low=low, high=high)
             return values, compressed_indices, plain_indices
 
-        batch_shape = size[:-2]
+        batch_shape = size[:-2 - dense_dims]
         n_batch = reduce(mul, batch_shape, 1)
 
         if layout in {torch.sparse_csr, torch.sparse_bsr}:
-            n_compressed_dims, n_plain_dims = size[-2] // blocksize0, size[-1] // blocksize1
+            n_compressed_dims, n_plain_dims = size[-2 - dense_dims] // blocksize0, size[-1 - dense_dims] // blocksize1
         else:
-            n_compressed_dims, n_plain_dims = size[-1] // blocksize1, size[-2] // blocksize0
+            n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
 
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize)
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-
         return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
                                               values, size=size, dtype=dtype, layout=layout, device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=dense_dims)
 
-    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=0)
 
-    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
-    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
