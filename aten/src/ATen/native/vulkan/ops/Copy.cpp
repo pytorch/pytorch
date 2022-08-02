@@ -135,6 +135,12 @@ void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
 void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
+  // Note that the float data type has been enforced for the storage buffer below.
+  // The reason for this is that the nchw_to_image and image_to_nchw shaders which
+  // perform the transfer to/from an image texture expect a buffer of floats as
+  // input. GLSL/Vulkan does not natively support 16 bit arithmetic types, so for
+  // now storage buffers created for compute shaders must define floats as their
+  // base data type.
   api::StorageBuffer staging(context, at::kFloat, dst.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
@@ -155,6 +161,8 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
 void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
   api::Context* const context = api::context();
 
+  // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
+  // for the storage buffer below.
   api::StorageBuffer staging(context, at::kFloat, src.numcells());
 
   api::VulkanFence fence = context->fences().get_fence();
@@ -235,40 +243,6 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
   }
 
   return dst;
-}
-
-Tensor to_vulkan(const Tensor& src, bool use_shader) {
-  TORCH_CHECK(
-      src.device().type() == at::kCPU,
-      "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
-
-  vTensor v_ret{api::context(), src.sizes(), src.options()};
-
-  if (use_shader) {
-    pack_cpu_to_vulkan(src, v_ret);
-  } else {
-    transfer_cpu_to_vulkan(src, v_ret);
-  }
-
-  return convert(v_ret);
-}
-
-Tensor to_cpu(const Tensor& src, bool use_shader) {
-  TORCH_CHECK(
-      src.device().type() == at::kVulkan,
-      "Vulkan to_cpu(): input tensor must be a Vulkan tensor!")
-
-  vTensor& v_src = convert(src);
-
-  Tensor ret = at::empty(src.sizes(), src.options().device(at::kCPU));
-
-  if (use_shader) {
-    pack_vulkan_to_cpu(v_src, ret);
-  } else {
-    transfer_vulkan_to_cpu(v_src, ret);
-  }
-
-  return ret;
 }
 
 } // namespace ops

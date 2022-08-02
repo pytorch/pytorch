@@ -253,16 +253,12 @@ TEST_F(VulkanAPITest, copy_to_texture) {
   at::Tensor test_tensors[] = {
     // 4D
     at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({5, 29, 197, 217}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
     // 3D
     at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({31, 197, 217}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
     // 2D
     at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({297, 317}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
     // 1D
     at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1017}, at::TensorOptions(at::kCPU).dtype(at::kHalf)),
   };
 
   for (auto in_cpu : test_tensors) {

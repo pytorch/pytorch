@@ -15,10 +15,6 @@ void transfer_vulkan_to_cpu(vTensor&, Tensor&);
 
 Tensor& copy_(Tensor& dst, const Tensor& src);
 
-Tensor to_vulkan(const Tensor&, bool use_shader = false);
-
-Tensor to_cpu(const Tensor&, bool use_shader = false);
-
 //
 // Utility functions for memcpy
 //

@@ -15,22 +15,18 @@ namespace api {
  * dtype.
  *
  * TODO: enable proper format selection between kFloat and kHalf.
+ *
  * Context: due to limitations of the shader compilation system, at the moment
  * it is not possible to support both 32 bit and 16 bit float formats since
  * shaders will have to specify the format qualifier of texture inputs. Right
  * now, shaders are compiled with either rgba16f or rgba32f qualifiers depending
  * on whether USE_VULKAN_FP16_INFERENCE is set. Therefore, textures must be
- * always created with the corresponding VkFormat.
+ * always created with the corresponding VkFormat. Consequently, kHalf tensors
+ * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
  */
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
-#ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* USE_VULKAN_FP16_INFERENCE */
-    case kHalf:
 #ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;
 #else
