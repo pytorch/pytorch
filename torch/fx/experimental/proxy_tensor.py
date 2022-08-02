@@ -28,7 +28,7 @@ CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 class ProxySymInt(object):
     def __init__(self, sym_int, proxy):
-        assert isinstance(sym_int, torch._C.SymbolicIntNode) or isinstance(sym_int, int)
+        assert isinstance(sym_int, torch._C.SymIntNode) or isinstance(sym_int, int)
         self.sym_int = sym_int
         self.proxy = proxy
 
@@ -88,23 +88,29 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res, **kwargs):
-    def wrap_with_proxy(e, proxy):
+def wrap_output(inner_res, proxy_res, *, constant):
+    def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy, **kwargs)
+                return ProxyTensor(e, proxy, constant=constant)
         else:
             return e
+
+    def get_constant(idx):
+        if constant is None:
+            return None
+        else:
+            return constant[idx]
 
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple):
-        return tuple(wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res))
+        return tuple(wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res))
     elif isinstance(inner_res, list):
-        return list([wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res)])
+        return list([wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res)])
     elif isinstance(inner_res, torch.Tensor):
-        return wrap_with_proxy(inner_res, proxy_res)
+        return wrap_with_proxy(inner_res, proxy_res, constant)
     else:
         return inner_res
 
@@ -142,7 +148,7 @@ def proxy_call(func_overload, args, kwargs=None):
     def unwrap_elem(e):
         if isinstance(e, ProxyTensor):
             return e.elem
-        if isinstance(e, torch._C.SymbolicIntNode):
+        if isinstance(e, torch._C.SymIntNode):
             if isinstance(e.get_pyobj(), ProxySymInt):
                 return e.get_pyobj().sym_int
             else:
@@ -231,18 +237,18 @@ class ProxyTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
         def create_proxy_symint(sym_int, new_proxy):
-            return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
+            return torch._C.SymIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
         has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
         if has_sym_ints:
             new_shape = []
             for idx, s in enumerate(elem.shape):
-                if isinstance(s, torch._C.SymbolicIntNode):
+                if isinstance(s, torch._C.SymIntNode):
                     new_shape.append(create_proxy_symint(s, proxy.size(idx)))
                 else:
                     assert isinstance(s, int)
-                    # If it's not an existing SymbolicIntNode, just pass the proxy as the int
-                    # _make_wrapper_subclass requires all inputs to be SymbolicIntNodes
+                    # If it's not an existing SymIntNodeImpl, just pass the proxy as the int
+                    # _make_wrapper_subclass requires all inputs to be SymIntNodeImpls
                     new_shape.append(create_proxy_symint(s, s))
             # TODO: hack, since we currently don't support symbolic strides
             new_strides = symbolic_shapes.create_contiguous(new_shape)
@@ -316,7 +322,7 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, torch._C.SymbolicIntNode):
+        elif isinstance(a, torch._C.SymIntNode):
             py_symint = a.get_pyobj()
             assert isinstance(py_symint, ProxySymInt)
             return py_symint.proxy.node

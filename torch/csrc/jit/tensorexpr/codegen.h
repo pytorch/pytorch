@@ -214,6 +214,7 @@ class RegisterCodeGenList {
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
       const StmtFactoryMethod& stmt_factory_method);
+  TORCH_API void RemoveStmtFactoryMethod(const std::string& name);
 
   std::unordered_map<std::string, StmtFactoryMethod> stmt_factory_methods_;
 };
@@ -221,7 +222,7 @@ class RegisterCodeGenList {
 template <class CodeGenType>
 class RegisterCodeGen {
  public:
-  explicit RegisterCodeGen(const std::string& name) {
+  explicit RegisterCodeGen(const std::string& name) : name_(name) {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
@@ -235,6 +236,13 @@ class RegisterCodeGen {
           return method;
         });
   }
+
+  ~RegisterCodeGen() {
+    RegisterCodeGenList::GetInstance().RemoveStmtFactoryMethod(name_);
+  }
+
+ private:
+  std::string name_;
 };
 
 TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(

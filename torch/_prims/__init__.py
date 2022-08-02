@@ -11,7 +11,7 @@ import torch
 
 import torch._prims_common as utils
 import torch.library
-from torch import _TypedStorage, Tensor
+from torch import Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims_common import (
     check,
@@ -268,8 +268,7 @@ def TensorMeta(
     else:
         # SymInt doesnt support empty_strided yet
         if any(
-            isinstance(inp, torch.SymbolicIntNode)
-            for inp in itertools.chain(shape, strides)
+            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
         ):
             meta_t = torch.empty(shape, dtype=dtype, device="meta")
         else:
