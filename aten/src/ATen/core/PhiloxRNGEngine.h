@@ -215,17 +215,14 @@ private:
     float u1 = in[0];
     float u2 = in[1];
 
-    constexpr float epsilon = std::numeric_limits<float>::epsilon();
     constexpr float two_pi = 2.0 * M_PI;
-
-    float u2eps = std::max(u2, epsilon);
 
     float mag = std::sqrt(-2.0 * std::log(u1));
 
     detail::FLOAT2 ret;
 
-    ret[0] = mag * std::cos(two_pi * u2eps);
-    ret[1] = mag * std::sin(two_pi * u2eps);
+    ret[0] = mag * std::cos(two_pi);
+    ret[1] = mag * std::sin(two_pi);
     return ret;
   }
 
