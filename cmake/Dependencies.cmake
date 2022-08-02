@@ -1890,20 +1890,10 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
-    message(STATUS "Using CPU-only version of Kineto")
-  endif()
-
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
   set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
-
-  message(STATUS "Configuring Kineto dependency:")
-  message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
-  message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
-  message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
-
   set(LIBKINETO_DYNAMIC_CUPTI "${USE_CUPTI_SO}" CACHE STRING "" FORCE)
 
   if(NOT TARGET kineto)
@@ -1914,10 +1904,20 @@ if(USE_KINETO)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
-    message(STATUS "Configured Kineto (CPU)")
-  else()
-    message(STATUS "Configured Kineto")
   endif()
+
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+    message(STATUS "Configured Kineto (CPU):")
+  else()
+    message(STATUS "Configured Kineto:")
+  endif()
+
+  message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
+  message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
+  message(STATUS "  LIBKINETO_NOCUPTI = ${LIBKINETO_NOCUPTI}")
+  message(STATUS "  LIBKINETO_NOROCTRACER = ${LIBKINETO_NOROCTRACER}")
+  message(STATUS "  LIBKINETO_DYNAMIC_CUPTI = ${LIBKINETO_DYNAMIC_CUPTI}")
 endif()
 
 # Include google/FlatBuffers
