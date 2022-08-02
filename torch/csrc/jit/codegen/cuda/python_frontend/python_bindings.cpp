@@ -934,6 +934,9 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg,
          std::vector<int64_t>& output_shape,
          std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor* {
+        TORCH_CHECK(
+            output_shape.size() >= broadcast_dims.size(),
+            "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::BroadcastOpRecord(
             {arg->index}, {output->index}, output_shape, broadcast_dims));

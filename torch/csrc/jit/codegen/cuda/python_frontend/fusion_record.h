@@ -32,7 +32,7 @@ enum class RecordType {
 //! appropriate part of the nvFuser Fusion IR for a given record.
 //!
 //! The hash and equality operators are used to facilitate the hashing of
-//! RecordFunctors in a hash map given those operators need to be 
+//! RecordFunctors in a hash map given those operators need to be
 //! specified for custom objects.
 
 struct RecordFunctor {
@@ -200,7 +200,7 @@ struct BroadcastOpRecord : RecordFunctor {
     }
     size_t broadcast_dims_hash = 0;
     for (auto dim : broadcast_dims_) {
-      broadcast_dims_hash |= 1 << dim;
+      broadcast_dims_hash |= 1 << ((output_shape_.size() - 1) - dim);
     }
     broadcast_dims_hash = (broadcast_dims_hash & 0xffff) << 16;
     return result | broadcast_dims_hash | (output_shape_hash & 0xffff);
@@ -380,7 +380,21 @@ struct InputTensorRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    return result;
+    size_t ssize_hash = 0;
+    for (size_t i = 0; i < symbolic_sizes_.size(); ++i) {
+      size_t ssize = 0;
+      if (symbolic_sizes_[i] == -1) {
+        ssize = 1;
+      }
+      ssize_hash |= (ssize << (symbolic_sizes_.size() - 1 - i));
+    }
+    size_t contig_hash = 0;
+    for (size_t i = 0; i < contiguous_info_.size(); ++i) {
+      contig_hash |= (contiguous_info_[i] << (contiguous_info_.size() - 1 - i));
+    }
+
+    result |= ((static_cast<size_t>(dtype_) & 0xff) << 24);
+    return result | ((ssize_hash & 0xfff) << 12) | (contig_hash & 0xfff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -445,6 +459,7 @@ struct OutputRecord : RecordFunctor {
       : RecordFunctor(std::move(_args), {}, RecordType::Output) {}
   virtual ~OutputRecord() = default;
 
+  //! Nothing extra necessary in hash
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     return result;
@@ -494,7 +509,15 @@ struct ReductionOpRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    return result;
+    size_t axes_hash = 0;
+    // Normally I would make a little endian hash of the axes but I do not
+    // know the size of the tensor based on just the record information.
+    for (size_t i = 0; i < axes_.size(); ++i) {
+      axes_hash |= (1 << axes_[i]);
+    }
+
+    return result | (static_cast<size_t>(keep_dim_) << 28) |
+        ((static_cast<size_t>(dtype_) & 0xff) << 20) | (axes_hash & 0xfffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -556,7 +579,7 @@ struct ScalarRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    return result;
+    return result | (static_cast<size_t>(dtype_) & 0xffffffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -608,9 +631,18 @@ struct VarianceOpRecord : RecordFunctor {
         keep_dim_(keep_dim) {}
   virtual ~VarianceOpRecord() = default;
 
+  // I am skipping the bassel's correction value in the hash because
+  // I suspect we might change it to a bool from a 64-bit value
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    return result;
+    size_t axes_hash = 0;
+    // Normally I would make a little endian hash of the axes but I do not
+    // know the size of the tensor based on just the record information.
+    for (size_t i = 0; i < axes_.size(); ++i) {
+      axes_hash |= (1 << axes_[i]);
+    }
+    return result | (static_cast<size_t>(keep_dim_) << 28) |
+        (axes_hash & 0xfffffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -658,16 +690,16 @@ namespace std {
 using namespace nvfuser;
 
 template <>
-struct hash<RecordFunctor> {
-  size_t operator()(RecordFunctor const& p) const {
-    return p.hash();
+struct hash<RecordFunctor*> {
+  size_t operator()(const RecordFunctor*& p) const {
+    return p->hash();
   }
 };
 template <>
-struct equal_to<RecordFunctor>
-    : public binary_function<RecordFunctor, RecordFunctor, bool> {
-  bool operator()(RecordFunctor const& p, RecordFunctor const& q) const {
-    return p.operator==(q);
+struct equal_to<RecordFunctor*>
+    : public binary_function<RecordFunctor*, RecordFunctor*, bool> {
+  bool operator()(const RecordFunctor*& p, const RecordFunctor*& q) const {
+    return p->operator==(*q);
   }
 };
 } // namespace std
