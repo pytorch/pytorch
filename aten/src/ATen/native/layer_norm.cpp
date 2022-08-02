@@ -206,6 +206,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
+
+  // Properly handle zero-size inputs: the view(1, M, -1) call below breaks on this.
+  if (input.numel() == 0) {
+    return std::make_tuple(at::empty_like(input), at::empty_like(input), at::empty_like(input));
+  }
   at::Tensor input_reshaped = input.view({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies

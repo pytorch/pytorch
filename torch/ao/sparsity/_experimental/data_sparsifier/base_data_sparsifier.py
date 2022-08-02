@@ -4,10 +4,15 @@ from typing import Optional, Tuple, List, Any, Dict
 from ...sparsifier import base_sparsifier
 from collections import defaultdict
 from torch import nn
-import warnings
 import copy
 from ...sparsifier import utils
 from torch.nn.utils import parametrize
+import sys
+import warnings
+
+if not sys.warnoptions:
+    # to suppress repeated warnings when being used in a training loop.
+    warnings.simplefilter("once")
 
 __all__ = ['BaseDataSparsifier']
 
@@ -74,8 +79,15 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         elif type(data) in EMBEDDING_TYPES:
             return data.weight
 
-    def add_data(self, name: str, data, **config):
-        r""" Configures and parametrizes the internal container model with name and data
+    def add_data(self, name: str, data, reuse_mask=True, **config):
+        r""" Configures and parametrizes the internal container model with name and data.
+
+        **Note**:
+            1. If the data with name already exists, it replaces the data.
+            2. While replacing, the old mask is reused when `reuse_mask=True`
+            3. If `reuse_mask=True`, then the replacing data needs to have the same shape as that of old data.
+            4. By default, the config of the replaced data is used as config for the replacing data, unless something
+               is specified in the config dictionary.
         """
         assert type(data) in SUPPORTED_TYPES, \
             "specified data type not supported at the moment"
@@ -90,7 +102,19 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         if name in self.state:
             # If the named data already exists - replace
             warnings.warn("Replacing existing data of the same name. - Did you mean a different name?")
-            self.__delete_data(name=name)
+
+            # reuse old config
+            old_args = self.data_groups[name]
+            local_args = copy.deepcopy(old_args)
+            local_args.update(config)
+
+            if reuse_mask:
+                current_data = self.get_data(name=name)
+                assert weight.shape == current_data.shape, \
+                    "to retain the old mask, the shape of the new data must be the same as the previous one"
+                mask = self.get_mask(name=name)  # reuse mask instead of creating a new one
+
+            self._delete_data(name=name)
 
         # parameter creates a deepcopy of the weight inside, so create a buffer
         self._container.register_buffer(name=name, tensor=weight)
@@ -270,7 +294,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     def update_mask(self, name, data, **kwargs):
         pass
 
-    def __delete_data(self, name):
+    def _delete_data(self, name):
         """Detaches some data from the sparsifier.
 
         Args:
@@ -280,7 +304,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         Note:
             Currently private. Kind of used as a helper function when replacing data of the same name
         """
-        self.squash_mask(names=[name], leave_parametrized=True)
+        self.squash_mask(names=[name], leave_parametrized=False)  # do not apply the mask while deleting
         delattr(self._container, name)
         self.state.pop(name)
         self.data_groups.pop(name)
