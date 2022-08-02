@@ -984,7 +984,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 If the argument itself is ``None``, then all parameters are
                 updated, and the gradients are assumed to be already populated.
                 (default: ``None``)
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers and should be
                 ``None`` if ``gradients`` is not ``None``; (default: ``None``)
         Returns:
@@ -1043,7 +1043,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         Performs a single optimizer step and syncs parameters across all ranks.
 
         Arguments:
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers.
         Returns:
             Optional loss depending on the underlying local optimizer.
