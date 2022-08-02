@@ -95,6 +95,13 @@ class Pattern:
         prev_events, _ = self.siblings_of(event)
         return prev_events[-1] if prev_events else None
 
+    def go_up_until(self, event: _ProfilerEvent, predicate):
+        if not event:
+            return None
+        while event.parent and not predicate(event):
+            event = event.parent
+        return event
+
 
 # Patterns
 
@@ -398,8 +405,8 @@ class GradNotSetToNonePattern(Pattern):
         NOT aten::zeros
             aten::zero_
 
-    # aten::zero_ is called on each parameter in the model.
-    # We also want to make sure it is not called by aten::zeros.
+    aten::zero_ is called on each parameter in the model.
+    We also want to make sure it is not called by aten::zeros.
 
     Algorithm:
     String match
@@ -426,6 +433,44 @@ class GradNotSetToNonePattern(Pattern):
         return False
 
 
+class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
+    '''
+    This pattern identifies if we are enabling bias in Conv2d which is followed by BatchNorm2d.
+    Bias doesn't do anything when followed by batchnorm.
+    Pattern:
+    nn.Module: Conv2d            | nn.Module: BatchNorm2d
+        ...
+            aten::conv2d AND dtype of third argument is not null
+    The third argument is the bias
+    Algorithm:
+    String match
+    '''
+
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
+        self.name = "Enabling Bias in Conv2d Followed By BatchNorm Pattern"
+        self.description = "Detected bias enabled in Conv2d that is followed by BatchNorm2d. Please set 'bias=False' in Conv2d."
+
+    @property
+    def skip(self):
+        return self.prof.record_shapes is False or super().skip
+
+    def match(self, event: _ProfilerEvent):
+        if event.name() != "aten::conv2d":
+            return False
+        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] == "":
+            return False
+        # This means bias=True
+        event = self.go_up_until(
+            event, lambda e: e.name().startswith("nn.Module: Conv2d"))
+        if not event:
+            return False
+        event = self.next_of(event)
+        if not event:
+            return False
+        return event.name().startswith("nn.Module: BatchNorm2d")
+
+
 def source_code_location(event: _ProfilerEvent):
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
@@ -441,6 +486,11 @@ def source_code_location(event: _ProfilerEvent):
 def input_shapes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
     return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
+
+
+def input_dtypes(event: _ProfilerEvent):
+    assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+    return tuple(t for t in event.extra_fields.inputs.dtypes)
 
 
 def eventTreeDFS(event_tree: List[_ProfilerEvent]):
@@ -474,7 +524,8 @@ def report_all_anti_patterns(prof, should_benchmark: bool = False):
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
-        GradNotSetToNonePattern(prof, should_benchmark)
+        GradNotSetToNonePattern(prof, should_benchmark),
+        Conv2dBiasFollowedByBatchNorm2dPattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
