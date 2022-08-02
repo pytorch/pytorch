@@ -3069,6 +3069,7 @@ class DistributedTest:
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
+        # Test all_gather accepting single tensor as output
         def _test_all_gather_single_output_tensor_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):

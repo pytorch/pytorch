@@ -2082,6 +2082,8 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
 
     """
+    # `tensor_list` would be understood as "tensor or list."
+    # If it is a single tensor, we would route it to the _all_gather_base implementation.
     if isinstance(tensor_list, torch.Tensor):
         return _all_gather_base(tensor_list, tensor, group, async_op)
 
