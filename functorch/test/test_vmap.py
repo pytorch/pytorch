@@ -3123,7 +3123,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
-        xfail('matrix_exp'),
         xfail('histogramdd'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.embedding_bag'),
@@ -3205,7 +3204,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.cholesky'),
         xfail('linalg.eigvals'),
         xfail('linalg.eigvalsh'),
-        xfail('linalg.inv'),
         xfail('linalg.lstsq'),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_norm'),
@@ -3279,7 +3277,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout2d', ''),
         xfail('normal', 'number_mean'),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
         xfail('nn.functional.triplet_margin_loss', ''),
@@ -3584,6 +3581,38 @@ class TestVmapOperatorsOpInfo(TestCase):
         a = with_vmap(vmap)
         b = with_vmap(_fake_vmap)
         self.assertEqual(a, b)
+
+    @ops(filter(lambda op: "linalg" in op.name, functorch_lagging_op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
+        xfail('linalg.vector_norm'),  # can accept vector inputs
+        skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
+    })
+    def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            if sample.input.dim() != 2 or sample.input.shape[0] == 0:
+                continue
+            test_input = sample.input[0]  # using the sample input avoids numerical inconsistency issues
+            with self.assertRaisesRegex(RuntimeError, "dimension"):
+                op(test_input, *sample.args, **sample.kwargs)
+
+            def op_wrapper(inp):
+                return op(inp, *sample.args, **sample.kwargs)
+
+            # square inputs are more likely to pass linalg checks
+            test_input = test_input.expand(test_input.shape[0], test_input.shape[0])
+            with self.assertRaisesRegex(RuntimeError, "dimension"):
+                return vmap(op_wrapper)(test_input)
+
+    def test_vmap_multi_dot_failure_1D_input(self):
+        # special exception for first and last tensors so making giving 3 items avoids special cases
+        inputs = (torch.randn(3, 3), torch.randn(3), torch.randn(3, 3))
+        with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
+            torch.linalg.multi_dot(inputs)
+
+        # square inputs are more likely to pass linalg checks
+        inputs = tuple(i.expand(i.shape[0], i.shape[0]) for i in inputs)
+        with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
+            return vmap(torch.linalg.multi_dot)(inputs)
 
 
 class TestRandomness(TestCase):
