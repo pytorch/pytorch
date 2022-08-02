@@ -16,9 +16,6 @@ class ChunkStorageMetadata:
     offsets: torch.Size
     sizes: torch.Size
 
-    # This is reported by the storage layer so it might include serialization overhead
-    size_in_bytes: int
-
 @dataclass
 class TensorStorageMetadata:
     properties: TensorProperties
@@ -27,7 +24,7 @@ class TensorStorageMetadata:
 
 @dataclass
 class BytesStorageMetadata:
-    size_in_bytes: int
+    pass
 
 TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]

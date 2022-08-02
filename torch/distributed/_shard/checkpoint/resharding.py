@@ -112,9 +112,7 @@ def _shard_md_to_chunk(chunk_md: ShardMetadata) -> ChunkStorageMetadata:
     return ChunkStorageMetadata(
         offsets=torch.Size(chunk_md.shard_offsets),
         sizes=torch.Size(chunk_md.shard_sizes),
-        size_in_bytes=-1,
     )
-
 
 def _compute_sharded_tensor_md(
     tensor: ShardedTensor,
@@ -272,7 +270,6 @@ def _compute_tensor_md(tensor: Tensor) -> TensorStorageMetadata:
         chunks=[ChunkStorageMetadata(
             offsets=torch.Size([0] * len(tensor.shape)),
             sizes=tensor.size(),
-            size_in_bytes=-1,
         )]
     )
 
@@ -292,7 +289,6 @@ def _prepare_tensor_write(
 
 def _compute_bytes_md(bytes: io.BytesIO) -> BytesStorageMetadata:
     return BytesStorageMetadata(
-        size_in_bytes=len(bytes.getbuffer())
     )
 
 def _prepare_bytes_write(
