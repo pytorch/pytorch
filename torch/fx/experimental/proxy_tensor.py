@@ -286,14 +286,15 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        # Verify that the proxy mode for all arguments is the same
+        # Get the first proxy mode. If there are different proxy modes with
+        # different tracers torch.fx.Proxy would raise an error.
         proxy_mode = None
         for arg in pytree.tree_flatten((args, kwargs))[0]:
             if isinstance(arg, ProxyTensor):
                 if proxy_mode is None:
                     proxy_mode = arg.proxy_mode
-                else:
-                    assert proxy_mode is arg.proxy_mode, "All arguments must be in the same proxy mode"
+                    break
+        assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
 
         with proxy_mode.restore():  # type: ignore[union-attr]
             return func_overload(*args, **kwargs)
