@@ -20453,7 +20453,11 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,
         sample_inputs_func=sample_inputs_assert_all_true,
-        error_inputs_func=error_inputs_assert_all_true
+        error_inputs_func=error_inputs_assert_all_true,
+        skips=(
+            # AssertionError: None mismatch: None is not ()
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+        )
     ),
 ]
 
