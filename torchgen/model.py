@@ -230,6 +230,7 @@ dispatch_keys = [
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
+    DispatchKey.AutogradNestedTensor,
 ]
 
 # Dispatch keys that "support all backends".  These codegen slightly differently

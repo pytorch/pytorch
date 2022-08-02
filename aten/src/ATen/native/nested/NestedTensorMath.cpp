@@ -74,7 +74,8 @@ std::vector<at::Tensor> NestedTensor_unbind(
   if (ntensors == 0) {
     return result_tensors;
   }
-  const at::Tensor& buffer = self_ptr->get_buffer();
+  // This returns a differentiable view of self as a regular tensor
+  auto buffer = self.values();
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   const std::vector<int64_t>& offsets = self_ptr->get_offsets();
@@ -1139,8 +1140,84 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_offsets()));
 }
 
-// See Note [Special size rule for nested tensor]
-Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
+  /**
+   * Create a buffer tensor that is a view of self
+   *
+   * This serves as the boundary between nested and non nested tensor
+   * view conversions
+   *
+   * @return Returns a new non nested tensor that
+   * aliases the same storage as self
+   */
+Tensor values_nested(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_nested(), "Can only create a buffer from Nested Tensor");
+  auto* nt_self = get_nested_tensor_impl(self);
+  return nt_self->get_buffer();
+}
+
+/**
+ * Create a nested tensor that is a view of a buffer
+ *
+ * This serves as the boundary between non nested tensor and nested
+ * view conversions
+ *
+ * @return Returns a nested tensor that
+ * aliases the same storage as buffer
+ */
+Tensor _nested_view_from_buffer(
+    const Tensor& buffer,
+    const Tensor& nested_size_tensor,
+    const Tensor& nested_stride_tensor,
+    IntArrayRef offsets) {
+  TORCH_INTERNAL_ASSERT(
+      !buffer.is_nested(),
+      "Can only a create Nested Tensor from a normal tensor buffer");
+  TORCH_INTERNAL_ASSERT(buffer.dim() == 1, "The input buffer must be flat");
+  TORCH_INTERNAL_ASSERT(nested_size_tensor.dim() == 2, "Expected the nested size tensor to be two dimensional.");
+  uint64_t num_elements_nested_size = at::prod(nested_size_tensor, 1).sum().item<int64_t>();
+  uint64_t buffer_storage_size = buffer.storage().nbytes()/buffer.dtype().itemsize();
+  TORCH_INTERNAL_ASSERT(
+      buffer_storage_size == num_elements_nested_size,
+      "The number of elements in the buffer must equal the nested tensor size but buffer size: ",
+      buffer_storage_size,
+      " and nested tensor size: ",
+      num_elements_nested_size,
+      ".");
+
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor.dim() == 2, "Expected the nested stride tensor to be two dimensional.");
+  TORCH_INTERNAL_ASSERT(nested_size_tensor.size(0) == nested_stride_tensor.size(0), "Expected the first dimension of nested size and nested stride tensor to be equal.");
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor.size(0) == (int64_t)offsets.size(), "Expected the first dimension of nested stride tensor to equal the length of offsets.");
+  return at::detail::make_tensor<NestedTensorImpl>(
+    c10::TensorImpl::VIEW,
+    buffer,
+    nested_size_tensor,
+    nested_stride_tensor,
+    std::vector<int64_t>(offsets.begin(), offsets.end()));
+}
+
+Tensor _nested_from_buffer(
+    const Tensor& buffer,
+    const Tensor& nested_size_tensor,
+    const Tensor& nested_stride_tensor,
+    IntArrayRef offsets) {
+  TORCH_INTERNAL_ASSERT(
+      !buffer.is_nested(),
+      "Can only a create Nested Tensor from a normal tensor buffer");
+  TORCH_CHECK(buffer.dim() == 1, "The input buffer must be flat");
+  // Because of broadcasting ops we need to call contiguous on the buffer
+  // Current invariant is that buffer is contiguous
+  auto contiguous_buffer = buffer.contiguous();
+  return contiguous_buffer._nested_view_from_buffer(
+      nested_size_tensor, nested_stride_tensor, offsets);
+}
+
+// Special rules for reshape(nested tensor):
+// 1. Only 1 regular dimension can be collapsed with
+//    or splitted from the implicit batch dimension
+// 2. Instead of infering size, -1 means "inherit the old size", so:
+//    * negative size is legal for a ragged dimension
+//    * multiple sizes can be -1
+Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
       proposed_shape.size() > 0,
       "shape '[]' is invalid for a nested tensor");
