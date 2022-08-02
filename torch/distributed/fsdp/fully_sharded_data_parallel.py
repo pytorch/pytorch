@@ -1983,19 +1983,25 @@ class FullyShardedDataParallel(nn.Module):
         if not self._fsdp_wrapped_module.has_params:
             return state_dict
 
-        for fqn, _, _ in self._param_fqns:
-            # Create a ShardedTensor for the unflattened, non-sharded parameter.
-            fqn = f"{prefix}{fqn}"
-            param = state_dict[fqn]
-            local_shard = param.chunk(self.world_size)[self.rank].clone()
-            offsets = [0 for _ in param.size()]
-            offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
-            local_shards = [
-                Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
-            ]
-            state_dict[fqn] = init_from_local_shards(
-                local_shards, param.size(), process_group=self.process_group
-            )  # type: ignore[assignment]
+        assert self.training_state != TrainingState_.SUMMON_FULL_PARAMS, (
+            "Inside _sharded_post_load_state_dict_hook, the training_state must "
+            "not be SUMMON_FULL_PARAMS."
+        )
+        with self._summon_full_params(recurse=False, writeback=False):
+            for fqn, _, _ in self._param_fqns:
+                # Create a ShardedTensor for the unflattened, non-sharded parameter.
+                param = functools.reduce(getattr, fqn.split("."), self.module)
+                local_shard = param.chunk(self.world_size)[self.rank].clone()
+                offsets = [0 for _ in param.size()]
+                offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
+                local_shards = [
+                    Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
+                ]
+                fqn = f"{prefix}{fqn}"
+                state_dict[fqn] = init_from_local_shards(
+                    local_shards, param.size(), process_group=self.process_group
+                )  # type: ignore[assignment]
+        state_dict.pop(f"{prefix}{FLAT_PARAM}")
         return state_dict
 
     @staticmethod
@@ -2103,24 +2109,19 @@ class FullyShardedDataParallel(nn.Module):
             else:
                 return {}
 
-        elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
+        elif (
+            self._state_dict_type == StateDictType.LOCAL_STATE_DICT or
+            self._state_dict_type == StateDictType.SHARDED_STATE_DICT
+        ):
             if (
                 self._fsdp_wrapped_module.flat_param is not None and
                 not self._fsdp_wrapped_module.flat_param._is_sharded
             ):
                 raise RuntimeError(
-                    "local_state_dict can only be called "
+                    "sharded_state_dict/local_state_dict can only be called "
                     "when parameters are flatten and sharded."
                 )
             return super().state_dict(*args, **kwargs)
-        elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            summon_ctx = (
-                self._summon_full_params(recurse=False, writeback=False)
-                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
-                contextlib.suppress()
-            )
-            with summon_ctx:
-                return super().state_dict(*args, **kwargs)
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
