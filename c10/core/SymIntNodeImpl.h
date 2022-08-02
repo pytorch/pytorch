@@ -3,6 +3,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -10,13 +11,18 @@
 namespace c10 {
 
 class SymIntNodeImpl;
-using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
+using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
 
-class C10_API SymIntNodeImpl
-    : public std::enable_shared_from_this<SymIntNodeImpl> {
+class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
  public:
   c10::SymInt toSymInt();
   virtual ~SymIntNodeImpl(){};
+
+  template <typename T>
+  c10::intrusive_ptr<T> dyn_cast() const {
+    return c10::intrusive_ptr<T>::reclaim_copy(dynamic_cast<T*>(this));
+  }
+
   // these could be pure virtual when we implement LTC versions
   virtual SymIntNode add(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
