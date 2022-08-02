@@ -34,12 +34,21 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
         @autoreleasepool{
           MPSGraph *mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
-
+          auto isBool = self.scalar_type() == c10::ScalarType::Bool;
+          auto dataType = (!isBool) ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8;
+          // constantWithScalar does not work for boolTypes on MacOS-12.[34]
+          // workaround by filing it as int8 tensor and than casting to bool
+          // See https://github.com/pytorch/pytorch/issues/82427
           MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
                                                                shape:getMPSShape(self)
-                                                            dataType:getMPSScalarType(self.scalar_type())];
+                                                            dataType:dataType];
           MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
                                                                  name:nil];
+          if (isBool) {
+              outputTensor = [mpsGraph castTensor:outputTensor
+                                           toType:MPSDataTypeBool
+                                             name:@"constWithBool-workaround"];
+          }
 
           newCachedGraph->outputTensor_ = outputTensor;
         }
