@@ -6599,6 +6599,9 @@ class TestConsistency(TestCase):
         'sub': None,
         'true_divide': None,
 
+        # assertion errors
+        'index_select': ['torch.float16'],
+
         # some aten operators in the derivative definition have not been supported by MPS
         'masked_select': None,  # `aten::masked_scatter_`
         'sgn': None,  # `aten::_efficientzerotensor`
