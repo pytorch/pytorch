@@ -95,11 +95,11 @@ def auto_quantize(func, qtype, quant_loss=None):
         . all_gather, all_to_all collective ops
     Note: BFP16 only supports 2D tensors.
     Args:
-        func (callable): A function representing collective operations.
+        func (Callable): A function representing collective operations.
         qtype (QuantType): Quantization method
         quant_loss (float, optional): This can be used to improve accuracy in the dequantization.
     Returns:
-        (callable): the same collective as func but enables automatic quantization/dequantization.
+        (Callable): the same collective as func but enables automatic quantization/dequantization.
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):

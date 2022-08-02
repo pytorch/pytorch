@@ -64,7 +64,8 @@ void save_jit_module(
     const ExtraFilesMap& extra_files) {
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
-  ofile.write(reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
+  ofile.write(
+      reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
   ofile.close();
 }
 

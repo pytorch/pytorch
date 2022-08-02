@@ -4,13 +4,13 @@
 #error "flatbuffer_serializer.h must not include any flatbuffers headers"
 #endif // FLATBUFFERS_VERSION_MAJOR
 
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <stdexcept>
 #include <fstream>
-#include <utility>
 #include <functional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
