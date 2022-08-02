@@ -20,7 +20,6 @@
 #include <regex>
 #include <set>
 #include <vector>
-#include <iostream>
 
 namespace c10 {
 
@@ -291,31 +290,7 @@ int trimHistoryBefore(Block* block, void* point) {
   if (!block->history) {
     block->history_last = nullptr;
   }
-  //std::cout << "TRIM " << n << "\n";
   return n;
-}
-
-void printHistory(Block* b) {
-  History* h = b->history.get();
-  while (h) {
-    auto start = (char*)h->addr - (char*)b->ptr;
-    auto end = start + h->real_size;
-    std::cout <<  start << "->" << end << " ";
-    h = h->next.get();
-  }
-  std::cout << "< " << b->size << "\n";
-}
-
-void validHistory(Block* block) {
-  //printHistory(block);
-  History* h = block->history.get();
-  while(h) {
-    AT_ASSERT(block->ptr <= h->addr && (char*) h->addr + h->real_size <= (char*) block->ptr + block->size);
-    if (!h->next.get()) {
-      AT_ASSERT(h == block->history_last);
-    }
-    h = h->next.get();
-  }
 }
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
@@ -521,16 +496,6 @@ class CachingAllocatorConfig {
   }
 };
 
-int historySize(Block* b) {
-  History* h = b->history.get();
-  int n = 0;
-  while (h) {
-    h = h->next.get();
-    n++;
-  }
-  return n;
-}
-
 class DeviceCachingAllocator {
  private:
   // lock around all operations
@@ -667,6 +632,13 @@ class DeviceCachingAllocator {
 
       stats.num_ooms += 1;
 
+      c10::reportOutOfMemoryToProfiler(
+          size,
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -710,8 +682,6 @@ class DeviceCachingAllocator {
           " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
           "");
     }
-    // record the history context correctly here, it should delete all allocations that this one completely overlaps, but leave
-    // the ones that are unused
 
     TORCH_INTERNAL_ASSERT(
         params.err == cudaSuccess && params.block != nullptr &&
@@ -739,8 +709,6 @@ class DeviceCachingAllocator {
       if (context) {
         trimHistoryBefore(remaining, (char*)block->ptr + size);
       }
-      //std::cout << "SPLIT\n";
-      validHistory(remaining);
 
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -766,37 +734,10 @@ class DeviceCachingAllocator {
     block->allocated = true;
     if (context) {
       trimHistoryBefore(block, (char*)block->ptr + size);
-
-
-
-      if (false) {
-        int n_blocks = active_blocks.size() + large_blocks.blocks.size() + small_blocks.blocks.size();
-        int local_history = 0;
-        for (auto& b : active_blocks) {
-          auto s = historySize(b);
-          std::cout << b->size << " " << s << " A\n";
-          local_history += s;
-        }
-
-        for (auto& b : large_blocks.blocks) {
-          auto s = historySize(b);
-          std::cout << b->size << " " << s << " L ";
-          printHistory(b);
-          local_history += s;
-        }
-        for (auto& b : small_blocks.blocks) {
-          auto s = historySize(b);
-          std::cout << b->size << " " << s << " S\n";
-          local_history += s;
-        }
-
-        std::cout << "NEW HISTORY " << " " << (double) local_history / (double) n_blocks << "\n";
-      }
       block->history = std::unique_ptr<History>(new History {block->ptr, orig_size, std::move(context), std::move(block->history)});
       if (!block->history_last) {
         block->history_last = block->history.get();
       }
-      validHistory(block);
     }
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
@@ -1235,9 +1176,6 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
     delete src;
 
-    //std::cout << "MERGE\n";
-    validHistory(dst);
-
     return subsumed_size;
   }
 
@@ -1458,14 +1396,13 @@ class DeviceCachingAllocator {
       return false;
     BlockPool& pool = *p.pool;
 
-    // silly things to make a block copyable
+    // because of std::unique_ptr, block cannot be trivially copied
     Block key(0, 0, 0);
     std::memcpy(&key, &p.search_key, sizeof(Block));
     key.history.release();
     key.size = (key.size < CachingAllocatorConfig::max_split_size())
         ? CachingAllocatorConfig::max_split_size()
         : key.size;
-
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
       // No single block is large enough; free multiple oversize blocks,

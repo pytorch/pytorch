@@ -212,6 +212,16 @@ VulkanOpContext context_create(
   return VulkanOpContext::create(packed_context, unpacked_context);
 }
 
+static Tensor reshape_to_2d(const Tensor& input_arg) {
+  TORCH_CHECK(
+      input_arg.dim() >= 2,
+      "Vulkan Linear op only supports input tensor with dim >= 2");
+  const IntArrayRef input_sizes = input_arg.sizes();
+  const auto d =
+      c10::multiply_integers(input_sizes.cbegin(), input_sizes.end() - 1);
+  return input_arg.reshape({d, input_arg.size(-1)});
+}
+
 Tensor context_run(
     const Tensor& input_arg,
     const c10::impl::GenericList& packed_context,
@@ -220,7 +230,10 @@ Tensor context_run(
     const float beta) {
   api::Context* const context = api::context();
 
-  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const Tensor input_arg_2d =
+      input_arg.dim() == 2 ? input_arg : reshape_to_2d(input_arg);
+  const Tensor input =
+      input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
   const vTensor& v_input = convert(input);
 
   const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
@@ -265,14 +278,6 @@ Tensor context_run(
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
-        // shader layout signature
-        {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
         // shader descriptor
         VK_KERNEL(addmm),
         // pipeline barrier
@@ -313,13 +318,6 @@ Tensor context_run(
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
-        // shader layout signature
-        {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
         // shader descriptor
         VK_KERNEL(mm),
         // pipeline barrier
@@ -347,7 +345,17 @@ Tensor context_run(
         params.buffer());
   }
 
-  return convert(v_output);
+  Tensor output = convert(v_output);
+  if (input_arg.dim() == 2) {
+    return output;
+  } else {
+    std::vector<int64_t> shape;
+    for (const auto i : c10::irange(input_arg.dim() - 1)) {
+      shape.emplace_back(input_arg.size(i));
+    }
+    shape.emplace_back(output.size(-1));
+    return output.reshape(shape);
+  }
 }
 
 Tensor addmm(
@@ -418,8 +426,8 @@ Tensor run_linear_context(
       input,
       vulkan_context->get_packed(),
       vulkan_context->get_unpacked(),
-      1.0,
-      1.0);
+      1.0f,
+      1.0f);
 }
 
 /* Backwards compatibility */

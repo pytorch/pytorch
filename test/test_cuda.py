@@ -569,8 +569,8 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch._UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -2804,7 +2804,11 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_not_implemented = 'cudnn' in op or 'prelu' in op or 'thnn' in op \
+                should_error_from_cudnn = 'cudnn' in op and not\
+                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
+                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
@@ -4397,6 +4401,28 @@ class TestCudaComm(TestCase):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
             self.assertTrue(torch.equal(x, cat))
+
+    def test_memory_snapshot(self):
+        torch.cuda.memory.enable_memory_history()
+        x = torch.rand(311, 411).cuda()
+        ss = torch.cuda.memory.snapshot()
+        import pickle
+        open('hi', 'wb').write(pickle.dumps(ss))
+        found_it = False
+        for seg in ss:
+            for b in seg['blocks']:
+                if 'history' in b:
+                    for h in b['history']:
+                        if h['real_size'] == 311*411*4:
+                            found_it = True
+        self.assertTrue(found_it)
+        if not IS_WINDOWS:
+            with tempfile.NamedTemporaryFile() as f:
+                torch.cuda.memory.save_segment_usage(f.name)
+                with open(f.name, 'r') as f2:
+                    self.assertTrue('test_cuda.py' in f2.read())
+
+
 
 if __name__ == '__main__':
     run_tests()
