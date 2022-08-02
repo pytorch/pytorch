@@ -15351,8 +15351,7 @@ dedent """
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(m("c"), torch.tensor([103]))
+            self.assertEqual(m("c"), torch.tensor([103.]))
 
     def test_module_none_attrs(self):
         class MyMod(torch.jit.ScriptModule):
