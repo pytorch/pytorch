@@ -70,6 +70,7 @@ class Interpreter:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
+        self.current_node: Optional[Node] = None
 
         self.garbage_collect_values = garbage_collect_values
 
@@ -148,6 +149,8 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        self.current_node = n
+
         args, kwargs = self.fetch_args_kwargs_from_env(n)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
@@ -391,13 +394,22 @@ class Transformer(Interpreter):
         self.new_graph.set_codegen(module.graph._codegen)
 
         class TransformerTracer(Tracer):
-            def __init__(self, graph: Graph):
+            def __init__(self, interpreter: Interpreter, graph: Graph):
                 super().__init__()
+                self.interpreter = interpreter
                 self.graph = graph
 
             def is_leaf_module(self, _, __) -> bool:
                 return True
-        self.tracer = TransformerTracer(self.new_graph)
+
+            def create_node(self, kind: str, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+                            name: Optional[str] = None, type_expr: Optional[Any] = None) -> Node:
+                node = super().create_node(kind, target, args, kwargs, name, type_expr)
+                # copy original node's stack_trace to the new node
+                node.stack_trace = self.interpreter.current_node.stack_trace
+                return node
+
+        self.tracer = TransformerTracer(self, self.new_graph)
         self.tracer.root = module
 
     @compatibility(is_backward_compatible=True)
@@ -416,7 +428,9 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
-        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
+        placeholder_node = self.new_graph.placeholder(target, default_value=default_value)
+        placeholder_node.stack_trace = self.current_node.stack_trace
+        return Proxy(placeholder_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
@@ -433,7 +447,9 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        getattr_node = self.new_graph.get_attr(target)
+        getattr_node.stack_trace = self.current_node.stack_trace
+        return Proxy(getattr_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
