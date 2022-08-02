@@ -232,13 +232,24 @@ def create_aot_autograd_function(
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
+                if config.debug_joint:
+                    print(fx_g.code)
+
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
-                # print(fw_module.code, bw_module.code)
+
+                if config.debug_graphs:
+                    print(fw_module.code, bw_module.code)
 
                 with track_graph_compiling("forward"):
                     compiled_fw = fw_compiler(fw_module, flat_tensor_args)
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
+                if config.debug_partitioner:
+                    activation_sizes = 0
+                    for out in fw_outs[num_outs:]:
+                        if isinstance(out, torch.Tensor):
+                            activation_sizes += out.storage().nbytes()
+                    print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                 with track_graph_compiling("backward", True):

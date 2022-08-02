@@ -25,7 +25,7 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 /**
  * Represents a span of data. Typically owned by a UniqueDetachedBuffer.
  */
-class DetachedBuffer final {
+class TORCH_API DetachedBuffer final {
  public:
   /// Creates a new DetachedBuffer with an optional data owner. This interface
   /// is provided to let users create objects of this type for testing.
@@ -40,7 +40,7 @@ class DetachedBuffer final {
     return data_;
   }
   /// Returns a pointer to the data.
-  const uint8_t *data() const {
+  const uint8_t* data() const {
     return data_;
   }
   /// Returns the size of the data, in bytes.
@@ -49,8 +49,8 @@ class DetachedBuffer final {
   }
 
   /// Wrapper type that typically owns data_owner_.
-  using UniqueDetachedBuffer = std::
-      unique_ptr<DetachedBuffer, std::function<void(DetachedBuffer*)>>;
+  using UniqueDetachedBuffer =
+      std::unique_ptr<DetachedBuffer, std::function<void(DetachedBuffer*)>>;
 
  private:
   /// Deletes the owner, if present, and the buf itself.
