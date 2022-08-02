@@ -131,6 +131,7 @@ def sharded_inplace_copy(types, args, kwargs, pg):
             raise RuntimeError(
                 "inplace copy can only happen between two ShardedTensor with same metadata!"
             )
+    for local_shard, new_shard in zip(self_st.local_shards(), new_st.local_shards()):
         local_shard.tensor.copy_(new_shard.tensor, nonblocking)
 
     return self_st
