@@ -53,6 +53,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # It will be BC-breaking, but we should fix their schemas.
         # should be inplace?
         "record_stream",
+        # See Note [resize_ in Functionalization]
+        "resize_",
     ]
 )
 
