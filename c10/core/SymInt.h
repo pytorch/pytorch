@@ -2,13 +2,14 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <memory>
 
 namespace c10 {
 
 class SymIntNodeImpl;
-using SymIntNode = std::shared_ptr<SymIntNodeImpl>;
+using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -58,11 +59,6 @@ class C10_API SymInt {
   static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
-    return data_;
-  }
-
-  // This is needed for interoperability with IValue
-  int64_t data() const {
     return data_;
   }
 
