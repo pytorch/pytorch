@@ -594,6 +594,8 @@
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: allclose
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1997,7 +1999,7 @@
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
-    QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
+    QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
 # all calls to empty() in python used to go through the symint overload
 # even if all arguments were concerete integers.
@@ -12733,6 +12735,9 @@
   variants: function
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
+
+- func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
+  variants: function
 
 - func: special_airy_ai(Tensor x) -> Tensor
   python_module: special
