@@ -470,6 +470,7 @@ fake_tensor_failures = {
     skip('nn.functional.nll_loss'),
     # NotImplementedError: Could not run 'aten::_local_scalar_dense'
     # with arguments from the 'Meta' backend.
+    xfail('assert_all_true'),
     xfail('nanquantile'),
     xfail('quantile'),
 }
