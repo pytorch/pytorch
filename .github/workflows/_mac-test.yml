@@ -61,6 +61,7 @@ jobs:
         if: inputs.build-environment == 'macos-12-py3-arm64'
         run: |
           conda clean --yes --all
+          conda list
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -124,7 +125,9 @@ jobs:
           python3 -c "import platform; print(platform.platform())"
           arch
 
+          conda list
           python3 -mpip install dist/*.whl
+          conda list
           .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id
