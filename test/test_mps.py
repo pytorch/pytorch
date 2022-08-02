@@ -6048,6 +6048,7 @@ class TestNoRegression(TestCase):
 
 
 MPS_DTYPES = get_all_dtypes()
+MPS_DTYPES_REQ_GRAD = ["torch.float16", "torch.float32"]
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
 
@@ -6597,6 +6598,13 @@ class TestConsistency(TestCase):
         'diff': None,
         'sub': None,
         'true_divide': None,
+
+        # some aten operators in the derivative definition have not been supported by MPS
+        'masked_select': None,  # `aten::masked_scatter_`
+        'sgn': None,  # `aten::_efficientzerotensor`
+        'logaddexp2': None,  # `aten::pow.Scalar_out`
+        'nn.functional.mse_loss': ['torch.float16'],  # `Half`
+        'nn.functional.smooth_l1_loss': ['torch.float16'],  # `Half`
     }
 
     # Used for accept mode only
@@ -6645,11 +6653,19 @@ class TestConsistency(TestCase):
                 mps_out = op(*mps_args, **mps_kwargs)
                 self.assertEqual(cpu_out, mps_out)
 
-                if key in self.BACKWARD_BLOCK_LIST or str(dtype) not in ["torch.float16", "torch.float32"]:
+                if not op.supports_autograd:
                     continue
 
-                cpu_sample = cpu_sample.transform(lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) else x)
-                mps_sample = mps_sample.transform(lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) else x)
+                if key in self.BACKWARD_BLOCK_LIST or str(dtype) not in MPS_DTYPES_REQ_GRAD:
+                    if self.BACKWARD_BLOCK_LIST[key] is None or str(dtype) in self.BACKWARD_BLOCK_LIST[key]:
+                        continue
+
+                cpu_sample = cpu_sample.transform(
+                    lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) and str(x.dtype) in MPS_DTYPES_REQ_GRAD else x
+                )
+                mps_sample = mps_sample.transform(
+                    lambda x: x.requires_grad_() if isinstance(x, torch.Tensor) and str(x.dtype) in MPS_DTYPES_REQ_GRAD else x
+                )
 
                 cpu_args = [cpu_sample.input] + list(cpu_sample.args)
                 cpu_kwargs = cpu_sample.kwargs
@@ -6659,9 +6675,20 @@ class TestConsistency(TestCase):
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
 
-                cpu_out.sum().backward()
-                mps_out.sum().backward()
-                self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
+                if isinstance(cpu_out, (list, tuple)):
+                    # for functions like `split`, which produces a tuple output.
+                    for cpu_out_, mps_out_ in zip(cpu_out, mps_out):
+                        cpu_out_.sum().backward(retain_graph=True)
+                        mps_out_.sum().backward(retain_graph=True)
+                else:
+                    cpu_out.sum().backward()
+                    mps_out.sum().backward()
+
+                if isinstance(cpu_sample.input, (list, tuple)):
+                    for cpu_sample_, mps_sample_ in zip(cpu_sample.input, mps_sample.input):
+                        self.assertEqual(cpu_sample_, mps_sample_)
+                else:
+                    self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
 
         except Exception as e:
             if not generate_new_truth:
