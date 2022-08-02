@@ -22,6 +22,11 @@ namespace at { namespace functorch {
 // or call data_ptr. We have some idea of how to fix these things in the long term
 // (e.g. functionalization for the in-place operations).
 
+// TODO: upstream into core
+Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+}
+
 static optional<std::tuple<Tensor,int64_t>> unwrap(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
@@ -284,6 +289,7 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
 } // dropout_hack
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
+  m.impl("index_select_backward", index_select_backward_hack);
   m.impl("linear", linear_hack);
   m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);
   m.impl("trace_backward", trace_backward_decomp);
