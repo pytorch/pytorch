@@ -6555,6 +6555,37 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ])
         m3(*example_inputs)
 
+    def test_getitem_no_dequant_quant(self):
+        """
+        Test that we do not add dequant and quant ops around getitem.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
+                self.conv2 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
+
+            def forward(self, inputs):
+                # inputs: [1, 5, 10]
+                x1 = self.conv1(inputs)
+                # x: [1, 5, 6]
+                x1 = x1 + inputs[:, :, -6:]
+                x2 = self.conv2(x1)
+                x2 = x2 + x1[:, :, -2:]
+                return x2
+
+        m = M()
+        m.eval()
+        qconfig_mapping = get_default_qconfig_mapping()
+        m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
+        m(torch.rand(1, 5, 10))
+        m = convert_fx(m)
+
+        # There should only be one dequantize at the end
+        self.checkGraphModuleNodes(m, expected_node_occurrence={
+            ns.call_method("dequantize") : 1,
+        })
+        m(torch.rand(1, 5, 10))
 
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):
