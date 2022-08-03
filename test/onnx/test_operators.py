@@ -80,7 +80,6 @@ class TestOperators(common_utils.TestCase):
             m = FuncModule(f, params)
         m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
-        print(onnx_model_pbtxt)
         subname = kwargs.pop("subname", None)
         self.assertExpected(onnx_model_pbtxt, subname)
         if _onnx_dep:
