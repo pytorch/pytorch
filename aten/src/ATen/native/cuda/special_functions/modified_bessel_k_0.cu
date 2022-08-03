@@ -102,7 +102,7 @@ const auto modified_bessel_k_0_string = modified_bessel_i_0_string + jiterator_s
 
 const char modified_bessel_k_0_name[] = "modified_bessel_k_0_forward";
 
-void modified_bessel_k_0_kernel_cuda(TensorIteratorBase& iterator) {
+void modified_bessel_k_0_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k_0_cuda", [&]() {
     jitted_gpu_kernel<modified_bessel_k_0_name, scalar_t, scalar_t, 1>(iterator, modified_bessel_k_0_string);
@@ -114,7 +114,7 @@ void modified_bessel_k_0_kernel_cuda(TensorIteratorBase& iterator) {
     });
   });
 #endif // AT_USE_JITERATOR()
-} // void modified_bessel_k_0_kernel_cuda(TensorIteratorBase& iterator)
+} // void modified_bessel_k_0_kernel_cuda(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(special_modified_bessel_k_0_stub, &modified_bessel_k_0_kernel_cuda);
 } // namespace native

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/native/special_functions/bessel_j_0.h>
+
 namespace at {
 namespace native {
 namespace special_functions {

@@ -63,7 +63,7 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
 
 const char shifted_chebyshev_polynomial_t_name[] = "shifted_chebyshev_polynomial_t_forward";
 
-void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase& iterator) {
+void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_t_cuda", [&]() {
     opmath_jitted_gpu_kernel_with_scalars<shifted_chebyshev_polynomial_t_name, scalar_t, scalar_t>(iterator, shifted_chebyshev_polynomial_t_string);
@@ -75,7 +75,7 @@ void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase& iterator) {
     });
   });
 #endif
-} // void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase& iterator)
+} // void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polynomial_t_kernel_cuda);
 } // namespace native

@@ -890,7 +890,7 @@ Keyword args:
 """.format(**common_args))
 
 bessel_j_0 = _add_docstr(_special.special_bessel_j_0,
-                        r"""
+                         r"""
 bessel_j_0(input, *, out=None) -> Tensor
 
 Bessel function of the first kind of order :math:`0`.
@@ -904,7 +904,7 @@ Keyword args:
 """.format(**common_args))
 
 bessel_j_1 = _add_docstr(_special.special_bessel_j_1,
-                        r"""
+                         r"""
 bessel_j_1(input, *, out=None) -> Tensor
 
 Bessel function of the first kind of order :math:`1`.
@@ -918,7 +918,7 @@ Keyword args:
 """.format(**common_args))
 
 bessel_y_0 = _add_docstr(_special.special_bessel_y_0,
-                        r"""
+                         r"""
 bessel_y_0(input, *, out=None) -> Tensor
 
 Bessel function of the second kind of order :math:`0`.
@@ -932,7 +932,7 @@ Keyword args:
 """.format(**common_args))
 
 bessel_y_1 = _add_docstr(_special.special_bessel_y_1,
-                        r"""
+                         r"""
 bessel_y_1(input, *, out=None) -> Tensor
 
 Bessel function of the second kind of order :math:`1`.
@@ -1125,7 +1125,7 @@ Keyword args:
 """.format(**common_args))
 
 modified_bessel_i_0 = _add_docstr(_special.special_modified_bessel_i_0,
-                                 r"""
+                                  r"""
 modified_bessel_i_0(input, *, out=None) -> Tensor
 
 Modified Bessel function of the first kind of order :math:`0`.
@@ -1139,7 +1139,7 @@ Keyword args:
 """.format(**common_args))
 
 modified_bessel_i_1 = _add_docstr(_special.special_modified_bessel_i_1,
-                                 r"""
+                                  r"""
 modified_bessel_i_1(input, *, out=None) -> Tensor
 
 Modified Bessel function of the first kind of order :math:`1`.
@@ -1153,7 +1153,7 @@ Keyword args:
 """.format(**common_args))
 
 modified_bessel_k_0 = _add_docstr(_special.special_modified_bessel_k_0,
-                                 r"""
+                                  r"""
 modified_bessel_k_0(input, *, out=None) -> Tensor
 
 Modified Bessel function of the second kind of order :math:`0`.
@@ -1167,7 +1167,7 @@ Keyword args:
 """.format(**common_args))
 
 modified_bessel_k_1 = _add_docstr(_special.special_modified_bessel_k_1,
-                                 r"""
+                                  r"""
 modified_bessel_k_1(input, *, out=None) -> Tensor
 
 Modified Bessel function of the second kind of order :math:`1`.
@@ -1181,7 +1181,7 @@ Keyword args:
 """.format(**common_args))
 
 exp_modified_bessel_k_0 = _add_docstr(_special.special_exp_modified_bessel_k_0,
-                                        r"""
+                                      r"""
 exp_modified_bessel_k_0(input, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`0`.
@@ -1195,7 +1195,7 @@ Keyword args:
 """.format(**common_args))
 
 exp_modified_bessel_k_1 = _add_docstr(_special.special_exp_modified_bessel_k_1,
-                                        r"""
+                                      r"""
 exp_modified_bessel_k_1(input, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`1`.
@@ -1269,7 +1269,7 @@ Keyword args:
 """.format(**common_args))
 
 spherical_bessel_j_0 = _add_docstr(_special.special_spherical_bessel_j_0,
-                                  r"""
+                                   r"""
 spherical_bessel_j_0(input, *, out=None) -> Tensor
 
 Spherical Bessel function of the first kind of order :math:`0`.

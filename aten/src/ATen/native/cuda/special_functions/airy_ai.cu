@@ -204,7 +204,7 @@ const auto airy_ai_string = jiterator_stringify(
 
 const char airy_ai_name[] = "airy_ai_forward";
 
-void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
+void airy_ai_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
     jitted_gpu_kernel<airy_ai_name, scalar_t, scalar_t, 1>(iterator, airy_ai_string);
@@ -216,7 +216,7 @@ void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
     });
   });
 #endif // AT_USE_JITERATOR()
-} // void airy_ai_kernel_cuda(TensorIteratorBase& iterator)
+} // void airy_ai_kernel_cuda(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda);
 } // namespace native

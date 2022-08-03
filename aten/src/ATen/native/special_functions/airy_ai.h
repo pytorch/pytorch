@@ -1,3 +1,22 @@
+#pragma once
+
+#include <cstdlib>
+#include <cstdint>
+#include <cmath>
+#include <cfloat>
+#include <limits>
+#include <type_traits>
+#include <ATen/NumericUtils.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <c10/util/MathConstants.h>
+#include <c10/util/math_compat.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/jiterator_macros.h>
+
+namespace at {
+namespace native {
+namespace special_functions {
 template<typename T>
 static inline C10_HOST_DEVICE
 T airy_ai(T x) {

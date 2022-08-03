@@ -1,3 +1,15 @@
+#define TORCH_ASSERT_NO_OPERATORS
+
+#include <ATen/Dispatch.h>
+#include <ATen/Generator.h>
+#include <ATen/MemoryOverlap.h>
+#include <ATen/Parallel.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/Math.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/native/special_functions/elliptic_theta_3.h>
+
 namespace at {
 namespace native {
 inline namespace CPU_CAPABILITY {
@@ -6,11 +18,12 @@ static void elliptic_theta_3_cpu_kernel(TensorIteratorBase &iterator) {
 
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_theta_3_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
-      return special_functions::elliptic_theta_3(x);
+      return at::native::special_functions::elliptic_theta_3(x);
     });
   });
 } // void elliptic_theta_3_cpu_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
+
 REGISTER_DISPATCH(special_elliptic_theta_3_stub, &CPU_CAPABILITY::elliptic_theta_3_cpu_kernel);
 } // namespace native
 } // namespace at

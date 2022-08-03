@@ -51,7 +51,7 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
 
 const char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
-void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
+void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "laguerre_polynomial_l_cuda", [&]() {
     opmath_jitted_gpu_kernel_with_scalars<laguerre_polynomial_l_name, scalar_t, scalar_t>(iterator, laguerre_polynomial_l_string);
@@ -63,7 +63,7 @@ void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
     });
   });
 #endif
-} // void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator)
+} // void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
 } // namespace native

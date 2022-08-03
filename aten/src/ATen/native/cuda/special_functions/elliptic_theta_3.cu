@@ -10,7 +10,7 @@ const auto elliptic_theta_3_string = jiterator_stringify(
 
 const char elliptic_theta_3_name[] = "elliptic_theta_3";
 
-void elliptic_theta_3_cuda_kernel(TensorIteratorBase& iterator) {
+void elliptic_theta_3_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_theta_3_cuda_kernel", [&]() {
     opmath_jitted_gpu_kernel_with_scalars<elliptic_theta_3_name, scalar_t, scalar_t>(iterator, elliptic_theta_3_string);
@@ -22,7 +22,7 @@ void elliptic_theta_3_cuda_kernel(TensorIteratorBase& iterator) {
     });
   });
 #endif
-} // void elliptic_theta_3_cuda_kernel(TensorIteratorBase& iterator)
+} // void elliptic_theta_3_cuda_kernel(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(elliptic_theta_3_stub, &elliptic_theta_3_cuda_kernel);
 } // namespace native

@@ -1,8 +1,28 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/Generator.h>
-#include <ATen/native/DispatchStub.h>
+#include <ATen/native/special_functions/airy_ai.h>
+#include <ATen/native/UnaryOps.h>
+
+#include <cmath>
+#include <limits>
+#include <type_traits>
+
+#include <ATen/Config.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/cpu/zmath.h>
+#include <ATen/OpMathType.h>
+
+#include <c10/util/math_compat.h>
+#include <c10/util/MathConstants.h>
+#include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -12,11 +32,12 @@ static void bessel_j_1_kernel(TensorIteratorBase &iterator) {
 
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j_1_cpu", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
-      return special_functions::bessel_j_1(x);
+      return x;
     });
   });
 } // static void bessel_j_1_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
+
 REGISTER_DISPATCH(special_bessel_j_1_stub, &CPU_CAPABILITY::bessel_j_1_kernel);
 } // namespace native
 } // namespace at

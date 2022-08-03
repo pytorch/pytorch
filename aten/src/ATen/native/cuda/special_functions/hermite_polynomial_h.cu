@@ -47,7 +47,7 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
 const char hermite_polynomial_h_name[] = "hermite_polynomial_h_forward";
 
-void hermite_polynomial_h_kernel_cuda(TensorIteratorBase& iterator) {
+void hermite_polynomial_h_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_h_cuda", [&]() {
     opmath_jitted_gpu_kernel_with_scalars<hermite_polynomial_h_name, scalar_t, scalar_t>(iterator, hermite_polynomial_h_string);
@@ -59,7 +59,7 @@ void hermite_polynomial_h_kernel_cuda(TensorIteratorBase& iterator) {
     });
   });
 #endif
-} // void hermite_polynomial_h_kernel_cuda(TensorIteratorBase& iterator)
+} // void hermite_polynomial_h_kernel_cuda(TensorIteratorBase &iterator)
 } // namespace (anonymous)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel_cuda);
 } // namespace native
