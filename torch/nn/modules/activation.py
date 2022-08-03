@@ -1124,7 +1124,8 @@ class MultiheadAttention(Module):
                     self.out_proj.bias,
                     key_padding_mask if key_padding_mask is not None else attn_mask,
                     need_weights,
-                    average_attn_weights)
+                    average_attn_weights,
+                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")

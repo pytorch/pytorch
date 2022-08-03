@@ -502,6 +502,7 @@ class TransformerEncoderLayer(Module):
                     self.linear2.weight,
                     self.linear2.bias,
                     src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
+                    1 if src_key_padding_mask is not None else 0 if src_mask is not None else None,
                 )
 
         x = src

@@ -118,7 +118,8 @@ Tensor bmm_nt(const Tensor& a, const Tensor& b) {
 Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
-    const Tensor& query) {
+    const Tensor& query,
+    c10::optional<int64_t> mask_type = NULL) {
   if (query.is_nested() && !attn_mask) {
     if (attn_scores.is_cpu()) {
       NestedTensor_softmax_dropout(query, attn_scores);
@@ -143,7 +144,7 @@ Tensor masked_softmax(
     attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
   }
   if (attn_mask) {
-    return _masked_softmax(attn_scores, *attn_mask);
+    return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);  /* TODO: add mask_type */
   } else {
     return _softmax_out(attn_scores, attn_scores, attn_scores.dim() - 1, false);
   }
@@ -329,7 +330,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& proj_bias,
     const c10::optional<Tensor>& mask,
     bool need_weights,
-    bool average_attn_weights) {
+    bool average_attn_weights,
+    const c10::optional<int64_t> mask_type) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 
@@ -445,7 +447,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   // shape: [B, num_head, T, T]
   // TODO: long-term, have a kernel that works with
   // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query);
+  qkt = masked_softmax(qkt, mask, query, mask_type);
 #ifdef DEBUG_PRINT_EACH_STEP
   std::cerr << "qkt after softmax: " << qkt << std::endl;
 #endif

@@ -173,6 +173,7 @@ class TestMHADeviceType(TestCase):
                     key_padding_mask,
                     need_weights=need_weights,
                     average_attn_weights=average_attn_weights,
+                    mask_type=1,
                 )
 
         npt = NativeMHA(
