@@ -326,15 +326,31 @@ if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
-from torch._C._autograd import (DeviceType, ProfilerEvent, _KinetoEvent,
-                                _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available,
-                                _record_function_with_args_enter, _record_function_with_args_exit,
-                                _supported_activities, _add_metadata_json, SavedTensor,
-                                _push_saved_tensors_default_hooks, _pop_saved_tensors_default_hooks,
-                                _kineto_step, _prepare_profiler, _enable_profiler, _disable_profiler)
+from torch._C._autograd import (
+    _add_metadata_json,
+    _disable_profiler,
+    _disable_profiler_legacy,
+    _enable_profiler,
+    _enable_profiler_legacy,
+    _enable_record_function,
+    _kineto_step,
+    _KinetoEvent,
+    _pop_saved_tensors_default_hooks,
+    _prepare_profiler,
+    _profiler_enabled,
+    _ProfilerResult,
+    _push_saved_tensors_default_hooks,
+    _record_function_with_args_enter,
+    _record_function_with_args_exit,
+    _set_empty_test_observer,
+    _supported_activities,
+    DeviceType,
+    kineto_available,
+    ProfilerEvent,
+    SavedTensor,
+)
 
-from torch._C._profiler import ProfilerActivity, ProfilerState, ProfilerConfig, _ProfilerResult
+from torch._C._profiler import ProfilerActivity, ProfilerConfig, ProfilerState
 
 from . import profiler
 

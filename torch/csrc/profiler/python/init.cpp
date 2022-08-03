@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/python/init.h>
 
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/utils/pybind.h>
 
