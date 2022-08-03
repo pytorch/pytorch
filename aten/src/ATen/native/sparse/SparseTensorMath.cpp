@@ -798,7 +798,12 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   const auto apply_op = [&](const Tensor& d_filtered) -> Tensor& {
     const auto res_indices = s_indices.clone();
-    const auto res_values = op(d_filtered, s_values);
+    // to(res.scalar_type) is only performed when both d and s are 0-dim.
+    // This insures right type promotions with the following rules:
+    // op(0-dim, 0-dim).dtype == <common dtype>
+    // op(0-dim, ge-1-dim).dtype == <ge-1-dim>.dtype,
+    // where ge-1-dim is a tensor with dim >= 1.
+    const auto res_values = op(d_filtered, s_values).to(res.scalar_type());
     get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
     get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
@@ -926,6 +931,24 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   // case mul(dense, sparse)
   if (!t_.is_sparse()) {
     return _mul_dense_sparse_out(t_, src_, r);
+  }
+
+  // case mul(sparse, sparse) with a 0-dim input.
+  const auto probably_scalar = (!src_.dim() && src_.is_coalesced())
+    ? src_
+    : (!t_.dim() && t_.is_coalesced())
+    ? t_ : Tensor {};
+  const auto other = is_same_tensor(probably_scalar, t_) ? src_ : t_;
+  // Case when there is a 0-dim argument which is coalesced.
+  if (probably_scalar.defined()) {
+    return _mul_dense_sparse_out(probably_scalar._values().squeeze(0), other, r);
+  }
+  // case for 0-dim arguments that need to get coalesced
+  if (!src_.dim()) {
+    return _mul_dense_sparse_out(src_.coalesce()._values().squeeze(0), t_, r);
+  }
+  if (!t_.dim()) {
+    return _mul_dense_sparse_out(t_.coalesce()._values().squeeze(0), src_, r);
   }
 
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"

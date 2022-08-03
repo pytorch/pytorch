@@ -471,6 +471,24 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
     return _mul_dense_sparse_out(t_, src_, r_);
   }
 
+  // case mul(sparse, sparse) with a 0-dim input.
+  const auto probably_scalar = (!src_.dim() && src_.is_coalesced())
+    ? src_
+    : (!t_.dim() && t_.is_coalesced())
+    ? t_ : Tensor {};
+  const auto other = is_same_tensor(probably_scalar, t_) ? src_ : t_;
+  // Case when there is a 0-dim argument which is coalesced.
+  if (probably_scalar.defined()) {
+    return _mul_dense_sparse_out(probably_scalar._values().squeeze(0), other, r_);
+  }
+  // case for 0-dim arguments that need to get coalesced
+  if (!src_.dim()) {
+    return _mul_dense_sparse_out(src_.coalesce()._values().squeeze(0), t_, r_);
+  }
+  if (!t_.dim()) {
+    return _mul_dense_sparse_out(t_.coalesce()._values().squeeze(0), src_, r_);
+  }
+
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
