@@ -189,9 +189,12 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   TORCH_CHECK(!input.is_complex() && !target.is_complex(),
-              "kl_div: Complex inputs not supported.")
+              "kl_div: Complex inputs not supported.");
+  TORCH_CHECK(!at::isIntegralType(input.scalar_type(), /*include_bool*/true) &&
+              !at::isIntegralType(target.scalar_type(), /*include_bool*/true),
+              "kl_div: Integral inputs not supported.");
   auto output = log_target ? at::exp(target) * (target - input)
-                           : target * (at::log(target) - input);
+                           : at::xlogy(target, target) - target * input;
   return apply_loss_reduction(output, reduction);
 }
 
