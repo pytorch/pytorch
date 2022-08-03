@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <structmember.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
