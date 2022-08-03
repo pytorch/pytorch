@@ -7,7 +7,10 @@ namespace nvfuser {
 
 class FusionCacheEntry {
  private:
-  std::unique_ptr<RecordFunctor> record_;
+  bool is_end;
+  std::unique_ptr<FusionOwner> fusion_owner_;
+
+  std::shared_ptr<RecordFunctor> record_;
   std::unordered_map<RecordFunctor*, std::unique_ptr<FusionCacheEntry>>
       record_hash_map_;
 };

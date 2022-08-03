@@ -12,6 +12,7 @@ using NvfVal = torch::jit::fuser::cuda::Val;
 namespace nvfuser {
 
 struct RecordFunctor;
+struct FusionManager;
 
 //! The State, child classes Tensor and Scalar, and the StateType enum
 //! are used to define state objects to encapsulate the recording of state
@@ -113,8 +114,10 @@ class FusionDefinition {
   FusionOwner* fusion_owner_;
   NvfFusion* prev_fusion_;
 
+  std::shared_ptr<FusionManager> fusion_manager_;
+
   //! A vector of record operations in the FusionDefintion
-  std::vector<std::unique_ptr<RecordFunctor>> recording_;
+  std::vector<std::shared_ptr<RecordFunctor>> recording_;
   //! A vector of state (Tensor/Scalar) recorded in the FusionDefinition
   std::vector<std::unique_ptr<State>> recording_state_;
 
