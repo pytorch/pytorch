@@ -1,5 +1,5 @@
 import contextlib
-from itertools import accumulate
+from itertools import accumulate, chain
 from typing import (
     Dict,
     Generator,
@@ -302,7 +302,7 @@ class FlatParamHandle:
             f"Expects {flat_param._unsharded_size.numel()} numel but got " \
             f"{tensor.numel()} numel"
         views = (
-            tensor.view(shape) for (tensor, shape) in
+            subtensor.view(shape) for (subtensor, shape) in
             zip(torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes)  # type: ignore[arg-type]
         )
         return views
@@ -526,3 +526,14 @@ class FlatParamHandle:
         return set(pi.module for pi in self.flat_param._param_infos).union(
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
+
+    def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        shared_param_infos = [
+            ParamInfo(param_name, module, module_name)
+            for (param_name, module, module_name, _, _, _)
+            in self.flat_param._shared_param_infos
+        ]
+        for param_name, _, module_name in chain(
+            self.flat_param._param_infos, shared_param_infos
+        ):
+            yield (param_name, module_name)
