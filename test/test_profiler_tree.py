@@ -681,9 +681,10 @@ class TestProfilerTree(TestCase):
                   detach
             [memory]
             aten::zeros
-              aten::empty
-                [memory]
-              aten::zero_
+              aten::zeros
+                aten::empty
+                  [memory]
+                aten::zero_
             Optimizer.step#SGD.step
               aten::empty
                 [memory]
@@ -809,7 +810,7 @@ class TestProfilerTree(TestCase):
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
                           cudaLaunchKernel
-                            void ..._kernel<...>(...)
+                            std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, float, float, float, float, false, true, false, false, 7, false, cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
                           [memory]
                           aten::expand
                             aten::as_strided
@@ -840,7 +841,7 @@ class TestProfilerTree(TestCase):
                               aten::as_strided
                           aten::mm
                             cudaLaunchKernel
-                              void ..._kernel<...>(...)
+                              std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, float, float, float, float, false, true, false, false, 7, false, cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
                             [memory]
                           aten::t
                             aten::transpose
@@ -875,9 +876,10 @@ class TestProfilerTree(TestCase):
                   torch/autograd/profiler.py(...): __init__
                     <built-in method zeros of type object at 0xXXXXXXXXXXXX>
                       aten::zeros
-                        aten::empty
-                          [memory]
-                        aten::zero_
+                        aten::zeros
+                          aten::empty
+                            [memory]
+                          aten::zero_
                   torch/autograd/profiler.py(...): __enter__
                     torch/_ops.py(...): __call__
                       <built-in method _record_function_enter of PyCapsule object at 0xXXXXXXXXXXXX>
