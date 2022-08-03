@@ -366,7 +366,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 
             def inner_pack(inner):
                 nonlocal unpack_counter
-                storage[unpack_counter] = inner
+                storage[unpack_counter] = inner.detach()
                 unpack_counter += 1
                 return None
 
