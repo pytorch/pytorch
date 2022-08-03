@@ -18,6 +18,9 @@ from torch.utils._pytree import tree_map
 from torch import nn
 import re
 
+import types
+import functools
+
 aten = torch.ops.aten
 
 try:
@@ -60,6 +63,16 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
+
+
+def copy_func(f):
+    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
+    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                           argdefs=f.__defaults__,
+                           closure=f.__closure__)
+    g = functools.update_wrapper(g, f)
+    g.__kwdefaults__ = f.__kwdefaults__
+    return g
 
 
 # Copied from functorch
@@ -119,20 +132,18 @@ def _create_new_input(x):
     else:
         return torch.rand_like(x)
 
-class TestProxyTensor(TestCase):
-    tracing_mode = "real"
-
+class TestGenericProxyTensor(TestCase):
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
         self.assertEqual(fx_f(*new_inps), f(*new_inps))
 
-    def test_make_fx_simple(self, device):
+    def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)
         self._test(f, (torch.randn(3),))
 
-    def test_scalar_device(self, device):
+    def test_scalar_device(self, device='cpu'):
         def f(a, b):
             return a + b
         self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
@@ -241,7 +252,7 @@ class TestProxyTensor(TestCase):
             self.assertTrue(is_any_digamma(traced))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_backward_trace(self, device):
+    def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 
         def f(x):
@@ -363,7 +374,7 @@ class TestProxyTensor(TestCase):
 
         self.assertEqual(fx_module(x), decomposed_module(x))
 
-    def test_make_fx_model_fwd_bwd(self, device):
+    def test_make_fx_model_fwd_bwd(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -393,7 +404,7 @@ class TestProxyTensor(TestCase):
             torch.allclose(fx_f(input, params)[1], f(input, params)[1])
         )
 
-    def test_make_fx_model_fwd_bwd_wgtupdate(self, device):
+    def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -428,6 +439,45 @@ class TestProxyTensor(TestCase):
             or
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
+
+
+class TestGenericProxyTensorReal(TestGenericProxyTensor):
+    tracing_mode = "real"
+
+
+class TestGenericProxyTensorFake(TestGenericProxyTensor):
+    tracing_mode = "fake"
+
+
+def xfail_inherited_tests(tests):
+    """
+    Given a list of test names which are defined by a superclass of the
+    class this decorates, mark them as expected failure.  This is useful
+    if you are doing poor man's parameterized tests by subclassing a generic
+    test class.
+    """
+    def deco(cls):
+        for t in tests:
+            # NB: expectedFailure operates by mutating the method in question,
+            # which is why you have to copy the function first
+            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
+        return cls
+    return deco
+
+
+@xfail_inherited_tests([
+    "test_inplace_metadata",
+    "test_mode_tracing_factory_function",
+    "test_make_fx_overloads",
+    "test_make_fx_model_fwd_bwd_wgtupdate",
+    "test_make_fx_model_fwd_bwd",
+    "test_proxy_tensor",
+])
+class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
+    tracing_mode = "symbolic"
+
+
+del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
@@ -998,11 +1048,6 @@ class TestProxyTensorOpInfo(TestCase):
 
 
 only_for = ("cpu")
-instantiate_device_type_tests(
-    TestProxyTensor,
-    globals(),
-    only_for=only_for,
-)
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
 
