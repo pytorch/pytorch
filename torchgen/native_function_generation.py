@@ -304,9 +304,7 @@ def add_generated_native_functions(
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = (
-                has_inplace and "inplace_view" in d[SchemaKind.inplace].tags
-            ) or any(f.is_view_op for f in d.values())
+            has_view_ops = any(f.is_view_op for f in d.values())
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly

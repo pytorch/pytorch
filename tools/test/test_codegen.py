@@ -1,11 +1,22 @@
 import dataclasses
 import typing
 import unittest
+from typing import Dict
 
 import torchgen.model
 
 from tools.autograd import gen_autograd_functions, load_derivatives
-from torchgen.gen import get_native_function_schema_registrations
+from torchgen.gen import (
+    get_native_function_declarations,
+    get_native_function_schema_registrations,
+)
+from torchgen.model import (
+    BackendIndex,
+    BackendMetadata,
+    DispatchKey,
+    NativeFunction,
+    OperatorName,
+)
 from torchgen.selective_build.selector import SelectiveBuilder
 
 
@@ -196,6 +207,67 @@ TORCH_LIBRARY(custom, m) {
                 ],
                 schema_selector=self.selector,
             )
+
+
+class TestGenNativeFunctionDeclaration(unittest.TestCase):
+    def setUp(self) -> None:
+        self.op_1_native_function, op_1_backend_index = NativeFunction.from_yaml(
+            {"func": "op_1() -> bool", "dispatch": {"CPU": "kernel_1"}},
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
+        self.op_2_native_function, op_2_backend_index = NativeFunction.from_yaml(
+            {
+                "func": "op_2() -> bool",
+                "dispatch": {"CPU": "kernel_2", "QuantizedCPU": "custom::kernel_3"},
+            },
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+            DispatchKey.CPU: {},
+            DispatchKey.QuantizedCPU: {},
+        }
+        BackendIndex.grow_index(backend_indices, op_1_backend_index)
+        BackendIndex.grow_index(backend_indices, op_2_backend_index)
+        self.backend_indices = {
+            k: BackendIndex(
+                dispatch_key=k,
+                use_out_as_primary=True,
+                external=False,
+                device_guard=False,
+                index=backend_indices[k],
+            )
+            for k in backend_indices
+        }
+
+    def test_native_function_declaration_1_op_2_ns_error(self) -> None:
+        with self.assertRaises(AssertionError):
+            get_native_function_declarations(
+                grouped_native_functions=[
+                    self.op_1_native_function,
+                    self.op_2_native_function,
+                ],
+                backend_indices=self.backend_indices,
+            )
+
+    def test_native_function_declaration_1_op_1_ns_valid(self) -> None:
+        self.assertIsInstance(self.op_1_native_function, NativeFunction)
+        declaration = get_native_function_declarations(
+            grouped_native_functions=[
+                self.op_1_native_function,
+            ],
+            backend_indices=self.backend_indices,
+        )
+        target = """
+namespace at {
+namespace native {
+TORCH_API bool kernel_1();
+} // namespace native
+} // namespace at
+        """
+        self.assertEqual("\n".join(declaration), target)
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()
