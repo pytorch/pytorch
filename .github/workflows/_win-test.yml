@@ -112,7 +112,7 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
-          .jenkins/pytorch/win-test.sh
+          .ci/pytorch/win-test.sh
 
       - name: Get workflow job id
         id: get-job-id

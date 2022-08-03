@@ -131,7 +131,7 @@ jobs:
           conda activate build
 
           python3 -mpip install dist/*.whl
-          .jenkins/pytorch/macos-test.sh
+          .ci/pytorch/macos-test.sh
 
       - name: Cleanup miniconda for arm64
         if: inputs.build-environment == 'macos-12-py3-arm64'

@@ -610,7 +610,7 @@ test_torch_deploy() {
 }
 
 test_docs_test() {
-  .jenkins/pytorch/docs-test.sh
+  .ci/pytorch/docs-test.sh
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

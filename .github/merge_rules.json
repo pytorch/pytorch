@@ -2,7 +2,7 @@
    {
       "name": "ONNX exporter",
       "patterns": [
-         ".jenkins/caffe2/*",
+         ".ci/caffe2/*",
          "aten/src/ATen/core/interned_strings.h",
          "docs/source/onnx.rst",
          "docs/source/scripts/onnx/**",
@@ -42,7 +42,7 @@
    },
    {
       "name": "OSS CI",
-      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+      "patterns": [".github/**", ".circleci/**", ".ci/**", "scripts/**", "tools/**"],
       "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
