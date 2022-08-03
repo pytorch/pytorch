@@ -101,6 +101,7 @@ def get_extensions():
         for p in glob.glob(os.path.join(extensions_dir, "*.cpp"))
     )
     sources = list(extension_sources)
+    sources.append(os.path.join(extensions_dir, "dim", "dim.cpp"))
 
     ext_modules = [
         extension(
