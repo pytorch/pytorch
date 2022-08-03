@@ -137,7 +137,7 @@ The Principles
 The Process for Nomination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Each module will have it's own process, please conact module maintainers
+* Each module has its own process. Please contact module maintainers for more information.
   however if there is no one, you can file a request to the core maintainers
   via [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
   meeting each 3 months.
