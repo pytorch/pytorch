@@ -1,4 +1,3 @@
-from typing import Optional
 from torch import Tensor
 class OverlappedOptimizer(object):
     def __init__(self, 
@@ -13,10 +12,10 @@ class OverlappedOptimizer(object):
 
         self.is_overlapped = True
         
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
-        self._pre_step(param=param, grad=grad)
-        self._step_param(param=param, grad=grad)
-        self._post_step(param=param, grad=grad)
+    def step_param(self, param: Tensor, grad: Tensor):
+        if self._pre_step(param=param, grad=grad):
+            self._step_param(param=param, grad=grad)
+            self._post_step(param=param, grad=grad)
 
     def set_lr(self, lr):
         self._functional_optim.defaults['lr'] = lr
@@ -27,12 +26,14 @@ class OverlappedOptimizer(object):
 
     def _pre_step(self, param, grad):
         if self.grad_scaler is not None:
-            self.grad_scaler.unscale_(grad)
+            return self.grad_scaler.unscale_grad(grad)
+        else:
+            return True
 
     def _post_step(self, param, grad):
         pass
             
-    def _step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def _step_param(self, param: Tensor, grad: Tensor):
         """The actual optimizing algorithm"""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped DDP."

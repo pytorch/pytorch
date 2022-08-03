@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Union
 from torch import Tensor
 from ..functional_sgd import _FunctionalSGD
 from .overlapped_optim import OverlappedOptimizer
@@ -31,5 +31,5 @@ class OverlappedSGD(OverlappedOptimizer):
                          grad_scaler=grad_scaler)
         self.params = params
 
-    def _step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def _step_param(self, param: Tensor, grad: Tensor):
         return self._functional_sgd.step_param(param=param, grad=grad)

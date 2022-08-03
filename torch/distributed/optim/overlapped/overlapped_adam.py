@@ -1,4 +1,4 @@
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Union
 from torch import Tensor
 from ..functional_adam import _FunctionalAdam
 from .overlapped_optim import OverlappedOptimizer
@@ -30,6 +30,6 @@ class OverlappedAdam(OverlappedOptimizer):
                          grad_scaler=grad_scaler)
         self.params = params
 
-    def _step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def _step_param(self, param: Tensor, grad: Tensor):
         return self._functional_adam.step_param(param=param, grad=grad)
         
