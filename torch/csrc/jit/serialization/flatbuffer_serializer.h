@@ -29,10 +29,7 @@ class TORCH_API DetachedBuffer final {
  public:
   /// Creates a new DetachedBuffer with an optional data owner. This interface
   /// is provided to let users create objects of this type for testing.
-  DetachedBuffer(
-      void* data,
-      size_t size,
-      void* internal_data_owner = nullptr)
+  DetachedBuffer(void* data, size_t size, void* internal_data_owner = nullptr)
       : data_(data), size_(size), data_owner_(internal_data_owner) {}
 
   /// Returns a pointer to the data.
