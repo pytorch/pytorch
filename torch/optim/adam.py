@@ -171,7 +171,8 @@ class Adam(Optimizer):
                  eps=group['eps'],
                  maximize=group['maximize'],
                  foreach=group['foreach'],
-                 capturable=group['capturable'])
+                 capturable=group['capturable'],
+                 differentiable=group['differentiable'])
 
         return loss
 
@@ -186,6 +187,7 @@ def adam(params: List[Tensor],
          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
          foreach: bool = None,
          capturable: bool = False,
+         differentiable: bool = False,
          *,
          amsgrad: bool,
          beta1: float,
@@ -226,7 +228,8 @@ def adam(params: List[Tensor],
          weight_decay=weight_decay,
          eps=eps,
          maximize=maximize,
-         capturable=capturable)
+         capturable=capturable,
+         differentiable=differentiable)
 
 
 def _single_tensor_adam(params: List[Tensor],
@@ -243,7 +246,8 @@ def _single_tensor_adam(params: List[Tensor],
                         weight_decay: float,
                         eps: float,
                         maximize: bool,
-                        capturable: bool):
+                        capturable: bool,
+                        differentiable: bool):
 
     for i, param in enumerate(params):
 
@@ -271,7 +275,7 @@ def _single_tensor_adam(params: List[Tensor],
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
-        if capturable:
+        if capturable or differentiable:
             step = step_t
 
             # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
@@ -286,7 +290,11 @@ def _single_tensor_adam(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                max_exp_avg_sqs[i][:] = torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq)
+                if differentiable:
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i].clone()
+                else:
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i]
+                max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sqs_i, exp_avg_sq))
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
@@ -307,7 +315,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                max_exp_avg_sqs[i][:] = torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq)
+                torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq, out=max_exp_avg_sqs[i])
                 # Use the max. for normalizing running avg. of gradient
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
             else:
@@ -330,7 +338,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        weight_decay: float,
                        eps: float,
                        maximize: bool,
-                       capturable: bool):
+                       differentiable: bool):
     if len(params) == 0:
         return
 
