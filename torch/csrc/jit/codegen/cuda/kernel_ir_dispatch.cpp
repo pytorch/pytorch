@@ -45,6 +45,46 @@ void IrVisitor::handle(IfThenElse* ite) {
   scope_exprs_.pop_back();
 }
 
+std::vector<const Expr*> ConstIrVisitor::handle(
+    const std::vector<const Expr*>& exprs) {
+  exprs_ = exprs;
+  for (auto expr : exprs) {
+    handle(expr);
+  }
+  return exprs_;
+}
+
+void ConstIrVisitor::handle(const ForLoop* fl) {
+  for_loops_.push_back(fl);
+  scope_.push_back(&fl->body());
+  scope_exprs_.push_back(fl);
+  auto body_exprs = fl->body().exprs();
+  for (auto expr : body_exprs) {
+    handle(expr);
+  }
+  scope_exprs_.pop_back();
+  scope_.pop_back();
+  for_loops_.pop_back();
+}
+
+void ConstIrVisitor::handle(const IfThenElse* ite) {
+  scope_exprs_.push_back(ite);
+  scope_.push_back(&ite->thenBody());
+  auto then_exprs = ite->thenBody().exprs();
+  for (auto expr : then_exprs) {
+    handle(expr);
+  }
+  scope_.pop_back();
+
+  scope_.push_back(&ite->elseBody());
+  auto else_exprs = ite->elseBody().exprs();
+  for (auto expr : else_exprs) {
+    handle(expr);
+  }
+  scope_.pop_back();
+  scope_exprs_.pop_back();
+}
+
 std::vector<Expr*> ExprMutator::mutate(bool reverse_order) {
   if (insertions_.empty() && replacements_.empty() && removal_.empty()) {
     return exprs_;

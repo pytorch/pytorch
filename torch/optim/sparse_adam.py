@@ -58,7 +58,7 @@ class SparseAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -75,7 +75,7 @@ class SparseAdam(Optimizer):
             eps = group['eps']
             lr = group['lr']
             beta1, beta2 = group['betas']
-            maximize = group['maximize']
+            maximize = group.get('maximize', False)
 
             for p in group['params']:
                 if p.grad is not None:
