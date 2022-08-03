@@ -3093,11 +3093,38 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 
 class TestVmapOperatorsOpInfo(TestCase):
+
+    def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule):
+        def test():
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            aliases = (op.op,) + op.aliases
+            for sample_input, func in itertools.product(sample_inputs_itr, aliases):
+                arg_values = (sample_input.input,) + sample_input.args
+                kwarg_values = sample_input.kwargs
+                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
+
+                generator = get_fallback_and_vmap_exhaustive(
+                    func, arg_values, kwarg_values,
+                    is_batch_norm_and_training=is_batch_norm_and_training)
+                for loop_out, batched_out in generator:
+                    # empty_like and new_empty produce garbage values so we just check the shapes.
+                    if op.name == 'empty_like' or op.name == 'new_empty':
+                        self.assertEqual(loop_out.shape, batched_out.shape)
+                        continue
+                    self.assertEqual(loop_out, batched_out)
+
+        if check_has_batch_rule:
+            check_vmap_fallback(self, test, op)
+        else:
+            test()
+
     vmap_fail = {
         # These are things that we either cannot fix or are not actually problems
         xfail('resize_'),
         xfail('resize_as_'),
         xfail('to_sparse'),
+        xfail('__getitem__'),  # dynamic mask
+        xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
@@ -3157,31 +3184,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
-        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample_input in sample_inputs_itr:
-            arg_values = [sample_input.input] + list(sample_input.args)
-            kwarg_values = sample_input.kwargs
-            is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-            try:
-                generator = get_fallback_and_vmap_exhaustive(
-                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                for loop_out, batched_out in generator:
-                    # empty_like and new_empty produce garbage values so we just check the shapes.
-                    if op.name == 'empty_like' or op.name == 'new_empty':
-                        self.assertEqual(loop_out.shape, batched_out.shape)
-                        continue
-                    self.assertEqual(loop_out, batched_out)
-                for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(
-                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                    for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out)
-            # todo(chilli): Garbage hack I added to deal with indexing not working
-            except Exception as e:
-                # Checking if we're throwing an error because of dynamic shapes.
-                if "dynamic" in e.args[0]:
-                    continue
-                raise e
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
@@ -3300,26 +3303,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.max_unpool3d', ''),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
-        def test():
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-            for sample_input in sample_inputs_itr:
-                arg_values = [sample_input.input] + list(sample_input.args)
-                kwarg_values = sample_input.kwargs
-                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-                generator = get_fallback_and_vmap_exhaustive(
-                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                for loop_out, batched_out in generator:
-                    # empty_like and new_empty produce garbage values so we just check the shapes.
-                    if op.name == 'empty_like' or op.name == 'new_empty':
-                        self.assertEqual(loop_out.shape, batched_out.shape)
-                        continue
-                    self.assertEqual(loop_out, batched_out)
-                for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(
-                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                    for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out)
-        check_vmap_fallback(self, test, op)
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
