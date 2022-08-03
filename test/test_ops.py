@@ -1712,6 +1712,30 @@ aliasing_failures = (
     "nn.functional.pixel_unshuffle",
 )
 
+fake_striding_skips = (
+    "fft.fft2",
+    "fft.fft",
+    "fft.fftn",
+    "fft.hfft2",
+    "fft.hfft",
+    "fft.hfftn",
+    "fft.ifft2",
+    "fft.ifft",
+    "fft.ifftn",
+    "fft.ihfft2",
+    "fft.ihfft",
+    "fft.ihfftn",
+    "fft.irfft2",
+    "fft.irfft",
+    "fft.irfftn",
+    "fft.rfft2",
+    "fft.rfft",
+    "fft.rfftn",
+    "svd",
+    "linalg.svd",
+    "nn.functional.conv_transpose2d",
+)
+
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
@@ -1767,7 +1791,14 @@ class TestFakeTensorNonErroring(TestCase):
                     self.assertTrue(isinstance(fake_out, FakeTensor))
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
-                    prims.utils.compare_tensor_meta(fake_out, real_out)
+
+                    check_strides = name not in fake_striding_skips
+
+                    # if there is a striding failure here as a result of adding a primtorch ref,
+                    # feel free to add the op to `fake_striding_skips` but please tag
+                    # @eellison on the pr.
+                    # see: https://github.com/pytorch/pytorch/issues/78050
+                    prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
 
                     if name not in aliasing_failures:
                         fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
