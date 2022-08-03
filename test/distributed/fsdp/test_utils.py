@@ -53,13 +53,13 @@ class TestUtils(TestCase):
             nonlocal expected
             expected += t.numel()
             return t
-    
+
         @dataclass
         class SomeDataClass:
             some_key: str
             some_float: float
             some_tensor: List[torch.Tensor]
-            
+
 
 
         # create a mixed bag of data.
