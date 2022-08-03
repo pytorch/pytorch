@@ -840,7 +840,7 @@ class Tensor(torch._C._TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
+        if self.dim() == 0 and not self.is_meta and issubclass(type(self), Tensor):
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 

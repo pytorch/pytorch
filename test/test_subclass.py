@@ -24,6 +24,9 @@ from unittest import expectedFailure
 parametrize_tensor_cls = parametrize("tensor_cls", [
     subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
 
+# Simple class for testing __format__.
+class TensorSubclass(torch.Tensor):
+    pass
 
 class TestSubclass(TestCase):
     def _create_tensor(self, tensor_cls):
@@ -238,6 +241,14 @@ class TestSubclass(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
             param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
+
+    def test_format(self):
+        # See that __format__ works for a scalar tensor.
+        x = torch.Tensor(torch.tensor(1.2345))
+        self.assertEqual(x.__format__(".4f"), '1.2345')
+        # And with a subclass.
+        y = TensorSubclass(torch.tensor(1.2345))
+        self.assertEqual(y.__format__(".4f"), '1.2345')
 
 instantiate_parametrized_tests(TestSubclass)
 
