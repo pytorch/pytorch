@@ -266,6 +266,20 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #endif
 }
 
+bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
+#if AT_CUDNN_ENABLED()
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
 long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
