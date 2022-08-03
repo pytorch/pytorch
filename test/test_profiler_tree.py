@@ -810,7 +810,7 @@ class TestProfilerTree(TestCase):
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
                           cudaLaunchKernel
-                          void ..._kernel<...>(...)
+                            void ..._kernel<...>(...)
                           [memory]
                           aten::expand
                             aten::as_strided
