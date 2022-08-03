@@ -3445,10 +3445,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        return where(mask, python_type(value), a)
+        return torch.where(mask, python_type(value), a)
 
     assert isinstance(value, TensorLike)
-    return where(mask, prims.to_dtype(value, a.dtype), a)
+    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # CompositeImplicitAutograd - don't register decomp
