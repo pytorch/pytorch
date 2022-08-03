@@ -373,6 +373,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
+BOT_COMMANDS_WIKI = 'https://github.com/pytorch/pytorch/wiki/Bot-commands'
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -888,7 +889,8 @@ class GitHubPR:
         gh_post_pr_comment(self.org, self.project, self.pr_num,
                            '@pytorchbot successfully started a merge and created land time checks.' +
                            f' See merge status [here]({os.getenv("GH_RUN_URL")}) ' +
-                           f'and land check progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})')
+                           f'and [land check]({BOT_COMMANDS_WIKI}) '
+                           f'progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}).')
         return commit
 
 
@@ -1238,6 +1240,11 @@ def main() -> None:
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
+        if land_checks:
+            msg += (" If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
+                    ' (optionally with the "ciflow/trunk" to get land signals)' +
+                    ' or use `@pytorchbot merge -f "some reason here"`.' +
+                    f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}).")
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
