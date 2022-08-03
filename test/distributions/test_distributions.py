@@ -1407,7 +1407,6 @@ class TestDistributions(DistributionsTestCase):
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
-        rate_zero = torch.zeros([], requires_grad=True)
 
         def ref_log_prob(ref_rate, idx, x, log_prob):
             l = ref_rate.view(-1)[idx].detach()
@@ -1419,16 +1418,6 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Poisson(rate_zero), lambda *args: ref_log_prob(rate_zero, *args))
         self._gradcheck_log_prob(Poisson, (rate,))
         self._gradcheck_log_prob(Poisson, (rate_1d,))
-
-        # We cannot check gradients automatically for zero rates because the finite difference
-        # approximation enters the forbidden parameter space. We instead compare with the
-        # theoretical results.
-        dist = Poisson(rate_zero)
-        s = dist.sample()
-        dist.log_prob(s).backward()
-        torch.testing.assert_allclose(rate_zero.grad, -1.0)
-        dist.log_prob(torch.ones_like(rate_zero)).backward()
-        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):

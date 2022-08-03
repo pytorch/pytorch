@@ -18050,7 +18050,7 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
                     # We don't test 0 as the gradient will be NaN and it'll break
-                    rhs_make_tensor_kwargs=dict(low=0.001)),
+                    rhs_make_tensor_kwargs=dict(low=0.01)),
     OpInfo('zero_',
            op=lambda x: torch.zero_(x.clone()),
            method_variant=None,
@@ -18074,7 +18074,7 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
                     # We don't test -1 as the gradient will be NaN and it'll break
-                    rhs_make_tensor_kwargs=dict(low=-0.999)),
+                    rhs_make_tensor_kwargs=dict(low=-0.99)),
     BinaryUfuncInfo('special.zeta',
                     aten_name='special_zeta',
                     dtypes=all_types_and(torch.bool),
