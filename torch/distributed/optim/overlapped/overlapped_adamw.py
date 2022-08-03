@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from torch import Tensor
 from ..functional_adamw import _FunctionalAdamW
 from .overlapped_optim import OverlappedOptimizer
