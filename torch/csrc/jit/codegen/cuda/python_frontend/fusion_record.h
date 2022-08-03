@@ -46,8 +46,8 @@ struct RecordFunctor {
   virtual ~RecordFunctor() = default;
 
   //! The base class is placing the type, outputs, and args hashed as follows:
-  //! |  0 - 7 |  8 - 15 | 16 ----------- 31 | 32 ------------------------- 63 |
-  //! | Type   | Outputs | Args              | Child Class Specified           |
+  //! | 63 - 56 | 55 - 48 | 47 ----------- 32 | 32 -------------------------  0 |
+  //! | Type    | Outputs | Args              | Child Class Specified           |
   virtual size_t hash() const {
     size_t arg_hash = 0;
     for (auto arg : args_) {
@@ -117,6 +117,9 @@ struct OpRecord : RecordFunctor {
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -------------------------------------  0 |
+  //! | Arith Function Sigs hash code               |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     return result | (fusion_op_.target_type().hash_code() & 0xffffffff);
@@ -192,6 +195,9 @@ struct BroadcastOpRecord : RecordFunctor {
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastOpRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -------------- 16 | 15 --------------  0 |
+  //! | broadcast_dims hash  | output_shape hash    |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t output_shape_hash = 0;
@@ -291,6 +297,9 @@ struct CastOpRecord : RecordFunctor {
         dtype_(dtype) {}
   virtual ~CastOpRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 --- 24 | 23 --------------------------  0 |
+  //! | Dtype     | Arith Function Sig hash code     |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     result |= ((static_cast<size_t>(dtype_) & 0xff) << 24);
@@ -378,6 +387,9 @@ struct InputTensorRecord : RecordFunctor {
         dtype_(_dtype) {}
   virtual ~InputTensorRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 --- 24 | 23 --------- 12 | 11 ---------  0 |
+  //! | Dtype     | Symbolic Sizes  | Contiguous Info |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t ssize_hash = 0;
@@ -460,6 +472,9 @@ struct OutputRecord : RecordFunctor {
   virtual ~OutputRecord() = default;
 
   //! Nothing extra necessary in hash
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | None                                          |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     return result;
@@ -507,6 +522,9 @@ struct ReductionOpRecord : RecordFunctor {
         dtype_(dtype) {}
   virtual ~ReductionOpRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -- 28 | 27 --- 20 | 19 -----------------  0 |
+  //! | keep_dim | Dtype     | Axes Hash               |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t axes_hash = 0;
@@ -577,6 +595,9 @@ struct ScalarRecord : RecordFunctor {
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
 
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | Dtype                                         |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     return result | (static_cast<size_t>(dtype_) & 0xffffffff);
@@ -633,6 +654,9 @@ struct VarianceOpRecord : RecordFunctor {
 
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -- 28 | 27 -----------------------------  0 |
+  //! | keep_dim | Axes Hash                           |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t axes_hash = 0;
