@@ -49,7 +49,10 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         random.shuffle(self.indices)
 
     def __getitem__(self, index) -> T_co:
-        old_numeric_index = self.index_map[index]
+        try:
+            old_numeric_index = self.index_map[index]
+        except KeyError:
+            raise IndexError(f"Index {index} is out of range for {self}.")
         new_index = self.indices[old_numeric_index]
         return self.datapipe[new_index]
 
