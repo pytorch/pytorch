@@ -52,7 +52,7 @@ def setLinalgBackendsToDefaultFinally(fn):
             torch.backends.cuda.preferred_linalg_library('default')
     return _fn
 
-
+@unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
@@ -868,7 +868,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -906,7 +905,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_eigh_lower_uplo(self, device, dtype):
         def run_test(shape, batch, uplo):
             # check lower case uplo
@@ -2874,7 +2872,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_pinv(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 

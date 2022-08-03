@@ -824,7 +824,17 @@ def _check_module_exists(name: str) -> bool:
     except ImportError:
         return False
 
-TEST_NUMPY = _check_module_exists('numpy')
+# Numpy is a special case here as it may be available but have
+# incompatible c++ extension. So we need to check that the c++
+# extensions actually work
+def _check_numpy_cpp_works():
+    try:
+        torch.tensor([0.]).numpy()
+        return True
+    except:
+        return False
+
+TEST_NUMPY = _check_module_exists('numpy') and _check_numpy_cpp_works()
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
