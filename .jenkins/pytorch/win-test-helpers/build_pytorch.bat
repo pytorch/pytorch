@@ -154,6 +154,10 @@ python setup.py install --cmake && sccache --show-stats && (
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
+:: Build functorch on windows
+pushd functorch
+time python setup.py install
+popd
 
 sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server
