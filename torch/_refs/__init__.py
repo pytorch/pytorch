@@ -222,6 +222,7 @@ __all__ = [
     "view",
     "vsplit",
     "vstack",
+    "unflatten",
     #
     # Tensor Creation
     #
@@ -2424,12 +2425,11 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.transpose(a, _permutation)
 
 
-def _reshape_view_helper(
-    a: TensorLikeType, shape: ShapeType, *, allow_copy: bool
-) -> TensorLikeType:
+def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
     # NOTE: Reshape may be given a shape with a -1 length
     # This indicates that the dimension's length should be inferred
     # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     for idx in range(len(shape)):
         if shape[idx] == -1:
@@ -2451,8 +2451,8 @@ def _reshape_view_helper(
                 )
                 raise ValueError(msg)
 
-            shape = list(shape)
-            shape[idx] = length
+            shape = list(shape)  # type: ignore[assignment]
+            shape[idx] = length  # type: ignore[index]
             break
 
     # Short-circuits if shape is the same
@@ -2566,8 +2566,11 @@ def _reshape_view_helper(
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 # CompositeImplicitAutograd - don't register decomp
-def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, shape, allow_copy=True)
+# NOTE: shape is a vararg because Tensor.reshape can be called with as
+# Tensor.reshape(a, b, c) or Tensor.reshape((a, b, c)) Function call
+# torch.reshape doesn't support unpacked shapes
+def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, *shape, allow_copy=True)
 
 
 @register_decomposition(torch.ops.aten.roll)
@@ -2706,6 +2709,19 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
     aligned_tensors = atleast_2d(*tensors)
     return cat(aligned_tensors, 0)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    if not sizes:
+        raise RuntimeError("unflatten: sizes must be non-empty")
+    if -1 not in sizes and utils.prod(sizes) != a.shape[dim]:
+        raise RuntimeError(
+            f"unflatten: Provided sizes {sizes} don't multiply up to the size of dim {dim} ({a.shape[dim]}) in the input tensor"
+        )
+    out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
+    return torch.reshape(a, out_shape)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -2945,10 +2961,13 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
+# NOTE: shape is a vararg because Tensor.reshape can be called with as
+# Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
+# doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
-def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, shape, allow_copy=False)
+def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
 # CompositeImplicitAutograd - don't register decomp

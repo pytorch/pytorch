@@ -391,6 +391,19 @@ class TestPrims(TestCase):
                 actual = refs.contiguous(a, memory_format=memory_format)
                 self.assertEqual(expected.stride(), actual.stride())
 
+    @dtypes(torch.float32)
+    def test_reshape_view_method(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((5, 5))
+        new_shape = 1, 5, 1, 5
+        result_eager = a.reshape(*new_shape)
+        result_refs = refs.reshape(a, *new_shape)
+        self.assertEqual(result_eager, result_refs)
+
+        result_eager = a.view(*new_shape)
+        result_refs = refs.view(a, *new_shape)
+        self.assertEqual(result_eager, result_refs)
+
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
