@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -774,24 +774,72 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.softmax(nt_contiguous, -1),
             torch.nn.functional.softmax(nt_noncontiguous, -1))
 
-    @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
+    # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
     def test_bmm(self, device, dtype):
+        # error case: one is nested but the other is not
+        nt = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        t = torch.randn(4, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a nested self and non-nested other",
+            lambda: nt.bmm(t)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a non-nested self and nested other",
+            lambda: t.bmm(nt)
+        )
         # error case: not 3D tensors
-        nt0 = torch.nested_tensor([])
-        nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)])
-        nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt0.bmm(nt0))
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt0.bmm(nt1))
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt0.bmm(nt2))
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt1.bmm(nt0))
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt1.bmm(nt1))
-        self.assertRaisesRegex(RuntimeError, "batch1 must be a 3D tensor", lambda: nt1.bmm(nt2))
-        self.assertRaisesRegex(RuntimeError, "batch2 must be a 3D tensor", lambda: nt2.bmm(nt0))
-        self.assertRaisesRegex(RuntimeError, "batch2 must be a 3D tensor", lambda: nt2.bmm(nt1))
+        nt0 = torch.nested_tensor([], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt0.bmm(nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt0.bmm(nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt0.bmm(nt2)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt1.bmm(nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt1.bmm(nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch1 must be a 3D tensor",
+            lambda: nt1.bmm(nt2)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch2 must be a 3D tensor",
+            lambda: nt2.bmm(nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "batch2 must be a 3D tensor",
+            lambda: nt2.bmm(nt1)
+        )
         # error case: incompatible batch size
-        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
-        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((4, 5)), torch.randn((4, 7))])
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((4, 6)),
+                                   torch.randn((4, 5)),
+                                   torch.randn((4, 7))],
+                                  device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
             "Expected size for the 1st dimension of batch2 tensor to be: 2 but got: 3.",
@@ -803,28 +851,167 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: nt1.bmm(nt0)
         )
         # error case: underlying matrices cannot be multiplied
-        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
             r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
             lambda: nt0.bmm(nt0)
         )
         # normal nested tensor
-        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 7))])
-        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))])
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 7))], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
         actual = nt0.bmm(nt1).to_padded_tensor(0.0)
         expect = nt0.to_padded_tensor(0.0).bmm(nt1.to_padded_tensor(0.0))
         self.assertEqual(actual, expect)
 
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_bmm_noncontiguous(self, device, dtype):
         nt0_contiguous, nt0_noncontiguous = self.random_nt_noncontiguous_pair((2, 3), device, dtype)
         nt1_contiguous, nt1_noncontiguous = self.random_nt_noncontiguous_pair((6, 7), device, dtype)
         self.nt_equal(
             nt0_contiguous.transpose(-1, -2).bmm(nt1_contiguous),
             nt0_noncontiguous.transpose(-1, -2).bmm(nt1_noncontiguous))
+
+    # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    def test_matmul(self, device, dtype):
+        # error case: one is nested but the other is not
+        nt = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        t = torch.randn(4, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a nested self and non-nested other",
+            lambda: torch.matmul(nt, t)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both to be nested, but got a non-nested self and nested other",
+            lambda: torch.matmul(t, nt)
+        )
+        # error case: not 3+D tensors
+        nt0 = torch.nested_tensor([], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
+        nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt0, nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt0, nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt0, nt2)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt1, nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt1, nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
+            lambda: torch.matmul(nt1, nt2)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 2nd input has rank: [0-9]+",
+            lambda: torch.matmul(nt2, nt0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 2nd input has rank: [0-9]+",
+            lambda: torch.matmul(nt2, nt1)
+        )
+        # error case: incompatible batch size
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((4, 6)),
+                                   torch.randn((4, 5)),
+                                   torch.randn((4, 7))],
+                                  device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
+            lambda: torch.matmul(nt0, nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
+            lambda: torch.matmul(nt1, nt0)
+        )
+        # error case: incompatible generalized batch size
+        nt0 = torch.nested_tensor([torch.randn((2, 2, 4)),
+                                   torch.randn((2, 3, 4))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((3, 4, 6)),
+                                   torch.randn((3, 4, 5))],
+                                  device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, no broadcasting is currently performed: "
+            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
+            r"have mismatching sizes [0-9]+ and [0-9]+",
+            lambda: torch.matmul(nt0, nt1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"matmul: For nested tensors, no broadcasting is currently performed: "
+            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
+            r"have mismatching sizes [0-9]+ and [0-9]+",
+            lambda: torch.matmul(nt1, nt0)
+        )
+        # error case: underlying matrices cannot be multiplied
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
+            lambda: torch.matmul(nt0, nt0)
+        )
+        # normal nested tensor: 3D
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 7))], device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
+        actual = torch.matmul(nt0, nt1).to_padded_tensor(0.0)
+        expect = torch.matmul(nt0.to_padded_tensor(0.0), nt1.to_padded_tensor(0.0))
+        self.assertEqual(actual, expect)
+        # normal nested tensor: 4D
+        nt0 = torch.nested_tensor([torch.randn((8, 2, 4)),
+                                   torch.randn((8, 3, 7))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((8, 4, 6)),
+                                   torch.randn((8, 7, 5))],
+                                  device=device, dtype=dtype)
+        actual = torch.matmul(nt0, nt1).to_padded_tensor(0.0)
+        expect = torch.matmul(nt0.to_padded_tensor(0.0), nt1.to_padded_tensor(0.0))
+        self.assertEqual(actual, expect)
+        # normal nested tensor: 5D
+        nt0 = torch.nested_tensor([torch.randn((8, 9, 2, 4)),
+                                   torch.randn((8, 9, 3, 7))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((8, 9, 4, 6)),
+                                   torch.randn((8, 9, 7, 5))],
+                                  device=device, dtype=dtype)
+        actual = torch.matmul(nt0, nt1).to_padded_tensor(0.0)
+        expect = torch.matmul(nt0.to_padded_tensor(0.0), nt1.to_padded_tensor(0.0))
+        self.assertEqual(actual, expect)
+
+    # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    def test_matmul_noncontiguous(self, device, dtype):
+        nt0_contiguous, nt0_noncontiguous = self.random_nt_noncontiguous_pair((2, 3), device, dtype)
+        nt1_contiguous, nt1_noncontiguous = self.random_nt_noncontiguous_pair((6, 7), device, dtype)
+        self.nt_equal(
+            torch.matmul(nt0_contiguous.transpose(-1, -2), nt1_contiguous),
+            torch.matmul(nt0_noncontiguous.transpose(-1, -2), nt1_noncontiguous))
 
     @dtypes(torch.float, torch.double)
     def test_linear(self, device, dtype):
@@ -958,6 +1145,66 @@ class TestNestedTensorDeviceType(TestCase):
         nt2 = nt1.reshape(2, -1, -1, 2, 2)
         pt2 = pt1.reshape(2, -1, 5, 2, 2)
         self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+    @parametrize("input_dim", [3, 4])
+    def test_scaled_dot_product_attention(self, device, input_dim):
+
+        def rand_tensor(*shape):
+            return torch.randn(shape, device=device)
+
+        E = 10
+        if input_dim == 3:
+            # Shape: (N, L, E); ragged L
+            query = torch.nested_tensor([rand_tensor(2, E), rand_tensor(3, E), rand_tensor(4, E)])
+
+            # Shape: (N, S, E); ragged S
+            key = torch.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
+            value = torch.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
+        elif input_dim == 4:
+            # Shape: (N, N', L, E); ragged N' and L
+            query = torch.nested_tensor([rand_tensor(2, 2, E), rand_tensor(3, 3, E), rand_tensor(4, 4, E)])
+            # Shape: (N, N', S, E); ragged N' and S
+            key = torch.nested_tensor([rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)])
+            value = torch.nested_tensor([rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)])
+        else:
+            self.fail(f"Invalid input_dim {input_dim} encountered in SDP test")
+
+        def rand_mask(size):
+            return torch.randint(0, 2, size=size, dtype=torch.bool, device=device)
+
+        # Shape: (N, L, S); ragged L and S matching above
+        attn_mask = torch.nested_tensor([rand_mask((2, 3)), rand_mask((3, 4)), rand_mask((4, 5))])
+
+        dropout_p = 0.0  # no dropout for reproducibility
+        need_attn_weights: bool = True
+
+        # Success case: no attn_mask set and is_causal=False.
+        actual = torch.ops.aten._scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+
+        expected_outputs = []
+        expected_attn_weights = []
+        for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
+            (output, attn_weights) = torch.ops.aten._scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p,
+                need_attn_weights=need_attn_weights)
+            expected_outputs.append(output.squeeze(0))
+            expected_attn_weights.append(attn_weights.squeeze(0))
+        expected_output_nested = torch.nested_tensor(expected_outputs)
+        expected_attn_weight_nested = torch.nested_tensor(expected_attn_weights)
+        self.nt_equal(actual[0], expected_output_nested)
+        self.nt_equal(actual[1], expected_attn_weight_nested)
+
+        # Error case: explicit attn_mask set.
+        with self.assertRaisesRegex(RuntimeError, "not supported when an explicit attn_mask is set"):
+            torch.ops.aten._scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+
+        # Error case: is_causal=True.
+        with self.assertRaisesRegex(RuntimeError, "not supported when is_causal=True"):
+            torch.ops.aten._scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, need_attn_weights=need_attn_weights, is_causal=True)
+
 
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
@@ -1098,6 +1345,114 @@ class TestNestedTensorAutograd(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
+
+    def test_nested_tensor_bmm_gradcheck(self):
+        a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(6, 4, requires_grad=True, dtype=torch.float64)
+        d = torch.randn(6, 5, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, d):
+            nt0 = torch.nested_tensor([a, b])
+            nt1 = torch.nested_tensor([c, d])
+            result = nt0.bmm(nt1)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b, c, d)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_bmm_backward(self):
+        nt0 = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
+        nt1 = torch.nested_tensor([torch.randn((6, 4)), torch.randn((6, 5))]).requires_grad_(True)
+        with torch.no_grad():
+            pt0 = nt0.to_padded_tensor(0.0).requires_grad_(True)
+            pt1 = nt1.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt0.bmm(nt1)
+        ypt = pt0.bmm(pt1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt0.grad.to_padded_tensor(0.0), pt0.grad)
+        self.assertEqual(nt1.grad.to_padded_tensor(0.0), pt1.grad)
+
+    def test_nested_tensor_matmul_gradcheck(self):
+        a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(6, 4, requires_grad=True, dtype=torch.float64)
+        d = torch.randn(6, 5, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, d):
+            nt0 = torch.nested_tensor([a, b])
+            nt1 = torch.nested_tensor([c, d])
+            result = torch.matmul(nt0, nt1)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b, c, d)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_matmul_backward(self):
+        nt0 = torch.nested_tensor([torch.randn((7, 2, 6)), torch.randn((7, 3, 6))]).requires_grad_(True)
+        nt1 = torch.nested_tensor([torch.randn((7, 6, 4)), torch.randn((7, 6, 5))]).requires_grad_(True)
+        with torch.no_grad():
+            pt0 = nt0.to_padded_tensor(0.0).requires_grad_(True)
+            pt1 = nt1.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = torch.matmul(nt0, nt1)
+        ypt = torch.matmul(pt0, pt1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.nt_equal(nt0.grad.to_padded_tensor(0.0), pt0.grad)
+        self.nt_equal(nt1.grad.to_padded_tensor(0.0), pt1.grad)
+
+    def test_nested_tensor_transpose_gradcheck(self):
+        a = torch.randn(2, 5, requires_grad=True)
+        b = torch.randn(3, 4, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested_tensor([a, b])
+            result = nt.transpose(-2, -1).transpose(-2, -1)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+
+    def test_nested_tensor_transpose_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))]).requires_grad_(True)
+        with torch.no_grad():
+            pt = nt.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt.transpose(-2, -1)
+        ypt = pt.transpose(-2, -1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt.grad.to_padded_tensor(0.0), pt.grad)
+
+    def test_nested_tensor_reshape_gradcheck(self):
+        a = torch.randn(2, 6, requires_grad=True)
+        b = torch.randn(3, 6, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested_tensor([a, b])
+            result = nt.reshape(2, -1, 2, 3)
+            return result.to_padded_tensor(0.0)
+
+        data = (a, b)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+
+    def test_nested_tensor_reshape_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
+        with torch.no_grad():
+            pt = nt.to_padded_tensor(0.0).requires_grad_(True)
+
+        ynt = nt.reshape(2, -1, 2, 3)
+        ypt = pt.reshape(2, -1, 2, 3)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(nt.grad.to_padded_tensor(0.0), pt.grad)
 
     def test_nested_tensor_linear(self):
 
