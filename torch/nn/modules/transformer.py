@@ -436,25 +436,25 @@ class TransformerEncoderLayer(Module):
         """
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        why_not_sparsity_fast_path = ''
+        why_not_encoderlayer_fast_path = ''
         if not src.dim() == 3:
-            why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
+            why_not_encoderlayer_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
-            why_not_sparsity_fast_path = "training is enabled"
+            why_not_encoderlayer_fast_path = "training is enabled"
         elif not self.self_attn.batch_first :
-            why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+            why_not_encoderlayer_fast_path = "self_attn.batch_first was not True"
         elif not self.self_attn._qkv_same_embed_dim :
-            why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
+            why_not_encoderlayer_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
+            why_not_encoderlayer_fast_path = "activation_relu_or_gelu was not True"
         elif not (self.norm1.eps == self.norm2.eps):
-            why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
+            why_not_encoderlayer_fast_path = "norm1.eps is not equal to norm2.eps"
         elif src_mask is not None:
-            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
+            why_not_encoderlayer_fast_path = "src_mask is not supported for fastpath"
         elif src.is_nested and src_key_padding_mask is not None:
-            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+            why_not_encoderlayer_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
 
-        if not why_not_sparsity_fast_path:
+        if not why_not_encoderlayer_fast_path:
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
@@ -474,14 +474,14 @@ class TransformerEncoderLayer(Module):
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
-                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+                why_not_encoderlayer_fast_path = "some Tensor argument has_torch_function"
             elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
-                why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
+                why_not_encoderlayer_fast_path = "some Tensor argument is neither CUDA nor CPU"
             elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
-                why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
-                                              "input/output projection weights or biases requires_grad")
+                why_not_encoderlayer_fast_path = ("grad is enabled and at least one of query or the "
+                                                  "input/output projection weights or biases requires_grad")
 
-            if not why_not_sparsity_fast_path:
+            if not why_not_encoderlayer_fast_path:
                 return torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
