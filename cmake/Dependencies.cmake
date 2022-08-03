@@ -1443,6 +1443,11 @@ if(USE_GLOO)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
       endif()
+      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+        # Tell Gloo build system to use bundled NCCL, see
+        # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
+        set(NCCL_EXTERNAL ON)
+      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
