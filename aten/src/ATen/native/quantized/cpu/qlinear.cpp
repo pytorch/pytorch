@@ -329,7 +329,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
         orig_weight, xnnp_weight);
 
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias = QuantizeBias(false, bias_, orig_weight, input_scale);
+    at::Tensor qbias = quant_utils::QuantizeBias(false, bias_, orig_weight, input_scale);
 
     // output limits
    auto output_min = kReluFused
@@ -476,7 +476,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     }
     // Original bias was float, so we requantize it here.
     const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
-    at::Tensor qbias = QuantizeBias(is_per_channel, bias_fp32, weight_contig, input_scale);
+    at::Tensor qbias = quant_utils::QuantizeBias(is_per_channel, bias_fp32, weight_contig, input_scale);
 
     // Update the input scale to not pack again.
     this->input_scale = input_scale;

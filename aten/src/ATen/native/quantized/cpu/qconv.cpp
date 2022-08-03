@@ -725,7 +725,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
 
 
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias = QuantizeBias(per_channel(), bias, weight_contig, act_input_scale);
+    at::Tensor qbias = quant_utils::QuantizeBias(per_channel(), bias, weight_contig, act_input_scale);
 
     status = at::native::xnnp_utils::xnnp_create_convolution2d_nhwc(
         padding()[0],
@@ -928,7 +928,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias = QuantizeBias(convolution_op->per_channel, bias_fp32, weight_contig, act_input_scale);
+    at::Tensor qbias = quant_utils::QuantizeBias(convolution_op->per_channel, bias_fp32, weight_contig, act_input_scale);
 
     // Update the input scale to not pack again.
     input_scale = act_input_scale;
