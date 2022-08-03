@@ -23,7 +23,6 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx.symbolic_helper import (
-    _set_onnx_shape_inference,
     _set_operator_export_type,
     _set_opset_version,
     _unpack_list,
@@ -56,8 +55,6 @@ class _BaseTestCase(common_utils.TestCase):
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
             model.eval()
-        # Need disable onnx_shape_inference for this test because it puts const node to initializers.
-        _set_onnx_shape_inference(False)
         utils._validate_dynamic_axes(dynamic_axes, model, None, None)
         graph, params_dict, torch_out = utils._model_to_graph(
             model,
@@ -69,7 +66,6 @@ class _BaseTestCase(common_utils.TestCase):
             input_names=input_names,
             dynamic_axes=dynamic_axes,
         )
-        _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
 
 
@@ -627,10 +623,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, __ = self._model_to_graph(
             ShapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
-
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Shape")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_upsample_scale_fold_as_constant(self):
         # upsample scale is a constant, not a model parameter,
@@ -992,12 +987,12 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_node_scope(self):
         class N(torch.nn.Module):
-            def __init__(self, prob):
+            def __init__(self):
                 super().__init__()
-                self.dropout = torch.nn.Dropout(prob)
+                self.relu = torch.nn.ReLU()
 
             def forward(self, x):
-                return self.dropout(x)
+                return self.relu(x)
 
         class M(torch.nn.Module):
             def __init__(self, num_layers):
@@ -1008,14 +1003,14 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 )
                 self.gelu1 = torch.nn.GELU()
                 self.gelu2 = torch.nn.GELU()
-                self.dropout = N(0.5)
+                self.relu = N()
 
             def forward(self, x, y, z):
                 res1 = self.gelu1(x)
                 res2 = self.gelu2(y)
                 for ln in self.lns:
                     z = ln(z)
-                return res1 + res2, self.dropout(z)
+                return res1 + res2, self.relu(z)
 
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
@@ -1033,6 +1028,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             "torch.nn.modules.normalization.LayerNorm::lns.1",
             "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.2",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.N::relu/"
+            "torch.nn.modules.activation.ReLU::relu",
             "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::",
         }
 
@@ -1048,6 +1046,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.0",
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.1",
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.2",
+            "test_utility_funs.M::/test_utility_funs.N::relu/"
+            "torch.nn.modules.activation.ReLU::relu",
             "test_utility_funs.M::",
         }
 
@@ -1444,8 +1444,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, x, y):
                 return f(x, y)
 
-        input_1 = torch.tensor(11)
-        input_2 = torch.tensor(12)
+        input_1 = torch.tensor([11])
+        input_2 = torch.tensor([12])
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = self._model_to_graph(

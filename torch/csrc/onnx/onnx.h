@@ -16,7 +16,7 @@ enum class TrainingMode {
   TRAINING, // Training mode
 };
 
-const std::string OnnxNodeNameAttribute = "onnx_name";
+const std::string kOnnxNodeNameAttribute = "onnx_name";
 
 } // namespace onnx
 } // namespace torch

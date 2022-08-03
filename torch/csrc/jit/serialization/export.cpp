@@ -881,7 +881,7 @@ void GraphEncoder::EncodeNode(
   }
   node_proto->set_op_type(node->kind().toUnqualString());
   const auto node_name_attribute_symbol =
-      Symbol::attr(::torch::onnx::OnnxNodeNameAttribute);
+      Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute);
   if (add_node_names) {
     std::string node_name =
         node_proto->op_type() + "_" + std::to_string(num_op_nodes_);

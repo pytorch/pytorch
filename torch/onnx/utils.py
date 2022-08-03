@@ -1257,7 +1257,7 @@ def _setup_trace_module_map(
             m.register_forward_hook(_track_module_attributes_forward_hook)
             m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
-    def __unqualified_variable_name(qualified_name: str):
+    def _unqualified_variable_name(qualified_name: str) -> str:
         """
         Parse qualified variable name and return the unqualified version.
 
@@ -1265,25 +1265,20 @@ def _setup_trace_module_map(
         and start from the first non-numeric atom.
 
         Example:
-            >>> __unqualified_variable_name('__main__.Foo.bar')
+            >>> _unqualified_variable_name('__main__.Foo.bar')
             'bar'
-            >>> __unqualified_variable_name('__main__.Foo.bar.0')
+            >>> _unqualified_variable_name('__main__.Foo.bar.0')
             'bar.0'
         """
         name_atoms = qualified_name.split(".")
-        idx = next(
-            (
-                i
-                for i, atom in reversed(list(enumerate(name_atoms)))
-                if not atom.isnumeric()
-            ),
-            0,
-        )
-        return ".".join(name_atoms[idx:])
+        for i, atom in reversed(list(enumerate(name_atoms))):
+            if not atom.isnumeric():
+                return ".".join(name_atoms[i:])
+        return qualified_name
 
     trace_module_map = {
         _m: torch._C._jit_onnx_create_full_scope_name(
-            torch.typename(type(_m)), __unqualified_variable_name(_n)
+            torch.typename(type(_m)), _unqualified_variable_name(_n)
         )
         for _n, _m in model.named_modules()
     }

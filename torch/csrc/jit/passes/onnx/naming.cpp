@@ -13,23 +13,23 @@ const std::string name_separator = "::";
 
 namespace {
 
-std::string nameFromRoot(
+std::string NameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator,
-    NameFunc nameFunc) {
-  std::string out = (*nameFunc)(scope);
+    NameFunc name_func) {
+  std::string out = (*name_func)(scope);
   if (scope->isRoot()) {
     return out;
   }
   auto parent = scope->parent();
   while (!parent->isRoot()) {
-    out = std::string((*nameFunc)(parent)).append(layer_separator).append(out);
+    out = std::string((*name_func)(parent)).append(layer_separator).append(out);
     parent = parent->parent();
   }
   return out;
 }
 
-std::pair<std::string, std::string> parseNameFromScope(
+std::pair<std::string, std::string> ParseNameFromScope(
     torch::jit::ScopePtr scope) {
   std::string full_name = scope->name().toUnqualString();
   auto pos = full_name.find(name_separator);
@@ -42,33 +42,33 @@ std::pair<std::string, std::string> parseNameFromScope(
 
 } // namespace
 
-std::string createFullScopeName(
+std::string CreateFullScopeName(
     const std::string& class_name,
     const std::string& variable_name) {
   return std::string(class_name).append(name_separator).append(variable_name);
 }
 
-std::string variableName(torch::jit::ScopePtr scope) {
-  return parseNameFromScope(scope).second;
+std::string VariableName(torch::jit::ScopePtr scope) {
+  return ParseNameFromScope(scope).second;
 }
 
-std::string variableNameFromRoot(
+std::string VariableNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return nameFromRoot(scope, layer_separator, &variableName);
+  return NameFromRoot(scope, layer_separator, &VariableName);
 }
 
-std::string className(torch::jit::ScopePtr scope) {
-  return parseNameFromScope(scope).first;
+std::string ClassName(torch::jit::ScopePtr scope) {
+  return ParseNameFromScope(scope).first;
 }
 
-std::string classNameFromRoot(
+std::string ClassNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return nameFromRoot(scope, layer_separator, &className);
+  return NameFromRoot(scope, layer_separator, &ClassName);
 }
 
-bool isCompatibleScope(torch::jit::ScopePtr scope) {
+bool IsCompatibleScope(torch::jit::ScopePtr scope) {
   return !scope->isRoot() && !scope->isBlank() &&
       (std::string(scope->name().toUnqualString()).find(name_separator) !=
        std::string::npos);
@@ -90,7 +90,7 @@ class NodeNameGenerator {
   bool IsGraphOutput(const Value* v, const std::shared_ptr<Graph> graph) const;
 
  protected:
-  std::string UpdateBaseName(
+  std::string CreateUniqueName(
       std::unordered_map<std::string, size_t>& base_name_count,
       std::string base_name);
 
@@ -114,7 +114,7 @@ class ScopedNodeNameGenerator : public NodeNameGenerator {
   std::unordered_map<std::string, size_t> base_scope_name_counts_;
 };
 
-std::string NodeNameGenerator::UpdateBaseName(
+std::string NodeNameGenerator::CreateUniqueName(
     std::unordered_map<std::string, size_t>& base_name_count,
     std::string base_name) {
   if (base_name_count.find(base_name) == base_name_count.end()) {
@@ -168,7 +168,7 @@ void NodeNameGenerator::PopulateNodeNames(Block* b) {
 
 void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
   if (node_names_.find(n) == node_names_.end()) {
-    if (!ONNXScopeName::isCompatibleScope(n->scope())) {
+    if (!ONNXScopeName::IsCompatibleScope(n->scope())) {
       return;
     }
     if (n->mustBeNone()) {
@@ -178,17 +178,17 @@ void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
     auto name = GetFullScopeName(n->scope());
     name += layer_separator_;
     name += n->kind().toUnqualString();
-    node_names_[n] = UpdateBaseName(base_node_name_counts_, name);
+    node_names_[n] = CreateUniqueName(base_node_name_counts_, name);
   }
-  n->s_(Symbol::attr(::torch::onnx::OnnxNodeNameAttribute), node_names_[n]);
+  n->s_(Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute), node_names_[n]);
 }
 
 std::string ScopedNodeNameGenerator::GetFullScopeName(ScopePtr scope) {
   if (full_scope_names_.find(scope) == full_scope_names_.end()) {
     auto full_scope_name =
-        ONNXScopeName::variableNameFromRoot(scope, layer_separator_);
+        ONNXScopeName::VariableNameFromRoot(scope, layer_separator_);
     full_scope_names_[scope] =
-        UpdateBaseName(base_scope_name_counts_, full_scope_name);
+        CreateUniqueName(base_scope_name_counts_, full_scope_name);
   }
   return full_scope_names_[scope];
 }
