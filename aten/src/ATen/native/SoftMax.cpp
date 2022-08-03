@@ -337,13 +337,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input_.scalar_type(), "log_softmax", [&] {
-          host_softmax<
-              scalar_t,
-              true /* LogSoftMax */,
-              false /* MaskedSoftMax */>(output, input_, dim_);
-        });
+    log_softmax_kernel(kCPU, output, input_, dim_);
   }
 }
 
@@ -372,13 +366,7 @@ TORCH_IMPL_FUNC(softmax_backward_cpu_out)
   if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
-          host_softmax_backward<
-              scalar_t,
-              false /* LogSoftMax */,
-              false /* MaskedSoftmax */>(grad_input, grad_, output, dim_);
-        });
+    softmax_backward_kernel(kCPU, grad_input, grad_, output, dim_);
   }
 }
 
@@ -401,16 +389,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
     if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
       log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output_);
     } else {
-      AT_DISPATCH_FLOATING_TYPES_AND(
-          at::ScalarType::BFloat16,
-          grad.scalar_type(),
-          "log_softmax_backward",
-          [&] {
-            host_softmax_backward<
-                scalar_t,
-                true /* LogSoftMax */,
-                false /* MaskedSoftMax */>(grad_input, grad_, output_, dim_);
-          });
+      log_softmax_backward_kernel(kCPU, grad_input, grad_, output_, dim_);
     }
   }
 }
@@ -551,6 +530,8 @@ DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
 DEFINE_DISPATCH(log_softmax_kernel);
+DEFINE_DISPATCH(softmax_backward_kernel);
+DEFINE_DISPATCH(log_softmax_backward_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
