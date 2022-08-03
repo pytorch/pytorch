@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -1145,6 +1145,66 @@ class TestNestedTensorDeviceType(TestCase):
         nt2 = nt1.reshape(2, -1, -1, 2, 2)
         pt2 = pt1.reshape(2, -1, 5, 2, 2)
         self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+    @parametrize("input_dim", [3, 4])
+    def test_scaled_dot_product_attention(self, device, input_dim):
+
+        def rand_tensor(*shape):
+            return torch.randn(shape, device=device)
+
+        E = 10
+        if input_dim == 3:
+            # Shape: (N, L, E); ragged L
+            query = torch.nested_tensor([rand_tensor(2, E), rand_tensor(3, E), rand_tensor(4, E)])
+
+            # Shape: (N, S, E); ragged S
+            key = torch.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
+            value = torch.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
+        elif input_dim == 4:
+            # Shape: (N, N', L, E); ragged N' and L
+            query = torch.nested_tensor([rand_tensor(2, 2, E), rand_tensor(3, 3, E), rand_tensor(4, 4, E)])
+            # Shape: (N, N', S, E); ragged N' and S
+            key = torch.nested_tensor([rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)])
+            value = torch.nested_tensor([rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)])
+        else:
+            self.fail(f"Invalid input_dim {input_dim} encountered in SDP test")
+
+        def rand_mask(size):
+            return torch.randint(0, 2, size=size, dtype=torch.bool, device=device)
+
+        # Shape: (N, L, S); ragged L and S matching above
+        attn_mask = torch.nested_tensor([rand_mask((2, 3)), rand_mask((3, 4)), rand_mask((4, 5))])
+
+        dropout_p = 0.0  # no dropout for reproducibility
+        need_attn_weights: bool = True
+
+        # Success case: no attn_mask set and is_causal=False.
+        actual = torch.ops.aten._scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+
+        expected_outputs = []
+        expected_attn_weights = []
+        for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
+            (output, attn_weights) = torch.ops.aten._scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p,
+                need_attn_weights=need_attn_weights)
+            expected_outputs.append(output.squeeze(0))
+            expected_attn_weights.append(attn_weights.squeeze(0))
+        expected_output_nested = torch.nested_tensor(expected_outputs)
+        expected_attn_weight_nested = torch.nested_tensor(expected_attn_weights)
+        self.nt_equal(actual[0], expected_output_nested)
+        self.nt_equal(actual[1], expected_attn_weight_nested)
+
+        # Error case: explicit attn_mask set.
+        with self.assertRaisesRegex(RuntimeError, "not supported when an explicit attn_mask is set"):
+            torch.ops.aten._scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+
+        # Error case: is_causal=True.
+        with self.assertRaisesRegex(RuntimeError, "not supported when is_causal=True"):
+            torch.ops.aten._scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, need_attn_weights=need_attn_weights, is_causal=True)
+
 
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
