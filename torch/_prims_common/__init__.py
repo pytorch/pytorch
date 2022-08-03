@@ -619,7 +619,8 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
 
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]]
+    shape: Union[ShapeType, Tuple[ShapeType]],
+    validate=True,
 ) -> Tuple[int, ...]:
     """
     Returns a shape from varargs.
@@ -643,7 +644,8 @@ def extract_shape_from_varargs(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
-    validate_shape(shape)  # type: ignore[arg-type]
+    if validate:
+        validate_shape(shape)  # type: ignore[arg-type]
     return shape  # type: ignore[return-value]
 
 
