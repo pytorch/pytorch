@@ -911,29 +911,29 @@
   result: self_t / (1 + pow(2, other_p - self_p)) + other_t / (1 + pow(2, self_p - other_p))
 
 - name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad * at::xlogy((self != 0), other)
-  other: grad * at::where(other.isnan() | (self != 0), self / other, zeros_like(other))
-  result: self_t * at::xlogy((self_p != 0), other_p) + other_t * self_p / other_p
+  self: at::xlogy(grad, other)
+  other: grad * self / other
+  result: at::xlogy(self_t, other_p) + other_t * self_p / other_p
 
 - name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, zeros_like(other))
+  other: grad * self / other
   result: auto_element_wise
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
-  self: grad * at::xlogy((self != 0), other)
+  self: at::xlogy(grad, other)
   result: auto_element_wise
 
 - name: special_xlog1py(Tensor self, Tensor other) -> Tensor
-  self: grad * other.log1p()
+  self: at::special_xlog1py(grad,  other)
   other: grad * self / (other + 1)
-  result: self_t * other_p.log1p() + other_t * self_p / (other_p + 1)
+  result: at::special_xlog1py(self_t,  other_p) + other_t * self_p / (other_p + 1)
 
 - name: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
   other: grad * self / (other + 1)
   result: auto_element_wise
 
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * log1p(other.toDouble())
+  self: at::special_xlog1py(grad,  other)
   result: auto_element_wise
 
 - name: special_zeta(Tensor self, Tensor other) -> Tensor

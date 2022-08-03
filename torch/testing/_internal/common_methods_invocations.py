@@ -18049,11 +18049,8 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    skips=(
-                        # nan vs nan comparisons
-                        # https://github.com/pytorch/pytorch/issues/74279
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                    )),
+                    # We don't test 0 as the gradient will be NaN and it'll break
+                    rhs_make_tensor_kwargs=dict(low=0.001)),
     OpInfo('zero_',
            op=lambda x: torch.zero_(x.clone()),
            method_variant=None,
@@ -18072,17 +18069,12 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('special.xlog1py',
                     aten_name='special_xlog1py',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                    backward_dtypes=all_types_and(torch.bool, torch.bfloat16),
-                    backward_dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    skips=(
-                        # nan vs 0 comparisons
-                        # https://github.com/pytorch/pytorch/issues/74279
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                    )),
+                    # We don't test -1 as the gradient will be NaN and it'll break
+                    rhs_make_tensor_kwargs=dict(low=-0.999)),
     BinaryUfuncInfo('special.zeta',
                     aten_name='special_zeta',
                     dtypes=all_types_and(torch.bool),
