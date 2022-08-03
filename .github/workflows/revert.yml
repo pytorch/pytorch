@@ -56,6 +56,6 @@ jobs:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -ex
-          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "revert"
 
 concurrency: try-revert
