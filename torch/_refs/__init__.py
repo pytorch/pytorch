@@ -3407,7 +3407,7 @@ def uniform(
 
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
 
-
+@register_decomposition([torch.ops.aten.masked_fill.Scalar, torch.ops.aten.masked_fill.Tensor])
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
@@ -3426,8 +3426,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
-        if a.device.type == "cuda" and value.device.type == "cpu":
-            value = prims.device_put(value, a.device)
+        if utils.is_cpu_scalar_tensor(value):
+            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
