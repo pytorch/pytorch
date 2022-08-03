@@ -294,7 +294,6 @@ class TestCuda(TestCase):
 
     def test_get_alloc_free_events(self):
         gc.collect()
-        mem = None
         size = 1
         ptr = 0
         mem = torch.cuda.caching_allocator_alloc(size)
