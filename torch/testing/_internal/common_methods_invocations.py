@@ -20808,6 +20808,18 @@ python_ref_db = [
         validate_view_consistency=False,
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="variadic_tensors",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="list_of_tensors",
+        supports_nvfuser=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
