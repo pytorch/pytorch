@@ -23,7 +23,7 @@ class APoTObserver(ObserverBase):
         self,
         b,
         k,
-            dtype=torch.int32) -> None:
+            dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.b = b
         self.k = k
@@ -47,7 +47,7 @@ class APoTObserver(ObserverBase):
         quantization_levels: non-uniform quantization levels (fp representation)
         level_indices: int representation of quantization_levels indices
     """
-    def _calculate_qparams(self, signed, min_val=None, max_val=None):
+    def _calculate_qparams(self, signed: bool, min_val=None, max_val=None):
         if min_val is not None:
             self.min_val = min_val
         if max_val is not None:
