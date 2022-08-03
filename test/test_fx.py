@@ -559,7 +559,7 @@ class TestFX(JitTestCase):
         tracer.record_stack_traces = True
 
         graph = tracer.trace(M())
-        gm =  GraphModule(tracer.root, graph)
+        gm = GraphModule(tracer.root, graph)
         new_gm = Transformer(gm).transform()
 
         # nodes after Transformer should still preserve the original node's stack trace

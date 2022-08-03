@@ -6,6 +6,7 @@ from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
+from contextlib import contextmanager
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -135,6 +136,15 @@ class Interpreter:
                 output_val = self.env[node]
                 return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
 
+    @contextmanager
+    def _set_current_node(self, node):
+        saved_current_node = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = saved_current_node
+
     @compatibility(is_backward_compatible=True)
     def run_node(self, n : Node) -> Any:
         """
@@ -149,12 +159,11 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        self.current_node = n
-
-        args, kwargs = self.fetch_args_kwargs_from_env(n)
-        assert isinstance(args, tuple)
-        assert isinstance(kwargs, dict)
-        return getattr(self, n.op)(n.target, args, kwargs)
+        with self._set_current_node(n):
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            assert isinstance(args, tuple)
+            assert isinstance(kwargs, dict)
+            return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
