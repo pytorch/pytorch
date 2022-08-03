@@ -46,5 +46,14 @@ jobs:
               python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
             fi
           fi
-
+      - name: Comment on Canceled
+        if: ${{ cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_SENDER: ${{ github.event.sender.login }}
+        run: |
+          set -ex
+          python3 .github/scripts/trymerge.py "${PR_NUM}" "merge"
 concurrency: try-revert
