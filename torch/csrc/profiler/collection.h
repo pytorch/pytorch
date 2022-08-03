@@ -237,9 +237,18 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
   }
 
+  template <typename T>
+  decltype(auto) visit(T&& visitor) {
+    return c10::visit(std::forward<T>(visitor), extra_fields_);
+  }
+
+  template <typename T>
+  decltype(auto) visit(T&& visitor) const {
+    return c10::visit(std::forward<T>(visitor), extra_fields_);
+  }
+
   EventType tag() const {
-    return c10::visit(
-        [](const auto& i) { return deduceTag(i); }, extra_fields_);
+    return visit([](const auto& i) { return deduceTag(i); });
   }
 
   std::string name() const;
