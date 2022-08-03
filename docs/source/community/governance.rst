@@ -62,13 +62,20 @@ future direction of the project and can participate in discussion.
 
 Within `pytorch/pytorch <https://github.com/pytorch/pytorch>`__,
 maintainer groups are defined in the
-`CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
+`merge_rules.json <https://github.com/pytorch/pytorch/blob/master/.github/merge_rules.json>`__
 file in the GitHub repository. For other modules that correspond
 to repositories, membership is recorded on GitHub as access
 level to the repo (i.e. “write” permission). Module maintainers
 are given privileges to administrate the repository (except for
 `pytorch/pytorch <https://github.com/pytorch/pytorch>`__ where
 they are responsible for a folder).
+
+Responsibilities of the maintainer includes:
+* Triaging high priority issues of the module
+* Triaging and reviewing and landing high priority pull requests 
+  of the module
+* Supporting public documentation related to the module
+* Running public developer meetings
 
 Core Maintainers
 ----------------
@@ -130,14 +137,12 @@ The Principles
 The Process for Nomination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* We will have a nomination form, where anyone in the community can
-  nominate a person to a Module maintainer position
-* Every 3 months, the core maintainers go through the nominations,
-  do light filtering around spam or desk-rejection, and draw up a
-  list of potential nominees.
-* The core maintainers ask the specific module maintainers for more
-  information on the nominee. The information should include the following
-  items:
+* Each module will have it's own process, please conact module maintainers
+  however if there is no one, you can file a request to the core maintainers
+  via [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
+  meeting each 3 months.
+* If you using the core maintainers route the information in your reqest 
+  should include the following items:
 
   * The nominees depth and breadth of code, review and design
     contributions on the module
