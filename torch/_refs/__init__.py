@@ -3328,11 +3328,12 @@ def meshgrid(
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
     if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
         assert len(tensors) == 1
-        check(
-            py_all(isinstance(a, TensorLike) for a in tensors[0]),
-            lambda: "meshgrid expects its inputs to be tensors",
-        )
         tensors = tuple(tensors[0])
+
+    check(
+        py_all(isinstance(a, TensorLike) for a in tensors),
+        lambda: "meshgrid expects its inputs to be tensors",
+    )
 
     check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
 
