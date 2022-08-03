@@ -19,6 +19,10 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
+  // Empty tensor is noop
+  if (self.numel() == 0) {
+    return;
+  }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);

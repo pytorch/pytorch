@@ -270,21 +270,24 @@ class TestProfilerTree(TestCase):
             ProfilerTree.format(p.profiler, 12),
             """\
             aten::zeros
-              aten::empty
-              aten::zero_
-            Top level Annotation
-              aten::empty
               aten::zeros
                 aten::empty
                 aten::zero_
+            Top level Annotation
+              aten::empty
+              aten::zeros
+                aten::zeros
+                  aten::empty
+                  aten::zero_
               First Annotation
                 aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
               aten::zeros
-                aten::empty
-                aten::zero_
+                aten::zeros
+                  aten::empty
+                  aten::zero_
               Second Annotation
                 aten::empty
                 aten::add
@@ -293,8 +296,9 @@ class TestProfilerTree(TestCase):
                       aten::empty_strided
                       aten::copy_
                 aten::zeros
-                  aten::empty
-                  aten::zero_
+                  aten::zeros
+                    aten::empty
+                    aten::zero_
                 Third Annotation
                   aten::empty
                   aten::ones_like
@@ -535,12 +539,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -576,12 +582,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -673,9 +681,10 @@ class TestProfilerTree(TestCase):
                   detach
             [memory]
             aten::zeros
-              aten::empty
-                [memory]
-              aten::zero_
+              aten::zeros
+                aten::empty
+                  [memory]
+                aten::zero_
             Optimizer.step#SGD.step
               aten::empty
                 [memory]
@@ -801,7 +810,7 @@ class TestProfilerTree(TestCase):
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
                           cudaLaunchKernel
-                            void ..._kernel<...>(...)
+                          void ..._kernel<...>(...)
                           [memory]
                           aten::expand
                             aten::as_strided
@@ -832,7 +841,7 @@ class TestProfilerTree(TestCase):
                               aten::as_strided
                           aten::mm
                             cudaLaunchKernel
-                              void ..._kernel<...>(...)
+                              std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, float, float, float, float, false, true, false, false, 7, false, cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
                             [memory]
                           aten::t
                             aten::transpose
@@ -867,9 +876,10 @@ class TestProfilerTree(TestCase):
                   torch/autograd/profiler.py(...): __init__
                     <built-in method zeros of type object at 0xXXXXXXXXXXXX>
                       aten::zeros
-                        aten::empty
-                          [memory]
-                        aten::zero_
+                        aten::zeros
+                          aten::empty
+                            [memory]
+                          aten::zero_
                   torch/autograd/profiler.py(...): __enter__
                     torch/_ops.py(...): __call__
                       <built-in method _record_function_enter of PyCapsule object at 0xXXXXXXXXXXXX>
