@@ -3,6 +3,8 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import contextlib
+import copy
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -88,23 +90,29 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res, **kwargs):
-    def wrap_with_proxy(e, proxy):
+def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
+    def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy, **kwargs)
+                return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
         else:
             return e
+
+    def get_constant(idx):
+        if constant is None:
+            return None
+        else:
+            return constant[idx]
 
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple):
-        return tuple(wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res))
+        return tuple(wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res))
     elif isinstance(inner_res, list):
-        return list([wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res)])
+        return list([wrap_with_proxy(e, proxy_res[idx], get_constant(idx)) for idx, e in enumerate(inner_res)])
     elif isinstance(inner_res, torch.Tensor):
-        return wrap_with_proxy(inner_res, proxy_res)
+        return wrap_with_proxy(inner_res, proxy_res, constant)
     else:
         return inner_res
 
@@ -119,7 +127,19 @@ def maybe_disable_fake_tensor_mode():
         return nullcontext()
 
 
-def proxy_call(func_overload, args, kwargs=None):
+def unwrap_elem(e):
+    if isinstance(e, ProxyTensor):
+        return e.elem
+    if isinstance(e, torch._C.SymIntNode):
+        if isinstance(e.get_pyobj(), ProxySymInt):
+            return e.get_pyobj().sym_int
+        else:
+            raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
+                               f"even though it's not a ProxySymInt. This is a bug.")
+    return e
+
+
+def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
@@ -138,18 +158,6 @@ def proxy_call(func_overload, args, kwargs=None):
 
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        if isinstance(e, torch._C.SymIntNode):
-            if isinstance(e.get_pyobj(), ProxySymInt):
-                return e.get_pyobj().sym_int
-            else:
-                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
-                                   f"even though it's not a ProxySymInt. This is a bug.")
-
-        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -219,17 +227,18 @@ def proxy_call(func_overload, args, kwargs=None):
 
     # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
     # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
-    return wrap_output(inner_res, proxy_res, constant=constant)
+    return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=proxy_mode)
 
 
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
     has_sym_ints: bool
+    proxy_mode: "ProxyTorchDispatchMode"
 
 
     @staticmethod
-    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
+    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None, proxy_mode):
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
@@ -259,7 +268,7 @@ class ProxyTensor(torch.Tensor):
         r.has_sym_ints = has_sym_ints
         return r
 
-    def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
+    def __init__(self, elem, proxy, *, requires_grad=None, constant=None, proxy_mode):
         # TODO: hack since _extract_tensor_metadata currently tries to access stride
         if elem.is_sparse or self.has_sym_ints:
             proxy.node.meta['tensor_meta'] = {}
@@ -271,6 +280,7 @@ class ProxyTensor(torch.Tensor):
         self.elem = elem
         self.proxy = proxy
         self.constant = constant
+        self.proxy_mode = proxy_mode
 
 
     def __deepcopy__(self, memo):
@@ -284,7 +294,18 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, args, kwargs)
+        # Get the first proxy mode. If there are different proxy modes with
+        # different tracers torch.fx.Proxy would raise an error.
+        proxy_mode = None
+        for arg in pytree.tree_flatten((args, kwargs))[0]:
+            if isinstance(arg, ProxyTensor):
+                if proxy_mode is None:
+                    proxy_mode = arg.proxy_mode
+                    break
+        assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
+
+        with proxy_mode.restore():  # type: ignore[union-attr]
+            return func_overload(*args, **kwargs)
 
 
 class PythonKeyTracer(Tracer):
@@ -333,7 +354,7 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, inps):
+def wrap_key(f, inps, proxy_mode):
     flat_inps, _ = pytree.tree_flatten(inps)
 
     @functools.wraps(f)
@@ -346,7 +367,8 @@ def wrap_key(f, inps):
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
-                        requires_grad=(flat_inps[idx].is_leaf and flat_inps[idx].requires_grad)
+                        requires_grad=(flat_inps[idx].is_leaf and flat_inps[idx].requires_grad),
+                        proxy_mode=proxy_mode,
                     )
             else:
                 flat_args[idx] = flat_inps[idx]
@@ -363,8 +385,9 @@ def wrap_key(f, inps):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer):
+    def __init__(self, tracer, trace_factory_functions=True):
         self.tracer = tracer
+        self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         if symbolic_shapes.is_symbolic_op(func_overload):
@@ -375,7 +398,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(func_overload, args, kwargs)
+            return proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -409,7 +432,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #       x.add_(2)
         #
         # This is what the overload modification does.
-        else:
+        elif self.trace_factory_functions:
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
@@ -427,7 +450,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                     constant = args[0].clone()
             else:
                 constant = None
-            return wrap_output(inner_res, proxy_res, constant=constant)
+            return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
+        else:
+            return func_overload(*args, **kwargs)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
@@ -438,15 +463,16 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         self.decomposition_table = decomposition_table
         if self.decomposition_table is None:
             self.decomposition_table = {}
+        self.mode = ProxyTorchDispatchMode(self.tracer)
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
         # TODO handle case where the first character of target is '*'
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer))
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer), proxy_mode=self.mode)
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer))
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer), proxy_mode=self.mode)
 
     # call_function, call_method, call_module get traced automatically by the ProxyTensors.
 
@@ -459,6 +485,10 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         return out
 
     def run(self, *args, **kwargs):
+        # Should enter the mode at least once for being able to restore it later
+        # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
+        with self.mode:
+            pass
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
@@ -491,7 +521,7 @@ a bug if you need this)""")
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer, trace_factory_functions=trace_factory_functions)
 
         def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
@@ -520,10 +550,65 @@ a bug if you need this)""")
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
-            t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
+
+
+def get_torch_dispatch_modes():
+    modes = [torch._C._get_torch_dispatch_mode()]
+    if modes[-1] is None:
+        return list()
+    while modes[-1].inner is not None:
+        modes.append(modes[-1].inner)
+    return modes
+
+
+def get_isolated_graphmodule(func, args, kwargs):
+    """A helper function used to get the GraphModule for the given func.
+
+    It's expected to be used in the ProxyTensor tracing context.
+    It detaches the args and kwargs from the current tracer so that the trace of
+    the current graph module can be created without any side-effects.
+    """
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    all_args, spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped(args):
+        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
+        return func(*fn_args, **fn_kwargs)
+
+    unwrapped_all_args = [unwrap_elem(a) for a in all_args]
+
+    # Current implementation doesn't support the case when ProxyTensor is
+    # wrapped with another Tensor subclass
+    # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
+    assert all(
+        getattr(a, "elem", None) is None
+        for a in unwrapped_all_args
+        if isinstance(a, torch.Tensor)
+    ), "ProxyTensor is wrapped with another Tensor subclass"
+
+
+    with contextlib.ExitStack() as stack:
+        modes = get_torch_dispatch_modes()
+        # Disable all torch dispatch modes
+        for mode in modes:
+            stack.enter_context(enable_torch_dispatch_mode(mode.inner, replace=mode))
+        assert torch._C._get_torch_dispatch_mode() is None
+
+        # Enable all torch dispatch modes except ProxyTorchDispatchMode
+        for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
+            mode = copy.copy(mode)
+            mode.inner = torch._C._get_torch_dispatch_mode()
+            mode.ancestors = set() if mode.inner is None else mode.inner.ancestors.union({mode.inner})
+            stack.enter_context(mode.restore())
+        gm = make_fx(wrapped)(unwrapped_all_args)
+    assert all(m1 == m2 for m1, m2 in zip(modes, get_torch_dispatch_modes()))
+    assert all(m1.inner == m2.inner for m1, m2 in zip(modes, get_torch_dispatch_modes()))
+    return gm
