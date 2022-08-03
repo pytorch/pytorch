@@ -13,7 +13,7 @@ allprojects {
             junitVersion = "4.12"
 
             fbjniJavaOnlyVersion = "0.2.2"
-            soLoaderNativeLoaderVersion = "0.10.1"
+            soLoaderNativeLoaderVersion = "0.10.4"
         }
 
         repositories {
