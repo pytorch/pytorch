@@ -1638,11 +1638,15 @@ class THCCachingAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, stream);
+    // if allocation fails we still record the event with a nullptr. ptr is
+    // modified if allocation succeeds
     memory_tracker.append_alloc_free_event(
-        reinterpret_cast<intptr_t>(block->ptr), // ptr
+        reinterpret_cast<intptr_t>(nullptr), // ptr
         size, // size: of allocation in bytes
         device);
+    Block* block = device_allocator[device]->malloc(device, size, stream);
+    memory_tracker.alloc_free_events[device].back().ptr =
+        reinterpret_cast<intptr_t>(block->ptr);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
   }
