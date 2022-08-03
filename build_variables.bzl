@@ -32,6 +32,7 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/index_utils.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/swizzle.cu",
     "torch/csrc/jit/codegen/cuda/runtime/memory.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
@@ -643,6 +644,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
+    "torch/csrc/jit/codegen/cuda/inline_propagator.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at_map.cpp",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
     "torch/csrc/jit/codegen/cuda/contiguity.cpp",
@@ -658,7 +660,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/grouped_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_builder.cpp",
@@ -937,6 +938,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
+    "torch/csrc/utils/verbose.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
@@ -1096,6 +1098,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
+    "aten/src/ATen/native/verbose_wrapper.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1364,6 +1367,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/nested/NestedTensorTransformerFunctions.cpp",
+    "aten/src/ATen/native/nested/NestedTensorBackward.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseBlas.cpp",
