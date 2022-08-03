@@ -1,5 +1,5 @@
-from expecttest import Any
-from trymerge import gh_post_pr_comment
+from typing import Any
+from trymerge import gh_post_pr_comment, BOT_COMMANDS_WIKI
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 import os
 
@@ -17,12 +17,13 @@ def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name(), debug=True)
     org, project = repo.gh_owner_and_name()
-    sender = os.environ.get("GH_SENDER")
     run_url = os.environ.get("GH_RUN_URL")
 
-    author_mention_prefix = f"@{sender}" if sender is not None else "The"
     job_link = f"[job]({run_url})" if run_url is not None else "job"
-    msg = f"{author_mention_prefix} {args.action} {job_link} was canceled."
+    msg = (
+        f"The {args.action} {job_link} was canceled. If you believe this is a mistake,"
+        + f"then you can re trigger it through [pytorch-bot]({BOT_COMMANDS_WIKI})."
+    )
 
     gh_post_pr_comment(org, project, args.pr_num, msg)
     print(org, project, args.pr_num, msg)

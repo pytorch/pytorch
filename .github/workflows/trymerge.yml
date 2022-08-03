@@ -15,6 +15,7 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Checkout repo
+        id: checkout
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
@@ -51,7 +52,8 @@ jobs:
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
       - name: Comment on Canceled
-        if: ${{ cancelled() }}
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
@@ -59,7 +61,7 @@ jobs:
           GH_SENDER: ${{ github.event.sender.login }}
         run: |
           set -ex
-          python3 .github/scripts/trymerge.py "${PR_NUM}" "merge"
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
 
 # We want newer merge commands to supercede old ones
 concurrency:
