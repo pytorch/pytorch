@@ -1231,7 +1231,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         batch = torch.FloatTensor(1, 3)
 
         graph, _, _ = self._model_to_graph(
-            model, batch, input_names=["batch"], dynamic_axes={"batch": [0, 1]}
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]},
         )
         iter = graph.nodes()
         autograd1 = next(iter)

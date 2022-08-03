@@ -410,7 +410,7 @@ See the ``symbolic_opset*.py`` files for more examples.
 torch.autograd.Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the operator is a sub-class of :class:`torch.autograd.Function`, there are two ways
+If the operator is a sub-class of :class:`torch.autograd.Function`, there are three ways
 to export it.
 
 Static Symbolic Method
@@ -487,6 +487,32 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
 
     from torch.onnx import register_custom_op_symbolic
     register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+
+Inline Autograd Function
+~~~~~~~~~~~~~~~~~~~~~~~~
+In cases where a static symbolic method is not provided for its subsequent autograd.Function
+or where a function to register prim::PythonOp as custom symbolic functions is not provided,
+torch.onnx.export tries to inline the graph that corresponds to that autograd.Function such that
+this function is broken down into individual operators that were used within the function.
+The export should be successful as long as these individual operators are supported. For example::
+
+    class MyLogExp(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input: torch.Tensor) -> torch.Tensor:
+            ctx.save_for_backward(input)
+            h = input.exp()
+            return h.log().log()
+
+There is no static symbolic method present for this model, yet it is exported as follows::
+
+    graph(%input : Float(1, strides=[1], requires_grad=0, device=cpu)):
+        %1 : float = onnx::Exp[](%input)
+        %2 : float = onnx::Log[](%1)
+        %3 : float = onnx::Log[](%2)
+        return (%3)
+
+In order to avoid inlining of autograd.Functions, model should be exported with
+operator_export_type set to ONNX_FALLTHROUGH or ONNX_ATEN_FALLBACK mode
 
 Custom operators
 ^^^^^^^^^^^^^^^^
