@@ -319,6 +319,11 @@ def min_cut_rematerialization_partition(
 
     AGGRESSIVE_RECOMPUTATION = False
 
+    def _maybe_size_of(node):
+        if 'tensor_meta' in node.meta:
+            return _size_of(node.meta['tensor_meta'])
+        return 0
+
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -333,7 +338,7 @@ def min_cut_rematerialization_partition(
             # then we don't allow recomputation.
             if 'tensor_meta' not in node.meta:
                 return False
-            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
+            input_tensors_size = sum(_maybe_size_of(i) for i in node.args if isinstance(i, fx.Node))
             output_size = _size_of(node.meta['tensor_meta'])
             return (output_size * 4 < input_tensors_size)
 
