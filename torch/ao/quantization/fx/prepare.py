@@ -1312,10 +1312,12 @@ def insert_observers_for_model(
                         node_name_to_target_dtype, qconfig_map,
                         model, modules, graph)
 
-        # Second pass: Look for getitem nodes and make the input and output observers the same
-        # Note: This is meant to be a workaround for the lack of dtype propagation. In the future,
-        # we should remove this pass if we can differentiate between tensors and non-tensors
-        # (e.g. dictionaries, lists) as getitem arguments.
+        # Second pass: Look for getitem nodes and make the input and output observers the same.
+        # Note: This is meant to be a workaround for the lack of dtype propagation. This currently
+        # only handles (obs0 - getitem - obs1) but not patterns like (obs0 - reshape - getitem - obs1),
+        # where there may be multiple nodes between the two observers. In the future, we should remove
+        # this pass if we can differentiate between tensors and non-tensors (e.g. dictionaries, lists)
+        # as getitem arguments.
         modules = dict(model.named_modules(remove_duplicate=False))
         for node in model.graph.nodes:
             if not is_activation_post_process_node(node, modules):

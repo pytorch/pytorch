@@ -6559,9 +6559,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ])
         m3(*example_inputs)
 
-    def test_getitem_no_dequant_quant(self):
+    def test_getitem_wrapped_in_observers(self):
         """
-        Test that we do not add dequant and quant ops around getitem.
+        Test that, for cases when there are observers around a getitem node:
+            (1) These observers are the same, and
+            (2) The pattern (dequant - getitem - quant) will be fused during the lowering step
         """
         class M(torch.nn.Module):
             def __init__(self):
