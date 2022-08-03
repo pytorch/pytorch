@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
@@ -59,7 +60,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
         c10::DispatchKeySet{this->key_set_.highestBackendKey()};
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
         Storage(storage_), buffer_key_set_, data_type_);
-    buffer_tensor_impl->set_sizes_contiguous(buffer_size_);
+    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size_));
     return Tensor(buffer_tensor_impl);
   }
 
@@ -89,9 +90,9 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // to TensorImpl.
   void refresh_dim();
   // Store the size of the buffer for use in get_buffer().
-  // Get buffer constructs a flat, contiguous tensor from the NestedTensor
+  // get_buffer constructs a flat, contiguous tensor from the NestedTensor
   // storage
-  std::vector<long> buffer_size_;
+  std::vector<int64_t> buffer_size_;
   const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
