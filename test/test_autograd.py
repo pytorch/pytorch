@@ -38,7 +38,7 @@ from torch.autograd import Variable, Function, detect_anomaly, kineto_available,
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
-from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
