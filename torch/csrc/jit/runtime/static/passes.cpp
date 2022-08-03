@@ -1027,6 +1027,10 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
       fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
+  UseVariadicOp(
+      graph,
+      fromQualString("fb::grouped_accessor_op_async"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op_async"));
 }
 
 namespace {
