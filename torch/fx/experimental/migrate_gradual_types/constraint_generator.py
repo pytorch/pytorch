@@ -841,6 +841,15 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([both_dyn, *const])], counter
 
 
+@register_inference_rule(torch.nn.functional.layer_norm)
+def layer_norm_functional(n: Node, symbols, constraints, counter):
+    """
+    We generate the constraint: input = output
+    """
+    assert isinstance(n.args[0], Node)
+    return gen_layer_norm_constraints(n, n.args[1], symbols, counter)
+
+
 @register_inference_rule(torch.nn.LayerNorm)
 def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, counter):
     """
@@ -848,6 +857,10 @@ def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, co
     Input should be consistent with the normalized_shape
     """
     assert isinstance(n.args[0], Node)
+    return gen_layer_norm_constraints(n, module_instance.normalized_shape, symbols, counter)
+
+
+def gen_layer_norm_constraints(n: Node, normalized_shape, symbols, counter):
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
@@ -864,15 +877,10 @@ def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, co
 
         c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims_rhs), op_eq),
                            BinConstraintT(output, TensorType(new_dims_rhs), op_eq)] +
-                          add_layer_norm_constraints(new_dims_rhs, list(module_instance.normalized_shape)) +
+                          add_layer_norm_constraints(new_dims_rhs, list(normalized_shape)) +
                           nat_constraints)
         c2.append(c_tensor_i)
-
-
     return [Disj([c1, Disj(c2)])], counter
-
-    # return [BinConstraintT(input, output, op_eq),
-    #         BinConstraintT(input, normalized_shape, op_consistency)], counter
 
 @register_inference_rule(torch.nn.Dropout)
 @register_inference_rule(torch.nn.ReLU)
