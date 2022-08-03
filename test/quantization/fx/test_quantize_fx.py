@@ -117,6 +117,10 @@ from torch.ao.quantization.fx.custom_config import (
     StandaloneModuleConfigEntry,
 )
 
+from torch.ao.quantization.fx.prepare import (
+    is_activation_post_process_node,
+)
+
 from torch.ao.quantization.fx.qconfig_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
@@ -6580,14 +6584,17 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
 
         # Input and output observers of getitem should be the same
+        modules = dict(m.named_modules(remove_duplicate=False))
         for n in m.graph.nodes:
-            if n.op != "call_module" or not n.target.startswith("activation_post_process"):
+            if not is_activation_post_process_node(n, modules):
                 continue
             if n.args[0].op != "call_function" or n.args[0].target != operator.getitem:
                 continue
             getitem_node = n.args[0]
             input_observer_node = getitem_node.args[0]
             output_observer_node = n
+            if not is_activation_post_process_node(input_observer_node, modules):
+                continue
             input_observer = getattr(m, input_observer_node.name)
             output_observer = getattr(m, output_observer_node.name)
             self.assertTrue(input_observer is output_observer,

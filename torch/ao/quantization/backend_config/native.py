@@ -1,4 +1,3 @@
-import operator
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
@@ -142,14 +141,6 @@ _CAT_CONFIG = {
     ]
 }
 
-_GETITEM_CONFIG = {
-    "pattern": operator.getitem,
-    "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
-    "dtype_configs": [
-        default_op_quint8_dtype_config,
-    ]
-}
-
 def _get_bn_configs():
     """ Get configs related to batchnorm
     """
@@ -274,7 +265,6 @@ def get_test_only_legacy_native_backend_config_dict():
             *_get_binary_op_configs(binary_op_dtype_configs),
             *_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs),
             _CAT_CONFIG,
-            _GETITEM_CONFIG,
             *_get_bn_configs(),
             *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
             *_get_rnn_op_configs(),
@@ -309,7 +299,6 @@ def get_native_backend_config_dict():
             *_get_binary_op_configs(binary_op_dtype_configs),
             *_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs),
             _CAT_CONFIG,
-            _GETITEM_CONFIG,
             *_get_bn_configs(),
             *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
             *_get_rnn_op_configs(),

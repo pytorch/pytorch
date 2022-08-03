@@ -393,6 +393,16 @@ def get_target_activation_dtype_for_node(
                 "output_activation_dtype": None,
             }
 
+        # TODO(future PR): consider stopping matching getitem
+        is_getitem = node.op == 'call_function' and \
+            node.target == operator.getitem
+        if is_getitem:
+            return {
+                "input_activation_dtype": torch.float,
+                "output_activation_dtype": torch.float,
+            }
+
+
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
@@ -1187,8 +1197,14 @@ def insert_observers_for_model(
             this_node_dtype = node_name_to_target_dtype[node.name]
             output_not_a_tensor = this_node_dtype is None
 
+            # TODO(future PR): consider stopping matching getitem
+            is_getitem = node.op == 'call_function' and \
+                node.target == operator.getitem
+
             skip_inserting_observers = (
-                (qconfig is None) or output_not_a_tensor
+                (qconfig is None) or
+                output_not_a_tensor or
+                is_getitem
             ) and (
                 not node.op == 'output'
             )
@@ -1298,7 +1314,23 @@ def insert_observers_for_model(
                         node_name_to_target_dtype, qconfig_map,
                         model, modules, graph)
 
-        #
+        # Second pass: Look for getitem nodes and make the input and output observers the same
+        # Note: This is meant to be a workaround for the lack of dtype propagation. In the future,
+        # we should remove this pass if we can differentiate between tensors and non-tensors
+        # (e.g. dictionaries, lists) as getitem arguments.
+        modules = dict(model.named_modules(remove_duplicate=False))
+        for node in model.graph.nodes:
+            if not is_activation_post_process_node(node, modules):
+                continue
+            if node.args[0].op != "call_function" or node.args[0].target != operator.getitem:
+                continue
+            getitem_node = node.args[0]
+            input_observer_node = getitem_node.args[0]
+            output_observer_node = node
+            if not is_activation_post_process_node(input_observer_node, modules):
+                continue
+            maybe_make_input_output_share_observers(getitem_node, model, modules)
+
         # After this point, the current node has input and output observers
         # that it needs for itself inserted.
         #
