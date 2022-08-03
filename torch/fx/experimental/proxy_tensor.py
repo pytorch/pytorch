@@ -3,6 +3,8 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import contextlib
+import copy
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -125,6 +127,18 @@ def maybe_disable_fake_tensor_mode():
         return nullcontext()
 
 
+def unwrap_elem(e):
+    if isinstance(e, ProxyTensor):
+        return e.elem
+    if isinstance(e, torch._C.SymIntNode):
+        if isinstance(e.get_pyobj(), ProxySymInt):
+            return e.get_pyobj().sym_int
+        else:
+            raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
+                               f"even though it's not a ProxySymInt. This is a bug.")
+    return e
+
+
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
@@ -144,18 +158,6 @@ def proxy_call(func_overload, args, kwargs=None):
 
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        if isinstance(e, torch._C.SymIntNode):
-            if isinstance(e.get_pyobj(), ProxySymInt):
-                return e.get_pyobj().sym_int
-            else:
-                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
-                                   f"even though it's not a ProxySymInt. This is a bug.")
-
-        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -533,3 +535,58 @@ a bug if you need this)""")
         return t
 
     return wrapped
+
+
+def get_torch_dispatch_modes():
+    modes = [torch._C._get_torch_dispatch_mode()]
+    if modes[-1] is None:
+        return list()
+    while modes[-1].inner is not None:
+        modes.append(modes[-1].inner)
+    return modes
+
+
+def get_isolated_graphmodule(func, args, kwargs):
+    """A helper function used to get the GraphModule for the given func.
+
+    It's expected to be used in the ProxyTensor tracing context.
+    It detaches the args and kwargs from the current tracer so that the trace of
+    the current graph module can be created without any side-effects.
+    """
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    all_args, spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped(args):
+        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
+        return func(*fn_args, **fn_kwargs)
+
+    unwrapped_all_args = [unwrap_elem(a) for a in all_args]
+
+    # Current implementation doesn't support the case when ProxyTensor is
+    # wrapped with another Tensor subclass
+    # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
+    assert all(
+        getattr(a, "elem", None) is None
+        for a in unwrapped_all_args
+        if isinstance(a, torch.Tensor)
+    ), "ProxyTensor is wrapped with another Tensor subclass"
+
+
+    with contextlib.ExitStack() as stack:
+        modes = get_torch_dispatch_modes()
+        # Disable all torch dispatch modes
+        for mode in modes:
+            stack.enter_context(enable_torch_dispatch_mode(mode.inner, replace=mode))
+        assert torch._C._get_torch_dispatch_mode() is None
+
+        # Enable all torch dispatch modes except ProxyTorchDispatchMode
+        for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
+            mode = copy.copy(mode)
+            mode.inner = torch._C._get_torch_dispatch_mode()
+            mode.ancestors = set() if mode.inner is None else mode.inner.ancestors.union({mode.inner})
+            stack.enter_context(mode.restore())
+        gm = make_fx(wrapped)(unwrapped_all_args)
+    assert all(m1 == m2 for m1, m2 in zip(modes, get_torch_dispatch_modes()))
+    assert all(m1.inner == m2.inner for m1, m2 in zip(modes, get_torch_dispatch_modes()))
+    return gm
