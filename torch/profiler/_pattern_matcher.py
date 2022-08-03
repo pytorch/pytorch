@@ -62,11 +62,12 @@ class Pattern:
     def benchmark_summary(self, events: List[_ProfilerEvent]):
 
         def format_time(time_ns: int):
-            unit_lst = ["ns", "us", "ms", "s"]
+            unit_lst = ["ns", "us", "ms"]
             for unit in unit_lst:
                 if time_ns < 1000:
                     return f"{time_ns:.2f} {unit}"
                 time_ns //= 1000
+            return f"{time_ns:.2f} s"
 
         assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
         shapes_factor_map = self.benchmark(  # type: ignore[attr-defined]
@@ -509,7 +510,7 @@ class MatMulDimInFP16Pattern(Pattern):
             return all(dim % multiple == 0 for shape in shapes
                        for dim in shape[-2:])
 
-        if event.name() != "aten::mm" and event.name() != "aten::bmm":
+        if event.name() not in ("aten::mm", "aten::bmm", "aten::addmm"):
             return False
         if not input_dtypes(event):
             return False
@@ -633,14 +634,10 @@ def report_all_anti_patterns(prof,
                 reported.add(report_msg)
                 src_location, line_no = source_code_location(event).split(":")
                 report_dict.setdefault(src_location, []).append({
-                    "line_number":
-                    int(line_no),
-                    "name":
-                    anti_pattern.name,
-                    "url":
-                    anti_pattern.url,
-                    "message":
-                    anti_pattern.description
+                    "line_number": int(line_no),
+                    "name": anti_pattern.name,
+                    "url": anti_pattern.url,
+                    "message": anti_pattern.description,
                 })
 
     if json_report_dir is not None:
