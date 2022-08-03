@@ -142,7 +142,7 @@ The Process for Nomination
   by submitting [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
   meeting every three months.
 * If you are submitting a request to the core maintainers, the information in your request 
-  should include the following items:
+  must include the following items:
 
   * The nominees depth and breadth of code, review and design
     contributions on the module
