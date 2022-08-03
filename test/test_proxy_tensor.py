@@ -128,11 +128,13 @@ def _create_new_input(x):
     if x.dtype != torch.float:
         return x + 1
     if x.is_leaf:
-        return torch.rand_like(x, requires_grad=True)
+        return torch.rand_like(x, requires_grad=x.requires_grad)
     else:
         return torch.rand_like(x)
 
 class TestGenericProxyTensor(TestCase):
+    # WARNING: if any of your inputs are index tensors, DO NOT use this
+    # function
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
@@ -255,15 +257,23 @@ class TestGenericProxyTensor(TestCase):
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 
-        def f(x):
-            for a in mod.parameters():
-                a.grad = None
-            out = mod(x)
-            out.sum().backward()
-            return [a.grad for a in mod.parameters()]
+        # An old version of this test called the module directly.  This works
+        # for tracing_mode == "real", but for fake tensors, we also have to
+        # ensure that the parameters and buffers get wrapped in fake tensors
+        # because free fake tensors are not supported.  Fortunately stateless
+        # does precisely this for us.
+        def f(x, params, buffers):
+            for p in params.values():
+                p.grad = None
+            loss = stateless.functional_call(mod, {**params, **buffers}, (x,)).sum()
+            # I could have done this with the functional API, but there is
+            # plenty of exercising this; I want to show mutating API still
+            # works
+            loss.backward()
+            return [p.grad for p in params.values()]
 
-        inp = torch.randn(3, 3, 250, 250, requires_grad=True)
-        self._test(f, [inp])
+        inp = torch.randn(3, 3, 250, 250)
+        self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
 
     def test_proxy_tensor(self):
         def f_grad(x):
@@ -465,6 +475,7 @@ def xfail_inherited_tests(tests):
     return deco
 
 
+@skipIfNoSympy
 @xfail_inherited_tests([
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
@@ -472,6 +483,7 @@ def xfail_inherited_tests(tests):
     "test_make_fx_model_fwd_bwd_wgtupdate",
     "test_make_fx_model_fwd_bwd",
     "test_proxy_tensor",
+    "test_resnet18_backward_trace",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
