@@ -1251,6 +1251,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: data, p_fn_n1, 0, 1)
         _helper(lambda data: data, p_fn_cmplx, 0, 1)
         _helper(lambda data: (data[0], data[1], data[0] + data[1]), p_fn_cmplx, [0, 1], 2)
+        _helper(lambda data: (data[0] + data[1], ), fn_n1_pos, [0, 1, 2])
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
@@ -1264,9 +1265,8 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
-        _helper(None, fn_n1_pos, [0, 1, 2], error=ValueError)
         _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
-        _helper(None, p_fn_n1, [0, 1], error=ValueError)
+        _helper(None, p_fn_n1, [0, 1], error=TypeError)
         _helper(None, fn_1n, [1, 2], error=ValueError)
         _helper(None, p_fn_cmplx, None, [0, 1, 2], error=ValueError)
         # Fn has keyword-only arguments
