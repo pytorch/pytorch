@@ -3,7 +3,7 @@
 
 #include <torch/csrc/Types.h>
 
-#define THPStorageStr "torch._UntypedStorage"
+#define THPStorageStr "torch.UntypedStorage"
 #define THPStorageBaseStr "StorageBase"
 
 struct THPStorage {
