@@ -528,7 +528,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -736,7 +736,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -810,7 +810,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
