@@ -293,6 +293,8 @@ else
     pushd ../cpp-build/caffe2
     WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
+    echo "Building functorch"
+    install_functorch
   fi
 fi
 

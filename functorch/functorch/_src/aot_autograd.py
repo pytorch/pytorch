@@ -194,7 +194,8 @@ def create_aot_autograd_function(
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *flat_tensor_args):
-            nonlocal compiled_fw, compiled_bw, num_outs, num_mutated_inputs, original_inputs_needing_mutation, input_mutation_submodule
+            nonlocal compiled_fw, compiled_bw, num_outs, num_mutated_inputs
+            nonlocal original_inputs_needing_mutation, input_mutation_submodule
             # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
             # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
             old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)

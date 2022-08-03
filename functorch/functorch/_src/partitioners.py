@@ -87,6 +87,15 @@ def _is_tangent(node):
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
     num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
+    if hasattr(joint_module, 'input_mutation_submodule'):
+        # When running with functionalization, any program inputs that get updated get converted into outputs
+        # in the forward graph.
+        # This isn't accounted for in the original pytree spec, so we need to include them here.
+        num_input_mutations = len([
+            n for n in joint_module.input_mutation_submodule.graph.nodes
+            if n.op == 'placeholder' and 'primal' in n.target
+        ])
+        num_fwd_outputs += num_input_mutations
     outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
@@ -451,7 +460,7 @@ def min_cut_rematerialization_partition(
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
-        mem_sz = int(mem_sz * (1.5 ** max(min(node.dist_from_bw, 100), 1)))
+        mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
         # mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
