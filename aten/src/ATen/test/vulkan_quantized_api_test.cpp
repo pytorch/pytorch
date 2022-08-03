@@ -34,9 +34,11 @@ bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
 }
 
+/* Unused function
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.0f;
 }
+*/
 
 void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const auto diff = (a - b).abs();

@@ -1,6 +1,5 @@
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/library.h>
 
 namespace at {
@@ -150,13 +149,14 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::vector<c10::intrusive_ptr<VulkanOpContext>> pack_lstm_linear_op_contexts(
+std::vector<c10::intrusive_ptr<LinearPackedContext>>
+pack_lstm_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
       "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'.");
-  std::vector<c10::intrusive_ptr<VulkanOpContext>> linear_op_contexts;
+  std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 8);
 
   for (int64_t l = 0; l < num_layers; ++l) {
@@ -200,7 +200,7 @@ std::vector<c10::intrusive_ptr<VulkanOpContext>> pack_lstm_linear_op_contexts(
   return linear_op_contexts;
 }
 
-VulkanOpContext lstm_context_create(
+LstmPackedContext::LstmPackedContext(
     const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
     bool has_biases,
     int64_t num_layers,
@@ -219,36 +219,76 @@ VulkanOpContext lstm_context_create(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(7);
-  packed_context.emplace_back(
-      pack_lstm_linear_op_contexts(params_cpu, num_layers));
-  packed_context.emplace_back(has_biases);
-  packed_context.emplace_back(num_layers);
-  packed_context.emplace_back(dropout);
-  packed_context.emplace_back(train);
-  packed_context.emplace_back(bidirectional);
-  packed_context.emplace_back(batch_first);
-
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(7);
-  unpacked_context.emplace_back(params_cpu);
-  unpacked_context.emplace_back(has_biases);
-  unpacked_context.emplace_back(num_layers);
-  unpacked_context.emplace_back(dropout);
-  unpacked_context.emplace_back(train);
-  unpacked_context.emplace_back(bidirectional);
-  unpacked_context.emplace_back(batch_first);
-
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  packed_.reserve(7);
+  packed_.emplace_back(pack_lstm_linear_op_contexts(params_cpu, num_layers));
+  packed_.emplace_back(has_biases);
+  packed_.emplace_back(num_layers);
+  packed_.emplace_back(dropout);
+  packed_.emplace_back(train);
+  packed_.emplace_back(bidirectional);
+  packed_.emplace_back(batch_first);
 }
 
-std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
+LstmPackedContext LstmPackedContext::pack(c10::impl::GenericList unpacked) {
+  return LstmPackedContext(
+      unpacked.get(0).toTensorVector(),
+      unpacked.get(1).toBool(),
+      unpacked.get(2).toInt(),
+      unpacked.get(3).toDouble(),
+      unpacked.get(4).toBool(),
+      unpacked.get(5).toBool(),
+      unpacked.get(6).toBool());
+}
+
+const c10::impl::GenericList LstmPackedContext::unpack() const {
+  c10::impl::GenericList unpacked_lstm_context{c10::AnyType::get()};
+  unpacked_lstm_context.reserve(7);
+
+  const c10::List<c10::IValue> packed_linear_contexts = get_val(0).toList();
+
+  const int64_t num_layers = get_val(2).toInt();
+  const int64_t linear_contexts_per_layer = 8;
+
+  std::vector<Tensor> params_cpu;
+  params_cpu.reserve(num_layers * linear_contexts_per_layer);
+
+  for (c10::IValue packed_linear_context : packed_linear_contexts) {
+    const c10::impl::GenericList unpacked_linear_context =
+        packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
+    params_cpu.emplace_back(unpacked_linear_context.get(0).toTensor().t());
+    params_cpu.emplace_back(unpacked_linear_context.get(1).toTensor());
+  }
+  unpacked_lstm_context.emplace_back(params_cpu);
+  for (int64_t i = 1; i < 7; ++i) {
+    unpacked_lstm_context.emplace_back(get_val(i));
+  }
+
+  return unpacked_lstm_context;
+}
+
+c10::intrusive_ptr<LstmPackedContext> create_lstm_context(
+    std::vector<Tensor>&& params_cpu,
+    bool has_biases,
+    int64_t num_layers,
+    double dropout,
+    bool train,
+    bool bidirectional,
+    bool batch_first) {
+  return c10::make_intrusive<LstmPackedContext>(LstmPackedContext(
+      params_cpu,
+      has_biases,
+      num_layers,
+      dropout,
+      train,
+      bidirectional,
+      batch_first));
+}
+
+std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
     const Tensor& input_vk, // input sequence (vulkan)
     const Tensor& hx_vk, // initial hidden state (vulkan)
     const Tensor& cx_vk, // initial cell state (vulkan)
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context) {
+    const c10::intrusive_ptr<LstmPackedContext>& lstm_context) {
   TORCH_INTERNAL_ASSERT(
       input_vk.sizes().size() == 3, "Vulkan LSTM expects input dims to be 3.");
   TORCH_INTERNAL_ASSERT(
@@ -259,8 +299,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
       "Vulkan LSTM expects cell state dims to be 3.");
 
   const c10::List<c10::IValue> packed_linear_op_contexts =
-      packed_context.get(0).toList();
-  const int64_t packed_num_layers = packed_context.get(2).toInt();
+      lstm_context->get_val(0).toList();
+  const int64_t packed_num_layers = lstm_context->get_val(2).toInt();
 
   const int64_t linear_op_contexts_per_layer =
       8; // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf), (b_ig,
@@ -285,49 +325,41 @@ std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
 
     const auto& cxt_ii =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 0]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_hi =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 1]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_if =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 2]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_hf =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 3]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_ig =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 4]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_hg =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 5]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_io =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 6]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
     const auto& cxt_ho =
         packed_linear_op_contexts[l * linear_op_contexts_per_layer + 7]
-            .toCustomClass<VulkanOpContext>();
+            .toCustomClass<LinearPackedContext>();
 
     const auto& i = at::sigmoid(
-        linear_context_run(
-            x, cxt_ii->get_packed(), cxt_ii->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hi->get_packed(), cxt_hi->get_unpacked(), 1.0f, 1.0f));
+        run_linear_context(x, cxt_ii) + run_linear_context(h, cxt_hi));
+    // cxt_ii->run(x, 1.0f, 1.0f) + cxt_hi->run(h, 1.0f, 1.0f));
     const auto& f = at::sigmoid(
-        linear_context_run(
-            x, cxt_if->get_packed(), cxt_if->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hf->get_packed(), cxt_hf->get_unpacked(), 1.0f, 1.0f));
-    const auto& g = at::tanh(
-        linear_context_run(
-            x, cxt_ig->get_packed(), cxt_ig->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hg->get_packed(), cxt_hg->get_unpacked(), 1.0f, 1.0f));
+        run_linear_context(x, cxt_if) + run_linear_context(h, cxt_hf));
+    // cxt_if->run(x, 1.0f, 1.0f) + cxt_hf->run(h, 1.0f, 1.0f));
+    const auto& g =
+        at::tanh(run_linear_context(x, cxt_ig) + run_linear_context(h, cxt_hg));
+    // cxt_ig->run(x, 1.0f, 1.0f) + cxt_hg->run(h, 1.0f, 1.0f));
     const auto& o = at::sigmoid(
-        linear_context_run(
-            x, cxt_io->get_packed(), cxt_io->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_ho->get_packed(), cxt_ho->get_unpacked(), 1.0f, 1.0f));
+        run_linear_context(x, cxt_io) + run_linear_context(h, cxt_ho));
+    // cxt_io->run(x, 1.0f, 1.0f) + cxt_ho->run(h, 1.0f, 1.0f));
     c = f * c + i * g;
     h = o * at::tanh(c);
     x = h; // next input
@@ -342,37 +374,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
   return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
-}
-
-c10::intrusive_ptr<VulkanOpContext> create_lstm_context(
-    std::vector<Tensor>&& params_cpu,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout,
-    bool train,
-    bool bidirectional,
-    bool batch_first) {
-  return c10::make_intrusive<VulkanOpContext>(lstm_context_create(
-      params_cpu,
-      has_biases,
-      num_layers,
-      dropout,
-      train,
-      bidirectional,
-      batch_first));
-}
-
-std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
-    const Tensor& input_vk, // input sequence (vulkan)
-    const Tensor& hx_vk, // initial hidden state (vulkan)
-    const Tensor& cx_vk, // initial cell state (vulkan)
-    const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
-  return lstm_context_run(
-      input_vk,
-      hx_vk,
-      cx_vk,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked());
 }
 
 } // namespace ops

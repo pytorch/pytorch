@@ -3,7 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
+#include <ATen/native/vulkan/ops/VulkanPackedContext.h>
 
 namespace at {
 namespace native {
@@ -14,61 +14,82 @@ enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
   Conv2dSlidingWindow,
+  TConv2dSlidingWindow,
+  QConv2dDepthwise,
+  QConv2dPointwise,
+  QConv2dSlidingWindow,
 };
 
-//  private:
-//   packed
-//     vTensor v_weight
-//     vTensor v_bias
-//     std::array<int64_t, 4> filter
-//     std::array<int64_t, 2> stride
-//     std::array<int64_t, 2> padding
-//     std::array<int64_t, 2> dilation
-//     int32_t groups
-//     float output_min
-//     float output_max
+class Conv2dPackedContext final : virtual public VulkanPackedContext,
+                                  public torch::jit::CustomClassHolder {
+ private:
+  c10::impl::GenericList unpacked_;
 
-//   unpacked
-//     Tensor weight
-//     c10::optional<Tensor> bias
-//     std::vector<int64_t> filter
-//     std::vector<int64_t> stride
-//     std::vector<int64_t> padding
-//     std::vector<int64_t> dilation
-//     int64_t groups
-//     c10::optional<Scalar> output_min
-//     c10::optional<Scalar> output_max
+ public:
+  Conv2dPackedContext(
+      const Tensor& weight,
+      const c10::optional<Tensor>& bias,
+      const IntArrayRef stride_arg,
+      const IntArrayRef padding_arg,
+      const IntArrayRef dilation_arg,
+      const bool transposed,
+      const bool quantized,
+      const IntArrayRef output_padding_arg,
+      const int64_t groups,
+      const c10::optional<Scalar>& output_min = c10::nullopt,
+      const c10::optional<Scalar>& output_max = c10::nullopt);
 
-VulkanOpContext conv2d_context_create(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride_arg,
-    const IntArrayRef padding_arg,
-    const IntArrayRef dilation_arg,
-    const bool transposed,
-    const IntArrayRef output_padding_arg,
-    const int64_t groups,
-    const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt);
+  static Conv2dPackedContext pack(c10::impl::GenericList);
 
-Tensor conv2d_context_run(
-    const Tensor& input_arg,
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context);
+  const c10::impl::GenericList unpack() const override {
+    return unpacked_;
+  }
+};
 
-Tensor run_conv2d_clamp_context(
-    const Tensor& input,
-    const c10::intrusive_ptr<VulkanOpContext>& context);
-
-c10::intrusive_ptr<VulkanOpContext> create_conv2d_clamp_context(
+c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max);
+    const c10::optional<Scalar>& output_min = c10::nullopt,
+    const c10::optional<Scalar>& output_max = c10::nullopt);
+
+Tensor run_conv2d_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv2dPackedContext>& context);
+
+c10::intrusive_ptr<Conv2dPackedContext> create_tconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min = c10::nullopt,
+    const c10::optional<Scalar>& output_max = c10::nullopt);
+
+Tensor run_tconv2d_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv2dPackedContext>& context);
+
+c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min = c10::nullopt,
+    const c10::optional<Scalar>& output_max = c10::nullopt);
+
+Tensor run_qconv2d_context(
+    const Tensor& input_arg,
+    double scale,
+    int64_t zero_point,
+    const c10::intrusive_ptr<Conv2dPackedContext>& conv_context);
 
 // Backwards compatibility
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
@@ -99,8 +120,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   State unpack() const;
 
  private:
-  explicit Conv2dOpContext(VulkanOpContext vulkan_context);
-  VulkanOpContext vulkan_context_;
+  explicit Conv2dOpContext(Conv2dPackedContext conv_context);
+  Conv2dPackedContext conv_context_;
 };
 
 Tensor conv2d_clamp_run(
