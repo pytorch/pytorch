@@ -319,6 +319,11 @@ def min_cut_rematerialization_partition(
 
     AGGRESSIVE_RECOMPUTATION = False
 
+    def _maybe_size_of(node):
+        if 'tensor_meta' in node.meta:
+            return _size_of(node.meta['tensor_meta'])
+        return 0
+
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -333,7 +338,7 @@ def min_cut_rematerialization_partition(
             # then we don't allow recomputation.
             if 'tensor_meta' not in node.meta:
                 return False
-            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
+            input_tensors_size = sum(_maybe_size_of(i) for i in node.args if isinstance(i, fx.Node))
             output_size = _size_of(node.meta['tensor_meta'])
             return (output_size * 4 < input_tensors_size)
 
@@ -351,7 +356,7 @@ def min_cut_rematerialization_partition(
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
-        mem_sz = int(mem_sz * (1.5 ** max(min(node.dist_from_bw, 100), 1)))
+        mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
         # mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
