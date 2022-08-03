@@ -962,7 +962,7 @@ if(CUDAToolkit_FOUND)
   endif()
 
   _CUDAToolkit_find_and_add_import_lib(culibos) # it's a static library
-  foreach(cuda_lib cublasLt cublas cufft curand cusparse nppc nvjpeg)
+  foreach(cuda_lib cublasLt cufft curand cusparse nppc nvjpeg)
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib})
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib}_static DEPS culibos)
   endforeach()
@@ -972,6 +972,9 @@ if(CUDAToolkit_FOUND)
     # https://docs.nvidia.com/cuda/archive/11.0/cublas/index.html#static-library
     _CUDAToolkit_find_and_add_import_lib(cublas DEPS cublasLt)
     _CUDAToolkit_find_and_add_import_lib(cublas_static DEPS cublasLt_static)
+  else()
+    _CUDAToolkit_find_and_add_import_lib(cublas)
+    _CUDAToolkit_find_and_add_import_lib(cublas_static DEPS culibos)
   endif()
 
   # cuFFTW depends on cuFFT
