@@ -6,7 +6,6 @@ from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from functorch.experimental import functionalize
-from functorch._src.partitioners import move_input_mutations_into_submodule
 
 import unittest
 
@@ -39,9 +38,6 @@ class TestFunctionalization(TestCase):
         out_ref = func(input_clone)
         reapply_views_str = 'mutations' if reapply_views else 'mutations_and_views'
         functional_func = make_fx(functionalize(func, remove=reapply_views_str))(inpt.clone())
-        # As part of testing functionalization, also test that we're properly
-        # hiding input mutations in a graph submodule.
-        move_input_mutations_into_submodule(functional_func)
         out_functional = functional_func(input_clone2)
 
         # The reinplacing pass is only valid to run with reapply_views=True.

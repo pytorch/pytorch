@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, OrderedDict
 from torch.fx.passes import graph_drawer
 from torch.fx.passes.utils import lift_subgraph_as_module
-from typing import Tuple
+from typing import Tuple, List
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 
@@ -165,19 +165,41 @@ def default_partition(
 
     return _extract_fwd_bwd_modules(joint_module, saved_values)
 
-def move_input_mutations_into_submodule(fx_g: fx.GraphModule):
+# This function expects a post-functionalizat FX GraphModule,
+# which means that all ops in the graph are functional, except for
+# some copy_() or as_strided_() nodes, that can show up at the end
+# of a graph who's module involves input mutations.
+#
+# This function extracts those input mutations into an opaque
+# submodule, called "input_mutation_submodule".
+#
+# We also update fx_g inplace to add the mutated inputs directly
+# as outputs in the graph.
+# Finally, this function returns a boolean list
+# telling AOTAutograd which of the inputs were actually mutated,
+# which correspond to actual inputs in the "input_mutation_submodule".
+#
+# AOTAutograd is responsible for splitting off the mutated inputs
+# after calling the compiled forward graph,
+# and running "input_mutation_submodule".
+def move_input_mutations_into_submodule(fx_g: fx.GraphModule) -> List[bool]:
     mutable_nodes: List[Node] = []  # the copy_() and as_strided_() nodes, that we'll delete move to a submodule.
+    mutated_inputs: List[Node] = []
     node_map: Dict[Node, Node] = {}
-    node_to_placeholder: Dict[Node, Node] = OrderedDict()  # mapping of nodes from old graph to placeholder in new graph
+    node_to_placeholder: Dict[Node, Node] = OrderedDict()  # mapping of nodes from old graph to placeholder in new submodule.
     mutation_subgraph = fx.Graph()
+    model_input_to_mutation: Dict[Node: bool] = OrderedDict()
 
-    def remap_inputs(x):
-        if x.op == "get_attr":
-            pass
+    # First, default all model inputs to not having mutations
+    for n in fx_g.graph.nodes:
+        if n.op == 'placeholder':
+            model_input_to_mutation[n] = False
+
+    def remap_input(x):
         if x in node_map:
             return node_map[x]
         if x not in node_to_placeholder:
-            # Add the copy_() arg inputs as a submodule input.
+            # Add the copy_() mutated input argument as a submodule input.
             placeholder_node = mutation_subgraph.placeholder(x.name, type_expr=x.type)
             placeholder_node.meta = copy.copy(x.meta)
             node_to_placeholder[x] = placeholder_node
@@ -200,9 +222,17 @@ def move_input_mutations_into_submodule(fx_g: fx.GraphModule):
         assert n.target == torch.ops.aten.copy_.default or \
                n.target == torch.ops.aten.as_strided_.default, \
                "Given a non-functionalized graph."
-        # Add the copy_() node to the submodule, remove it from the original graph.
+        # Add the copy_() node to the submodule, remember which nodes are mutated input
+        # so we can return them in the original graph.
         mutable_nodes.append(n)
-        new_node = mutation_subgraph.node_copy(n, remap_inputs)
+        if n.target == torch.ops.aten.copy_.default:
+            original_input = n.args[0]
+            mutated_input = n.args[1]
+            if mutated_input not in mutated_inputs:
+                mutated_inputs.append(mutated_input)
+            # Figure out which inputs were mutated
+            model_input_to_mutation[original_input] = True
+        new_node = mutation_subgraph.node_copy(n, remap_input)
         node_map[n] = new_node
     # Add the submodule to the end of the original graph
     mutation_subgraph.lint()
@@ -210,30 +240,24 @@ def move_input_mutations_into_submodule(fx_g: fx.GraphModule):
     submodule_name = 'input_mutation_submodule'
     fx_g.add_submodule(submodule_name, mutation_submodule)
 
-    # Create a call_module node in main graph.
-    module_node = fx_g.graph.call_module(
-        submodule_name,
-        args=tuple(node_to_placeholder.keys()),
-        kwargs=None)
+    # Update the output node to also return the mutated inputs.
+    output_node = [n for n in fx_g.graph.nodes if n.op == 'output']
+    # FX graphs created through torch_dispatch tracing should
+    # only have a single output node.
+    assert len(output_node) == 1
+    assert isinstance(output_node[0].args, tuple) and len(output_node[0].args) == 1
+    # Update the output node to also return any mutated inputs
+    new_args = [mutated_inputs + output_node[0].args[0]]
+    output_node[0].args = tuple(new_args)
 
-    # ATen graphs that go through __torch_dispatch__ tracing have a large amount of structure.
-    # In particular, there should be a single "return" node that is the last node in the graph..
-    # Figuring out the right place to insert the submodule is tricky, so instead
-    # just re-generate the return to be the last node again.
-    all_nodes = list(fx_g.graph.nodes)
-    return_nodes = [n for n in all_nodes if n.op == 'output']
-    if len(return_nodes) > 0:
-        assert len(return_nodes) == 1 and return_nodes[0] is all_nodes[-2]
-        # erase and add back, so the return node comes at the end of the graph.
-        return_node = return_nodes[0]
-        fx_g.graph.output(return_node.args[0])
-        fx_g.graph.erase_node(return_node)
 
     # Remove the mutable nodes from the original graph
     for n in reversed(mutable_nodes):
         fx_g.graph.erase_node(n)
     fx_g.graph.lint()
     fx_g.recompile()
+
+    return list(model_input_to_mutation.values())
 
 
 def _prod(x):
@@ -390,6 +414,11 @@ def min_cut_rematerialization_partition(
 
     AGGRESSIVE_RECOMPUTATION = False
 
+    def _maybe_size_of(node):
+        if 'tensor_meta' in node.meta:
+            return _size_of(node.meta['tensor_meta'])
+        return 0
+
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -404,7 +433,7 @@ def min_cut_rematerialization_partition(
             # then we don't allow recomputation.
             if 'tensor_meta' not in node.meta:
                 return False
-            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
+            input_tensors_size = sum(_maybe_size_of(i) for i in node.args if isinstance(i, fx.Node))
             output_size = _size_of(node.meta['tensor_meta'])
             return (output_size * 4 < input_tensors_size)
 
