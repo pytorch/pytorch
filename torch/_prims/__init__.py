@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import math
 import operator
 import weakref
@@ -10,7 +11,7 @@ import torch
 
 import torch._prims_common as utils
 import torch.library
-from torch import _TypedStorage, Tensor
+from torch import Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims_common import (
     check,
@@ -265,11 +266,14 @@ def TensorMeta(
     if device.type == "meta":
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
     else:
-        return FakeTensor(
-            mode,
-            torch.empty(shape, dtype=dtype, device="meta"),
-            device,
-        )
+        # SymInt doesnt support empty_strided yet
+        if any(
+            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
+        ):
+            meta_t = torch.empty(shape, dtype=dtype, device="meta")
+        else:
+            meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+        return FakeTensor(mode, meta_t, device)
 
 
 #
