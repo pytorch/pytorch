@@ -1323,9 +1323,8 @@ def insert_observers_for_model(
             if node.args[0].op != "call_function" or node.args[0].target != operator.getitem:
                 continue
             getitem_node = node.args[0]
-            input_observer_node = getitem_node.args[0]
-            output_observer_node = node
-            if not is_activation_post_process_node(input_observer_node, modules):
+            assert(isinstance(getitem_node, Node))
+            if not is_activation_post_process_node(getitem_node.args[0], modules):
                 continue
             maybe_make_input_output_share_observers(getitem_node, model, modules)
 
