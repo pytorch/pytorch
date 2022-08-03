@@ -7756,7 +7756,6 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.pin_memory(), [x])
         gradgradcheck(lambda x: x.pin_memory(), [x])
 
-    @skipCUDAIfRocm
     @onlyCUDA
     def test_profiler_emit_nvtx(self, device):
         # This test is not intended to ensure correctness of nvtx ranges.
