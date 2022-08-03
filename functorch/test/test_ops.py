@@ -711,7 +711,6 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),
         xfail('complex'),
         xfail('linalg.pinv', 'hermitian'),
-        xfail('matrix_exp'),
         xfail('pinverse'),
         skip('_masked.mean'),  # ???
         xfail('linalg.cholesky_ex'),
@@ -815,7 +814,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
-        xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('pinverse'),
         xfail('prod'),
@@ -915,7 +913,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('index_put', ''),
-        xfail('matrix_exp'),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
@@ -1291,6 +1288,7 @@ class TestOperators(TestCase):
         xfail('to_sparse'),  # dispatch key issue
 
         # numerical inconsistencies, look like bugs
+        xfail('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
         skip('__rmatmul__'),  # flaky needs investigation
         skip('matmul'),  # flaky needs investigation
