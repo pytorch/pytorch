@@ -48,11 +48,15 @@ enable_language(CUDA)
 set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-find_package(CUDAToolkit REQUIRED)
-# This variable was only added in CMake 3.18
-if(NOT CUDAToolkit_LIBRARY_ROOT)
-  set(CUDAToolkit_LIBRARY_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+# CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
 endif()
+
+find_package(CUDAToolkit REQUIRED)
+
+cmake_policy(POP)
 
 if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
     NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
