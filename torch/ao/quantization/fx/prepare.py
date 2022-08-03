@@ -393,15 +393,6 @@ def get_target_activation_dtype_for_node(
                 "output_activation_dtype": None,
             }
 
-        # TODO(future PR): consider stopping matching getitem
-        is_getitem = node.op == 'call_function' and \
-            node.target == operator.getitem
-        if is_getitem:
-            return {
-                "input_activation_dtype": torch.float,
-                "output_activation_dtype": torch.float,
-            }
-
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():

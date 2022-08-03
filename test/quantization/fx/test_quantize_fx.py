@@ -6578,6 +6578,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m.eval()
         qconfig_mapping = get_default_qconfig_mapping()
         m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
+
+        # Input and output observers of getitem should be the same
+        for n in m.graph.nodes:
+            if n.op != "call_module" or not n.target.startswith("activation_post_process"):
+                continue
+            if n.args[0].op != "call_function" or n.args[0].target != operator.getitem:
+                continue
+            getitem_node = n.args[0]
+            input_observer_node = getitem_node.args[0]
+            output_observer_node = n
+            input_observer = getattr(m, input_observer_node.name)
+            output_observer = getattr(m, output_observer_node.name)
+            self.assertTrue(input_observer is output_observer,
+                            "Input observer %s for %s is not the same as output observer %s" %
+                            (input_observer_node.name, getitem_node.name, output_observer_node.name))
+
         m(torch.rand(1, 5, 10))
         m = convert_fx(m)
 
@@ -6585,7 +6601,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_occurrence={
             ns.call_method("dequantize") : 1,
         })
-        m(torch.rand(1, 5, 10))
 
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):
