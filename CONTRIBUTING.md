@@ -1215,7 +1215,7 @@ This also means if you ADD a new top-level path, or you start
 sharing code between projects, you need to modify these files.
 
 There are a few "unusual" directories which, for historical reasons,
-are Caffe2/PyTorch specific. Here they are:
+are Caffe2/PyTorch specific. Here they are now:
 
 - `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
