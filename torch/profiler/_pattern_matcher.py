@@ -176,6 +176,11 @@ class ExtraCUDACopyPattern(Pattern):
         # TODO: We should also check tensor identities
         if event.name() != "aten::to":
             return False
+        if not event.children:
+            return False
+        child_event = event.children[-1]
+        if child_event.name() != "aten::_to_copy":
+            return False
         # Up one level
         event = event.parent
         if event is None:
@@ -609,8 +614,8 @@ def report_all_anti_patterns(prof,
     report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
-        ForLoopIndexingPattern(prof, should_benchmark),
-        FP32MatMulPattern(prof, should_benchmark),
+        # ForLoopIndexingPattern(prof, should_benchmark),
+        # FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
         GradNotSetToNonePattern(prof, should_benchmark),
