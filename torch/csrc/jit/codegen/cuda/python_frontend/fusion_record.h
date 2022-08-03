@@ -16,10 +16,12 @@ enum class RecordType {
   BroadcastOp,
   CastOp,
   Constant,
+  End,
   InputTensor,
   Output,
   ReductionOp,
   Scalar,
+  Start,
   VarianceOp,
 };
 
@@ -64,7 +66,8 @@ struct RecordFunctor {
   //! The base virtual equality operator is defined so all child
   //! classes can utilize the check for the same args and outputs.
   virtual bool operator==(const RecordFunctor& other) const {
-    auto result = (args_.size() == other.args_.size()) &&
+    auto result = (record_type_ == other.record_type_);
+    result = (args_.size() == other.args_.size()) &&
         (outputs_.size() == other.outputs_.size());
     if (result) {
       for (size_t i = 0; i < args_.size(); ++i) {
@@ -373,6 +376,31 @@ struct ConstantRecord : RecordFunctor {
   ValueType value_;
 };
 
+//! Specialized Record Functor for recording FusionDefinition End.
+//! The accompanying Fusion Cache Entry holds a Fusion Object.
+
+struct EndRecord : RecordFunctor {
+  EndRecord() : RecordFunctor({}, {}, RecordType::End) {}
+  virtual ~EndRecord() = default;
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | None                                          |
+  virtual size_t hash() const final {
+    return RecordFunctor::hash();
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const EndRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+    }
+    return result;
+  }
+
+  virtual void operator()(FusionDefinition& fd) final {}
+};
+
 //! Specialized Record Functor for recording FusionDefinition input tensors.
 
 struct InputTensorRecord : RecordFunctor {
@@ -632,6 +660,32 @@ struct ScalarRecord : RecordFunctor {
  private:
   //! Scalar data type.
   NvfDataType dtype_;
+};
+
+//! Specialized Record Functor for recording FusionDefinition Start.
+//! There should only ever be one instance of this Record in the 
+//! Fusion Cache.
+
+struct StartRecord : RecordFunctor {
+  StartRecord() : RecordFunctor({}, {}, RecordType::Start) {}
+  virtual ~StartRecord() = default;
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | None                                          |
+  virtual size_t hash() const final {
+    return RecordFunctor::hash();
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const EndRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+    }
+    return result;
+  }
+
+  virtual void operator()(FusionDefinition& fd) final {}
 };
 
 //! Specialized Record Functor for the FusionDefinition's var op.
