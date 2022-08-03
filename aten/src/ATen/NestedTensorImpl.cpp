@@ -187,6 +187,11 @@ int64_t NestedTensorImpl::numel_custom() const {
   return static_cast<int64_t>(num_elements);
 }
 
+
+c10::SymInt NestedTensorImpl::sym_numel_custom() const {
+  return NestedTensorImpl::numel_custom();
+}
+
 bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   TORCH_CHECK(false, "is_contiguous is disabled.");
 }
