@@ -844,7 +844,6 @@ find_package_handle_standard_args(CUDAToolkit
     CUDAToolkit_VERSION
 )
 
-unset(CUDAToolkit_ROOT_DIR)
 mark_as_advanced(CUDA_CUDART
                  CUDAToolkit_INCLUDE_DIR
                  CUDAToolkit_NVCC_EXECUTABLE
@@ -863,7 +862,7 @@ endif()
 if(CUDAToolkit_FOUND)
 
   function(_CUDAToolkit_find_and_add_import_lib lib_name)
-    cmake_parse_arguments(arg "" "" "ALT;DEPS;EXTRA_PATH_SUFFIXES;EXTRA_INCLUDE_DIRS" ${ARGN})
+    cmake_parse_arguments(arg "" "" "ALT;DEPS;EXTRA_HINTS;EXTRA_PATH_SUFFIXES;EXTRA_INCLUDE_DIRS" ${ARGN})
 
     set(search_names ${lib_name} ${arg_ALT})
 
@@ -871,6 +870,7 @@ if(CUDAToolkit_FOUND)
       NAMES ${search_names}
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
+            ${arg_EXTRA_HINTS}
       PATH_SUFFIXES nvidia/current lib64 lib/x64 lib
                     ${arg_EXTRA_PATH_SUFFIXES}
     )
@@ -880,6 +880,7 @@ if(CUDAToolkit_FOUND)
       NAMES ${search_names}
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
+            ${arg_EXTRA_HINTS}
       PATH_SUFFIXES lib64/stubs lib/x64/stubs lib/stubs stubs
                     # Support NVHPC splayed math library layout
                     ../../math_libs/${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/lib64
@@ -1018,8 +1019,9 @@ if(CUDAToolkit_FOUND)
   find_path(CUDAToolkit_CUPTI_INCLUDE_DIR cupti.h PATHS
       "${CUDAToolkit_ROOT_DIR}/extras/CUPTI/include"
       "${CUDAToolkit_INCLUDE_DIR}/../extras/CUPTI/include"
-      "${CUDATookit_INCLUDE_DIR}"
+      "${CUDAToolkit_INCLUDE_DIR}"
       NO_DEFAULT_PATH)
+  mark_as_advanced(CUDAToolkit_CUPTI_INCLUDE_DIR)
 
   if(CUDAToolkit_CUPTI_INCLUDE_DIR)
     _CUDAToolkit_find_and_add_import_lib(cupti
@@ -1036,30 +1038,26 @@ if(CUDAToolkit_FOUND)
 
   _CUDAToolkit_find_and_add_import_lib(nvml ALT nvidia-ml nvml)
 
+  # nvtools can be installed outside the CUDA toolkit directory,
+  # so search the NVTOOLSEXT_PATH windows only environment variable
   find_path(CUDAToolkit_nvToolsExt_INCLUDE_DIR nvToolsExt.h
-    PATHS "${CUDATookit_INCLUDE_DIR}"
-          "${CUDAToolkit_ROOT_DIR}"
-          ENV NVTOOLSEXT_PATH
-    PATH_SUFFIXES include
-    NO_DEFAULT_PATH
-  )
+      PATHS "${CUDAToolkit_INCLUDE_DIR}"
+            ENV NVTOOLSEXT_PATH
+      PATH_SUFFIXES include
+      NO_DEFAULT_PATH)
+  mark_as_advanced(CUDAToolkit_nvToolsExt_INCLUDE_DIR)
 
-  if(WIN32)
-    # nvtools can be installed outside the CUDA toolkit directory
-    # so prefer the NVTOOLSEXT_PATH windows only environment variable
-    # In addition on windows the most common name is nvToolsExt64_1
-    find_library(CUDA_nvToolsExt_LIBRARY
-      NAMES nvToolsExt64_1 nvToolsExt64 nvToolsExt
-      PATHS ENV NVTOOLSEXT_PATH
-            ENV CUDA_PATH
-      PATH_SUFFIXES lib/x64 lib
-    )
+  if(CUDAToolkit_nvToolsExt_INCLUDE_DIR)
+    _CUDAToolkit_find_and_add_import_lib(nvToolsExt
+        ALT nvToolsExt64 nvToolsExt64_1
+        EXTRA_HINTS ENV NVTOOLSEXT_PATH
+        EXTRA_INCLUDE_DIRS "${CUDAToolkit_nvToolsExt_INCLUDE_DIR}")
   endif()
-  _CUDAToolkit_find_and_add_import_lib(nvToolsExt ALT nvToolsExt64
-    EXTRA_INCLUDE_DIRS "${CUDAToolkit_nvToolsExt_INCLUDE_DIR}")
 
   _CUDAToolkit_find_and_add_import_lib(OpenCL)
 endif()
+
+unset(CUDAToolkit_ROOT_DIR)
 
 if(_CUDAToolkit_Pop_ROOT_PATH)
   list(REMOVE_AT CMAKE_FIND_ROOT_PATH 0)
