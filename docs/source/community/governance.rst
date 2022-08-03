@@ -140,7 +140,7 @@ The Process for Nomination
 * Each module has its own process. Please contact module maintainers for more information.
   However, if there is no process identified, you can file a request to the core maintainers
   by submitting [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
-  meeting each 3 months.
+  meeting every three months.
 * If you using the core maintainers route the information in your reqest 
   should include the following items:
 
