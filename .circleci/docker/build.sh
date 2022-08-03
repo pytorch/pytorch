@@ -151,7 +151,7 @@ case "$image" in
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
