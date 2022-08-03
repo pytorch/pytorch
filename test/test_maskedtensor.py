@@ -1,3 +1,5 @@
+# Owner(s): ["module: masked operators"]
+
 import torch
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, make_tensor, parametrize, instantiate_parametrized_tests,
@@ -12,7 +14,6 @@ from torch.testing._internal.common_methods_invocations import (
     reduction_ops,
     unary_ufuncs,
 )
-from torch.testing._internal.common_utils import make_tensor
 
 from torch._masked import _combine_input_and_mask
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match

@@ -70,16 +70,12 @@ def masked_tensor_str(data, mask, formatter):
 
 
 def get_data(a):
-    from torch.masked.maskedtensor import is_masked_tensor
-
     if is_masked_tensor(a):
         return a.masked_data
     return a
 
 
 def get_mask(a):
-    from torch.masked.maskedtensor import is_masked_tensor
-
     if is_masked_tensor(a):
         return a.masked_mask
     return None
@@ -320,7 +316,7 @@ class MaskedTensor(torch.Tensor):
             from .functions import multi_head_attention_forward as mha_mt
 
             return mha_mt(*args, **kwargs)
-        from torch.masked.maskedtensor import apply_reduction, is_reduction
+        from .reductions import apply_reduction, is_reduction
 
         if is_reduction(func):
             return apply_reduction(func, *args, **kwargs)
@@ -357,27 +353,27 @@ class MaskedTensor(torch.Tensor):
 
         func = func.overloadpacket
 
-        from torch.masked.maskedtensor import apply_reduction, is_reduction
+        from .reductions import apply_reduction, is_reduction
 
         if is_reduction(func):
             return apply_reduction(func, *args, **kwargs)
 
-        from torch.masked.maskedtensor import apply_pass_through_fn, is_pass_through_fn
+        from .passthrough import apply_pass_through_fn, is_pass_through_fn
 
         if is_pass_through_fn(func):
             return apply_pass_through_fn(func, *args, **kwargs)
 
-        from torch.masked.maskedtensor import apply_native_unary, is_native_unary
+        from .unary import apply_native_unary, is_native_unary
 
         if is_native_unary(func):
             return apply_native_unary(func, *args, **kwargs)
 
-        from torch.masked.maskedtensor import apply_native_binary, is_native_binary
+        from .binary import apply_native_binary, is_native_binary
 
         if is_native_binary(func):
             return apply_native_binary(func, *args, **kwargs)
 
-        from torch.masked.maskedtensor import apply_native_matmul, is_native_matmul
+        from .matmul import apply_native_matmul, is_native_matmul
 
         if is_native_matmul(func):
             return apply_native_matmul(func, *args, **kwargs)

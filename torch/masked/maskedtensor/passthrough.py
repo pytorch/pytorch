@@ -32,7 +32,7 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
         kwargs = {}
     impl_args = []
     for a in args:
-        from torch.masked.maskedtensor import is_masked_tensor
+        from .core import is_masked_tensor
 
         if is_masked_tensor(a):
             impl_args.append(map_fn(a))
@@ -58,7 +58,7 @@ def _wrap_result(result_data, result_mask):
     if isinstance(result_data, tuple):
         return tuple(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
     if torch.is_tensor(result_data):
-        from torch.masked.maskedtensor import MaskedTensor
+        from .core import MaskedTensor
 
         return MaskedTensor(result_data, result_mask)
     # Expect result_data and result_mask to be Tensors only

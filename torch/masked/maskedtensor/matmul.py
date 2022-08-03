@@ -13,7 +13,7 @@ logging.basicConfig(level=getattr(logging, os.getenv("MTLOGLEVEL", "INFO")))
 class MaskedBmm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, attn_mask):
-        from torch.masked.maskedtensor import is_masked_tensor
+        from .core import is_masked_tensor
 
         assert not is_masked_tensor(q)
         assert is_masked_tensor(k)
@@ -44,7 +44,7 @@ def masked_bmm(q, k, attn_mask):
 
 
 def get_data(a):
-    from torch.masked.maskedtensor import is_masked_tensor
+    from .core import is_masked_tensor
 
     if is_masked_tensor(a):
         return a.masked_data
@@ -52,7 +52,7 @@ def get_data(a):
 
 
 def get_mask(a):
-    from torch.masked.maskedtensor import is_masked_tensor
+    from .core import is_masked_tensor
 
     if is_masked_tensor(a):
         return a.masked_mask
@@ -63,7 +63,7 @@ def torch_matmul(func_name):
     func = getattr(torch.ops.aten, func_name)
 
     def matmul(input0, input1):
-        from torch.masked.maskedtensor import is_masked_tensor, MaskedTensor
+        from .core import is_masked_tensor, MaskedTensor
 
         logging.debug("Calling matmul with type({type(input0)}, {type(input1)})")
         if is_masked_tensor(input0) and is_masked_tensor(input1):
