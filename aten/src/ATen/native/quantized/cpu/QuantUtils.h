@@ -206,7 +206,7 @@ inline void HandleWeightsSaturation(int64_t N, float* weight) {
 }
 
 // Util function for quantizing bias.
-at::Tensor QuantizeBias(
+inline at::Tensor QuantizeBias(
     bool is_per_channel,
     const at::Tensor& bias,
     const at::Tensor& weight_contig,
