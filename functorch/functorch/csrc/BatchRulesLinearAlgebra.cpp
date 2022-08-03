@@ -240,7 +240,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
               op_name, ": The input tensor A must have at least 2 dimensions.");
     TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
               op_name, ": The input tensor B must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, /*do_type_promotion=*/false);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
@@ -257,7 +257,7 @@ oneOutput cholesky_solve_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, false);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
   const auto tensor_ = std::get<0>(tensor_other);
   const auto other_ = std::get<1>(tensor_other);
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
