@@ -17,7 +17,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -426,6 +426,11 @@ class TestOptim(TestCase):
                 optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=0.5, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4, min_lr=1e-6)],
+                constructor_accepts_maximize=True
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
@@ -599,6 +604,14 @@ class TestOptim(TestCase):
                     lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, total_iters=4, min_lr=1e-6, power=0.9)],
                 constructor_accepts_maximize=True
             )
             self._test_complex_2d(optimizer)
@@ -1211,6 +1224,10 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
+    def test_polynomial_lr_is_constant_for_constant_epoch(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -1343,6 +1360,15 @@ class TestLRScheduler(TestCase):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test(scheduler, targets, epochs)
 
+    def test_poly_lr(self):
+        epochs = 10
+        power = 0.9
+        total_iters = 5
+        single_targets = [(1.0 - x / total_iters) ** power * 0.05 for x in range(total_iters)] + [0.0] * (epochs - total_iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters)
+        self._test(scheduler, targets, epochs)
+
     def test_cos_anneal_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -1376,6 +1402,11 @@ class TestLRScheduler(TestCase):
     def test_closed_form_exp_lr(self):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         closed_form_scheduler = ExponentialLR(self.opt, gamma=0.9)
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_poly_lr(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        closed_form_scheduler = PolynomialLR(self.opt, power=0.9)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_cos_anneal_lr(self):
