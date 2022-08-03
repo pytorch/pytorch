@@ -114,13 +114,17 @@ class ScalarType(enum.IntEnum):
 
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a ScalarType to an ONNX data type."""
-        if not self.onnx_compatible():
-            raise ValueError(f"Scalar type {self} is not compatible with ONNX")
+        if self not in _SCALAR_TYPE_TO_ONNX:
+            raise ValueError(f"Scalar type {self} cannot be converted to ONNX")
         return _SCALAR_TYPE_TO_ONNX[self]
 
     def onnx_compatible(self) -> bool:
         """Return whether this ScalarType is compatible with ONNX."""
-        return self in _ONNX_COMPATIBLE_TYPES
+        return (
+            self in _SCALAR_TYPE_TO_ONNX
+            and self != ScalarType.UNDEFINED
+            and self != ScalarType.COMPLEX32
+        )
 
 
 def valid_scalar_name(scalar_name: Union[ScalarName, str]) -> bool:
@@ -180,26 +184,6 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()
 }
-
-_ONNX_COMPATIBLE_TYPES = frozenset(
-    (
-        ScalarType.BOOL,
-        ScalarType.UINT8,
-        ScalarType.INT8,
-        ScalarType.INT16,
-        ScalarType.INT,
-        ScalarType.INT64,
-        ScalarType.HALF,
-        ScalarType.FLOAT,
-        ScalarType.DOUBLE,
-        ScalarType.COMPLEX64,
-        ScalarType.COMPLEX128,
-        ScalarType.BFLOAT16,
-        ScalarType.QINT8,
-        ScalarType.QUINT8,
-        ScalarType.QINT32,
-    )
-)
 
 _SCALAR_TYPE_TO_ONNX = {
     ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
