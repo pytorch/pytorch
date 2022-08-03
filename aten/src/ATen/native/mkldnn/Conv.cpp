@@ -43,6 +43,81 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 namespace at { namespace native {
 
+// follow check rules from native/Convolution.cpp without transpose supported
+static void check_shape_forward(const Tensor& input,
+                                const Tensor& weight,
+                                const Tensor& bias,
+                                const IntArrayRef& padding,
+                                const IntArrayRef& stride,
+                                const IntArrayRef& dilation,
+                                const int64_t groups) {
+#define MKLDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
+  auto is_padding_neg = MKLDNN_CONV_ARG_CHECK(padding, <);
+  auto is_stride_nonpos = MKLDNN_CONV_ARG_CHECK(stride, <=);
+  auto is_dilation_nonpos = MKLDNN_CONV_ARG_CHECK(dilation, <=);
+#undef MKLDNN_CONV_ARG_CHECK
+  TORCH_CHECK(!is_padding_neg, "negative padding is not supported");
+  TORCH_CHECK(!is_stride_nonpos, "non-positive stride is not supported");
+  TORCH_CHECK(!is_dilation_nonpos, "non-positive dilation is not supported");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
+
+  int64_t k = input.ndimension();
+  const IntArrayRef& weight_sizes = weight.sizes();
+  int64_t weight_dim = weight_sizes.size();
+
+  TORCH_CHECK(weight_dim == k,
+              "Expected ", weight_dim, "-dimensional input for ", weight_dim,
+              "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
+              input.sizes(), " instead");
+  TORCH_CHECK(weight_sizes[0] >= groups,
+              "Given groups=", groups, ", expected weight to be at least ", groups,
+              " at dimension 0, but got weight of size ", weight_sizes, " instead");
+  TORCH_CHECK(weight_sizes[0] % groups == 0,
+              "Given groups=", groups, ", expected weight to be divisible by ",
+              groups, " at dimension 0, but got weight of size [", weight_sizes,
+              "] instead");
+  TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
+              "Given groups=", groups, ", weight of size ", weight_sizes,
+              ", expected input", input.sizes(), " to have ",
+              (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+              " channels instead");
+  TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
+              "Given weight of size ", weight_sizes,
+              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
+              ", but got bias of size ", bias.sizes(), " instead");
+
+  std::vector<int64_t> input_shape;
+  std::vector<int64_t> kernel_shape;
+  bool kernel_size_correct = true;
+
+  for (const auto i : c10::irange(2, k)) {
+    input_shape.push_back(input.size(i) + 2 * padding[i-2]);
+    // log new kernel size considering dilation
+    kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
+    if (input_shape.back() < kernel_shape.back()) {
+      kernel_size_correct = false;
+    }
+  }
+
+  TORCH_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
+
+  if (!kernel_size_correct) {
+    // If kernel size is incorrect
+    std::ostringstream input_ss;
+    std::ostringstream kernel_ss;
+    std::string separator = "";
+
+    for (int i = 0, len = input_shape.size(); i < len; ++i) {
+      input_ss << separator << input_shape[i];
+      kernel_ss << separator << kernel_shape[i];
+      separator = " x ";
+    }
+
+    TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
+                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+  }
+}
+
 #define MKLDNNTensor(itensor, options)                                  \
   new_with_itensor_mkldnn(                                              \
       std::move(itensor),                                               \
@@ -82,7 +157,8 @@ namespace at { namespace native {
 
 Tensor mkldnn_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -95,6 +171,8 @@ Tensor mkldnn_convolution(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
+
+  check_shape_forward(input, weight, bias, padding, stride, dilation, groups);
 
   bool is_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
 

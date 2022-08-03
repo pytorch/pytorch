@@ -136,6 +136,22 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
+    def test_mkldnn_conv_shapecheck(self):
+        input = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        w1 = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        b1 = torch.full((1,), 1, dtype=torch.float32)
+        w2 = torch.full((1, 1, 2, 24,), 1, dtype=torch.float32)
+        b2 = torch.full((2,), 1, dtype=torch.float32)
+        options = zip([-1, 0, 0, 0, 0, 0, 0],  # padding
+                      [1, 0, 1, 1, 1, 1, 1],  # stride
+                      [1, 1, 0, 1, 1, 1, 1],  # dilation
+                      [1, 1, 1, 0, 2, 1, 1],  # groups
+                      [w1, w1, w1, w1, w1, w1, w2],  # weight
+                      [b1, b1, b1, b1, b1, b2, b1])  # bias
+        for pad, st, dil, gr, w, b in options:
+            with self.assertRaises(RuntimeError) as _:
+                torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
+
     def test_autograd_to_mkldnn(self):
         # MKLDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
