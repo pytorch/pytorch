@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/jit.h>
 #include <iostream>
 #include <stdexcept>
