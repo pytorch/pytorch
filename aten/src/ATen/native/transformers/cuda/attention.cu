@@ -345,8 +345,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
       accscalar_t,                                                      \
       assume_aligned>                                                   \
       <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(       \
-          nt_qkv->get_buffer()                                          \
-              .packed_accessor64<scalar_t, 1, RestrictPtrTraits>(),     \
+          qkv.packed_accessor64<scalar_t, 1, RestrictPtrTraits>(),     \
           qkv_bias.packed_accessor64<scalar_t, 1, RestrictPtrTraits>(), \
           offsets_ptr,                                                  \
           sizes_ptr,                                                    \
@@ -387,7 +386,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           const auto input_dim = sizes.sizes()[1];
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_dim == 1);
           if (aligned &&
-              ((reinterpret_cast<intptr_t>(nt_qkv->get_buffer().data_ptr()) %
+              ((reinterpret_cast<intptr_t>(qkv.data_ptr()) %
                 TRANSFORM_BIAS_RESCALE_VEC) == 0)) {
             CALL_ADD_PADDING_KERNEL(true);
           } else {
