@@ -1565,6 +1565,8 @@ aten::mm""")
             (1, lambda: torch.rand((100, 100)).cuda()),
             (1, lambda: torch.randn((100, 100)).cuda()),
             (1, lambda: torch.full((100, 100), 10).cuda()),
+            (0, lambda: torch.rand((100, 100)).to(dtype=torch.float16)),
+            (0, lambda: torch.ones((100, 100)).to(dtype=torch.float16)),
         )
         num_matched = []
         for _, fn in cases:
