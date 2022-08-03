@@ -151,6 +151,8 @@ class ExtraCUDACopyPattern(Pattern):
     build-in method                 |build-in method
         ...                         |    aten::to
             aten::fill_/aten::zero_ |        aten::_to_copy
+                                    |            aten::copy_
+                                    |                cudaMemcpyAsync
 
     Algorithm:
     We start at node aten::to, go parent events' previous events,
@@ -176,12 +178,24 @@ class ExtraCUDACopyPattern(Pattern):
         # TODO: We should also check tensor identities
         if event.name() != "aten::to":
             return False
+        to_event = event
         if not event.children:
             return False
-        child_event = event.children[-1]
-        if child_event.name() != "aten::_to_copy":
+        event = event.children[-1]
+        if event.name() != "aten::_to_copy":
+            return False
+        if not event.children:
+            return False
+        event = event.children[-1]
+        if event.name() != "aten::copy_":
+            return False
+        if not event.children:
+            return False
+        event = event.children[0]
+        if event.name() != "cudaMemcpyAsync":
             return False
         # Up one level
+        event = to_event
         event = event.parent
         if event is None:
             return False
