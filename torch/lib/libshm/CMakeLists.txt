@@ -30,7 +30,7 @@ set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
   CXX_STANDARD 14)
-target_link_libraries(shm PUBLIC torch_cpu)
+target_link_libraries(shm PUBLIC torch)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
