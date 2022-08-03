@@ -1920,7 +1920,6 @@ if(USE_KINETO)
   endif()
   if(USE_ROCM OR NOT LIBKINETO_NOROCTRACER)
     message(STATUS "  LIBKINETO_NOROCTRACER = ${LIBKINETO_NOROCTRACER}")
->>>>>>> 6832cc724e (WIP: Use CUDAToolkit to find cupti)
   endif()
 endif()
 
