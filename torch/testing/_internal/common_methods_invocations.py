@@ -13456,6 +13456,8 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu'), ],
            skips=(
+               # Strides are not the same!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
                             'TestCommon', 'test_noncontiguous_samples',
@@ -14858,6 +14860,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_expanded_weight=True,
            decorators=(
+               # Strides are not the same!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
@@ -20695,6 +20699,10 @@ python_ref_db = [
             # See https://github.com/pytorch/pytorch/issues/82364
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+
+            # Prims arange does not follow aten
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.int64,)),
         ),
         supports_nvfuser=False,
     ),
