@@ -1122,6 +1122,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * XXX: do not use, private api!
+   * Update the backend component related keys to the backend component
+   * corresponding to this device.
+   */
+  void _change_backend_component_keys(c10::Device device);
+
+  /**
    * Whether or not the tensor is a zerotensor
    */
   inline bool _is_zerotensor() const {
