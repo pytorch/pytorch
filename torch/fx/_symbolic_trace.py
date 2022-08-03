@@ -630,6 +630,9 @@ class Tracer(TracerBase):
         old_is_fx_tracing_flag = _is_fx_tracing_flag
         _is_fx_tracing_flag = True
         try:
+            if isinstance(root, torch.fx.GraphModule):
+                self.root = root
+                return root.graph
             if isinstance(root, torch.nn.Module):
                 self.root = root
 

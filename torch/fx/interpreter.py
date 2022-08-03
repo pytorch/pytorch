@@ -91,7 +91,7 @@ class Interpreter:
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
     @compatibility(is_backward_compatible=True)
-    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing : bool = True) -> Any:
+    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing : bool = True,  **kwargs) -> Any:
         """
         Run `module` via interpretation and return the result.
 
@@ -115,6 +115,7 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
+        self.kwargs = kwargs
 
         for node in self.module.graph.nodes:
             if node in self.env:
@@ -173,7 +174,9 @@ class Interpreter:
             Any: The argument value that was retrieved.
         """
         assert isinstance(target, str)
-        if target.startswith('*'):
+        if target.startswith('**'):
+            return self.kwargs
+        elif target.startswith('*'):
             # For a starred parameter e.g. `*args`, retrieve all
             # remaining values from the args list.
             return list(self.args_iter)

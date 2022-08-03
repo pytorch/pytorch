@@ -15,7 +15,6 @@ import pickle
 import warnings
 from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
-
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
@@ -1281,6 +1280,12 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
                           "to enable Profile-Directed Typing in TorchScript. Refer to "
                           "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
 
+    if isinstance(obj, torch.fx.GraphModule):  # type: ignore[attr-defined]
+        with obj._jit_script_mode():
+            obj = call_prepare_scriptable_func(obj)
+            return torch.jit._recursive.create_script_module(
+                obj, torch.jit._recursive.infer_methods_to_compile
+            )
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(

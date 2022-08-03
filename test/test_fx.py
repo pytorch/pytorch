@@ -2616,13 +2616,11 @@ class TestFX(JitTestCase):
 
         traced.recompile()
 
-        with self.capture_stderr() as captured:
-            with self.assertRaises(TypeError):
-                traced(5)
+        with self.assertRaises(TypeError) as error:
+            traced(5)
 
-        self.assertRegex(captured[0],
-                         r"Call using an FX-traced Module, line .* of the "
-                         r"traced Module's generated forward function:")
+        self.assertEqual(repr(error.exception),
+                         "TypeError(\"dot(): argument 'tensor' (position 2) must be Tensor, not int\")")
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
         class M(torch.nn.Module):
@@ -3498,7 +3496,9 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         graph.output(a)
         gm = torch.fx.GraphModule({}, graph)
         gm.recompile()
-        self.assertEqual(gm(2, 3), 6)
+        x = torch.tensor([2])
+        y = torch.tensor([3])
+        self.assertEqual(gm(x, y), 6)
         self.assertIn("a *= b", gm.code)
 
     def test_map_aggregate_doesnt_traverse_size(self):
