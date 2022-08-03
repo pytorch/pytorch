@@ -1195,14 +1195,9 @@ def insert_observers_for_model(
 
             this_node_dtype = node_name_to_target_dtype[node.name]
             output_not_a_tensor = this_node_dtype is None
-            # TODO(future PR): consider stopping matching getitem
-            is_getitem = node.op == 'call_function' and \
-                node.target == operator.getitem
 
             skip_inserting_observers = (
-                (qconfig is None) or
-                output_not_a_tensor or
-                is_getitem
+                (qconfig is None) or output_not_a_tensor
             ) and (
                 not node.op == 'output'
             )

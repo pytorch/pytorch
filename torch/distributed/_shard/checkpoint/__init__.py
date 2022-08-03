@@ -1,9 +1,9 @@
 from .metadata import (
     BytesReadRequest,
     BytesWriteRequest,
-    ShardedTensorMetadata,
-    ShardStorageMetadata,
     TensorStorageMetadata,
+    BytesStorageMetadata,
+    ChunkStorageMetadata,
     Metadata,
     TensorReadRequest,
     TensorWriteRequest,

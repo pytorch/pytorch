@@ -111,6 +111,7 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        operator.getitem
     ]
     method_list = [
         "clamp",
@@ -270,10 +271,6 @@ STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
     F.conv3d: (torch.ops.quantized.conv3d, torch.ops.quantized.conv3d_relu),
 }
-
-STATIC_LOWER_SPECIAL_OPS: List[Callable] = [
-    operator.getitem,
-]
 
 WEIGHT_PREPACK_OPS: Set[Callable] = {
     torch._ops.ops.quantized.linear_prepack,
@@ -949,24 +946,6 @@ def _lower_getattr_tensor_metadata_op(model: QuantizedGraphModule):
             args[0] = n.args[0].args[0]
             n.args = tuple(args)
 
-def _lower_static_special_op(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
-    """
-    Remove the dequantize and quantize ops that wraps the special ops.
-    """
-    modules = dict(model.named_modules(remove_duplicate=False))
-    for n in model.graph.nodes:
-        (q_node, _, ref_node) = _match_static_pattern(
-            n, modules, qconfig_map, STATIC_LOWER_SPECIAL_OPS, dequantize_node_arg_indices=[0])  # type: ignore[arg-type]
-        if q_node is None:
-            continue
-        assert(isinstance(ref_node, Node))
-        dq_node = ref_node.args[0]
-        assert(isinstance(dq_node, Node))
-        dq_node.replace_all_uses_with(dq_node.args[0])
-        model.graph.erase_node(dq_node)
-        q_node.replace_all_uses_with(ref_node)
-        model.graph.erase_node(q_node)
-
 def _lower_to_native_backend(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
@@ -983,7 +962,6 @@ def _lower_to_native_backend(
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
     _lower_getattr_tensor_metadata_op(model)
-    _lower_static_special_op(model, qconfig_map)
     special_pattern_replacement(model)
     model = fold_weight(model, node_name_to_scope)
     model.graph.eliminate_dead_code()
