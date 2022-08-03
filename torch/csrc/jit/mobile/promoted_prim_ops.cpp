@@ -63,6 +63,11 @@ void sym_size(Stack& stack) {
   pack(stack, t.sym_sizes().vec());
 }
 
+void sym_numel(Stack& stack) {
+  auto t = std::move(pop(stack)).toTensor();
+  push(stack, t.sym_numel());
+}
+
 void device(Stack& stack) {
   push(stack, pop(stack).toTensor().device());
 }
