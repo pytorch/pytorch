@@ -234,7 +234,7 @@ def _gen_code_list_type(
             )
         )
     # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
-    elif isinstance(t.elem, OptionalType) and ctype != BaseCType(iOptTensorListRefT):
+    elif isinstance(t.elem, OptionalType) and ctype.remove_const_ref() != BaseCType(iOptTensorListRefT):
         code.extend(
             f"""
 {ctype.cpp_type(strip_ref=True)} {out_name};
