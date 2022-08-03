@@ -1744,11 +1744,17 @@ aten::mm""")
             optimizer.step()
             optimizer.zero_grad()
         report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
-        self.assertTrue(os.path.exists("torchtidy_report.json"))
-        with open("./torchtidy_report.json") as f:
-            report = json.load(f)
-        self.assertTrue("test_profiler.py" in report)
-        os.remove("torchtidy_report.json")
+        try:
+            with open("./torchtidy_report.json") as f:
+                report = json.load(f)
+            self.assertTrue("test_profiler.py" in report)
+            self.assertTrue(len(report["test_profiler.py"]) > 0)
+            expected_fields = sorted(["line_number", "name", "url", "message"])
+            for event in report["test_profiler.py"]:
+                actual_fields = sorted(event.keys())
+                self.assertEqual(expected_fields, actual_fields)
+        finally:
+            os.remove("torchtidy_report.json")
 
 if __name__ == '__main__':
     run_tests()
