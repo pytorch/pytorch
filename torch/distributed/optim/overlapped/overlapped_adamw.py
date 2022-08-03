@@ -5,7 +5,7 @@ from .overlapped_optim import OverlappedOptimizer
 class OverlappedAdamW(OverlappedOptimizer):
     def __init__(
         self,
-        params: List[Tensor],
+        params: Union[None, List[Tensor]] = None,
         lr: float = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
@@ -13,9 +13,7 @@ class OverlappedAdamW(OverlappedOptimizer):
         amsgrad: bool = False,
         maximize: bool = False,
         foreach: bool = False,
-        grad_scaler=None,
-        zero_grad: bool = False,
-        zero_grad_to_none: bool = False
+        grad_scaler=None
     ):
         
         self._functional_adamw = _FunctionalAdamW([],
@@ -29,9 +27,7 @@ class OverlappedAdamW(OverlappedOptimizer):
                                                   _allow_empty_param_list=True)
 
         super().__init__(functional_optim=self._functional_adamw, 
-                         grad_scaler=grad_scaler, 
-                         zero_grad=zero_grad,
-                         zero_grad_to_none=zero_grad_to_none)
+                         grad_scaler=grad_scaler)
         self.params = params
     
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):

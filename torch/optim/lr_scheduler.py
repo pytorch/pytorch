@@ -1,3 +1,4 @@
+from glob import escape
 import types
 import math
 from torch._six import inf
@@ -130,7 +131,7 @@ class _LRScheduler(object):
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_with_counter"):
+            if not self.optimizer.is_overlapped and not hasattr(self.optimizer.step, "_with_counter"):
                 warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
                               "initialization. Please, make sure to call `optimizer.step()` before "
                               "`lr_scheduler.step()`. See more details at "
@@ -170,10 +171,13 @@ class _LRScheduler(object):
                 else:
                     values = self.get_lr()
 
-        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
-            param_group, lr = data
-            param_group['lr'] = lr
-            self.print_lr(self.verbose, i, lr, epoch)
+        if self.optimizer.is_overlapped:
+            self.optimizer.set_lr(values[0])
+        else:
+            for i, data in enumerate(zip(self.optimizer.param_groups, values)):
+                param_group, lr = data
+                param_group['lr'] = lr
+                self.print_lr(self.verbose, i, lr, epoch)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 

@@ -3,18 +3,10 @@ from torch import Tensor
 class OverlappedOptimizer(object):
     def __init__(self, 
                  functional_optim,
-                 grad_scaler=None, 
-                 zero_grad=False,
-                 zero_grad_to_none=False
+                 grad_scaler=None
                  ) -> None:
-
-        if not zero_grad and zero_grad_to_none:
-            raise ValueError('zero_grad_to_none can only be set to True while zero_grad is True.')
-
         self._functional_optim = functional_optim
         self.grad_scaler = grad_scaler
-        self.zero_grad = zero_grad
-        self.zero_grad_to_none = zero_grad_to_none
 
         # Dummpy param_groups to cooperate with LRScheduler
         self.param_groups = [{'lr': functional_optim.defaults['lr']}]
@@ -35,20 +27,10 @@ class OverlappedOptimizer(object):
 
     def _pre_step(self, param, grad):
         if self.grad_scaler is not None:
-            self.grad_scaler.unscale_(param)
+            self.grad_scaler.unscale_(grad)
 
     def _post_step(self, param, grad):
-        if self.zero_grad:
-            if param.grad is not None:
-                if self.zero_grad_to_none:
-                    param.grad = None
-                else:
-                    if param.grad.grad_fn is not None:
-                        param.grad.detach_()
-                    else:
-                        param.grad.requires_grad_(False)
-
-                    param.grad.zero_()
+        pass
             
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):
         """The actual optimizing algorithm"""
