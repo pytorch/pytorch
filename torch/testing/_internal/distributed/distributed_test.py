@@ -3073,9 +3073,9 @@ class DistributedTest:
         def _test_all_gather_single_output_tensor_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
-            size = len(group)
-            tensor_in = _build_tensor(size, rank, dtype=dtype)
-            tensor_out = _build_tensor(size * len(group), -1, dtype=dtype)
+            size = 2
+            tensor_in = torch.ones([size, size], dtype=dtype) * rank
+            tensor_out = torch.ones([len(group) * size, size], dtype=dtype) * (-1)
             allgather = dist.all_gather
             if cuda:
                 tensor_in = tensor_in.cuda(rank_to_GPU[rank][0])
@@ -3092,23 +3092,17 @@ class DistributedTest:
                 tensor_in,
                 group_id,
                 False,
+                expect_event=False,
                 tensor_shapes=tensor_shapes,
             )
 
-            expected_tensors = [
-                _build_tensor(size, i, dtype=dtype) for i in group
-            ]
-            for i in range(len(group)):
-                t1 = tensor_out[i * size : (i + 1) * size]
-                t2 = expected_tensors[i]
-                self.assertEqual(t1, t2)
+            # Concatenate all blocks into a bigger tensor
+            expected_tensor = torch.cat([
+                torch.ones([size, size], dtype=dtype) * i for i in group
+            ])
+            self.assertEqual(tensor_out, expected_tensor)
 
             self._barrier()
-
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        def test_all_gather_single_output_tensor(self):
-            group, group_id, rank = self._init_global_test()
-            self._test_all_gather_single_output_tensor_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
         @skip_if_no_gpu
