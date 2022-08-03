@@ -803,7 +803,9 @@ Tensor& intersection_binary_op_sparse_dense_out(
     // op(0-dim, 0-dim).dtype == <common dtype>
     // op(0-dim, ge-1-dim).dtype == <ge-1-dim>.dtype,
     // where ge-1-dim is a tensor with dim >= 1.
-    const auto res_values = op(d_filtered, s_values).to(res.scalar_type());
+    // We do not cast if op is performed in-place.
+    const auto values = op(d_filtered, s_values);
+    const auto res_values = is_same_tensor(s_, res) ? values : values.to(res.scalar_type());
     get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
     get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
