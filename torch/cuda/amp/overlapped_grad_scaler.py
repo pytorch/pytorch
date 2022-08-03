@@ -48,7 +48,7 @@ class OverlappedGradScaler:
     the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used
     without incurring inf or NaN gradient values.
     ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every
-    ``scaler.step(optimizer)`` (or optional separate ``scaler.unscale_(optimizer)``, see :meth:`unscale_`).
+    step.
 
     * If infs/NaNs are found,  the underlying ``optimizer.step_param()`` will be skipped for the current bucket 
       (so the params in this bucket will not be updated but the reset buckets may be updated if no infs/NaNs are found) 
@@ -101,7 +101,7 @@ class OverlappedGradScaler:
             self._growth_tracker = None
 
             # Records whether found infs/NaNs or not within a step
-            self._found_inf_within_step
+            self._found_inf_within_step = False
 
     def _check_scale_growth_tracker(self, funcname) -> Tuple[torch.Tensor, torch.Tensor]:
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
@@ -167,7 +167,7 @@ class OverlappedGradScaler:
             return True
 
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
-        assert self._scale is not None, "Attempted unscale_ but _scale is None. " + fix
+        assert self._scale is not None, "Attempted unscale_grad but _scale is None. " + fix
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=grad.device)
         with torch.no_grad:
