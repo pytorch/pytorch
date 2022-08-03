@@ -256,14 +256,30 @@ def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
         raise NotImplementedError('Not yet implemented')
 
 
+@register_inference_rule(torch.nn.functional.embedding)
+def embedding_inference_rule_functional(n: Node, symbols, constraints, counter):
+    assert isinstance(n.args[0], Node)
+
+    embedding_dim_weights = symbols[n.args[1]]
+
+    # will treat this as a static shape. So we will not use matching.
+    weight_dims, counter = gen_tensor_dims(2, counter)
+    equality_constraint = BinConstraintT(embedding_dim_weights, TensorType(weight_dims), op_eq)
+    embedding_dim = weight_dims[1]
+    constraints, counter = gen_embedding_rules(n, symbols, embedding_dim, counter)
+    return [equality_constraint] + constraints, counter
+
+
 @register_inference_rule(torch.nn.modules.sparse.Embedding)
 def embedding_inference_rule(n: Node, module_instance, symbols, constraints, counter):
     """
     The output shape differs from the input shape in the last dimension
     """
     assert isinstance(n.args[0], Node)
+    return gen_embedding_rules(n, symbols, module_instance.embedding_dim, counter)
 
-    embedding_dim = module_instance.embedding_dim  # number
+
+def gen_embedding_rules(n: Node, symbols, embedding_dim, counter):
 
     embedding_output, counter = gen_tvar(counter)
     symbols[n] = embedding_output
@@ -1077,6 +1093,7 @@ class ConstraintGenerator:
         if n.op == 'placeholder':
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
+            n.type = Dyn if not (isinstance(n.type, TensorType) or n.type == Dyn) else n.type
             c1 = BinConstraintT(n.type, x, op_precision)
             c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
