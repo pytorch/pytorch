@@ -141,7 +141,7 @@ The Process for Nomination
   However, if there is no process identified, you can file a request to the core maintainers
   by submitting [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
   meeting every three months.
-* If you using the core maintainers route the information in your reqest 
+* If you are submitting a request to the core maintainers, the information in your request 
   should include the following items:
 
   * The nominees depth and breadth of code, review and design
