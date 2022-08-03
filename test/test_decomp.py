@@ -271,6 +271,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "new_empty"),
     # decomp has problem even with opmath
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
@@ -389,7 +390,10 @@ class TestDecomp(TestCase):
                 # Stuff we shouldn't bother testing
                 # (TODO: remove detach from the decomp table?)
                 if func not in decomposition_table or func in [
-                    torch.ops.aten.detach.default
+                    torch.ops.aten.detach.default,
+                    # non-deterministic ops
+                    torch.ops.aten.new_empty.default,
+                    torch.ops.aten.new_empty.SymInt
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 

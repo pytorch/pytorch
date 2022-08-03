@@ -1,4 +1,7 @@
 import collections
+import os
+import re
+import subprocess
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
@@ -23,6 +26,37 @@ Each of the entries in these maps translates a CUDA string to a tuple containing
 ROCm/HIP string, a type and API annotation and - optionally - an annotation if it is not
 supported in ROCm/HIP yet.
 """
+
+# We need to know the ROCm version so we can conditionalize some of the mappings later.
+# As of ROCm 5.0, the version is found in rocm_version.h header file under /opt/rocm/include.
+rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/rocm"
+try:
+    rocm_path = subprocess.check_output(["hipconfig", "--rocmpath"]).decode("utf-8")
+except subprocess.CalledProcessError:
+    print(f"Warning: hipconfig --rocmpath failed, assuming {rocm_path}")
+except FileNotFoundError:
+    # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
+    pass
+
+rocm_version = (0, 0, 0)
+rocm_version_h = f"{rocm_path}/include/rocm_version.h"
+# The file could be missing due to 1) ROCm version < 5.0, or 2) no ROCm install.
+if os.path.isfile(rocm_version_h):
+    RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
+    RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
+    RE_PATCH = re.compile(r"#define\s+ROCM_VERSION_PATCH\s+(\d+)")
+    major, minor, patch = 0, 0, 0
+    for line in open(rocm_version_h, "r"):
+        match = RE_MAJOR.search(line)
+        if match:
+            major = int(match.group(1))
+        match = RE_MINOR.search(line)
+        if match:
+            minor = int(match.group(1))
+        match = RE_PATCH.search(line)
+        if match:
+            patch = int(match.group(1))
+    rocm_version = (major, minor, patch)
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict(
@@ -563,8 +597,8 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
             ("hip/hip_texture_types.h", CONV_INCLUDE, API_RUNTIME),
         ),
         ("vector_types.h", ("hip/hip_vector_types.h", CONV_INCLUDE, API_RUNTIME)),
-        ("cublas.h", ("rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
-        ("cublas_v2.h", ("rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
+        ("cublas.h", ("rocblas.h" if rocm_version < (5, 2, 0) else "rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
+        ("cublas_v2.h", ("rocblas.h" if rocm_version < (5, 2, 0) else "rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
         ("curand.h", ("hiprand/hiprand.h", CONV_INCLUDE_CUDA_MAIN_H, API_RAND)),
         ("curand_kernel.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_discrete.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),

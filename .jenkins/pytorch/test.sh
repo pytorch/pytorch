@@ -82,12 +82,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
-
-  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
-  if [[ -z "${GITHUB_ACTIONS}" ]]; then
-    export NUM_TEST_SHARDS=2
-  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -456,7 +450,7 @@ build_xla() {
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   XLA_DIR=xla
-  USE_CACHE=0
+  USE_CACHE=1
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"

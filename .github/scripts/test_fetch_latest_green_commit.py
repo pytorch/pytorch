@@ -1,6 +1,6 @@
 from unittest import TestCase, main, mock
 from typing import Any, List, Dict
-from print_latest_commits import isGreen, WorkflowCheck
+from fetch_latest_green_commit import isGreen, WorkflowCheck
 
 workflowNames = [
     "pull",
@@ -37,13 +37,13 @@ class TestChecks:
         return workflow_checks
 
 class TestPrintCommits(TestCase):
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_all_successful(self, mock_get_commit_results: Any) -> None:
         "Test with workflows are successful"
         workflow_checks = mock_get_commit_results()
         self.assertTrue(isGreen("sha", workflow_checks)[0])
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_necessary_successful(self, mock_get_commit_results: Any) -> None:
         "Test with necessary workflows are successful"
         workflow_checks = mock_get_commit_results()
@@ -54,7 +54,7 @@ class TestPrintCommits(TestCase):
         workflow_checks = set_workflow_job_status(workflow_checks, workflowNames[12], "failed")
         self.assertTrue(isGreen("sha", workflow_checks)[0])
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_necessary_skipped(self, mock_get_commit_results: Any) -> None:
         "Test with necessary job (ex: pull) skipped"
         workflow_checks = mock_get_commit_results()
@@ -62,7 +62,7 @@ class TestPrintCommits(TestCase):
         result = isGreen("sha", workflow_checks)
         self.assertTrue(result[0])
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_skippable_skipped(self, mock_get_commit_results: Any) -> None:
         "Test with skippable jobs (periodic and docker-release-builds skipped"
         workflow_checks = mock_get_commit_results()
@@ -70,7 +70,7 @@ class TestPrintCommits(TestCase):
         workflow_checks = set_workflow_job_status(workflow_checks, "docker-release-builds", "skipped")
         self.assertTrue(isGreen("sha", workflow_checks))
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_necessary_failed(self, mock_get_commit_results: Any) -> None:
         "Test with necessary job (ex: Lint) failed"
         workflow_checks = mock_get_commit_results()
@@ -79,7 +79,7 @@ class TestPrintCommits(TestCase):
         self.assertFalse(result[0])
         self.assertEqual(result[1], "Lint checks were not successful")
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_skippable_failed(self, mock_get_commit_results: Any) -> None:
         "Test with skippable job (ex: docker-release-builds) failing"
         workflow_checks = mock_get_commit_results()
@@ -89,7 +89,7 @@ class TestPrintCommits(TestCase):
         self.assertFalse(result[0])
         self.assertEqual(result[1], "docker-release-builds checks were not successful")
 
-    @mock.patch('print_latest_commits.get_commit_results', return_value={})
+    @mock.patch('fetch_latest_green_commit.get_commit_results', return_value={})
     def test_no_workflows(self, mock_get_commit_results: Any) -> None:
         "Test with missing workflows"
         workflow_checks = mock_get_commit_results()

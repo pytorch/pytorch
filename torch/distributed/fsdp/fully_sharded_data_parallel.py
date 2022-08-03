@@ -71,7 +71,7 @@ from ._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
 )
-from .flat_param import FlatParameter, FlatParamHandle, ParamInfo
+from .flat_param import FlatParameter, FlatParamHandle
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
@@ -1843,6 +1843,23 @@ class FullyShardedDataParallel(nn.Module):
                 submodule._state_dict_type = prev_state_dict_type
                 submodule._state_dict_config = prev_state_dict_config
 
+    @property
+    def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._fsdp_wrapped_module.handle.parameter_module_names()
+        ):
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            # Activation checkpoint adds a prefix that has to be
+            # removed as well.
+            module_name = module_name.replace(
+                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+            )
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
     def _full_post_state_dict_hook(
         self,
         state_dict: Dict[str, Any],
@@ -1871,25 +1888,8 @@ class FullyShardedDataParallel(nn.Module):
 
         # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
         # processing buffers.
-        shared_param_infos = [
-            ParamInfo(param_name, module, module_name)
-            for (param_name, module, module_name, _, _, _)
-            in self._fsdp_wrapped_module.handle.flat_param._shared_param_infos
-        ]
-        for param_name, _, module_name in itertools.chain(
-            self._fsdp_wrapped_module.handle.flat_param._param_infos, shared_param_infos
-        ):
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            # Activation checkpoint adds a prefix that has to be
-            # removed as well.
-            module_name = module_name.replace(
-                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-            )
-            fqn = f"{prefix}{module_name}{param_name}"
-
+        for fqn, param_name, module_name in self._param_fqns:
+            fqn = f"{prefix}{fqn}"
             clean_key = fqn
             clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
@@ -1983,14 +1983,9 @@ class FullyShardedDataParallel(nn.Module):
         if not self._fsdp_wrapped_module.has_params:
             return state_dict
 
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            fqn = f"{prefix}{module_name}{param_name}"
-
+        for fqn, _, _ in self._param_fqns:
             # Create a ShardedTensor for the unflattened, non-sharded parameter.
+            fqn = f"{prefix}{fqn}"
             param = state_dict[fqn]
             local_shard = param.chunk(self.world_size)[self.rank].clone()
             offsets = [0 for _ in param.size()]
@@ -4128,7 +4123,7 @@ class FullyShardedDataParallel(nn.Module):
                             peers to communicate with next in `GossipGrad <https://arxiv.org/abs/1803.05880>`_, etc.
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Callable with the following signature:
+            hook (Callable): Callable with the following signature:
                             ``hook: Callable[torch.Tensor] -> None``:
                             This function takes in a Python tensor, which represents
                             the full, flattened, unsharded gradient with respect to all variables

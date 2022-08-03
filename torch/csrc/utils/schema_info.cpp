@@ -1,3 +1,4 @@
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/utils/schema_info.h>
 
 namespace torch {
@@ -107,20 +108,27 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
 }
 
 bool SchemaInfo::is_nondeterministic() const {
-  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
-      getNonDeterministicOps();
-  static const c10::FunctionSchema detach_schema = torch::jit::parseSchema(
+  static const c10::FunctionSchema dropout_schema = torch::jit::parseSchema(
       "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  if (detach_schema == this->schema_ && value_map_.count("train") &&
+  if (dropout_schema == schema_ && value_map_.count("train") &&
       !value_map_.at("train").toBool()) {
     return false;
   }
+
+#if defined C10_MOBILE
+  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
+      getNonDeterministicOps();
   return std::any_of(
       nondeterministic_ops.begin(),
       nondeterministic_ops.end(),
       [this](const c10 ::FunctionSchema& nondeterministic_op) {
         return nondeterministic_op == this->schema_;
       });
+#else
+  const auto& op = c10::Dispatcher::singleton().findOp(
+      c10::OperatorName(schema_.name(), schema_.overload_name()));
+  return op && op->hasTag(at::Tag::nondeterministic_seeded);
+#endif
 }
 
 bool SchemaInfo::may_alias(
@@ -203,6 +211,21 @@ bool SchemaInfo::mayContainAliasImpl(
       wildcard_set_.count(rhs);
 }
 
+void SchemaInfo::ensureConservativity(
+    const std::unordered_set<at::Symbol>& duplicates,
+    const std::vector<c10::Argument>& arguments_list,
+    c10::SchemaArgType type) {
+  for (size_t i = 0; i < arguments_list.size(); i++) {
+    if (arguments_list[i].alias_info()) {
+      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+        if (duplicates.count(set)) {
+          wildcard_set_.insert({type, i});
+        }
+      }
+    }
+  }
+}
+
 std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   // This list of nondeterministic ops is copied from JIT ir.cpp.
   static const std::vector<std::string> nondeterministic_op_strings = {
@@ -237,21 +260,6 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   }
 
   return nondeterministic_ops;
-}
-
-void SchemaInfo::ensureConservativity(
-    const std::unordered_set<at::Symbol>& duplicates,
-    const std::vector<c10::Argument>& arguments_list,
-    c10::SchemaArgType type) {
-  for (size_t i = 0; i < arguments_list.size(); i++) {
-    if (arguments_list[i].alias_info()) {
-      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
-        if (duplicates.count(set)) {
-          wildcard_set_.insert({type, i});
-        }
-      }
-    }
-  }
 }
 
 std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
