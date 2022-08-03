@@ -239,6 +239,15 @@ class TestProxyTensor(TestCase):
         # In case we mutated shared state in the g graph!
         self.assertEqual(g(), f())
 
+    def test_constant_unbind(self):
+        def f():
+            val = torch.tensor([2])
+            r, = torch.unbind(val, 0)
+            return r.item()
+
+        g = make_fx(f)()
+        self.assertEqual(g(), f())
+
     def test_use_fake_and_tensor(self):
         def f(x, y):
             z = torch.tensor([2.0, 3.0])
