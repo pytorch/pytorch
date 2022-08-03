@@ -83,11 +83,15 @@ def is_available() -> bool:
     return torch._C._cuda_getDeviceCount() > 0
 
 def is_bf16_supported():
-    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
+    # Check for ROCm, if true return true, no ROCM_VERSION check required,
+    # since it is supported on AMD GPU archs.
+    if torch.version.hip:
+        return True
+
     cu_vers = torch.version.cuda
     if cu_vers is not None:
         cuda_maj_decide = int(cu_vers.split('.')[0]) >= 11
-
     else:
         cuda_maj_decide = False
     return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and cuda_maj_decide
