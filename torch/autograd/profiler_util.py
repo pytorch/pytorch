@@ -636,11 +636,13 @@ def _filter_stack_entry(entry):
     return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
 MEMORY_EVENT_NAME = "[memory]"
+OUT_OF_MEMORY_EVENT_NAME = "[OutOfMemory]"
 
 def _filter_name(name):
     # ignoring the following utility ops
     filtered_out_names = [
         MEMORY_EVENT_NAME,  # used only for the top-level memory events
+        OUT_OF_MEMORY_EVENT_NAME,
         "profiler::_record_function_enter",
         "profiler::_record_function_enter_new",
         "profiler::_record_function_exit",

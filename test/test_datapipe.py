@@ -30,7 +30,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
@@ -49,6 +48,9 @@ from torch.utils.data.graph import traverse
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
+)
+from torch.utils.data.datapipes.utils.snapshot import (
+    _simple_graph_snapshot_restoration
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -521,7 +523,7 @@ class TestDataFramesPipes(TestCase):
         df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
         expected = list(dp_numbers)
         actual = list(df_numbers)
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -532,7 +534,7 @@ class TestDataFramesPipes(TestCase):
         dp_numbers = self._get_datapipe(range=1000)
         df_result = [tuple(item) for item in df_numbers]
         self.assertNotEqual(list(dp_numbers), df_result)
-        self.assertEquals(list(dp_numbers), sorted(df_result))
+        self.assertEqual(list(dp_numbers), sorted(df_result))
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -542,21 +544,21 @@ class TestDataFramesPipes(TestCase):
         last_batch = df_numbers_list[-1]
         self.assertEqual(4, len(last_batch))
         unpacked_batch = [tuple(row) for row in last_batch]
-        self.assertEquals([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
-        self.assertEquals(list(dp_numbers), list(df_numbers.unbatch(2)))
+        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         actual = list(df_numbers)
-        self.assertEquals([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
+        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -862,7 +864,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp0 = input_dp.fork(num_instances=1)
+        dp0 = input_dp.fork(num_instances=1, buffer_size=0)
         self.assertEqual(dp0, input_dp)
 
         # Functional Test: making sure all child DataPipe shares the same reference
@@ -883,12 +885,16 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual([(i, i) for i in range(10)], output)
 
         # Functional Test: one child DataPipe yields all value first, but buffer_size = 5 being too small
-        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=4)
         it1 = iter(dp1)
-        for _ in range(5):
+        for _ in range(4):
             next(it1)
         with self.assertRaises(BufferError):
             next(it1)
+        with self.assertRaises(BufferError):
+            list(dp2)
+
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
         with self.assertRaises(BufferError):
             list(dp2)
 
@@ -1636,8 +1642,9 @@ class TestFunctionalIterDataPipe(TestCase):
         # Reset Test:
         n_elements_before_reset = 3
         res_before_reset, res_after_reset = reset_after_n_next_calls(zipped_dp, n_elements_before_reset)
-        self.assertEqual(list((i, i) for i in range(5))[:n_elements_before_reset], res_before_reset)
-        self.assertEqual(list((i, i) for i in range(5)), res_after_reset)
+        expected_res = [(i, i) for i in range(5)]
+        self.assertEqual(expected_res[:n_elements_before_reset], res_before_reset)
+        self.assertEqual(expected_res, res_after_reset)
 
 
 class TestFunctionalMapDataPipe(TestCase):
@@ -2328,7 +2335,7 @@ def unbatch(x):
 class TestSerialization(TestCase):
     @skipIfNoDill
     def test_spawn_lambdas_iter(self):
-        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1)
+        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(idp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
@@ -2336,7 +2343,7 @@ class TestSerialization(TestCase):
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
-        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1)
+        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
@@ -2635,8 +2642,7 @@ class TestSharding(TestCase):
         expected = list(dp0)
 
         dp0 = self._get_pipeline().sharding_filter()
-        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:
             items.append(i)
@@ -2982,6 +2988,223 @@ class TestIterDataPipeCountSampleYielded(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
             list(it)
         self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+
+class _CustomNonGeneratorTestDataPipe(IterDataPipe):
+    def __init__(self):
+        self.n = 10
+        self.source = list(range(self.n))
+
+    # This class's `__iter__` is not a generator function
+    def __iter__(self):
+        return iter(self.source)
+
+    def __len__(self):
+        return self.n
+
+
+class _CustomSelfNextTestDataPipe(IterDataPipe):
+    def __init__(self):
+        self.n = 10
+        self.iter = iter(range(self.n))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.iter)
+
+    def reset(self):
+        self.iter = iter(range(self.n))
+
+    def __len__(self):
+        return self.n
+
+
+class TestIterDataPipeGraphFastForward(TestCase):
+
+    def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, expected_res, n_iterations=3, rng=None):
+        if rng is None:
+            rng = torch.Generator()
+        rng = rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+
+        # Test Case: fast forward works with list
+        rng.manual_seed(0)
+        fast_forward_fn(datapipe, n_iterations, rng)
+        actual_res = list(datapipe)
+        self.assertEqual(len(datapipe) - n_iterations, len(actual_res))
+        self.assertEqual(expected_res[n_iterations:], actual_res)
+
+        # Test Case: fast forward works with iterator
+        rng.manual_seed(0)
+        fast_forward_fn(datapipe, n_iterations, rng)
+        it = iter(datapipe)
+        actual_res = list(it)
+        self.assertEqual(len(datapipe) - n_iterations, len(actual_res))
+        self.assertEqual(expected_res[n_iterations:], actual_res)
+        with self.assertRaises(StopIteration):
+            next(it)
+
+    def test_simple_snapshot_graph(self):
+        graph1 = dp.iter.IterableWrapper(range(10))
+        res1 = list(range(10))
+        self._fast_forward_graph_test_helper(graph1, _simple_graph_snapshot_restoration,
+                                             expected_res=res1)
+
+        graph2 = graph1.map(_mul_10)
+        res2 = [10 * x for x in res1]
+        self._fast_forward_graph_test_helper(graph2, _simple_graph_snapshot_restoration,
+                                             expected_res=res2)
+
+        rng = torch.Generator()
+        graph3 = graph2.shuffle()
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        res3 = list(graph3)
+        self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
+                                             expected_res=res3)
+
+        graph4 = graph3.map(_mul_10)
+        res4 = [10 * x for x in res3]
+        self._fast_forward_graph_test_helper(graph4, _simple_graph_snapshot_restoration,
+                                             expected_res=res4)
+
+        batch_size = 2
+        graph5 = graph4.batch(batch_size)
+        res5 = [res4[i:i + batch_size] for i in range(0, len(res4), batch_size)]  # .batch(2)
+        self._fast_forward_graph_test_helper(graph5, _simple_graph_snapshot_restoration,
+                                             expected_res=res5)
+
+        # With `fork` and `zip`
+        cdp1, cdp2 = graph5.fork(2)
+        graph6 = cdp1.zip(cdp2)
+        rng = rng.manual_seed(100)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        res6 = [(x, x) for x in res5]
+        self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
+                                             expected_res=res6)
+
+        # With `fork` and `concat`
+        graph7 = cdp1.concat(cdp2)
+        res7 = res5 * 2
+        self._fast_forward_graph_test_helper(graph7, _simple_graph_snapshot_restoration,
+                                             expected_res=res7)
+
+        # Raises an exception if the graph has already been restored
+        with self.assertRaisesRegex(RuntimeError, "Snapshot restoration cannot be applied."):
+            _simple_graph_snapshot_restoration(graph7, 1)
+            _simple_graph_snapshot_restoration(graph7, 1)
+
+    def test_simple_snapshot_custom_non_generator(self):
+        graph = _CustomNonGeneratorTestDataPipe()
+        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration, expected_res=range(10))
+
+    def test_simple_snapshot_custom_self_next(self):
+        graph = _CustomSelfNextTestDataPipe()
+        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration, expected_res=range(10))
+
+    def _snapshot_test_helper(self, datapipe, expected_res, n_iter=3, rng=None):
+        """
+        Extend the previous test with serialization and deserialization test.
+        """
+        if rng is None:
+            rng = torch.Generator()
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        it = iter(datapipe)
+        for _ in range(n_iter):
+            next(it)
+        serialized_graph = pickle.dumps(datapipe)
+        deserialized_graph = pickle.loads(serialized_graph)
+        self.assertEqual(n_iter, datapipe._number_of_samples_yielded)
+        self.assertEqual(n_iter, deserialized_graph._number_of_samples_yielded)
+
+        rng_for_deserialized = torch.Generator()
+        rng_for_deserialized.manual_seed(0)
+        _simple_graph_snapshot_restoration(deserialized_graph, n_iter, rng=rng_for_deserialized)
+        self.assertEqual(expected_res[n_iter:], list(it))
+        self.assertEqual(expected_res[n_iter:], list(deserialized_graph))
+
+    def test_simple_snapshot_graph_with_serialization(self):
+        graph1 = dp.iter.IterableWrapper(range(10))
+        res1 = list(range(10))
+        self._snapshot_test_helper(graph1, expected_res=res1)
+
+        graph2 = graph1.map(_mul_10)
+        res2 = [10 * x for x in res1]
+        self._snapshot_test_helper(graph2, expected_res=res2)
+
+        rng = torch.Generator()
+        graph3 = graph2.shuffle()
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        res3 = list(graph3)
+        self._snapshot_test_helper(graph3, expected_res=res3)
+
+        graph4 = graph3.map(_mul_10)
+        res4 = [10 * x for x in res3]
+        self._snapshot_test_helper(graph4, expected_res=res4)
+
+        batch_size = 2
+        graph5 = graph4.batch(batch_size)
+        res5 = [res4[i:i + batch_size] for i in range(0, len(res4), batch_size)]  # .batch(2)
+        self._snapshot_test_helper(graph5, expected_res=res5)
+
+        # With `fork` and `zip`
+        cdp1, cdp2 = graph5.fork(2)
+        graph6 = cdp1.zip(cdp2)
+        res6 = [(x, x) for x in res5]
+        self._snapshot_test_helper(graph6, expected_res=res6)
+
+        # With `fork` and `concat`
+        graph7 = cdp1.concat(cdp2)
+        res7 = res5 * 2
+        self._snapshot_test_helper(graph7, expected_res=res7)
+
+    def test_simple_snapshot_graph_repeated(self):
+        cdp1, cdp2 = dp.iter.IterableWrapper(range(10)).map(_mul_10).shuffle().map(_mul_10).map(_mul_10).fork(2)
+        graph = cdp1.zip(cdp2)
+
+        rng = torch.Generator()
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+
+        # Get expected result
+        expected_res = list(graph)
+
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        it = iter(graph)
+        n_iter = 3
+        for _ in range(n_iter):
+            next(it)
+
+        # First serialization/deserialization
+        serialized_graph = pickle.dumps(graph)
+        deserialized_graph = pickle.loads(serialized_graph)
+
+        rng_for_deserialized = torch.Generator()
+        rng_for_deserialized.manual_seed(0)
+        _simple_graph_snapshot_restoration(deserialized_graph, deserialized_graph._number_of_samples_yielded,
+                                           rng=rng_for_deserialized)
+
+        it = iter(deserialized_graph)
+        # Get the next element and ensure it is as expected
+        self.assertEqual(expected_res[3], next(it))
+
+        # Serializalize/Deserialize and fast-forward again after to ensure it works
+        serialized_graph2 = pickle.dumps(deserialized_graph)
+        deserialized_graph2 = pickle.loads(serialized_graph2)
+
+        rng_for_deserialized = torch.Generator()
+        rng_for_deserialized.manual_seed(0)
+        _simple_graph_snapshot_restoration(deserialized_graph2, deserialized_graph._number_of_samples_yielded,
+                                           rng=rng_for_deserialized)
+
+        # Get the next element and ensure it is as expected
+        self.assertEqual(expected_res[4:], list(deserialized_graph2))
+
 
 if __name__ == '__main__':
     run_tests()
