@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <ATen/ATen.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -370,7 +371,7 @@ void GraphTaskGuard::restore_current_graph_task() {
 
 // The current graph task's exec_info could be used to trim unnecessary edegs
 // during node evaluation, see `Node.should_compute_output()` function.
-const std::unordered_map<Node*, ExecInfo>* get_current_graph_task_exec_info() {
+const std::unordered_map<Node*, GraphTask::ExecInfo>* get_current_graph_task_exec_info() {
   return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
 }
 

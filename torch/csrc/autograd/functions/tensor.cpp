@@ -1,9 +1,9 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 
-#include <torch/csrc/autograd/exec_info.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
