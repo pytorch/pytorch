@@ -36,7 +36,8 @@ from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              SynchronizedDataLoaderPattern,
                                              GradNotSetToNonePattern,
                                              Conv2dBiasFollowedByBatchNorm2dPattern,
-                                             MatMulDimInFP16Pattern)
+                                             MatMulDimInFP16Pattern,
+                                             report_all_anti_patterns)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1728,6 +1729,32 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    def test_profiler_pattern_matcher_json_report(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+        optimizer = torch.optim.Adam(model.parameters())
+        with profile(with_stack=True, record_shapes=True) as prof:
+            y_hat = model(x)
+            loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
+        try:
+            with open("./torchtidy_report.json") as f:
+                report = json.load(f)
+            self.assertTrue("test_profiler.py" in report)
+            self.assertTrue(len(report["test_profiler.py"]) > 0)
+            expected_fields = sorted(["line_number", "name", "url", "message"])
+            for event in report["test_profiler.py"]:
+                actual_fields = sorted(event.keys())
+                self.assertEqual(expected_fields, actual_fields)
+        finally:
+            os.remove("torchtidy_report.json")
 
 if __name__ == '__main__':
     run_tests()
