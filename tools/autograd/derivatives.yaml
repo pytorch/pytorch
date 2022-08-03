@@ -333,6 +333,10 @@
   p: zeros_like(p)
   result: self_t.zero_()
 
+- name: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
+  self: zeros_like(grad)
+  result: auto_element_wise
+
 - name: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
