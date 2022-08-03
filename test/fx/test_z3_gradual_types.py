@@ -29,6 +29,34 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+class TorchDynamoUseCases(unittest.TestCase):
+
+
+    def test_reshape(self):
+        """
+        In this example, we prove that some nodes must
+        always have a fixed shape regardless of the input
+        """
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Dyn):
+                y = x.view(100)
+                tmp = y.size()[0]
+                return tmp
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        dim = z3.Int(4)
+        self.assertEqual(s.model()[dim], 100)
+        # print(s.model()[dim])
+
 
 class HFOperations(unittest.TestCase):
 
@@ -400,6 +428,37 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.model()[output].arg(0).arg(1), b[0])
         self.assertEqual(s.model()[output].arg(1).arg(1), b[1])
 
+
+    def test_layer_norm_functional(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                return torch.nn.functional.layer_norm(x, (1024,))
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # make the output a size 1 tensor which should result
+        # in the migration of the input
+
+        b = BasicBlock().forward(torch.rand(1024))
+        input = z3.Const(1, tensor_type)
+        output = z3.Const(2, tensor_type)
+        s.add(output == tensor_type.tensor1(D(1, 1024)))
+        s.check()
+        self.assertEqual(s.model()[input], s.model()[output])
+        # input shape = output shape
+        self.assertEqual(b.shape[0], s.model()[input].arg(0).arg(1))
+
     def test_ne_int_long_type_as(self):
 
         class BasicBlock(torch.nn.Module):
@@ -718,6 +777,28 @@ class HFOperations(unittest.TestCase):
 
         self.assertEquals(s.check(), z3.sat)
 
+
+    def test_embedding_2(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4]), y: TensorType([Dyn, 1024])):
+                return torch.nn.functional.embedding(x, y)
+
+        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long), torch.rand(256008, 1024)).size()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        embedding_result = z3.Const(5, tensor_type)
+
+        assert s.model()[embedding_result].arg(0).arg(1) == B[0]
+        assert s.model()[embedding_result].arg(1).arg(1) == B[1]
+        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
 
     def test_size_two_args(self):
         class BasicBlock(torch.nn.Module):
