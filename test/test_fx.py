@@ -553,6 +553,25 @@ class TestFX(JitTestCase):
             self.assertTrue(new_node.stack_trace is not None)
             assert 'test_fx.py' in new_node.stack_trace
 
+    def test_stack_traces_with_transformer(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        new_gm = Transformer(gm).transform()
+
+        # nodes after Transformer should still preserve the original node's stack trace
+        for node in new_gm.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_fx.py' in node.stack_trace
+
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')

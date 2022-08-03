@@ -6,6 +6,7 @@ from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
+from contextlib import contextmanager
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -70,6 +71,7 @@ class Interpreter:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
+        self.current_node: Optional[Node] = None
 
         self.garbage_collect_values = garbage_collect_values
 
@@ -134,6 +136,15 @@ class Interpreter:
                 output_val = self.env[node]
                 return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
 
+    @contextmanager
+    def _set_current_node(self, node):
+        saved_current_node = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = saved_current_node
+
     @compatibility(is_backward_compatible=True)
     def run_node(self, n : Node) -> Any:
         """
@@ -148,10 +159,11 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        args, kwargs = self.fetch_args_kwargs_from_env(n)
-        assert isinstance(args, tuple)
-        assert isinstance(kwargs, dict)
-        return getattr(self, n.op)(n.target, args, kwargs)
+        with self._set_current_node(n):
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            assert isinstance(args, tuple)
+            assert isinstance(kwargs, dict)
+            return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
@@ -391,13 +403,23 @@ class Transformer(Interpreter):
         self.new_graph.set_codegen(module.graph._codegen)
 
         class TransformerTracer(Tracer):
-            def __init__(self, graph: Graph):
+            def __init__(self, interpreter: Interpreter, graph: Graph):
                 super().__init__()
+                self.interpreter = interpreter
                 self.graph = graph
 
             def is_leaf_module(self, _, __) -> bool:
                 return True
-        self.tracer = TransformerTracer(self.new_graph)
+
+            def create_node(self, kind: str, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+                            name: Optional[str] = None, type_expr: Optional[Any] = None) -> Node:
+                node = super().create_node(kind, target, args, kwargs, name, type_expr)
+                # copy original node's stack_trace to the new node
+                original_node = self.interpreter.current_node
+                node.stack_trace = original_node.stack_trace if original_node else None
+                return node
+
+        self.tracer = TransformerTracer(self, self.new_graph)
         self.tracer.root = module
 
     @compatibility(is_backward_compatible=True)
@@ -416,7 +438,9 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
-        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
+        placeholder_node = self.new_graph.placeholder(target, default_value=default_value)
+        placeholder_node.stack_trace = self.current_node.stack_trace if self.current_node else None
+        return Proxy(placeholder_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
@@ -433,7 +457,9 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        getattr_node = self.new_graph.get_attr(target)
+        getattr_node.stack_trace = self.current_node.stack_trace if self.current_node else None
+        return Proxy(getattr_node, self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
