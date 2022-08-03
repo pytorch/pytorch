@@ -551,7 +551,6 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
 
-<<<<<<< HEAD
         if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
             try:
                 torch._C._add_meta_to_tls_dispatch_include()
@@ -560,11 +559,6 @@ class FakeTensorMode(TorchDispatchMode):
             finally:
                 torch._C._remove_meta_from_tls_dispatch_include()
 
-=======
-        if "prims::" in func._schema.name:
-            with no_dispatch():
-                return func(*args, **kwargs)
->>>>>>> f144515d6e ([WIP] Added support for tracing through autograd)
         if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]
             if func not in constructors:
