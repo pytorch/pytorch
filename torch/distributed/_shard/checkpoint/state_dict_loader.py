@@ -1,5 +1,5 @@
 import io
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, cast
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor.shard import Shard
 
@@ -8,25 +8,18 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    ShardedTensorMetadata
-)
-from torch.distributed._shard.sharding_spec._internals import (
-    validate_non_overlapping_shards_metadata,
-    _check_shard_metadata_pair_overlap,
 )
 
 from .metadata import (
     BytesReadRequest,
     BytesStorageMetadata,
-    ShardStorageMetadata,
     TensorReadRequest,
-    Metadata,
-    ShardedTensorStorageMetadata,
     TensorStorageMetadata,
+    Metadata,
+    MetadataIndex,
 )
 from .resharding import (
     _prepare_generic_tensor_read,
-    _shards_get_overlap_region_wrt_saved_tensor
 )
 from .storage import (
     StorageReader,
@@ -46,13 +39,6 @@ def _create_shard_for(tensor: Tensor) -> Shard:
         metadata=_create_shard_metadata(tensor.size()),
     )
 
-def _create_checkpoint_shard_for(storage: TensorStorageMetadata) -> ShardStorageMetadata:
-    return ShardStorageMetadata(
-        # The metadata device is not used during loading.
-        shard_metadata=_create_shard_metadata(storage.size),
-        storage_key=storage.storage_key,
-    )
-
 def _reshard_and_prepare_read_request(
     state_dict: Dict[str, Any], metadata_from_storage: Metadata
 ) -> Tuple[List[BytesReadRequest], List[TensorReadRequest]]:
@@ -61,6 +47,7 @@ def _reshard_and_prepare_read_request(
     """
     tensor_read_requests = []
     bytes_read_requests = []
+    storage_md = cast(Dict[MetadataIndex, str], metadata_from_storage.storage_data)
     for fqn, obj in state_dict.items():
         md = metadata_from_storage.state_dict_metadata[fqn]
         if isinstance(obj, ShardedTensor):
@@ -72,7 +59,7 @@ def _reshard_and_prepare_read_request(
                 bytes_io = io.BytesIO()
                 brr = BytesReadRequest(
                     bytes=bytes_io,
-                    storage_key=md.storage_key,
+                    storage_key=storage_md[MetadataIndex(fqn)],
                     fqn=fqn
                 )
                 bytes_read_requests.append(brr)
@@ -83,17 +70,15 @@ def _reshard_and_prepare_read_request(
                 )
             continue
 
-        if isinstance(md, ShardedTensorStorageMetadata):
-            checkpoint_shards = md.storage_metadata
-        elif isinstance(md, TensorStorageMetadata):
-            checkpoint_shards = [_create_checkpoint_shard_for(md)]
+        if isinstance(md, TensorStorageMetadata):
+            checkpoint_shards = md.chunks
         else:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, " +
                 f"expected TensorStorageMetadata but found {type(md)}"
             )
 
-        tensor_read_requests += _prepare_generic_tensor_read(checkpoint_shards, local_shards)
+        tensor_read_requests += _prepare_generic_tensor_read(fqn, checkpoint_shards, local_shards, storage_md)
 
 
 
@@ -186,96 +171,3 @@ def load_state_dict(
         tensor_futures.wait()
 
     distW.all_gather("checkpoint read", load_model)
-
-
-def _validate_sharded_tensor(
-    tensor_md: ShardedTensorMetadata, checkpoint_md: ShardedTensorStorageMetadata
-) -> None:
-    # We assume the incoming tensor has being validated during construction
-
-    # To ensure a checkpoint can satisfy loading a ST, we compute the loading
-    # plans for all shards and see if they are doable.
-    validate_non_overlapping_shards_metadata(
-        checkpoint_md.tensor_metadata.shards_metadata
-    )
-
-    for shard_md in tensor_md.shards_metadata:
-        read_volume = 0
-        for storage_md in checkpoint_md.storage_metadata:
-            shard_md_from_storage = storage_md.shard_metadata
-
-            if not _check_shard_metadata_pair_overlap(shard_md, shard_md_from_storage):
-                continue
-
-            shard_volume = 1
-            for (_, _, _, length,) in _shards_get_overlap_region_wrt_saved_tensor(
-                saved_shard=shard_md_from_storage, current_shard=shard_md
-            ):
-                shard_volume *= length
-            read_volume += shard_volume
-
-        shard_volume = 1
-        for size in shard_md.shard_sizes:
-            shard_volume *= size
-        if read_volume != shard_volume:
-            raise ValueError(
-                f"Shard {shard_md} only has {read_volume} available" +
-                "elements but needs {shard_volume}"
-            )
-
-def validate_metadata(
-    state_dict: Dict[str, Any], metadata: Metadata
-) -> None:
-    """
-    Verify if it's possible to correctly load `state_dict` from `metadata`.
-
-    This method validate if a checkpoint is usable with a given model
-    state_dict without loading it. It will raise ValueError if it finds
-    anything problematic.
-
-    Args:
-        state_dict: A state_dict to verify if it's loadable.
-        metadata: Checkpoint metadata to verify against.
-
-    Returns:
-        None
-
-    Example:
-        >>> my_model: torch.nn.Model = ....
-        >>> my_reader: torch.distributed._shard.checkpoint.StorageReader = ...
-
-        >>> torch.distributed._shard.checkpoint.validate_metadata(my_model.state_dict(), my_reader.read_metadata())
-        None
-    ```
-
-    """
-    for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor):
-            if fqn not in metadata.state_dict_metadata:
-                raise ValueError(f"{fqn}: Could not find ShardedTensor metadata")
-
-            md = metadata.state_dict_metadata[fqn]
-            if not isinstance(md, ShardedTensorStorageMetadata):
-                raise ValueError(f"{fqn}: Expected ShardedTensorStorageMetadata but found: {type(md)}")
-
-            # Check if the overall ShardedTensor size is the same. Individual shards don't matter as we can reshard.
-            md_size = list(md.tensor_metadata.size)
-            tensor_size = list(obj.metadata().size)
-            if md_size != tensor_size:
-                raise ValueError(
-                    f"{fqn}: Incompatible ShardedTensor size: expectected {tensor_size} but found {md_size}"
-                )
-
-            _validate_sharded_tensor(obj.metadata(), md)
-        elif isinstance(obj, torch.Tensor):
-            if fqn not in metadata.state_dict_metadata:
-                raise ValueError(f"{fqn}: Could not find Tensor metadata")
-
-            md = metadata.state_dict_metadata[fqn]
-            if not isinstance(md, TensorStorageMetadata):
-                raise ValueError(f"{fqn}: Expected TensorStorageMetadata but found: {type(md)}")
-
-            if md.size != obj.size():
-                raise ValueError(
-                    f"{fqn}: Incompatible tensor size: expected {obj.size()} but found {md.size}"
-                )
