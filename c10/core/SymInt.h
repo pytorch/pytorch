@@ -28,11 +28,9 @@ namespace c10 {
 // SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
 class C10_API SymInt {
-  enum class CTOR_TYPE {
-    INT, /* unused */
+  enum Unchecked {
     UNCHECKED,
   };
-
 
  public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
@@ -41,7 +39,7 @@ class C10_API SymInt {
   SymInt() = default;
 
   // unchecked c-tor accepting raw `data_`
-  SymInt(int64_t d, CTOR_TYPE) : data_(d) {}
+  SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
