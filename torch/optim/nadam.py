@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['NAdam', 'nadam']
 
 class NAdam(Optimizer):
     r"""Implements NAdam algorithm.
@@ -92,7 +93,7 @@ class NAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -169,10 +170,10 @@ def nadam(params: List[Tensor],
     See :class:`~torch.optim.NAdam` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
-    if not all([isinstance(t, torch.Tensor) for t in mu_products]):
+    if not all(isinstance(t, torch.Tensor) for t in mu_products):
         raise RuntimeError("API has changed, `mu_products` argument must contain a list of singleton tensors")
 
     if foreach is None:

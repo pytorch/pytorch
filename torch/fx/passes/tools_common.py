@@ -6,6 +6,7 @@ import torch.fx
 from torch.fx.node import _get_qualified_name
 from torch.fx._compatibility import compatibility
 
+__all__ = ['get_acc_ops_name', 'get_node_target', 'is_node_output_tensor', 'FxNetAccFusionsFinder', 'legalize_graph']
 
 Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
@@ -22,7 +23,7 @@ def get_acc_ops_name(k):
     elif k.__module__ and "acc_ops" in k.__module__:
         return f"acc_ops.{k.__name__}"
     else:
-        module = k.__module__
+        module = k.__module__.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
         return f"{module if module else ''}.{k.__name__}"
 
 

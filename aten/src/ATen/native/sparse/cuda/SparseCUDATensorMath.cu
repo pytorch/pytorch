@@ -459,16 +459,20 @@ struct TensorMulOp {
   }
 };
 
-SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
-  if (src_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, t_, src_);
-  } else if (t_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, src_, t_);
+SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
+  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+
+  // case mul(sparse, dense)
+  if (!src_.is_sparse()) {
+    return _mul_dense_sparse_out(src_, t_, r_);
+  }
+  // case mul(dense, sparse)
+  if (!t_.is_sparse()) {
+    return _mul_dense_sparse_out(t_, src_, r_);
   }
 
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
@@ -495,7 +499,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 
   Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
-  int64_t valueSize = t_values_.stride(0);
+  int64_t valueSize = std::max<int64_t>(1, t_values_.stride(0));
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
   dim3 grid;
   int curDevice = -1;

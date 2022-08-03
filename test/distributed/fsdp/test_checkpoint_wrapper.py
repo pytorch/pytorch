@@ -106,7 +106,7 @@ class CheckpointWrapperTest(TestCase):
 
         functional_reentrant = test(use_checkpointing=True, use_wrapper=False, use_reentrant=True)
         wrapper_reentrant = test(use_checkpointing=False, use_wrapper=True, use_reentrant=True)
-        self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
+        self.assertEqual(functional_reentrant, wrapper_reentrant)
 
     def test_forward_missing_attributes(self):
         lin = nn.Linear(1, 1)
@@ -176,6 +176,12 @@ class CheckpointWrapperTest(TestCase):
                     self.assertTrue(param.requires_grad)
                     self.assertFalse(param.grad is None)
 
+    def test_fqn(self):
+        lin = nn.Linear(10, 10, bias=False)
+        lin = checkpoint_wrapper(lin)
+        state_dict = lin.state_dict()
+        for fqn, _ in lin.named_parameters():
+            self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
 if __name__ == "__main__":
     run_tests()

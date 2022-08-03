@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -844,7 +845,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
   auto size = asIntArrayRefSlow(packed_size);
-  return expand(self, size, implicit);
+  return self.expand(size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
@@ -927,7 +928,7 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
 }
 
 Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return narrow_copy(self, dim, start, sym_length.expect_int());
+  return self.narrow_copy(dim, start, sym_length.expect_int());
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -1072,24 +1073,101 @@ Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t leng
   return at::narrow(self, dim, st, length);
 }
 
-Tensor permute(const Tensor& self, IntArrayRef dims) {
-  auto nDims = self.dim();
-  TORCH_CHECK(dims.size() == (size_t)nDims,
-           "number of dims don't match in permute");
-  auto oldSizes = self.sizes();
-  auto oldStrides = self.strides();
-  DimVector newSizes(nDims);
-  DimVector newStrides(nDims);
-  std::vector<bool> seen(nDims);
-  for (const auto i : c10::irange(nDims)) {
-    auto dim = maybe_wrap_dim(dims[i], nDims);
-    TORCH_CHECK(!seen[dim],
-             "repeated dim in permute");
-    seen[dim] = true;
-    newSizes[i] = oldSizes[dim];
-    newStrides[i] = oldStrides[dim];
+std::tuple<DimVector, DimVector, std::vector<int64_t>>
+_permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == static_cast<int64_t>(dims.size()),
+      "permute(sparse_coo): number of dimensions in the tensor input ",
+      "does not match the length of the desired ordering of dimensions ",
+      "i.e. input.dim() = ", ndim, " is not equal to len(dims) = ", dims.size());
+
+  const auto is_strided_layout = self.options().layout() == at::kStrided;
+  const auto old_sizes = self.sizes();
+  const auto old_strides = is_strided_layout ? self.strides() : IntArrayRef{};
+
+  auto new_sizes = DimVector(ndim);
+  auto new_strides = DimVector(is_strided_layout ? ndim : 0);
+  auto wrapped_dims = std::vector<int64_t>(ndim);
+  std::vector<bool> seen_dims(ndim);
+
+  for (const auto i : c10::irange(ndim)) {
+    const auto d = maybe_wrap_dim(dims[i], ndim);
+    TORCH_CHECK(!seen_dims[d],
+        "permute(): duplicate dims are not allowed.");
+    seen_dims[d] = true;
+    wrapped_dims[i] = d;
+    new_sizes[i] = old_sizes[d];
+    if (is_strided_layout) {
+      new_strides[i] = old_strides[d];
+    }
   }
-  return self.as_strided(newSizes, newStrides);
+
+  return std::make_tuple(new_sizes, new_strides, wrapped_dims);
+}
+
+Tensor permute(const Tensor& self, IntArrayRef dims) {
+  DimVector new_sizes, new_strides;
+  std::vector<int64_t> _;
+  std::tie(new_sizes, new_strides, _) = _permute_size_stride_estimation(self, dims);
+  return self.as_strided(new_sizes, new_strides);
+}
+
+Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
+  DimVector new_sizes, _;
+  std::vector<int64_t> wrapped_dims;
+  std::tie(new_sizes, _, wrapped_dims) = _permute_size_stride_estimation(self, dims);
+
+  const auto ndim = self.dim();
+  const auto sparse_ndim = self.sparse_dim();
+  const auto dense_ndim = self.dense_dim();
+
+  auto dims_id_perm = std::vector<int64_t>(ndim);
+  auto dims_sparse_dense_id_perm = std::vector<int64_t>(ndim);
+  for (const auto i : c10::irange(ndim)) {
+    dims_id_perm[i] = i;
+    dims_sparse_dense_id_perm[i] = wrapped_dims[i];
+  }
+  std::sort(dims_sparse_dense_id_perm.begin(), dims_sparse_dense_id_perm.begin() + sparse_ndim);
+  std::sort(dims_sparse_dense_id_perm.begin() + sparse_ndim, dims_sparse_dense_id_perm.end());
+  TORCH_CHECK(dims_sparse_dense_id_perm == dims_id_perm,
+      "permute(sparse_coo): transpositions between sparse and dense dimensions are not allowed.",
+      "Only transpositions within sparse and dense dimensions are supported.");
+
+  const auto slice = [](std::vector<int64_t> v, size_t begin, size_t len) -> decltype(v) {
+    return std::vector<int64_t>{v.begin() + begin, v.begin() + begin + len};
+  };
+
+  auto old_sparse_dims = slice(dims_id_perm, 0, sparse_ndim);
+  auto old_dense_dims = slice(dims_id_perm, sparse_ndim, ndim - sparse_ndim);
+  auto new_sparse_dims = slice(wrapped_dims, 0, sparse_ndim);
+  auto new_dense_dims = slice(wrapped_dims, sparse_ndim, ndim - sparse_ndim);
+
+  auto old_indices = self._indices();
+  auto old_values = self._values();
+
+  const auto new_indices = (new_sparse_dims == old_sparse_dims)
+    ? old_indices
+    : [&]() -> Tensor {
+      auto sparse_perm_tensor = at::from_blob(reinterpret_cast<void*>(new_sparse_dims.data()),
+          {sparse_ndim}, old_indices.options().device(at::kCPU));
+      // creates new indices. It is possible to avoid that if COO
+      // is allowed to store a permutation vector.
+      return old_indices.index_select(0, sparse_perm_tensor.to(self.device().type()));
+    }();
+  const auto new_values = (new_dense_dims == old_dense_dims)
+    ? old_values
+    : [&]() -> Tensor {
+      auto values_perm = std::vector<int64_t>(dense_ndim + 1);
+      for (const auto i : c10::irange(dense_ndim)) {
+        values_perm[i + 1] = new_dense_dims[i] - sparse_ndim + 1;
+      }
+      return old_values.permute(values_perm);
+    }();
+
+  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  return _sparse_coo_tensor_with_dims_and_tensors(
+      sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options())
+    ._coalesced_(is_coalesced);
 }
 
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
@@ -1184,6 +1262,17 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  // reshape has special autograd logic since it sometimes returns a view but sometimes does not
+  // we have to intercept here instead of using dispatcher
+  // otherwise we will see "autograd still running" kind of error in inference mode:
+  // * if we create a tensor in inference mode scope,
+  //   then pass it to a inference mode decorated function,
+  //   everything is fine
+  // * but if we create the input tensor not with inference mode,
+  //   then errors like "Cannot set version_counter for inference tensor" arise
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, proposed_shape);
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
@@ -1252,7 +1341,8 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
       if (new_values.size(0) == 1) {
         return new_values[0];
       } else {
-        return new_values.sum(0);
+        // sum promotes integral type to int64 when dtype is not specified.
+        return at::sum(new_values, 0, false, new_values.scalar_type());
       }
     } else {
       auto dimIndices = (arange(
@@ -2820,7 +2910,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
@@ -2859,8 +2949,12 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   return result;
 }
 
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+  return native::unflatten_impl(self, dim, sizes, c10::nullopt);
+}
+
 Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
-  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+  return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
@@ -3026,6 +3120,11 @@ Tensor adjoint(const Tensor &self) {
 Tensor view(const Tensor& self,
             IntArrayRef size) {
   return view_impl(self, size);
+}
+
+Tensor view_symint(const Tensor& self,
+            c10::SymIntArrayRef size) {
+  return self.view(c10::asIntArrayRefSlow(size));
 }
 
 Tensor alias(const Tensor& self) {
@@ -3327,6 +3426,11 @@ at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at:
 // If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
 // then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
 at::Tensor lift(const at::Tensor& self) {
+    return self;
+}
+
+// See notes in native_functions.yaml
+at::Tensor lift_fresh(const at::Tensor& self) {
     return self;
 }
 

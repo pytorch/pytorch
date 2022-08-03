@@ -6,9 +6,13 @@
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 echo "Clang version:"
 clang --version
+
+python tools/stats/export_test_times.py
 
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong

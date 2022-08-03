@@ -877,14 +877,29 @@ TEST(StaticRuntime, Div) {
         return torch.div(a, b, rounding_mode=c).clone()
   )JIT";
 
+  const auto div_strided = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        a_strided = torch.transpose(a, 0, 1)
+        b_strided = torch.transpose(b, 0, 1)
+        return torch.div(a_strided, b_strided).clone()
+  )JIT";
+
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
+  auto bs = at::randn({3, 2}).transpose(0, 1);
   auto c = at::randn({4, 3, 2});
   auto d = at::randn({4, 3, 2});
+  auto ds = at::randn({3, 4, 2}).transpose(0, 1);
 
   std::vector<IValue> args0{a, b};
   testStaticRuntime(div_tensor, args0);
   testStaticRuntime(div_tensor, args0, {c, d});
+
+  testStaticRuntime(div_strided, args0);
+  testStaticRuntime(div_strided, args0, {c, d});
+
+  testStaticRuntime(div_tensor, {a, bs});
+  testStaticRuntime(div_tensor, {a, bs}, {c, ds});
 
   std::vector<IValue> args1{a, 3};
   testStaticRuntime(div_scalar, args1);

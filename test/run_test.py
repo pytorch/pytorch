@@ -13,6 +13,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import json
+from typing import Dict, Optional, List, cast, Any
 
 import torch
 from torch.utils import cpp_extension
@@ -25,18 +27,17 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from typing import Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
-        export_S3_test_times,
-        get_shard_based_on_S3,
         get_reordered_tests,
         get_test_case_configs,
+        calculate_shards,
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -72,6 +73,7 @@ def discover_tests(
         rc += extra_tests
     return sorted(rc)
 
+
 TESTS = discover_tests(
     blocklisted_patterns=[
         'ao',
@@ -100,8 +102,6 @@ TESTS = discover_tests(
         'test_static_runtime',
         'test_throughput_benchmark',
         'test_typing',
-        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
-        "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",
@@ -247,6 +247,7 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -268,9 +269,6 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch"
 ]
-
-# the JSON file to store the S3 test stats
-TEST_TIMES_FILE = ".pytorch-test-times.json"
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -317,6 +315,19 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
+
+
+def discover_functorch_tests():
+    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
+    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
+    result = discover_tests(pathlib.Path(functorch_test_dir))
+    result = [os.path.join(functorch_test_dir, r) for r in result]
+
+    # Sanity check
+    assert len(result) >= 8
+    return result
+
+FUNCTORCH_TESTS = discover_functorch_tests()
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -383,12 +394,12 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+
 run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
 
 
 def get_run_test_with_subprocess_fn():
     return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
-
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -544,6 +555,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
@@ -556,6 +568,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
+
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -589,6 +602,16 @@ def parse_args():
         "--distributed-tests",
         action="store_true",
         help="run all distributed tests",
+    )
+    parser.add_argument(
+        "--functorch",
+        "--functorch",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run functorch tests. "
+            "If this flag is not present, we will not run any functorch tests. "
+            "This requires functorch to already be installed."
+        )
     )
     parser.add_argument(
         "-core",
@@ -676,13 +699,6 @@ def parse_args():
         nargs="*",
         help="additional arguments passed through to unittest, e.g., "
         "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
-    )
-    parser.add_argument(
-        "--export-past-test-times",
-        nargs="?",
-        type=str,
-        const=TEST_TIMES_FILE,
-        help="dumps test times from previous S3 stats into a file, format JSON",
     )
     parser.add_argument(
         "--shard",
@@ -778,6 +794,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    if options.functorch:
+        selected_tests = FUNCTORCH_TESTS
+
     # process reordering
     if options.bring_to_front:
         to_front = set(options.bring_to_front)
@@ -838,11 +857,29 @@ def get_selected_tests(options):
         assert num_shards <= len(
             selected_tests
         ), f"Number of shards must be less than {len(selected_tests)}"
-        # TODO: fix this to use test_times_filename, but currently this is not working
-        # because setting the export arg immeidately halts the test execution.
-        selected_tests = get_shard_based_on_S3(
-            which_shard, num_shards, selected_tests, TEST_TIMES_FILE
-        )
+
+        if num_shards == 1:
+            return selected_tests
+
+        # Download previous test times to make sharding decisions
+        path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
+        test_config = os.environ.get("TEST_CONFIG")
+        if test_config not in test_file_times:
+            print(
+                "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
+            )
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        else:
+            print("Found test time stats from artifacts")
+            test_file_times_config = test_file_times[test_config]
+            shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
+            _, tests_from_shard = shards[which_shard - 1]
+            selected_tests = tests_from_shard
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
@@ -881,15 +918,6 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
 def main():
     options = parse_args()
-
-    # TODO: move this export & download function in tools/ folder
-    test_times_filename = options.export_past_test_times
-    if test_times_filename:
-        print(
-            f"Exporting past test times from S3 to {test_times_filename}, no tests will be run."
-        )
-        export_S3_test_times(test_times_filename)
-        return
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)

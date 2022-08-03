@@ -133,6 +133,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
+    "torch/csrc/profiler/itt_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -366,6 +367,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
+    "torch/csrc/utils/schema_info.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
@@ -421,7 +423,6 @@ lazy_tensor_core_sources = [
 lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
-    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
     "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
@@ -749,6 +750,9 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
+    "torch/csrc/distributed/c10d/UCCTracing.cpp",
+    "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -871,6 +875,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.cpp",
+    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
@@ -935,6 +940,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
+    "torch/csrc/utils/verbose.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
@@ -1024,6 +1030,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Dict.cpp",
     "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
+    "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
@@ -1060,10 +1067,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
-    "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
-    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
-    "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
-    "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
     "aten/src/ATen/native/mkldnn/Copy.cpp",
@@ -1084,6 +1087,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+    # This is moved to aten_cpu because some of the custom ops use empty_with_tail_padding
+    # which was available only within aten_native_cpu. Ideally the right fix is to make
+    # empty_with_tail_padding into an op and use dispatcher with it. But exposing it as an op
+    # has limited use and hence does not seem to really make sense.
+    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
@@ -1092,6 +1100,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
+    "aten/src/ATen/native/verbose_wrapper.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1131,8 +1140,8 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/IndexKernel.cpp",
     "aten/src/ATen/native/cpu/LerpKernel.cpp",
     "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
@@ -1153,10 +1162,15 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
+    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
+    "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
-    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
+    "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
+    "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
+    "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
+    "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
@@ -1165,8 +1179,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_deserialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_serialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",
@@ -1347,8 +1363,13 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
+    "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/nested/NestedTensorTransformerFunctions.cpp",
+    "aten/src/ATen/native/nested/NestedTensorBackward.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseBlas.cpp",
@@ -1359,9 +1380,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseFactories.cpp",
+    "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
-    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
