@@ -506,7 +506,7 @@ def nan_to_num(g, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
+    input_dtype = _type_utils.ScalarType.from_name(input.type().scalarType()).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)
