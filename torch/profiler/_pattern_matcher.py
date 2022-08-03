@@ -58,11 +58,12 @@ class Pattern:
 
     def benchmark_summary(self, events: List[_ProfilerEvent]):
         def format_time(time_ns: int):
-            unit_lst = ["ns", "us", "ms", "s"]
+            unit_lst = ["ns", "us", "ms"]
             for unit in unit_lst:
                 if time_ns < 1000:
                     return f"{time_ns:.2f} {unit}"
                 time_ns //= 1000
+            return f"{time_ns:.2f} s"
 
         assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
         shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
@@ -486,7 +487,7 @@ class MatMulDimInFP16Pattern(Pattern):
             return all(dim % multiple == 0 for shape in shapes
                        for dim in shape[-2:])
 
-        if event.name() != "aten::mm" and event.name() != "aten::bmm":
+        if event.name() not in ("aten::mm", "aten::bmm", "aten::addmm"):
             return False
         if not input_dtypes(event):
             return False
@@ -577,7 +578,7 @@ def eventTreeBFS(event_tree: List[_ProfilerEvent]):
             stack.append(child_event)
 
 
-def report_all_anti_patterns(prof, should_benchmark: bool = False, json_report_dir: str = None):
+def report_all_anti_patterns(prof, should_benchmark: bool = False):
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         ForLoopIndexingPattern(prof, should_benchmark),
