@@ -402,7 +402,6 @@ def get_target_activation_dtype_for_node(
                 "output_activation_dtype": torch.float,
             }
 
-
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
@@ -1196,7 +1195,6 @@ def insert_observers_for_model(
 
             this_node_dtype = node_name_to_target_dtype[node.name]
             output_not_a_tensor = this_node_dtype is None
-
             # TODO(future PR): consider stopping matching getitem
             is_getitem = node.op == 'call_function' and \
                 node.target == operator.getitem
