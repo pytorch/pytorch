@@ -21,7 +21,6 @@ from trymerge import (find_matching_merge_rule,
                       GitHubPR,
                       MergeRule,
                       MandatoryChecksMissingError,
-                      PostCommentError,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -128,11 +127,20 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                   ),
     ]
 
+class DummyGitRepo(GitRepo):
+    def __init__(self) -> None:
+        super().__init__(get_git_repo_dir(), get_git_remote_name())
+
+    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+        return ["FakeCommitSha"]
+
+    def commit_message(self, ref: str) -> str:
+        return "super awsome commit message"
 
 class TestGitHubPR(TestCase):
     def test_merge_rules_valid(self) -> None:
         "Test that merge_rules.json can be parsed"
-        repo = GitRepo(get_git_repo_dir(), get_git_repo_dir())
+        repo = DummyGitRepo()
         self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -140,7 +148,7 @@ class TestGitHubPR(TestCase):
     def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any) -> None:
         "Tests that PR passes merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        repo = DummyGitRepo()
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -148,7 +156,7 @@ class TestGitHubPR(TestCase):
     def test_lint_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
         "Tests that PR fails mandatory lint check"
         pr = GitHubPR("pytorch", "pytorch", 74649)
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        repo = DummyGitRepo()
         self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -195,7 +203,7 @@ class TestGitHubPR(TestCase):
     def test_checksuites_pagination(self, mocked_gql: Any) -> None:
         "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
-        self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 104)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_comments_pagination(self, mocked_gql: Any) -> None:
@@ -238,7 +246,7 @@ class TestGitHubPR(TestCase):
         """ Tests that PR with nonexistent/pending status checks fails with the right reason.
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        repo = DummyGitRepo()
         self.assertRaisesRegex(MandatoryChecksMissingError,
                                ".*are pending/not yet run.*",
                                lambda: find_matching_merge_rule(pr, repo))
@@ -259,6 +267,7 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
+        self.assertEqual(len(conclusions), 83)
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -275,7 +284,7 @@ class TestGitHubPR(TestCase):
         """ Tests that all checkruns can be fetched for a commit
         """
         conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
-        self.assertGreater(len(conclusions), 100)
+        self.assertEqual(len(conclusions), 101)
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
@@ -323,12 +332,10 @@ class TestGitHubPR(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_revert_rules(self, mock_gql: Any) -> None:
-        """ Tests that reverts from collaborators are not allowed, Zain to change it soon """
+        """ Tests that reverts from collaborators are allowed """
         pr = GitHubPR("pytorch", "pytorch", 79694)
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(PostCommentError,
-                               ".*is not a MEMBER, but COLLABORATOR.*",
-                               lambda: validate_revert(repo, pr, comment_id=1189459845))
+        repo = DummyGitRepo()
+        self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
 
 if __name__ == "__main__":
     main()

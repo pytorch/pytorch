@@ -11,41 +11,34 @@ void SizesAndStrides::resizeSlowPath(
         !isInline(),
         "resizeSlowPath called when fast path should have been hit!");
     SymInt* tempStorage = outOfLineStorage_;
-    memcpy(
-        &inlineStorage_[0],
-        &tempStorage[0],
-        C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
-    memcpy(
-        &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE],
-        &tempStorage[oldSize],
-        C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
+    for (size_t i = 0; i < C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE; i++) {
+      inlineStorage_[i] = std::move(tempStorage[i]);
+      inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i] =
+          std::move(tempStorage[oldSize + i]);
+    }
     // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
     // HAS BEEN OVERWRITTEN!
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-    free(tempStorage);
+    delete[] tempStorage;
   } else {
     if (isInline()) {
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      SymInt* tempStorage = static_cast<SymInt*>(malloc(storageBytes(newSize)));
+      SymInt* tempStorage = new SymInt[storageElems(newSize)];
       TORCH_CHECK(
           tempStorage,
           "Could not allocate memory to change Tensor SizesAndStrides!");
-      const auto bytesToCopy = oldSize * sizeof(inlineStorage_[0]);
-      const auto bytesToZero = (newSize > oldSize)
-          ? (newSize - oldSize) * sizeof(tempStorage[0])
-          : 0;
-      memcpy(&tempStorage[0], &inlineStorage_[0], bytesToCopy);
-      if (bytesToZero) {
-        memset(&tempStorage[oldSize], 0, bytesToZero);
+      const auto elemsToCopy = oldSize;
+      const auto elemsToZero = (newSize > oldSize) ? (newSize - oldSize) : 0;
+      for (size_t i = 0; i < elemsToCopy; i++) {
+        tempStorage[i] = std::move(inlineStorage_[i]);
+        tempStorage[newSize + i] = std::move(
+            inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i]);
       }
-      memcpy(
-          &tempStorage[newSize],
-          &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE],
-          bytesToCopy);
-      if (bytesToZero) {
-        memset(&tempStorage[newSize + oldSize], 0, bytesToZero);
+      for (size_t i = 0; i < elemsToZero; i++) {
+        tempStorage[oldSize + i] = 0;
+        tempStorage[newSize + oldSize + i] = 0;
       }
       outOfLineStorage_ = tempStorage;
     } else {
@@ -57,19 +50,27 @@ void SizesAndStrides::resizeSlowPath(
       // Shift the old strides to their new starting point. Note
       // that this does not occur in the inline path above because
       // the stride starting point is not moving.
-      memmove(
-          outOfLineStorage_ + newSize,
-          outOfLineStorage_ + oldSize,
-          std::min(oldSize, newSize) * sizeof(outOfLineStorage_[0]));
+      if (isGrowing) {
+        std::move_backward(
+            outOfLineStorage_ + oldSize,
+            outOfLineStorage_ + oldSize + oldSize,
+            outOfLineStorage_ + newSize + oldSize);
+      } else {
+        std::move(
+            outOfLineStorage_ + oldSize,
+            outOfLineStorage_ + oldSize + newSize,
+            outOfLineStorage_ + newSize);
+      }
       if (!isGrowing) {
         // Resize after shifting so that we don't lose data.
         resizeOutOfLineStorage(newSize);
       } else {
         // Zero the end of the sizes portion.
-        const auto bytesToZero =
-            (newSize - oldSize) * sizeof(outOfLineStorage_[0]);
-        memset(&outOfLineStorage_[oldSize], 0, bytesToZero);
-        memset(&outOfLineStorage_[newSize + oldSize], 0, bytesToZero);
+        const auto elemsToZero = newSize - oldSize;
+        for (size_t i = 0; i < elemsToZero; i++) {
+          outOfLineStorage_[oldSize + i] = 0;
+          outOfLineStorage_[newSize + oldSize + i] = 0;
+        }
       }
     }
   }
