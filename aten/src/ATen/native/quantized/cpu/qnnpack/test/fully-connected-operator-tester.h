@@ -356,7 +356,7 @@ class FullyConnectedOperatorTester {
           }
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t c = 0; c < outputChannels(); c++) {
-              ASSERT_EQ(
+              ASSERT_FLOAT_EQ(
                   output_dynamic[i * outputChannels() + c],
                   ((float)accumulators[i * outputChannels() + c] *
                   requantization_scales[c]) + float(bias[c]))
