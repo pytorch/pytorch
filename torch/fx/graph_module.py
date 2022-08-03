@@ -4,7 +4,7 @@ import torch.overrides
 from torch.nn.modules.module import _addindent
 from torch.package import PackageImporter, PackageExporter
 import linecache
-from typing import Type, Dict, List, Any, Union, Optional, Set
+from typing import Type, Dict, List, Any, Union, Optional, Set, Callable
 from .graph import Graph, _PyTreeCodeGen, _is_from_torch, _custom_builtins, PythonCode
 from ._compatibility import compatibility
 from torch.package import Importer, sys_importer
@@ -625,14 +625,17 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
+    src_forward: Callable[..., Any]
+
     @contextmanager
     def _jit_script_mode(self):
-        saved_forward = self.forward
+        cls = type(self)
+        saved_forward = cls.forward
         try:
-            self.forward = self.src_forward
+            cls.forward = cls.src_forward
             yield
         finally:
-            self.forward = saved_forward
+            cls.forward = saved_forward
 
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
