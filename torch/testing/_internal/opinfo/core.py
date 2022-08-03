@@ -4,7 +4,7 @@ import operator
 from typing import Callable, List, Optional, Tuple, Iterable
 
 import torch
-import torch.testing._internal.opinfos.helper as opinfo_helper
+from torch.testing._internal.opinfo import utils
 from torchgen.utils import dataclass_repr
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -495,7 +495,7 @@ class AliasInfo(object):
 # This trial-and-error approach to writing an OpInfo can be frustrating,
 #   but it's probably necessary as long as OpInfos don't require
 #   learning about all the systems that consume them. One thing that can help
-#   is the get_supported_dtypes() function defined in opinfo_helper.py. This
+#   is the get_supported_dtypes() function defined in utils.py. This
 #   function can be used to programmatically specify the dtypes an operator
 #   supports, and is especially useful if writing an OpInfo on a machine
 #   without a CUDA device. See its documentation for more details.
@@ -754,12 +754,12 @@ class OpInfo(object):
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(map(lambda dtypes: isinstance(
-            dtypes, opinfo_helper._dynamic_dispatch_dtypes), dtypes_args))
+            dtypes, utils._dynamic_dispatch_dtypes), dtypes_args))
 
         if self.dynamic_dtypes:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
-            assert isinstance(self.dtypesIfCUDA, opinfo_helper._dynamic_dispatch_dtypes), \
+            assert isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes), \
                 (f"To use dynamic dypes for operator {self.name}, "
                  "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
                  "This is to ensure that CUDA dtypes are acquired correctly as they"
