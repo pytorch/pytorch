@@ -11,7 +11,7 @@ import torch
 
 import torch._prims_common as utils
 import torch.library
-from torch import _TypedStorage, Tensor
+from torch import Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims_common import (
     check,
