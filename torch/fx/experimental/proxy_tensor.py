@@ -90,11 +90,11 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res, *, constant):
+def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy, constant=constant)
+                return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
         else:
             return e
 
@@ -139,7 +139,7 @@ def unwrap_elem(e):
     return e
 
 
-def proxy_call(func_overload, args, kwargs=None):
+def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
@@ -227,17 +227,18 @@ def proxy_call(func_overload, args, kwargs=None):
 
     # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
     # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
-    return wrap_output(inner_res, proxy_res, constant=constant)
+    return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=proxy_mode)
 
 
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
     has_sym_ints: bool
+    proxy_mode: "ProxyTorchDispatchMode"
 
 
     @staticmethod
-    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
+    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None, proxy_mode):
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
@@ -267,7 +268,7 @@ class ProxyTensor(torch.Tensor):
         r.has_sym_ints = has_sym_ints
         return r
 
-    def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
+    def __init__(self, elem, proxy, *, requires_grad=None, constant=None, proxy_mode):
         # TODO: hack since _extract_tensor_metadata currently tries to access stride
         if elem.is_sparse or self.has_sym_ints:
             proxy.node.meta['tensor_meta'] = {}
@@ -279,6 +280,7 @@ class ProxyTensor(torch.Tensor):
         self.elem = elem
         self.proxy = proxy
         self.constant = constant
+        self.proxy_mode = proxy_mode
 
 
     def __deepcopy__(self, memo):
@@ -292,7 +294,18 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, args, kwargs)
+        # Get the first proxy mode. If there are different proxy modes with
+        # different tracers torch.fx.Proxy would raise an error.
+        proxy_mode = None
+        for arg in pytree.tree_flatten((args, kwargs))[0]:
+            if isinstance(arg, ProxyTensor):
+                if proxy_mode is None:
+                    proxy_mode = arg.proxy_mode
+                    break
+        assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
+
+        with proxy_mode.restore():  # type: ignore[union-attr]
+            return func_overload(*args, **kwargs)
 
 
 class PythonKeyTracer(Tracer):
@@ -341,7 +354,7 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, inps):
+def wrap_key(f, inps, proxy_mode):
     flat_inps, _ = pytree.tree_flatten(inps)
 
     @functools.wraps(f)
@@ -354,7 +367,8 @@ def wrap_key(f, inps):
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
-                        requires_grad=(flat_inps[idx].is_leaf and flat_inps[idx].requires_grad)
+                        requires_grad=(flat_inps[idx].is_leaf and flat_inps[idx].requires_grad),
+                        proxy_mode=proxy_mode,
                     )
             else:
                 flat_args[idx] = flat_inps[idx]
@@ -371,8 +385,9 @@ def wrap_key(f, inps):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer):
+    def __init__(self, tracer, trace_factory_functions=True):
         self.tracer = tracer
+        self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         if symbolic_shapes.is_symbolic_op(func_overload):
@@ -383,7 +398,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(func_overload, args, kwargs)
+            return proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -417,7 +432,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #       x.add_(2)
         #
         # This is what the overload modification does.
-        else:
+        elif self.trace_factory_functions:
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
@@ -435,7 +450,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                     constant = args[0].clone()
             else:
                 constant = None
-            return wrap_output(inner_res, proxy_res, constant=constant)
+            return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
+        else:
+            return func_overload(*args, **kwargs)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
@@ -446,15 +463,16 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         self.decomposition_table = decomposition_table
         if self.decomposition_table is None:
             self.decomposition_table = {}
+        self.mode = ProxyTorchDispatchMode(self.tracer)
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
         # TODO handle case where the first character of target is '*'
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer))
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer), proxy_mode=self.mode)
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer))
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer), proxy_mode=self.mode)
 
     # call_function, call_method, call_module get traced automatically by the ProxyTensors.
 
@@ -467,6 +485,10 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         return out
 
     def run(self, *args, **kwargs):
+        # Should enter the mode at least once for being able to restore it later
+        # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
+        with self.mode:
+            pass
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
@@ -499,7 +521,7 @@ a bug if you need this)""")
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer, trace_factory_functions=trace_factory_functions)
 
         def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
@@ -528,7 +550,7 @@ a bug if you need this)""")
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
-            t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env  # type: ignore[assignment]
