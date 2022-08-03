@@ -1,7 +1,13 @@
 from typing import List, Tuple
 
 from torchgen.api import cpp
-from torchgen.api.types import Binding, CppSignatureGroup, CType, BaseCType, iOptTensorListRefT
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    CppSignatureGroup,
+    CType,
+    iOptTensorListRefT,
+)
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -234,7 +240,9 @@ def _gen_code_list_type(
             )
         )
     # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
-    elif isinstance(t.elem, OptionalType) and ctype.remove_const_ref() != BaseCType(iOptTensorListRefT):
+    elif isinstance(t.elem, OptionalType) and ctype.remove_const_ref() != BaseCType(
+        iOptTensorListRefT
+    ):
         code.extend(
             f"""
 {ctype.cpp_type(strip_ref=True)} {out_name};
@@ -257,7 +265,9 @@ for (c10::IValue {elem_name}: {in_name}) {{
         wrapper_name = arg_name + "_wrapper"
         # need to bring owning container instantiation out of scope so that the actual
         # unboxed list has valid data.
-        decl.append(f"{container_type}<{res_ctype.cpp_type(strip_ref=True)}> {wrapper_name};")
+        decl.append(
+            f"{container_type}<{res_ctype.cpp_type(strip_ref=True)}> {wrapper_name};"
+        )
         code.extend(
             f"""
 for (c10::IValue {elem_name}: {in_name}) {{
