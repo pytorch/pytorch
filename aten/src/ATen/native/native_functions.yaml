@@ -9412,12 +9412,28 @@
     CPU: foreach_tensor_maximum_slow
     CUDA: foreach_tensor_maximum_cuda
 
+- func: _foreach_maximum_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_maximum_slow_
+    CUDA: foreach_tensor_maximum_cuda_
+  autogen: _foreach_maximum.List_out
+
 - func: _foreach_minimum.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
+
+- func: _foreach_minimum_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_minimum_slow_
+    CUDA: foreach_tensor_minimum_cuda_
+  autogen: _foreach_minimum.List_out
 
 - func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
