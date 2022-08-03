@@ -12,6 +12,20 @@
 
 namespace c10 {
 
+#ifdef USE_ROCM
+#define FORALL_CUDA_BASED_SYMBOLS(_) \
+_(hip, _set_device)                  \
+_(hip, set_stream)                   \
+_(hip, _current_device)
+#else
+#define FORALL_CUDA_BASED_SYMBOLS(_) \
+_(cuda, _set_device)                 \
+_(cuda, set_stream)                  \
+_(cuda, _current_device)             \
+_(cuda, synchronize)
+#endif
+
+
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
   _(namespaces, prims)               \
@@ -216,10 +230,7 @@ namespace c10 {
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
   _(prim, grad)                      \
-  _(cuda, _set_device)               \
-  _(cuda, set_stream)                \
-  _(cuda, _current_device)           \
-  _(cuda, synchronize)               \
+  FORALL_CUDA_BASED_SYMBOLS(_)       \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
