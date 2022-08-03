@@ -1036,6 +1036,14 @@ if(CUDAToolkit_FOUND)
 
   _CUDAToolkit_find_and_add_import_lib(nvml ALT nvidia-ml nvml)
 
+  find_path(CUDAToolkit_nvToolsExt_INCLUDE_DIR nvToolsExt.h
+    PATHS "${CUDATookit_INCLUDE_DIR}"
+          "${CUDAToolkit_ROOT_DIR}"
+          ENV NVTOOLSEXT_PATH
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
+
   if(WIN32)
     # nvtools can be installed outside the CUDA toolkit directory
     # so prefer the NVTOOLSEXT_PATH windows only environment variable
@@ -1047,7 +1055,8 @@ if(CUDAToolkit_FOUND)
       PATH_SUFFIXES lib/x64 lib
     )
   endif()
-  _CUDAToolkit_find_and_add_import_lib(nvToolsExt ALT nvToolsExt64)
+  _CUDAToolkit_find_and_add_import_lib(nvToolsExt ALT nvToolsExt64
+    EXTRA_INCLUDE_DIRS "${CUDAToolkit_nvToolsExt_INCLUDE_DIR}")
 
   _CUDAToolkit_find_and_add_import_lib(OpenCL)
 endif()
