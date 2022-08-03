@@ -209,7 +209,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
 
   // Properly handle zero-size inputs: the view(1, M, -1) call below breaks on this.
   if (input.numel() == 0) {
-    return std::make_tuple(at::empty_like(input), at::empty_like(input), at::empty_like(input));
+    return std::make_tuple(
+      at::empty_like(input),
+      at::empty_like(input, c10::TensorOptions().dtype(kFloat)),
+      at::empty_like(input, c10::TensorOptions().dtype(kFloat))
+    );
   }
   at::Tensor input_reshaped = input.view({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
