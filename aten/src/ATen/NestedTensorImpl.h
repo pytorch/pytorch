@@ -64,6 +64,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // TODO: numel_custom and is_contiguous_custom can be profitably overridden
   // with real implementations
   int64_t numel_custom() const override;
+  c10::SymInt sym_numel_custom() const override;
   bool is_contiguous_custom(MemoryFormat) const override;
   int64_t size_custom(int64_t d) const override {
     return this->size(d);
@@ -78,22 +79,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
 
   // this one is real
   int64_t dim_custom() const override;
-
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override;
-
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
-      bool allow_tensor_metadata_change) const override;
-
-  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    copy_tensor_metadata(
-        /*src_impl=*/impl.get(),
-        /*dest_impl=*/this,
-        /*version_counter=*/version_counter(),
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
-  }
 
  private:
   // Must be called after any changes to our dim() to sync the state
@@ -119,11 +104,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_size_tensor_`
   std::vector<int64_t> opt_sizes_;
-
-  template <typename VariableVersion>
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
-      VariableVersion&& version_counter,
-      bool allow_tensor_metadata_change) const;
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(

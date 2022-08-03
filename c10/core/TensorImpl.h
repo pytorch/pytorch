@@ -564,6 +564,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
+  c10::SymInt sym_numel() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_numel_custom();
+    }
+    return sym_numel_default();
+  }
+
+  inline c10::SymInt sym_numel_default() const {
+    return numel_;
+  }
+
+  virtual c10::SymInt sym_numel_custom() const;
+
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -748,7 +763,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
-    return numel_;
+    return numel_.as_int_unchecked();
   }
 
  public:
@@ -1120,6 +1135,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       key_set_ = key_set_.remove(DispatchKey::Conjugate);
     }
   }
+
+  /**
+   * XXX: do not use, private api!
+   * Update the backend component related keys to the backend component
+   * corresponding to this device.
+   */
+  void _change_backend_component_keys(c10::Device device);
 
   /**
    * Whether or not the tensor is a zerotensor
@@ -1919,6 +1941,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
+    auto concrete_numel = numel_.expect_int();
+#ifdef DEBUG
+    TORCH_INTERNAL_ASSERT(compute_numel() == concrete_numel);
+#endif
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
@@ -1933,9 +1959,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
-      if (numel_ == 0 ||
+      if (concrete_numel == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
-           (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
+           (storage_.nbytes() >= (concrete_numel * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
         return storage_.data();
@@ -1952,18 +1978,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
-        auto size = numel_;
         auto dtor = data_type_.placementDelete();
-        auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
+        auto data_ptr =
+            allocator->allocate(concrete_numel * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
-            std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.placementNew()(storage_.data(), numel_);
+            std::move(data_ptr), dtor, concrete_numel, storage_.device()));
+        data_type_.placementNew()(storage_.data(), concrete_numel);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr_noswap(
-            allocator->allocate(numel_ * data_type_.itemsize()));
+            allocator->allocate(concrete_numel * data_type_.itemsize()));
       }
-      storage_.set_nbytes(numel_ * data_type_.itemsize());
+      storage_.set_nbytes(concrete_numel * data_type_.itemsize());
       TORCH_INTERNAL_ASSERT(
           storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
@@ -2462,7 +2488,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // time, we will immediately set sizes to {0} and reset numel to 0.
   // (Can't do that in the default initializers, because there's no way to
   // spell "allocate a one-element array" for strides_).
-  int64_t numel_ = 1;
+  SymInt numel_ = c10::SymInt(1);
 
   // INVARIANT: When storage is non-null, this type meta must
   // agree with the type meta in storage

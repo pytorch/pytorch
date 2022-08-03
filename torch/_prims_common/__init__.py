@@ -86,7 +86,7 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
+def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -117,12 +117,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
-    # same_strides, idx = check_significant_strides(a, b)
-    # if not same_strides:
-    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-    #         a.stride(), b.stride(), idx
-    #     )
-    # raise RuntimeError(msg)
+    if check_strides:
+        same_strides, idx = check_significant_strides(a, b)
+        if not same_strides:
+            msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                a.stride(), b.stride(), idx
+            )
+            raise RuntimeError(msg)
 
 
 def check_significant_strides(
@@ -618,7 +619,8 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
 
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]]
+    shape: Union[ShapeType, Tuple[ShapeType]],
+    validate=True,
 ) -> Tuple[int, ...]:
     """
     Returns a shape from varargs.
@@ -642,7 +644,8 @@ def extract_shape_from_varargs(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
-    validate_shape(shape)  # type: ignore[arg-type]
+    if validate:
+        validate_shape(shape)  # type: ignore[arg-type]
     return shape  # type: ignore[return-value]
 
 
@@ -1303,7 +1306,7 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 
 
 def check_in_bounds_for_storage(
-    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+    a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
     """
     Determines if the given shape, strides, and offset are valid for the given storage.

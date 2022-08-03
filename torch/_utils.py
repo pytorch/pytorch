@@ -77,9 +77,11 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             values = torch.Tensor._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
-            return torch._UntypedStorage(
+            untyped_storage = torch.UntypedStorage(
                 self.size(), device=torch.device("cuda")
-            ).copy_(self, non_blocking)
+            )
+            untyped_storage.copy_(self, non_blocking)
+            return untyped_storage
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
@@ -138,11 +140,11 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a _TypedStorage
+# be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
-    return t.set_(storage._untyped(), storage_offset, size, stride)
+    t = torch.tensor([], dtype=storage.dtype, device=storage.untyped().device)
+    return t.set_(storage.untyped(), storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(
@@ -251,7 +253,7 @@ def _rebuild_wrapper_subclass(
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a _TypedStorage
+# be a TypedStorage
 def _rebuild_qtensor(
     storage,
     storage_offset,
