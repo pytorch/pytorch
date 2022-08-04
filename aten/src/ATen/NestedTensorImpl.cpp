@@ -121,8 +121,12 @@ NestedTensorImpl::NestedTensorImpl(
       offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
-  auto buffer_size_vec{buffer.unsafeGetTensorImpl()->sizes().vec()};
-  TORCH_INTERNAL_ASSERT(buffer_size_vec.size() == 1, "The buffer used to construct the nested tensor did not have a size of 1.")
+  auto buffer_size_vec{buffer.unsafeGetTensorImpl()->sizes()};
+  TORCH_INTERNAL_ASSERT(
+      buffer_size_vec.size() == 1,
+      "NestedTensorImpl buffer is required to be 1 dimensional but got a buffer with ",
+      buffer.dim(),
+      " dimensions.");
   buffer_size_ = buffer_size_vec[0];
 
   TORCH_WARN_ONCE(
