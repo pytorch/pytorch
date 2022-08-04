@@ -33,7 +33,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
     disable_gc, gradcheck, gradgradcheck, parametrize,
-    instantiate_parametrized_tests, skipIfMps)
+    instantiate_parametrized_tests, skipIfMps, set_warn_always_context)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -43,6 +43,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.utils._mode_utils import no_dispatch
+import weakref
 
 import pickle
 
@@ -1783,10 +1784,7 @@ class TestAutograd(TestCase):
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
 
     def test_backward_create_graph_warns(self):
-        try:
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-
+        with set_warn_always_context(True):
             b = torch.randn(3, requires_grad=True, dtype=torch.double)
             c = b * b
             with warnings.catch_warnings(record=True) as ws:
@@ -1798,9 +1796,6 @@ class TestAutograd(TestCase):
             with warnings.catch_warnings(record=True) as ws:
                 torch.autograd.grad(c, b, torch.ones_like(c), create_graph=True)
             self.assertFalse(any('Using backward() with create_graph=True' in str(w.message) for w in ws))
-
-        finally:
-            torch.set_warn_always(prev)
 
     def test_next_functions(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -3467,7 +3462,6 @@ class TestAutograd(TestCase):
 
     def test_anomaly_assign_parent_cleanup(self):
         # Test that python objects created are properly cleaned up when assign_parent is called
-        import weakref
 
         def get_ref():
             # we use torch.exp here but any function that will construct a new node in its
@@ -3506,8 +3500,6 @@ class TestAutograd(TestCase):
 
     def test_nested_anomaly_printstack_cleanup(self):
         # Test if metadata dict PyObject is properly destroyed
-        import weakref
-
         def get_ref():
             # This is similar to the construction in test_anomaly_assign_parent_cleanup:
             #
@@ -6206,6 +6198,57 @@ for shape in [(1,), ()]:
             self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
+
+    def test_create_graph_and_full_backward_hook_cycle(self):
+        # If BackwardHook saves grad_output, it can create a cycle when we perform backward
+        # with create_graph=True
+        #
+        #   grad_output -> grad_output.grad_fn -> graph -> hook -> grad_output
+        #
+        class TestCls():
+            # Dummy class for the purpose of creating a weakref
+            pass
+
+        def get_ref(input_requires_grad, nb_hooks):
+            t = torch.randn(10, requires_grad=input_requires_grad)
+            a = torch.tensor(1., requires_grad=True)
+
+            class Test(nn.Module):
+                def forward(self, x):
+                    return x ** 2 * a ** 2
+            mod = Test()
+
+            for _ in range(nb_hooks):
+                mod.register_full_backward_hook(lambda a, b, c: None)
+
+            tmp = mod(t)
+
+            # Save dummy object to graph and get a weak ref to it
+            test = TestCls()
+            ref = weakref.ref(test)
+            tmp.grad_fn.metadata["a"] = test
+
+            with set_warn_always_context(True):
+                with warnings.catch_warnings(record=True) as w:
+                    tmp.exp().sum().backward(create_graph=True)
+                    self.assertTrue(len(w) == 1)
+                    self.assertTrue("Using backward() with create_graph=True" in str(w[0].message))
+
+            # Remove the backward + create_graph=True cycle
+            a.grad = None
+            t.grad = None
+
+            return ref
+
+        for nb_hooks in (1, 2, 3):
+            for input_requires_grad in (True, False):
+                ref_ = get_ref(
+                    input_requires_grad=input_requires_grad,
+                    nb_hooks=nb_hooks,
+                )
+                gc.collect()
+                self.assertIsNone(ref_())
+
 
     def test_input_buffer_accum(self):
         leaf = torch.rand(2, 2, requires_grad=True)
