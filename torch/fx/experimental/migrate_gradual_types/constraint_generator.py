@@ -1123,7 +1123,16 @@ class ConstraintGenerator:
         if n.op == 'placeholder':
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
-            n.type = Dyn if not (isinstance(n.type, TensorType) or n.type == Dyn) else n.type
+
+            if n.type != Dyn and (not isinstance(n.type, TensorType)):
+
+                if n.type == torch.nn.parameter.Parameter:
+                    # since we have a parameter, the shape must be static
+                    assert 'example_value' in n.meta
+                    n.type = TensorType(n.meta['example_value'].size())
+                else:
+                    n.type = Dyn
+
             c1 = BinConstraintT(n.type, x, op_precision)
             c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
