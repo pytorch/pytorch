@@ -3,6 +3,7 @@ import functools
 import inspect
 import math
 import os
+import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -496,7 +497,7 @@ class Tracer(TracerBase):
                         )
                         self.create_proxy("call_function", _assert_is_none, args, {})
                     else:
-                        torch.warnings.warn(
+                        warnings.warn(
                             f"Was not able to add assertion to guarantee correct input {name} to "
                             f"specialized function. It is up to the user to make sure that your inputs match the "
                             f"inputs you specialized the function with."
