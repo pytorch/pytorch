@@ -149,13 +149,13 @@ const std::vector<std::string> functions = {
             return std_out, backward
 
         def std_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
