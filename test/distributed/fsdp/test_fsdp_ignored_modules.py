@@ -3,10 +3,16 @@
 import sys
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -92,13 +98,25 @@ class TestFSDPIgnoredModules(FSDPTest):
         transformer model with shared parameters."""
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
-        group = dist.distributed_c10d._get_default_group()
-        wrapped_model = self._get_wrapped_model(
-            group, cuda_first=True, ignore_modules=True,
+        model: nn.Module = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
+        wrapped_model = FSDP(
+            model,
+            self.process_group,
+            ignored_modules=[model.transformer],
         )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
-        nonwrapped_model = self._get_nonwrapped_model(group)
+        nonwrapped_model: nn.Module = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
         total_numel = sum(p.numel() for p in nonwrapped_model.parameters())
         ignored_numel = sum(
             p.numel() for p in nonwrapped_model.transformer.parameters()

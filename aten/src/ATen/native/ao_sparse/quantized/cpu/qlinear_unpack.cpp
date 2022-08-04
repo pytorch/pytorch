@@ -14,35 +14,41 @@ int register_linear_params();
 LinearPackedSerializationType PackedLinearWeight::unpack() {
   auto packW = w.get();
 
-  int64_t N = static_cast<int64_t>(packW->R);
-  int64_t K = static_cast<int64_t>(packW->C);
+  const int64_t N = static_cast<int64_t>(packW->R);
+  const int64_t K = static_cast<int64_t>(packW->C);
 
   at::Tensor weight_origin;
   if (q_scheme == c10::kPerTensorAffine) {
     weight_origin = at::_empty_affine_quantized(
         {N, K}, at::device(c10::kCPU).dtype(c10::kQInt8), w_scale[0], w_zp[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
-    auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
-    auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kInt));
+    at::Tensor scales = at::empty(
+        {static_cast<long>(w_scale.size())},
+        at::device(c10::kCPU).dtype(c10::kFloat));
+    std::copy(w_scale.begin(), w_scale.end(), scales.data_ptr<float>());
+
+    at::Tensor zero_points = at::empty(
+        {static_cast<long>(w_zp.size())},
+        at::device(c10::kCPU).dtype(c10::kInt));
+    std::copy(w_zp.begin(), w_zp.end(), zero_points.data_ptr<int>());
 
     weight_origin = at::_empty_per_channel_affine_quantized(
         {N, K},
-        scales.toType(c10::kDouble),
-        zero_points.toType(c10::kLong),
+        scales,
+        zero_points,
         0, // The output channel axis is 0
         device(c10::kCPU).dtype(c10::kQInt8));
   }
 
-  // TODO: uncomment once unpack is implemented for BCSRMatrix
-  // int8_t* weight_ptr_int8 =
-  //     reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
-  // packW->unpack(weight_ptr_int8);
-  std::vector<int64_t> block_pattern(
+  int8_t* weight_ptr_int8 =
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+
+  packW->unpack(weight_ptr_int8);
+
+  const std::vector<int64_t> block_pattern(
       {out_features_block_size_, in_features_block_size_});
 
-  return std::make_tuple(weight_origin, bias_, std::move(block_pattern));
+  return std::make_tuple(std::move(weight_origin), bias_, block_pattern);
 }
 
 #endif // USE_FBGEMM
@@ -50,9 +56,58 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 
 LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
+  const int64_t N = static_cast<int64_t>(output_channels_);
+  const int64_t K = static_cast<int64_t>(input_channels_);
+
+  float* w_scales_ptr = w_scales_.data_ptr<float>();
+
+  at::Tensor weight_origin;
+  if (q_scheme_ == c10::kPerTensorAffine) {
+    weight_origin = at::_empty_affine_quantized(
+        {N, K},
+        at::device(c10::kCPU).dtype(c10::kQInt8),
+        w_scales_ptr[0],
+        w_zero_points_[0] - 128);
+  } else if (q_scheme_ == c10::kPerChannelAffine) {
+    at::Tensor scales = at::empty(
+        {static_cast<long>(output_channels_)},
+        at::device(c10::kCPU).dtype(c10::kFloat));
+    std::copy(
+        w_scales_ptr,
+        w_scales_ptr + output_channels_,
+        scales.data_ptr<float>());
+
+    at::Tensor zero_points = at::empty(
+        {static_cast<long>(output_channels_)},
+        at::device(c10::kCPU).dtype(c10::kInt));
+    std::transform(
+        w_zero_points_.begin(),
+        w_zero_points_.begin() + output_channels_,
+        zero_points.data_ptr<int>(),
+        [](uint8_t v) { return static_cast<int>(v) - 128; });
+
+    weight_origin = at::_empty_per_channel_affine_quantized(
+        {N, K},
+        scales,
+        zero_points,
+        0, // The output channel axis is 0
+        device(c10::kCPU).dtype(c10::kQInt8));
+  }
+
+  int8_t* weight_ptr_int8 =
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+
+  bcsr_matrix_->unpack(
+      weight_ptr_int8,
+      output_channels_,
+      input_channels_,
+      w_zero_points_.data());
+
   std::vector<int64_t> block_pattern(
       {out_features_block_size_, in_features_block_size_});
-  return std::make_tuple(orig_weight_, orig_bias_, std::move(block_pattern));
+
+  return std::make_tuple(
+      std::move(weight_origin), bias_, std::move(block_pattern));
 }
 
 #endif // USE_FBGEMM
@@ -67,7 +122,7 @@ class QLinearUnpackWeightInt8 final {
   }
 };
 
-TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
+TORCH_LIBRARY_IMPL(sparse, CatchAll, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("sparse::qlinear_unpack"),
       TORCH_FN(QLinearUnpackWeightInt8::run));

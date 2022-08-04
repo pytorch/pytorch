@@ -101,9 +101,9 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
-  - random.functional
-  - random.from_functional
-  - random.to_functional
+  - random
+  - random.from
+  - random.to
   - reciprocal
   - relu
   - remainder.Tensor
@@ -140,7 +140,7 @@ full_codegen:
   - upsample_bilinear2d_backward
   - upsample_nearest2d
   - upsample_nearest2d_backward
-  - zero.functional
+  - zero
   - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
@@ -168,6 +168,8 @@ full_codegen:
   - slice_scatter
   - diagonal_scatter
   - as_strided_scatter
+ir_gen:
+  - selu
 supported:
   - clone
   - _copy_from
@@ -182,6 +184,7 @@ supported:
   - _to_copy
   - _unsafe_view
   - lift
+  - lift_fresh
   # Below are all operators that are "composite" in core,
   # but require us to explicitly re-enable functionalization in order to use them.
   # Why? These operators are all CompositeExplicitAutograd, which mean that they run

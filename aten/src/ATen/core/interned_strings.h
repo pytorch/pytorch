@@ -53,6 +53,8 @@ namespace c10 {
   _(prim, squeeze_copy)              \
   _(prim, unsqueeze_copy)            \
   _(prim, flatten_copy)              \
+  _(prim, expand_copy)               \
+  _(prim, expand_as_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
