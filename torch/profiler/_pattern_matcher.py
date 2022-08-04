@@ -627,7 +627,7 @@ def report_all_anti_patterns(prof,
     report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
-        #ForLoopIndexingPattern(prof, should_benchmark),
+        # ForLoopIndexingPattern(prof, should_benchmark),
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
