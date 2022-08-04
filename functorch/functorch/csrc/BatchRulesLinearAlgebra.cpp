@@ -232,15 +232,31 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
+  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+      const Tensor& first, optional<int64_t> first_bdim,
+      const Tensor& second, optional<int64_t> second_bdim) {
+    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
+                op_name, ": The input tensor A must have at least 2 dimensions.");
+    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
+                op_name, ": The input tensor B must have at least 2 dimensions.");
+    return _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+  }
+
+  static oneOutput apply_one(
+      const Tensor& first, optional<int64_t> first_bdim,
+      const Tensor& second, optional<int64_t> second_bdim,
+      T... extra_args) {
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
+    const auto tensor_ = std::get<0>(tensor_other);
+    const auto other_ = std::get<1>(tensor_other);
+    return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
+  }
+
   static twoOutputs apply_two(
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
-              op_name, ": The input tensor B must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, /*do_type_promotion=*/false);
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
@@ -337,6 +353,12 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, four));\
   }
 
+#define LINALG_CHECK_MATRIX_BINARY_ONE_OUT(fn, op_name) \
+  LINALG_STRING_CONST(fn, op_name);\
+  TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {\
+    VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, one));\
+  }
+
 #define LINALG_CHECK_MATRIX_BINARY_TWO_OUT(fn, op_name) \
   LINALG_STRING_CONST(fn, op_name);\
   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {\
@@ -348,18 +370,22 @@ LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_eigvals, linalg.eigvals);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_matrix_power, linalg.matrix_power);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_pinv, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(linalg_pinv, atol_rtol_float, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet);
+LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular);
 
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(logdet, logdet);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(symeig, symeig);
 LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
 LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
 
