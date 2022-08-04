@@ -311,7 +311,7 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
-            kwargs = {}            
+            kwargs = {}
 
         if func in [torch.Tensor.where, torch.where]:
             assert len(args) == 3
@@ -345,6 +345,16 @@ class MaskedTensor(torch.Tensor):
             return None
 
         func = func.overloadpacket
+
+        from .passthrough import apply_pass_through_fn, is_pass_through_fn
+
+        if is_pass_through_fn(func):
+            return apply_pass_through_fn(func, *args, **kwargs)
+
+        from .unary import apply_native_unary, is_native_unary
+
+        if is_native_unary(func):
+            return apply_native_unary(func, *args, **kwargs)
 
         assert len(args) > 0
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
