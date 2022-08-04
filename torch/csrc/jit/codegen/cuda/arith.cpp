@@ -458,7 +458,6 @@ TensorView* unaryOp(
   }
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
-NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
@@ -468,6 +467,30 @@ NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+Val* randlike(Val* v) {
+  TORCH_CHECK(
+      isFloatingPointType(v->dtype()),
+      "input must have floating point type, but got ",
+      v->dtype());
+  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
+  return where(
+      eq(rand_vals, IrBuilder::create<Double>(1.0)),
+      IrBuilder::create<Double>(0.0),
+      rand_vals);
+}
+
+TensorView* randlike(TensorView* v) {
+  TORCH_CHECK(
+      isFloatingPointType(v->dtype()),
+      "input must have floating point type, but got ",
+      v->dtype());
+  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
+  return where(
+      eq(rand_vals, IrBuilder::create<Double>(1.0)),
+      IrBuilder::create<Double>(0.0),
+      rand_vals);
+}
 
 Val* bitwise_not(Val* v) {
   TORCH_CHECK(
