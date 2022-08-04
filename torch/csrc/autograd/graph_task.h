@@ -8,8 +8,10 @@
 
 namespace torch {
 namespace autograd {
+
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
+
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
