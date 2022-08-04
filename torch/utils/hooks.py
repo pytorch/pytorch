@@ -79,7 +79,6 @@ class BackwardHook(object):
         self.output_tensors_index = None
         self.n_inputs = -1
         self.input_tensors_index = None
-        self.counter = 0
 
     def _pack_with_none(self, indices, values, size):
         res = [None] * size
