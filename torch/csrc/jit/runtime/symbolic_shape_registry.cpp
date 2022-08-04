@@ -344,20 +344,29 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  auto shape_compute_functions =
-      GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
+  try{
+    auto shape_compute_functions =
+        GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
-  auto src = std::make_shared<Source>(shape_compute_functions);
-  std::stringstream ss;
-  std::vector<at::IValue> constantTable;
-  auto resolver = std::make_shared<SourceImporterImpl>(
-      compilation_unit,
-      &constantTable,
-      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
-      1);
-  compilation_unit->define(
-      c10::nullopt, shape_compute_functions, resolver, nullptr);
-  loadModule(*compilation_unit);
+    auto src = std::make_shared<Source>(shape_compute_functions);
+    std::stringstream ss;
+    std::vector<at::IValue> constantTable;
+    auto resolver = std::make_shared<SourceImporterImpl>(
+        compilation_unit,
+        &constantTable,
+        [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+        1);
+    compilation_unit->define(
+        c10::nullopt, shape_compute_functions, resolver, nullptr);
+    loadModule(*compilation_unit);
+  }
+  catch (...){
+    // Reset the cache and compilation unit so that we don't get weird errors
+    // in later tests when one of the shape functions is invalid.
+    compilation_unit = std::make_shared<CompilationUnit>();
+    cached_schema_to_graph.clear();
+    throw;
+  }
 }
 } // anonymous namespace
 
