@@ -326,6 +326,7 @@ TensorBase empty_symint_meta(
   c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
   auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
   // NB: because there is no SparseMeta (yet), non-strided layout is
   // exerciseable
   TORCH_CHECK_NOT_IMPLEMENTED(

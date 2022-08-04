@@ -367,7 +367,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
-        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 
@@ -423,7 +423,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
-        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 
@@ -485,7 +485,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
         *args (optional): the corresponding args for callable ``model``.
         source (str, optional): 'github' or 'local'. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is 'github'.
-        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 

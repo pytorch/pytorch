@@ -77,41 +77,6 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
  protected:
   IntArrayRef strides_custom() const override;
 
-  int64_t numel_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: numel_custom() not supported for SparseCsrTensorImpl.");
-  }
-  bool is_contiguous_custom(MemoryFormat) const override {
-    TORCH_CHECK(
-        false, "Tensors of type SparseCsrTensorImpl do not have is_contiguous");
-  }
-  IntArrayRef sizes_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: sizes_custom() not supported for SparseCsrTensorImpl.");
-  }
-  c10::SymIntArrayRef sym_sizes_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: sym_sizes_custom() not supported for SparseCsrTensorImpl.");
-  }
-  c10::SymIntArrayRef sym_strides_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: sym_strides_custom() not supported for SparseCsrTensorImpl.");
-  }
-  Device device_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: device_custom() not supported for SparseCsrTensorImpl.");
-  }
-  int64_t dim_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: dim_custom() not supported for SparseCsrTensorImpl.");
-  }
-
  public:
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
