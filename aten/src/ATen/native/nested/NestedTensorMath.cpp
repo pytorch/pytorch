@@ -819,10 +819,10 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-// utilities support _NestedTensor_GeneralizedBMM
+// utilities support matmul_nested
 namespace {
 inline std::tuple<std::vector<int64_t>, Tensor>
-_NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+matmul_nested_bmm_BatchSizes_OutputMemory(
     const std::vector<IntArrayRef>& self_sizes,
     const std::vector<IntArrayRef>& mat2_sizes,
     const c10::TensorOptions& buffer_op,
@@ -869,14 +869,16 @@ _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
 }
 }
 
-// This is a generalized batched matmul dedicated to nested tensors,
+// Note [nested tensor matmul] TODO
+// This is really a generalized batched matmul dedicated to nested tensors,
 // where `self` and `mat2` have same number (>= 3) of dimensions.
 // The last 2 dimensions will be considered as matrix dimensions,
 // so they should be matrix-multiplicable.
 // The leading dimensions are considered as batch dimensions,
 // and since nested tensor does not support broadcasting for now,
 // for each batch dimension `self` and `mat2` must have same size.
-Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
+// Should make full matmul semantics support some day
+Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   if (self.is_nested() && !mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
   }
@@ -913,7 +915,7 @@ Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
   // create a contiguous output
   std::vector<int64_t> batch_sizes;
   Tensor output;
-  std::tie(batch_sizes, output) = _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+  std::tie(batch_sizes, output) = matmul_nested_bmm_BatchSizes_OutputMemory(
       self_sizes, mat2_sizes, self_buffer.options(), self_ptr->get_nested_size_tensor().options());
   // call tensor matmul
   // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
@@ -943,6 +945,11 @@ Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
     }
   }
   return output;
+}
+
+Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& result) {
+  result = at::matmul(tensor1, tensor2);
+  return result;
 }
 
 Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
