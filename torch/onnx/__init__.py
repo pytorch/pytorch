@@ -10,7 +10,7 @@ from torch._C._onnx import (
     TrainingMode,
 )
 
-from . import (
+from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
     errors,
     symbolic_caffe2,

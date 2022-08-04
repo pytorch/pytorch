@@ -657,7 +657,7 @@ class GELU(Module):
         :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:

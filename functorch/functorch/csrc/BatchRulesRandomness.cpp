@@ -463,7 +463,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
     decltype(&ATEN_FN2(randint_like, low_dtype)), &ATEN_FN2(randint_like, low_dtype), int64_t, int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);
   m.impl("rand_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(rand_like)), &ATEN_FN(rand_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
   m.impl("randn_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(randn_like)), &ATEN_FN(randn_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
-  
+
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
   #undef RANDOM_INPLACE_BATCH_RULE

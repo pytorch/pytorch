@@ -343,7 +343,7 @@ def check_all_permutations(op, args, kwargs, assert_equal_fn):
 
         try:
             actual = op(*new_args, **new_kwargs)
-        # NOTE: [What errors are Composite Compiance trying to catch?]
+        # NOTE: [What errors are Composite Compliance trying to catch?]
         #
         # There's two things we want to catch:
         # - errors that would raise within the torch_dispatch impl
@@ -393,7 +393,7 @@ def check_with_mode(op, args, kwargs, assert_equal_fn):
     try:
         with enable_torch_dispatch_mode(CCT):
             actual = op(*args, **kwargs)
-    # see NOTE: [What errors are Composite Compiance trying to catch?]
+    # see NOTE: [What errors are Composite Compliance trying to catch?]
     except RuntimeError as err:
         raise_composite_compliance_error(err)
 
@@ -461,7 +461,7 @@ def check_backward_formula(op: Callable, args, kwargs,
                 results = gradcheck_wrapper(op, *new_args, **new_kwargs)
             if output_process_fn_grad is not None:
                 results = output_process_fn_grad(results)
-        # see NOTE: [What errors are Composite Compiance trying to catch?]
+        # see NOTE: [What errors are Composite Compliance trying to catch?]
         except RuntimeError as err:
             raise_composite_compliance_error(
                 err,
@@ -480,7 +480,7 @@ def check_backward_formula(op: Callable, args, kwargs,
             try:
                 actual = torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
                                              allow_unused=True, retain_graph=True)
-            # see NOTE: [What errors are Composite Compiance trying to catch?]
+            # see NOTE: [What errors are Composite Compliance trying to catch?]
             except RuntimeError as err:
                 raise_composite_compliance_error(
                     err,
@@ -561,7 +561,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                         actual = op(*op_args, **op_kwargs)
                     else:
                         actual = gradcheck_wrapper(op, *op_args, **op_kwargs)
-                # see NOTE: [What errors are Composite Compiance trying to catch?]
+                # see NOTE: [What errors are Composite Compliance trying to catch?]
                 except RuntimeError as err:
                     raise_composite_compliance_error(
                         err,
