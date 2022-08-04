@@ -1,9 +1,9 @@
 #include <torch/csrc/lazy/core/lazy_view.h>
 
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 
 #include <c10/util/Exception.h>
 #include <algorithm>
@@ -62,10 +62,10 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
 //     a = torch.diagonal(b)
 //     b.add_(1) # a should be updated as well.
 //
-// Ideally we should all have a *ViewUpdate IR which updates the original tensor/view
-// withe current value. See DiagonalViewUpdate and corresponding LowerDiagonalViewUpdate
-// in ts_node_lowering.cpp. There are some "edge cases" here simply because they can
-// smartly reuse some other ops to undo themselves.
+// Ideally we should all have a *ViewUpdate IR which updates the original
+// tensor/view withe current value. See DiagonalViewUpdate and corresponding
+// LowerDiagonalViewUpdate in ts_node_lowering.cpp. There are some "edge cases"
+// here simply because they can smartly reuse some other ops to undo themselves.
 Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<Value> tmp_values({ir_value});
@@ -88,14 +88,13 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = MakeNarrowViewUpdate(
-            tmp_values[i - 1], result, view_info.indices);
+        result =
+            MakeNarrowViewUpdate(tmp_values[i - 1], result, view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;
       case ViewInfo::Type::kPermute:
-        result = MakePermute(
-            result, InversePermutation(view_info.permutation));
+        result = MakePermute(result, InversePermutation(view_info.permutation));
         break;
       case ViewInfo::Type::kReshape:
         result = MakeView(result, view_info.source_shape.sizes().vec());
@@ -104,11 +103,11 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
         result = MakeResize(result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kSqueeze:
-          result = MakeUnsqueeze(ir_value, view_info.squeeze_index);
-          break;
+        result = MakeUnsqueeze(ir_value, view_info.squeeze_index);
+        break;
       case ViewInfo::Type::kUnsqueeze:
-          result = MakeSqueeze(ir_value, view_info.squeeze_index);
-          break;
+        result = MakeSqueeze(ir_value, view_info.squeeze_index);
+        break;
       case ViewInfo::Type::kAsStrided:
         result = MakeAsStridedViewUpdate(
             tmp_values[i - 1],
@@ -145,8 +144,7 @@ ViewInfo::ViewInfo(Type view_type, Shape shape, Shape source_shape, int64_t sqi)
     : view_type(view_type),
       shape(std::move(shape)),
       source_shape(std::move(source_shape)),
-      squeeze_index(sqi)
-{
+      squeeze_index(sqi) {
   TORCH_CHECK(view_type == Type::kSqueeze);
 }
 

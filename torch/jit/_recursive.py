@@ -5,6 +5,7 @@ import collections
 import textwrap
 import functools
 import warnings
+import sys
 from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
@@ -25,13 +26,15 @@ ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
-    "_modules",
-    "_initializing",
+    "_non_persistent_buffers_set",
     "_backward_hooks",
     "_forward_hooks",
     "_forward_pre_hooks",
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+    "_modules",
+    "_initializing",
     "dump_patches",
 ]
 
@@ -134,7 +137,22 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     if isinstance(nn_module, (torch.nn.ParameterDict)):
         concrete_type_builder.set_parameter_dict()
 
-    class_annotations = getattr(nn_module, '__annotations__', {})
+    def get_annotations(obj):
+        if sys.version_info < (3, 10):
+            return getattr(obj, '__annotations__', {})
+        # In Python-3.10+ it is recommended to use inspect.get_annotations
+        # See https://docs.python.org/3.10/howto/annotations.html
+        # But also, in 3.10 annotations from base class are not inherited
+        # by unannotated derived one, so they must be manually extracted
+        annotations = inspect.get_annotations(obj)
+        if len(annotations) > 0:
+            return annotations
+        cls = obj if isinstance(obj, type) else type(obj)
+        if len(cls.__bases__) == 0:
+            return {}
+        return inspect.get_annotations(cls.__bases__[0])
+
+    class_annotations = get_annotations(nn_module)
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
         class_annotations = {}
 

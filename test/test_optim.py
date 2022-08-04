@@ -20,7 +20,8 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    parametrize, instantiate_parametrized_tests, gradcheck
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -40,7 +41,7 @@ class TestOptim(TestCase):
     exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
-                                sparse_only=False):
+                                sparse_only=False, maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
         params_t = torch.tensor([1.5, 1.5])
@@ -95,7 +96,10 @@ class TestOptim(TestCase):
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
                 self.assertEqual(params.data, params_c.data)
 
-        self.assertLessEqual(params.data.dist(solution), initial_dist)
+        if not maximize:
+            self.assertLessEqual(params.data.dist(solution), initial_dist)
+        else:
+            self.assertGreaterEqual(rosenbrock(params.data), rosenbrock(params_t))
 
     def _test_basic_cases_template(self, weight, bias, input, constructor,
                                    scheduler_constructors, constructor_accepts_maximize=True):
@@ -315,6 +319,32 @@ class TestOptim(TestCase):
             real_opt.step()
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
+
+    def _test_complex_2d(self, optimizer_constructor, f=None):
+        if f is None:
+            f = rosenbrock
+        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
+        a1_real = a1.real.clone().detach()
+        a1_imag = a1.imag.clone().detach()
+        a1_real.requires_grad_()
+        a1_imag.requires_grad_()
+        optim1 = optimizer_constructor([a1])
+        optim2 = optimizer_constructor([a1_real, a1_imag])
+
+        for i in range(10):
+            optim1.zero_grad()
+            optim2.zero_grad()
+            a2 = torch.complex(a1_real, a1_imag)
+            f(a1).backward()
+            f(a2).backward()
+
+            self.assertEqual(a1.grad.real, a1_real.grad)
+            self.assertEqual(a1.grad.imag, a1_imag.grad)
+
+            optim1.step()
+            optim2.step()
+            self.assertEqual(a1.real, a1_real)
+            self.assertEqual(a1.imag, a1_imag)
 
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
@@ -562,26 +592,13 @@ class TestOptim(TestCase):
                  lambda opt: ReduceLROnPlateau(opt)],
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-
-    # Test whether variance parameter is always real
-    def test_complex_adam_variance(self):
-        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        target = torch.randn(5, 5, dtype=torch.complex64)
-        optimizer = optim.Adam([complex_param], lr=0.001)
-
-        for i in range(20):
-            optimizer.zero_grad()
-            loss = (complex_param - target).pow(2).sum()
-            loss.backward()
-            optimizer.step()
-            for idx in optimizer.state_dict()['state'].keys():
-                variance = optimizer.state_dict()['state'][idx]['exp_avg_sq']
-                self.assertEqual(variance.imag, torch.zeros(variance.imag.shape))
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
@@ -609,6 +626,12 @@ class TestOptim(TestCase):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
             [],
+            True
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2, maximize=True),
+            [],
+            True,
             True
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
@@ -791,32 +814,38 @@ class TestOptim(TestCase):
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-2)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2)
+                    lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True)
+                    lr=1e-2, centered=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True, momentum=0.1)
+                    lr=1e-2, centered=True, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1)
+                    lr=1e-2, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1, weight_decay=1)
+                    lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
@@ -824,17 +853,20 @@ class TestOptim(TestCase):
     def test_asgd(self):
         for optimizer in [optim.ASGD, optim_mt.ASGD]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, t0=100)
+                    lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, weight_decay=1)
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
@@ -1470,6 +1502,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr4(self):
+        optimizer = torch.optim.SGD([torch.tensor(0.5)], lr=0.1)
+        prev_lr = optimizer.param_groups[0]["lr"]
+
+        schedulers = [
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1),
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1)
+        ]
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers, milestones=[10])
+
+        new_lr = optimizer.param_groups[0]["lr"]
+
+        # Ensure that multiple schedulers does not affect the initial learning rate
+        self.assertEqual(prev_lr, new_lr)
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
@@ -2018,23 +2065,22 @@ class TestLRScheduler(TestCase):
         scheduler = MultiplicativeLR(self.opt, lr_lambda=[lambda x1: 0.9, lambda x2: 0.8])
         self._test(scheduler, targets, epochs)
 
-    def test_CosineAnnealingWarmRestarts_lr1(self):
+    @parametrize("T_mult", [1, 2, 4])
+    def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2, 4]
-        for T_mult in T_mults:
-            T_i = 10
-            T_cur = 0
-            targets = [[0.05], [0.5]]
-            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
-            for _ in range(1, iters, 1):
-                T_cur += 1
-                if T_cur >= T_i:
-                    T_cur = T_cur - T_i
-                    T_i = int(T_mult) * T_i
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-            self._test(scheduler, targets, iters)
+        T_i = 10
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+        for _ in range(1, iters, 1):
+            T_cur += 1
+            if T_cur >= T_i:
+                T_cur = T_cur - T_i
+                T_i = int(T_mult) * T_i
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+        self._test(scheduler, targets, iters)
 
     def test_CosineAnnealingWarmRestarts_lr2(self):
         iters = 30
@@ -2647,6 +2693,32 @@ class TestSWAUtils(TestCase):
 
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
+
+instantiate_parametrized_tests(TestLRScheduler)
+
+
+def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
+    # Ignored is the list of values in `opt_differentiable_state`, we do this
+    # for `gradcheck` to correctly track the state tensors as function inputs
+    # because otherwise it can't unpack the values in the `opt_differentiable_state`
+    # dict
+    p = p.clone()
+    p.grad = grad
+    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt = opt_class([p], **kwargs)
+    opt.state.update(opt_differentiable_state)
+    opt.step()
+    return (p,) + tuple(opt_differentiable_state.values())
+
+
+class TestDifferentiableOptimizer(TestCase):
+
+    def test_sgd(self):
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state = {'momentum_buffer': mbuff}
+        gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
 
 
 if __name__ == '__main__':

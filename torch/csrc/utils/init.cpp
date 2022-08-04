@@ -3,6 +3,7 @@
 #include <torch/csrc/utils/throughput_benchmark.h>
 
 #include <pybind11/functional.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -17,7 +18,8 @@ void initThroughputBenchmarkBindings(PyObject* module) {
       .def_readwrite("num_worker_threads", &BenchmarkConfig::num_worker_threads)
       .def_readwrite("num_warmup_iters", &BenchmarkConfig::num_warmup_iters)
       .def_readwrite("num_iters", &BenchmarkConfig::num_iters)
-      .def_readwrite("profiler_output_path", &BenchmarkConfig::profiler_output_path);
+      .def_readwrite(
+          "profiler_output_path", &BenchmarkConfig::profiler_output_path);
 
   py::class_<BenchmarkExecutionStats>(m, "BenchmarkExecutionStats")
       .def_readonly("latency_avg_ms", &BenchmarkExecutionStats::latency_avg_ms)
@@ -45,8 +47,6 @@ void initThroughputBenchmarkBindings(PyObject* module) {
         pybind11::gil_scoped_release no_gil_guard;
         return self.benchmark(config);
       });
-
-
 }
 
 } // namespace throughput_benchmark

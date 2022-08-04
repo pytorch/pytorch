@@ -28,7 +28,9 @@
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
+#include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
@@ -98,7 +100,9 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
+  ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -580,11 +584,13 @@ void validateAlignedVectorizedFusionInputOutput(
   bool still_rightmost = true;
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
-    // If this domain is contiguous, then not necessary to check the
-    // stride. Otherwise, stride must be 1 if it's rightmost or
-    // divisible by word_size.
+    const auto size = aten_tensor.sizes().at(i);
+    // If this domain is contiguous or size == 1, then not necessary to check
+    // the stride. Otherwise, stride must be 1 if it's rightmost or
+    // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || (still_rightmost && stride == 1) ||
+        stride == cur_contig_stride || size == 1 ||
+            (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
         tv->toString(),
@@ -597,9 +603,12 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    const auto size = aten_tensor.sizes().at(i);
     still_rightmost = still_rightmost && size == 1;
-    cur_contig_stride = stride * size;
+    // We do not update cur_contig_stride for size==1 dimensions,
+    // since we have specialized vectorization stride check for them
+    if (size != 1) {
+      cur_contig_stride = stride * size;
+    }
   }
 }
 
@@ -768,7 +777,12 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
-        const auto extent = root_domain[dim]->extent();
+        Val* extent = nullptr;
+        if (root_domain[dim]->hasExpandedExtent()) {
+          extent = root_domain[dim]->expandedExtent();
+        } else {
+          extent = root_domain[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -836,7 +850,12 @@ ExpressionEvaluator bindFusionInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");
       for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
+        Val* extent = nullptr;
+        if (root_dom[dim]->hasExpandedExtent()) {
+          extent = root_dom[dim]->expandedExtent();
+        } else {
+          extent = root_dom[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -888,6 +907,11 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
+  if (isDisabled(DisableOption::ArchCheck)) {
+    TORCH_WARN(
+        "NVFuser Compile: arch check disabled, should not compile any kernel");
+  }
+
   initializeCudaContext();
 
   std::stringstream ptxas_log;
@@ -959,6 +983,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   args.push_back("-DNDEBUG");
 #endif
 
+  if (isEnabled(EnableOption::KernelProfile)) {
+    args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
+  }
+
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
 
@@ -991,6 +1019,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");
@@ -1212,6 +1246,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
       lowered_kernel_name));
+
+  TORCH_CHECK(
+      !isDisabled(DisableOption::ArchCheck),
+      "NVFuser Compile: arch check disabled, should not return any compiled kernel");
 
   return {compiled_kernel_, ptxas_log.str()};
 }

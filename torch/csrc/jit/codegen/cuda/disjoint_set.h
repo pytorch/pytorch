@@ -86,6 +86,11 @@ class VectorOfUniqueEntries {
     return vector_.empty();
   }
 
+  // Returns the number of elements in this container
+  size_t size() const {
+    return vector_.size();
+  }
+
   // Returns if entry is in this vector
   bool has(T entry) const {
     return set_.find(entry) != set_.end();

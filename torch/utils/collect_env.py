@@ -89,7 +89,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda):
     conda = os.environ.get('CONDA_EXE', 'conda')
-    out = run_and_read_all(run_lambda, f"{conda} list")
+    out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
         return out
 
@@ -283,7 +283,7 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
-        out = run_and_read_all(run_lambda, f"{pip} list --format=freeze")
+        out = run_and_read_all(run_lambda, "{} list --format=freeze".format(pip))
         return "\n".join(
             line
             for line in out.splitlines()

@@ -8,9 +8,9 @@ from pathlib import Path
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import PackageExporter, PackageImporter, is_from_package
+from torch.package import is_from_package, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests, skipIfTorchDynamo
 
 try:
     from .common import PackageTestCase
@@ -263,6 +263,7 @@ class TestMisc(PackageTestCase):
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_std_lib_sys_hackery_checks(self):
         """
         The standard library performs sys.module assignment hackery which

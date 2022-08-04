@@ -390,13 +390,15 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
   } else {
     scope_list scopes;
     std::copy_if(
-        input_scopes.begin(), input_scopes.end(), scopes.begin(), IsValidScope);
+        input_scopes.begin(),
+        input_scopes.end(),
+        std::back_inserter(scopes),
+        IsValidScope);
     std::copy_if(
         output_scopes.begin(),
         output_scopes.end(),
-        scopes.begin(),
+        std::back_inserter(scopes),
         IsValidScope);
-
     if (scopes.size() > 0) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
@@ -553,7 +555,6 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& domain_name,
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
-  const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
@@ -671,8 +672,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   const auto func_name =
       construct_unique_module_name(module_class_name.substr(pos + 1));
 
-  auto func_def_n =
-      CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
+  CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
 
   // create and insert local function node to graph.
   for (const auto& it : func_ctx.scope_ctxs_) {

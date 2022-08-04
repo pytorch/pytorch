@@ -1,20 +1,10 @@
 import torch
 from torch.utils._pytree import tree_map
-
 from typing import Iterator, List
 import logging
 import contextlib
 import itertools
-from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 # How the chain of calls works for LoggingTensor:
@@ -134,5 +124,5 @@ def capture_logs(is_mode=False) -> Iterator[List[str]]:
 
 @contextlib.contextmanager
 def capture_logs_with_logging_tensor_mode():
-    with push_torch_dispatch_mode(LoggingTensorMode), capture_logs(True) as logs:
+    with LoggingTensorMode(), capture_logs(True) as logs:
         yield logs

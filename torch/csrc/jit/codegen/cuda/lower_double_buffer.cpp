@@ -67,20 +67,22 @@ void validateDoubleBufferedTensor(const TensorView* tv) {
   // considered.
   auto def = tv->definition();
   TORCH_INTERNAL_ASSERT(
-      def->isA<UnaryOp>() &&
-          def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set,
+      (def->isA<UnaryOp>() &&
+       def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set) ||
+          // Load store op should generally support double buffering.
+          def->isA<LoadStoreOp>(),
       "Invalid tensor to double-buffer. Only tensor defined by UnaryOp::Set is supported: ",
       def->toString());
 
   TORCH_INTERNAL_ASSERT(
-      def->as<UnaryOp>()->in()->isA<TensorView>(),
+      def->input(0)->isA<TensorView>(),
       "Invalid tensor to double-buffer. Only tensor defined by UnaryOp::Set with TensorView is supported: ",
       def->toString());
 
   // Require the producer tensor to have been computed entirely for
   // the double-buffering loop. Otherwise, the producer itself would
   // also need to be double-bufferred.
-  auto producer = def->as<UnaryOp>()->in()->as<TensorView>();
+  auto producer = def->input(0)->as<TensorView>();
   TORCH_INTERNAL_ASSERT(
       producer->getComputeAtPosition() <= double_buffer_pos,
       "Invalid tensor to double-buffer. The computeAt position of the producer tensor must be moved left: ",
@@ -122,6 +124,9 @@ class DoubleBufferFusionInspector : private IterVisitor {
       return;
     }
 
+    TORCH_INTERNAL_ASSERT(
+        tv->definition(), "Fusion input shouldn't be double buffered.", tv);
+
     validateDoubleBufferedTensor(tv);
 
     auto db_axis = getDoubleBufferAxis(tv);
@@ -133,17 +138,15 @@ class DoubleBufferFusionInspector : private IterVisitor {
   DoubleBufferInfo& db_info_;
 };
 
-// The type of replicated double-buffer loops
-enum class LoopType { Prologue, Main, Epilogue };
-
 // The epilogue loop is only created when the producer of a double
 // buffer tensor is on smem, in which case it would otherwise require
 // an additional predicate to guard buffer overruns. When it's on
 // gmem, that isn't the case, so it does not need to create an
 // epilogue loop.
-bool requireEpilogue(const std::vector<UnaryOp*>& exprs) {
-  return std::any_of(exprs.begin(), exprs.end(), [](const UnaryOp* uop) {
-    return uop->in()->as<TensorView>()->getMemoryType() == MemoryType::Shared;
+bool requireEpilogue(const std::vector<Expr*>& exprs) {
+  return std::any_of(exprs.begin(), exprs.end(), [](const Expr* expr) {
+    return expr->input(0)->as<TensorView>()->getMemoryType() ==
+        MemoryType::Shared;
   });
 }
 
@@ -155,8 +158,8 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
  public:
   static kir::ForLoop* clone(
       kir::ForLoop* double_buffer_loop,
-      const std::vector<UnaryOp*>& double_buffer_load_exprs,
-      LoopType loop_type) {
+      const std::vector<Expr*>& double_buffer_load_exprs,
+      DoubleBufferLoopStage loop_type) {
     DoubleBufferLoopCloner cloner(
         double_buffer_loop, double_buffer_load_exprs, loop_type);
     cloner.clone();
@@ -166,8 +169,8 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
  private:
   DoubleBufferLoopCloner(
       kir::ForLoop* double_buffer_loop,
-      const std::vector<UnaryOp*>& double_buffer_load_exprs,
-      LoopType loop_type)
+      const std::vector<Expr*>& double_buffer_load_exprs,
+      DoubleBufferLoopStage loop_type)
       : double_buffer_loop_(double_buffer_loop),
         double_buffer_load_exprs_(double_buffer_load_exprs),
         loop_type_(loop_type) {}
@@ -183,19 +186,20 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
     // Main: 0 to (extent-1)
     // Epilogue: (extent-1) to extent
 
-    auto index = IrBuilder::create<Int>(c10::nullopt);
+    auto index = GpuLower::current()->caMap()->getIndexVariable(
+        double_buffer_loop_->iter_domain(), loop_type_);
     auto start = double_buffer_loop_->start();
     auto stop = double_buffer_loop_->stop();
 
-    if (loop_type_ == LoopType::Prologue) {
+    if (loop_type_ == DoubleBufferLoopStage::Prolog) {
       TORCH_INTERNAL_ASSERT(start->isZeroInt());
       stop = gpu_lower->kernel()->oneVal();
     } else if (
-        loop_type_ == LoopType::Main &&
+        loop_type_ == DoubleBufferLoopStage::Main &&
         requireEpilogue(double_buffer_load_exprs_)) {
       stop = IrBuilder::subExpr(
           double_buffer_loop_->stop(), gpu_lower->kernel()->oneVal());
-    } else if (loop_type_ == LoopType::Epilogue) {
+    } else if (loop_type_ == DoubleBufferLoopStage::Epilog) {
       TORCH_INTERNAL_ASSERT(requireEpilogue(double_buffer_load_exprs_));
       start = IrBuilder::subExpr(
           double_buffer_loop_->stop(), gpu_lower->kernel()->oneVal());
@@ -209,7 +213,8 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
         gpu_lower->kernel()->oneVal(),
         false,
         nullptr,
-        double_buffer_loop_->isUnrollRequired());
+        double_buffer_loop_->isUnrollRequired(),
+        loop_type_);
 
     handle(double_buffer_loop_);
   }
@@ -244,7 +249,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
 
     TORCH_INTERNAL_ASSERT(!cloned_scopes_.empty());
 
-    if (loop_type_ == LoopType::Main) {
+    if (loop_type_ == DoubleBufferLoopStage::Main) {
       cloned_scopes_.back()->push_back(expr);
       return;
     }
@@ -262,22 +267,24 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
           TORCH_INTERNAL_ASSERT(double_buffer_tv != nullptr);
           return out_tv == double_buffer_tv;
         });
-    if ((loop_type_ == LoopType::Prologue && is_double_buffer_load_expr) ||
-        (loop_type_ == LoopType::Epilogue && !is_double_buffer_load_expr)) {
+    if ((loop_type_ == DoubleBufferLoopStage::Prolog &&
+         is_double_buffer_load_expr) ||
+        (loop_type_ == DoubleBufferLoopStage::Epilog &&
+         !is_double_buffer_load_expr)) {
       cloned_scopes_.back()->push_back(expr);
     }
   }
 
  private:
   kir::ForLoop* double_buffer_loop_ = nullptr;
-  const std::vector<UnaryOp*>& double_buffer_load_exprs_;
-  const LoopType loop_type_;
+  const std::vector<Expr*>& double_buffer_load_exprs_;
+  const DoubleBufferLoopStage loop_type_;
 
   kir::ForLoop* cloned_top_level_loop_ = nullptr;
   std::deque<kir::Scope*> cloned_scopes_;
 };
 
-using InsertionInfo = std::unordered_map<kir::ForLoop*, std::vector<UnaryOp*>>;
+using InsertionInfo = std::unordered_map<kir::ForLoop*, std::vector<Expr*>>;
 
 // Traverse lowered loop-nests and find all double buffer loops and
 // associated load expressions.
@@ -295,17 +302,19 @@ class DoubleBufferLoopNestInspector : private kir::IrVisitor {
 
   using kir::IrVisitor::handle;
 
-  void handle(UnaryOp* uop) final {
+  // Collect double buffer related information on a expr
+  //  that is a memory load, i.e. a LoadStore or a Set.
+  void handlePossibleLoadExpr(Expr* expr) {
     const auto gpu_lower = GpuLower::current();
 
-    auto out_tv = ir_utils::getTvOutput(uop);
+    auto out_tv = ir_utils::getTvOutput(expr);
 
     if (out_tv == nullptr) {
       return;
     }
 
     // Ignore init loop
-    if (!out_tv->isDoubleBuffered() || !uop->in()->isA<TensorView>()) {
+    if (!out_tv->isDoubleBuffered() || !expr->input(0)->isA<TensorView>()) {
       return;
     }
 
@@ -319,7 +328,15 @@ class DoubleBufferLoopNestInspector : private kir::IrVisitor {
 
     validateDoubleBufferLoop(double_buffer_loop);
 
-    insertion_info_[double_buffer_loop].push_back(uop);
+    insertion_info_[double_buffer_loop].push_back(expr);
+  }
+
+  void handle(UnaryOp* uop) final {
+    handlePossibleLoadExpr(uop);
+  }
+
+  void handle(LoadStoreOp* ldst) final {
+    handlePossibleLoadExpr(ldst);
   }
 
   static void validateDoubleBufferLoop(kir::ForLoop* loop) {
@@ -391,32 +408,121 @@ class DoubleBufferInserter : private kir::ExprMutator {
 
   void insert(
       kir::ForLoop* double_buffer_loop,
-      const std::vector<UnaryOp*>& loads) {
+      const std::vector<Expr*>& loads) {
     auto prologue_loop = DoubleBufferLoopCloner::clone(
-        double_buffer_loop, loads, LoopType::Prologue);
+        double_buffer_loop, loads, DoubleBufferLoopStage::Prolog);
     registerInsertBefore(double_buffer_loop, prologue_loop);
 
     auto write_to_smem =
-        std::any_of(loads.begin(), loads.end(), [](const UnaryOp* uop) {
-          return uop->out()->as<TensorView>()->getMemoryType() ==
+        std::any_of(loads.begin(), loads.end(), [](const Expr* expr) {
+          return expr->output(0)->as<TensorView>()->getMemoryType() ==
               MemoryType::Shared;
         });
 
     // RAW sync is not inserted for double buffered tensors. The only
     // exception is the prologue load.
+    bool insert_cpasync_wait = false;
     if (write_to_smem) {
-      auto sync = IrBuilder::create<kir::BlockSync>();
-      registerInsertBefore(double_buffer_loop, sync);
+      // Here the initial sync before entering double buffer loop is
+      //  inserted.
+
+      // If any of the double buffered tensor in this double buffer
+      //  loop is async copy. We want to wait for the gmem loads to
+      //  finish before synchronizing the block.
+      if (std::any_of(loads.begin(), loads.end(), ir_utils::isCpAsyncOp)) {
+        auto cp_async_wait = IrBuilder::create<kir::CpAsyncWait>();
+        registerInsertBefore(double_buffer_loop, cp_async_wait);
+        insert_cpasync_wait = true;
+      }
+
+      // Insert the initial block sync before entering main loop.
+      if (std::any_of(loads.begin(), loads.end(), [](Expr* expr) {
+            return GpuLower::current()
+                ->syncMap()
+                .needsRawSync(ir_utils::getTvOutput(expr))
+                .hasTID();
+          })) {
+        // If any of the double buffered loads require sync, as indicated
+        //  by sync info map, insert the sync before entering the double buffer
+        //  loop.
+        // TODO:
+        //  Currently not supporting double buffer in gmem, but short to mid
+        //  term not yet a priority to go for this case.
+        auto sync = IrBuilder::create<kir::BlockSync>(false);
+        registerInsertBefore(double_buffer_loop, sync);
+      }
     }
 
     auto main_loop = DoubleBufferLoopCloner::clone(
-        double_buffer_loop, loads, LoopType::Main);
+        double_buffer_loop, loads, DoubleBufferLoopStage::Main);
+
     registerReplace(double_buffer_loop, main_loop);
+
+    // Insert the wait instruction in this pass instead
+    //  of relying on WAR sync pass to do it.
+    // The WAR sync pass today would insert the wait function
+    //  exactly where we need it but the purpose of this wait
+    //  insertion isn't exactly WAR protection.
+    //
+    // TODO: [Double Buffer Sync]
+    //  We might eventually want to move the block sync inserted
+    //   by WAR pass here as well since this sync insertion is kind
+    //   of both WAR and RAW (or neither RAW nor WAR, depends
+    //   on how we look at it).
+    // Eg. in the case when a intermediate
+    //   tensor is double buffered.
+    //
+    //  __block_sync();    // This is the initial sync
+    //  For i in ...       // Double buffer loop
+    //     A[i%2] = ...;
+    //     ...  = A[1-i%2];
+    //     __block_sync();  // sync within loop
+    //     ...
+    //  The "sync within loop" can be placed anywhere in the
+    //   double buffer loop while in the case of RAW and WAR
+    //   there'd be extra insertion point restrictions.
+    //  We are currently not actively exploring opportunities
+    //   with this property of "double buffer sync" so this
+    //   is more conceptual at the moment, aka low priority.
+    if (insert_cpasync_wait) {
+      insertCpAsyncWaitInMainLoop(main_loop);
+    }
 
     if (requireEpilogue(loads)) {
       auto epilogue_loop = DoubleBufferLoopCloner::clone(
-          double_buffer_loop, loads, LoopType::Epilogue);
+          double_buffer_loop, loads, DoubleBufferLoopStage::Epilog);
       registerInsertAfter(double_buffer_loop, epilogue_loop);
+    }
+  }
+
+  // Simple conservative rule for inserting async copy wait
+  //  primitive in the double buffer loop:
+  void insertCpAsyncWaitInMainLoop(kir::ForLoop* main_loop) {
+    TORCH_INTERNAL_ASSERT(
+        !main_loop->body().empty(),
+        "Double buffer sync insertion: empty main loop.");
+    // Note: This pass explicitly assumes that WAR sync has been
+    //  inserted so would need to be updated if we re-order the
+    //  passes. Cleanups suggested in [Double Buffer Sync]
+    //  would resolve this dependency on pass ordering.
+    auto end_of_loop_expr = main_loop->body().exprs().back();
+    auto cp_async_wait = IrBuilder::create<kir::CpAsyncWait>();
+
+    // Check if a sync has been inserted by WAR sync pass.
+    auto block_sync_it = std::find_if(
+        main_loop->body().exprs().rbegin(),
+        main_loop->body().exprs().rend(),
+        [](const Expr* expr) { return expr->isA<kir::BlockSync>(); });
+    if (block_sync_it == main_loop->body().exprs().rend()) {
+      // If there's no sync, i.e. no tensor needs cross
+      //  thread communication. We still need a wait but
+      //  it can just be anywhere in the loop. Chose to
+      //  place at the end arbitrarily.
+      main_loop->body().insert_after(end_of_loop_expr, cp_async_wait);
+    } else {
+      // If a sync has been inserted, wait needs to be placed
+      //  before the sync.
+      main_loop->body().insert_before(*block_sync_it, cp_async_wait);
     }
   }
 
@@ -429,6 +535,24 @@ class DoubleBufferInserter : private kir::ExprMutator {
 
 void DoubleBufferInfo::build(Fusion* fusion) {
   DoubleBufferFusionInspector inspector(fusion, *this);
+
+  // Build double buffered loop id's
+  for (auto& info : map_) {
+    auto double_buffer_axis = info.second.double_buffer_axis;
+    // Keeps track of which loop disjoint set has been
+    //  double buffered. In index allocation, one index
+    //  variable would need to be allocated in each
+    //  double buffer stage.
+    concrete_double_buffered_loop_id_.insert(
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            double_buffer_axis, IdMappingMode::LOOP));
+  }
+}
+
+bool DoubleBufferInfo::isDoubleBufferedIterDomain(IterDomain* id) {
+  auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::LOOP);
+  return concrete_double_buffered_loop_id_.count(concrete_loop_id);
 }
 
 DoubleBufferInfo::TvInfo& DoubleBufferInfo::getTvInfo(const TensorView* tv) {

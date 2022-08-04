@@ -38,7 +38,7 @@ Features described in this documentation are classified by release status:
 .. toctree::
    :glob:
    :maxdepth: 1
-   :caption: Guides
+   :caption: Developer Notes
 
    notes/*
 
@@ -62,6 +62,7 @@ Features described in this documentation are classified by release status:
    tensor_view
    torch.amp <amp>
    torch.autograd <autograd>
+   torch.library <library>
    cuda
    torch.backends <backends>
    torch.distributed <distributed>
@@ -99,6 +100,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>

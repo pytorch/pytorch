@@ -1,11 +1,13 @@
 #pragma once
 
+#include <c10/core/SymIntNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
+
+#include <memory>
 
 namespace c10 {
-
-class SymbolicIntNode;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -23,12 +25,56 @@ class SymbolicIntNode;
 // functions.
 //
 // SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymbolicIntNode*] which will be implemented as a single packed int64_t field
+// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
 class C10_API SymInt {
  public:
+  // TODO: this needs to only accept integers, not pointers
   /*implicit*/ SymInt(int64_t d) : data_(d){};
   SymInt() = default;
+
+  // TODO: these implementations are not optimal because they allocate a
+  // temporary and then use the move constructor/assignment
+  SymInt(const SymInt& s) : data_(0) {
+    if (s.is_symbolic()) {
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+    } else {
+      data_ = s.data_;
+    }
+  }
+  SymInt(SymInt&& s) : data_(s.data_) {
+    s.data_ = 0;
+  }
+
+  SymInt& operator=(const SymInt& s) {
+    if (s.is_symbolic()) {
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+    } else {
+      data_ = s.data_;
+    }
+    return *this;
+  }
+  SymInt& operator=(SymInt&& s) {
+    data_ = s.data_;
+    if (s.is_symbolic())
+      s.data_ = 0;
+    return *this;
+  }
+
+  SymIntNodeImpl* toSymIntNodeImplUnowned() const {
+    uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
+    uint64_t sign_bit_mask = 1ULL << (62 - 1);
+    // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
+    uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
+    return static_cast<SymIntNodeImpl*>(
+        reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
+  }
+
+  ~SymInt() {
+    if (is_symbolic()) {
+      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
+    }
+  }
 
   int64_t expect_int() const {
     TORCH_CHECK(!is_symbolic());
@@ -39,15 +85,10 @@ class C10_API SymInt {
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
   }
 
-  bool operator==(const SymInt& p2) const {
-    return data_ == p2.data_;
-  }
-
-  bool operator!=(const SymInt& p2) const {
-    return data_ != p2.data_;
-  }
-
   SymInt operator+(SymInt sci) const;
+  SymInt operator*(SymInt sci) const;
+  bool operator==(SymInt sci) const;
+  bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
 
@@ -56,15 +97,10 @@ class C10_API SymInt {
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
 
-  std::shared_ptr<SymbolicIntNode> toSymbolicIntNode();
-  static c10::SymInt toSymInt(std::shared_ptr<SymbolicIntNode> sin);
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
-    return data_;
-  }
-
-  // This is needed for interoperability with IValue
-  int64_t data() const {
     return data_;
   }
 
@@ -75,15 +111,17 @@ class C10_API SymInt {
 
  private:
   // Constraints on the internal representation:
-  // - Should represent positive and negative ints
+  // - Should represent positive and small negative ints
   // - No conversion necessary for operations on ints.
-  // - We reserve some values to act as indices into our sym int table.
+  // - Must represent valid 64-bit pointers
   //
   // So, the scheme is to reserve large negative numbers:
   // - 0b0.... means we are a positive int (following two's complement)
   // - 0b11... means we are a negative int (following two's complement)
-  // - 0b10... means we are index into the sym table. This means that
+  // - 0b10... means we are are a pointer. This means that
   //           [-2^63, -2^62-1] are not representable as ints.
+  //           We don't actually need all of this space as on x86_64
+  //           as the top 16bits aren't used for anything
   static constexpr uint64_t MASK = 1ULL << 63 | 1ULL << 62;
   static constexpr uint64_t IS_SYM = 1ULL << 63;
   // Since we use the top two bits to determine whether something is symbolic,
@@ -92,7 +130,7 @@ class C10_API SymInt {
   static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & ~(1ULL << 62);
+  static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 
