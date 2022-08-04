@@ -2684,7 +2684,7 @@
 - name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
-- name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+- name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
   t: grad.to_padded_tensor(0, t.sizes())
   mask: non_differentiable
 
