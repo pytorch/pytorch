@@ -56,7 +56,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
   linux-focal-py3_7-gcc7-pch:
-    name: linux-focal-py3.7-gcc7-no-ops
+    name: linux-focal-py3.7-gcc7-pch
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3.7-gcc7-pch
