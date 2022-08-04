@@ -304,6 +304,16 @@ def gen_embedding_rules(n: Node, symbols, embedding_dim, counter):
     return [Disj([c1, Disj(c2)])], counter
 
 
+@register_inference_rule(torch.tensor)
+def tensor_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    If the tensor is a scalar, we will skip it since we
+    do not support scalars yet. We will add support in the future
+    if it's needed. For our examples so far, scalars are not needed.
+    """
+    return [], counter
+
+
 @register_inference_rule("reshape")
 @register_inference_rule("view")
 def view_inference_rule(n: Node, symbols, constraints, counter):
