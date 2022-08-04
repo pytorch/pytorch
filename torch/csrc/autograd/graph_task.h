@@ -1,7 +1,7 @@
 #pragma once
-
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/Tensor.h>
+#include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
@@ -181,9 +181,19 @@ class GraphTaskGuard {
   std::shared_ptr<GraphTask> last_graph_task_;
 };
 
-const std::unordered_map<Node*, GraphTask::ExecInfo>*
-get_current_graph_task_exec_info();
-void add_node_to_current_graph_task_exec_info(Node* fn);
+C10_DECLARE_TLS_extern(std::shared_ptr<GraphTask>, tls_current_graph_task);
+#define current_graph_task (tls_current_graph_task.get())
+
+// The current graph task's exec_info could be used to trim unnecessary edegs
+// during node evaluation, see `Node.should_compute_output()` function.
+inline const std::unordered_map<Node*, GraphTask::ExecInfo>*
+get_current_graph_task_exec_info() {
+  return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
+}
+
+inline void add_node_to_current_graph_task_exec_info(Node* fn) {
+  current_graph_task->exec_info_[fn].needed_ = true;
+}
 
 } // namespace autograd
 } // namespace torch

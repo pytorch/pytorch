@@ -2,6 +2,7 @@
 
 #include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
@@ -34,6 +35,32 @@ NodeGuard::~NodeGuard() {
 
 void Node::assign_parent() {
   metadata()->assign_parent(current_evaluating_node);
+}
+
+bool Node::should_compute_output(size_t output_edge_index) const {
+  TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+  const auto& next = next_edges_[output_edge_index];
+  if (next.is_valid()) {
+    const auto exec_info = get_current_graph_task_exec_info();
+    if (exec_info && !exec_info->empty()) {
+      auto it = exec_info->find(next.function.get());
+      if (it == exec_info->end() || !it->second.should_execute()) {
+        return false; // this edge is not needed for the current graph_task
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+bool Node::should_compute_output(std::initializer_list<IndexRange> idxs) const {
+  return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
+    for (const auto i : c10::irange(range.first, range.second)) {
+      if (should_compute_output(i))
+        return true;
+    }
+    return false;
+  });
 }
 
 auto Node::name() const -> std::string {
