@@ -45,6 +45,14 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         excluded_types = [inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD]
         return [p for p in signature.parameters.values() if p.default is p.empty and p.kind not in excluded_types]
 
+    def contains_var_positional(signature: inspect.Signature):
+        """Checks for the presences of *args in the signature"""
+        return any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in signature.parameters.values())
+
+    def get_normal_params(signature: inspect.Signature):
+        """Finds any position or keyword arguments in the signature"""
+        return [p for p in signature.parameters.values() if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD]
+
     if len(sig.parameters) >= input_col_size:
         non_default_params = get_non_default_params(sig)
 
@@ -62,6 +70,18 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                 f"The function {fn_name} takes {len(non_default_kw_only)} "
                 f"non-default keyword-only parameters, which is not allowed."
             )
+
+        pos_or_kwonly = get_normal_params(sig)
+        non_default_pos_or_kwonly = list(filter(lambda p: p.default is p.empty, pos_or_kwonly))
+        if len(pos_or_kwonly) != input_col_size:
+            if contains_var_positional(sig):
+              pass
+            elif len(non_default_pos_or_kwonly) != input_col_size:
+                raise ValueError(
+                    f"The function {fn_name} takes {len(non_default_pos_or_kwonly)} "
+                    f"non-default positional or keyword parameters, "
+                    f"but {input_col_size} are required."
+                )
 
     if len(sig.parameters) < input_col_size:
         if inspect.Parameter.VAR_POSITIONAL not in [p.kind for p in sig.parameters.values()]:

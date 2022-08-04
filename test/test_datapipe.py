@@ -1227,6 +1227,9 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_n1_pos(d0, d1, *args):
             return d0 + d1
 
+        def fn_n1_sep_pos(d0, *args, d1):
+            return d0 + d1
+
         def fn_cmplx(d0, d1=1, *args, d2, **kwargs):
             return d0 + d1
 
@@ -1266,9 +1269,10 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
         _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
-        _helper(None, p_fn_n1, [0, 1], error=TypeError)
+        _helper(None, p_fn_n1, [0, 1], error=ValueError)
         _helper(None, fn_1n, [1, 2], error=ValueError)
-        _helper(None, p_fn_cmplx, None, [0, 1, 2], error=ValueError)
+        # _helper(None, p_fn_cmplx, [0, 1, 2], error=ValueError)
+        _helper(None, fn_n1_sep_pos, [0, 1, 2], error=ValueError)
         # Fn has keyword-only arguments
         _helper(None, fn_n1_kwargs, 1, error=ValueError)
         _helper(None, fn_cmplx, [0, 1], 2, ValueError)
@@ -1362,6 +1366,8 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: data, fn_n1_def, 'x', 'y')
         _helper(lambda data: data, p_fn_n1, 'x', 'y')
         _helper(lambda data: data, p_fn_cmplx, 'x', 'y')
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
+                p_fn_cmplx, ["x", "y", "z"], "z")
 
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
 
@@ -1372,6 +1378,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(None, fn_has_nondefault_kwonly, ['x', 'y'], error=ValueError)
         _helper(None, fn_cmplx, ['x', 'y'], error=ValueError)
 
+
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
@@ -1380,6 +1387,9 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, "y", error=ValueError)
         _helper(None, fn_1n, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_def, ["x", "y", "z"], error=ValueError)
+        _helper(None, p_fn_n1, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_kwargs, ["x", "y", "z"], error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
