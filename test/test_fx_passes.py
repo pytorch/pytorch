@@ -577,6 +577,62 @@ class MultipleOutputsIdenticalAnchor:
         TestCase(False, True, 0),
     ]
 
+class PatternWithRegexAny:
+    @staticmethod
+    def forward(x):
+        x = x.relu()
+        x = x.sigmoid()
+
+        y = x.relu()
+        y = y + 1
+
+        z = y.relu()
+        z = z.relu()
+
+        return z
+
+    @staticmethod
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.regex.any(y)
+        return z
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 3),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+
+class PatternWithRegexOneof:
+    @staticmethod
+    def forward(x):
+        x = x.relu()
+        x = x.sigmoid()
+
+        y = x.relu()
+        y = y + 1
+
+        z = y.relu()
+        z = z.relu()
+
+        return z
+
+    @staticmethod
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.regex.oneof(y, ops=["relu", "sigmoid"])
+        return z
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 2),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -593,6 +649,8 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsMultipleOverlappingMatches,
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
+        PatternWithRegexAny,
+        PatternWithRegexOneof,
     ])
     def test_subgraph_matcher(self, test_model):
         traced = symbolic_trace(test_model.forward)

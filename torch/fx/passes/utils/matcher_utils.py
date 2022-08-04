@@ -1,5 +1,6 @@
 from collections import defaultdict
 import copy
+import torch.library
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
@@ -9,6 +10,10 @@ from torch.fx.subgraph_rewriter import Match
 from typing import Dict, List, Set
 
 __all__ = ['SubgraphMatcher']
+
+regex = torch.library.Library("regex", "DEF")
+regex.define("any() -> ()")
+regex.define("oneof( *, str[] ops) -> ()")
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcher:
@@ -65,6 +70,13 @@ class SubgraphMatcher:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
+
+        if pn.target == torch.ops.regex.any:
+            return True
+
+        if pn.target == torch.ops.regex.oneof:
+            if gn.target in pn.kwargs["ops"]:
+                return True
 
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
