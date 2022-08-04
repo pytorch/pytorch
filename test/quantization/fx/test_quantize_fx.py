@@ -117,6 +117,10 @@ from torch.ao.quantization.fx.custom_config import (
     StandaloneModuleConfigEntry,
 )
 
+from torch.ao.quantization.fx.prepare import (
+    is_activation_post_process_node,
+)
+
 from torch.ao.quantization.fx.qconfig_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
@@ -6555,6 +6559,57 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ])
         m3(*example_inputs)
 
+    def test_getitem_wrapped_in_observers(self):
+        """
+        Test that, for cases when there are observers around a getitem node:
+            (1) These observers are the same, and
+            (2) The pattern (dequant - getitem - quant) will be fused during the lowering step
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
+                self.conv2 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
+
+            def forward(self, inputs):
+                # inputs: [1, 5, 10]
+                x1 = self.conv1(inputs)
+                # x: [1, 5, 6]
+                x1 = x1 + inputs[:, :, -6:]
+                x2 = self.conv2(x1)
+                x2 = x2 + x1[:, :, -2:]
+                return x2
+
+        m = M()
+        m.eval()
+        qconfig_mapping = get_default_qconfig_mapping()
+        m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
+
+        # Input and output observers of getitem should be the same
+        modules = dict(m.named_modules(remove_duplicate=False))
+        for n in m.graph.nodes:
+            if not is_activation_post_process_node(n, modules):
+                continue
+            if n.args[0].op != "call_function" or n.args[0].target != operator.getitem:
+                continue
+            getitem_node = n.args[0]
+            input_observer_node = getitem_node.args[0]
+            output_observer_node = n
+            if not is_activation_post_process_node(input_observer_node, modules):
+                continue
+            input_observer = getattr(m, input_observer_node.name)
+            output_observer = getattr(m, output_observer_node.name)
+            self.assertTrue(input_observer is output_observer,
+                            "Input observer %s for %s is not the same as output observer %s" %
+                            (input_observer_node.name, getitem_node.name, output_observer_node.name))
+
+        m(torch.rand(1, 5, 10))
+        m = convert_fx(m)
+
+        # There should only be one dequantize at the end
+        self.checkGraphModuleNodes(m, expected_node_occurrence={
+            ns.call_method("dequantize") : 1,
+        })
 
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):

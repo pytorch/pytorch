@@ -111,6 +111,7 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        operator.getitem
     ]
     method_list = [
         "clamp",
@@ -931,7 +932,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
 
     return model
 
-def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
+def _lower_getattr_tensor_metadata_op(model: QuantizedGraphModule):
     """ Modified the graph of the model inplace, to skip extra dequantize op before
     the general tensor shape ops when possible
     """
@@ -960,7 +961,7 @@ def _lower_to_native_backend(
     _lower_static_weighted_ref_functional(model, qconfig_map)
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
-    _lower_getattr_tensor_metadta_op(model)
+    _lower_getattr_tensor_metadata_op(model)
     special_pattern_replacement(model)
     model = fold_weight(model, node_name_to_scope)
     model.graph.eliminate_dead_code()
