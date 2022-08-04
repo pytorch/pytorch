@@ -1262,6 +1262,17 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  // reshape has special autograd logic since it sometimes returns a view but sometimes does not
+  // we have to intercept here instead of using dispatcher
+  // otherwise we will see "autograd still running" kind of error in inference mode:
+  // * if we create a tensor in inference mode scope,
+  //   then pass it to a inference mode decorated function,
+  //   everything is fine
+  // * but if we create the input tensor not with inference mode,
+  //   then errors like "Cannot set version_counter for inference tensor" arise
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, proposed_shape);
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }

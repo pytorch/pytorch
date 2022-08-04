@@ -1,5 +1,5 @@
 import contextlib
-from itertools import accumulate
+from itertools import accumulate, chain
 from typing import (
     Dict,
     Generator,
@@ -20,8 +20,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from spmd.tensor import Tensor as DistributedTensor, DeviceMesh
-from spmd.tensor.placement_types import Placement
+try:
+    from spmd.tensor import Tensor as DistributedTensor, DeviceMesh
+    from spmd.tensor.placement_types import Placement
+    has_dt = True
+except ImportError:
+    has_dt = False
+
 
 
 __all__ = [
@@ -274,7 +279,7 @@ class FlatParamHandle:
                             )
                         )
                         param = param.local_tensor()
-                    elif isinstance(param, DistributedTensor):
+                    elif has_dt and isinstance(param, DistributedTensor):
                         st_sharding_infos.append(
                             STShardingInfo(
                                 None,
@@ -584,6 +589,17 @@ class FlatParamHandle:
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
 
+    def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        shared_param_infos = [
+            ParamInfo(param_name, module, module_name)
+            for (param_name, module, module_name, _, _, _)
+            in self.flat_param._shared_param_infos
+        ]
+        for param_name, _, module_name in chain(
+            self.flat_param._param_infos, shared_param_infos
+        ):
+            yield (param_name, module_name)
+
     @staticmethod
     def _to_sharded_tensor(tensor: torch.Tensor, sharding_info: STShardingInfo):
         if sharding_info.sharding_spec is not None:
@@ -593,11 +609,13 @@ class FlatParamHandle:
                 sharding_info.global_size,
                 process_group=sharding_info.process_group,
             )
-        else:
+        elif has_dt:
             sharded_tensor = DistributedTensor.from_local(
                 tensor,
                 device_mesh=sharding_info.device_mesh,
                 placements=sharding_info.placements,
             )
+        else:
+            raise ValueError("Invalid cases in _to_sharded_tensor")
         sharded_tensor._flattened = True
         return sharded_tensor

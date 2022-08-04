@@ -342,6 +342,11 @@
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
+- name: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
+  self: _NestedTensor_GeneralizedBMM(grad, mat2.transpose(-2, -1).conj())
+  mat2: _NestedTensor_GeneralizedBMM(self.transpose(-2, -1).conj(), grad)
+  result: _NestedTensor_GeneralizedBMM(self_t, mat2_p) + _NestedTensor_GeneralizedBMM(self_p, mat2_t)
+
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)
@@ -1336,6 +1341,10 @@
 #     as_variable(baseType->reshape(self)),
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
+
+- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
+  self: _reshape_nested_backward(self, grad)
+  result: auto_linear
 
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())

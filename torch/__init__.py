@@ -40,7 +40,7 @@ __all__ = [
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    '_TypedStorage',
+    'TypedStorage', 'UntypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
@@ -455,6 +455,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -656,10 +657,10 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, _LegacyStorage, _UntypedStorage
+from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
-# dtype, use torch.storage._TypedStorage directly.
+# dtype, use torch.storage.TypedStorage directly.
 
 class ByteStorage(_LegacyStorage):
     @classproperty
@@ -747,11 +748,11 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 _storage_classes = {
-    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
-    _TypedStorage
+    TypedStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
