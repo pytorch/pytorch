@@ -8058,6 +8058,9 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
                       args=(torch.randn(S, S, device=device) > 0, 10),
                       broadcasts_input=True)
 
+    if torch.device(device).type == 'cuda':
+        # `self` and `mask` on CUDA but `value` is a CPU scalar tensor.
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, torch.randn(())))
 
 def error_inputs_masked_fill(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -8071,6 +8074,13 @@ def error_inputs_masked_fill(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.ones(2, dtype=torch.long, device=device),
                                  args=(make_arg(()) > 0, torch.tensor(1j, device=device))),
                      error_regex=r"value cannot be converted to type .* without overflow")
+
+    if torch.device(device).type == 'cuda':
+        # `self` and `mask` on CPU but `value` is a CUDA scalar tensor.
+        yield ErrorInput(SampleInput(torch.randn((S, S), device='cpu'),
+                                     args=(torch.randn(S, S, device='cpu') > 0,
+                                           torch.randn((), device='cuda'))),
+                         error_regex=r"to be on same device")
 
 
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
