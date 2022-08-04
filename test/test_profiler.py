@@ -1232,6 +1232,23 @@ class TestTorchTidyProfiler(TestCase):
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
 
+    def test_scalar_ins(self):
+        x = torch.ones(5, 5)
+        alpha = 0.9
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = torch.add(x, 9.1, alpha=alpha)
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        # The second argument to the add gets promotoed to a zerodim Tensor
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
+        self.assertEqual(input_info.shapes, [[5, 5], [], []])
+        self.assertEqual(input_info.ivalues, [None, None, alpha])
+
 
 @dataclass(frozen=True)
 class MockKinetoEvent():
