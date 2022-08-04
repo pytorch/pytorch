@@ -31,14 +31,19 @@
 namespace torch {
 namespace jit {
 
+namespace {
 mobile::Module parse_mobile_module(
     void* data,
-    size_t,
+    size_t size,
     bool should_copy_tensor_memory = false) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(
-      flatbuffer_module, c10::nullopt, should_copy_tensor_memory);
+  return parse_and_initialize_mobile_module(
+      static_cast<char*>(data),
+      size,
+      /*device=*/c10::nullopt,
+      /*extra_files=*/nullptr,
+      should_copy_tensor_memory);
 }
+} // namespace
 
 TEST(FlatbufferTest, UpsampleNearest2d) {
   Module m("m");
@@ -1256,15 +1261,16 @@ TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
   }
 }
 
-Module jitModuleFromBuffer(void* data) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  FlatbufferLoader loader;
-  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
-  ExtraFilesMap files;
-  std::vector<IValue> constants;
-  loader.extractJitSourceAndConstants(&files, &constants);
-  return jitModuleFromSourceAndConstants(
-      mobilem._ivalue(), files, constants, 8);
+Module jitModuleFromBuffer(void* data, size_t size) {
+  // Make a copy of the data so we can use the existing API, which takes
+  // ownership. The `data` param might point into the middle of a buffer, so we
+  // can't safely take ownership of it directly.
+  // @nolint CLANGTIDY cppcoreguidelines-no-malloc
+  std::shared_ptr<char> copy(static_cast<char*>(malloc(size)), free);
+  memcpy(copy.get(), data, size);
+
+  ExtraFilesMap extra_files;
+  return parse_and_initialize_jit_module(std::move(copy), size, extra_files);
 }
 
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
@@ -1298,7 +1304,7 @@ TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   Module m("m");
   m.register_attribute("mobile_optimized", BoolType::get(), true);
   auto data = save_jit_module_to_bytes(m);
-  Module m2 = jitModuleFromBuffer(data->data());
+  Module m2 = jitModuleFromBuffer(data->data(), data->size());
   bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
   AT_ASSERT(mobile_optimized);
   mobile::Module m3 = parse_mobile_module(data->data(), data->size());
@@ -1338,7 +1344,7 @@ TEST(TestSourceFlatbuffer,
     auto ref = m.run_method("test_func", minput);
 
     auto data = save_jit_module_to_bytes(m);
-    Module m2 = jitModuleFromBuffer(data->data());
+    Module m2 = jitModuleFromBuffer(data->data(), data->size());
     const auto& test_func = m2.get_method("test_func");
     IValue res;
     for (int i = 0; i < 3; ++i) {
