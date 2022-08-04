@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
@@ -5,17 +6,29 @@ from ._symbolic_trace import symbolic_trace
 from ._compatibility import compatibility
 
 import copy
-from typing import Callable, Dict, List, NamedTuple, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 import torch
 
 __all__ = ['Match', 'replace_pattern']
 
-@compatibility(is_backward_compatible=True)
-class Match(NamedTuple):
+@compatibility(is_backward_compatible=False)
+@dataclass
+class Match():
     # Node from which the match was found
     anchor: Node
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node]
+    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+
+    # nodes in target graph that are matched placeholder in pattern
+    placeholder_nodes: List[Node] = field(default_factory=list)
+
+    # sink nodes in matched subgraph returned by output
+    returning_nodes: List[Node] = field(default_factory=list)
+
+    def __copy__(self):
+        return Match(anchor=self.anchor, nodes_map=self.nodes_map.copy(),
+                     placeholder_nodes=self.placeholder_nodes.copy(),
+                     returning_nodes=self.returning_nodes.copy())
 
 class _SubgraphMatcher:
     def __init__(self, pattern: Graph) -> None:
