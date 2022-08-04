@@ -422,6 +422,40 @@ command = [
 ]
 
 [[linter]]
+code = 'PYBIND11_SPECIALIZATION'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    # The place for all orphan specializations
+    'torch/csrc/utils/pybind.h',
+    # These specializations are non-orphan
+    'torch/csrc/distributed/c10d/init.cpp',
+    'torch/csrc/jit/python/pybind.h',
+    # These are safe to exclude as they do not have Python
+    'c10/**/*',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=PYBIND11_DECLARE_HOLDER_TYPE',
+    '--linter-name=PYBIND11_SPECIALIZATION',
+    '--error-name=pybind11 specialization in non-standard location',
+    """--error-description=\
+        This pybind11 specialization (PYBIND11_DECLARE_HOLDER_TYPE) should \
+        be placed in torch/csrc/utils/pybind.h so that it is guaranteed to be \
+        included at any site that may potentially make use of it via py::cast. \
+        If your specialization is in the same header file as the definition \
+        of the holder type, you can ignore this lint by adding your header to \
+        the exclude_patterns for this lint in .lintrunner.toml.  For more \
+        information see https://github.com/pybind/pybind11/issues/4099 \
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYPIDEP'
 include_patterns = ['.github/**']
 exclude_patterns = [
