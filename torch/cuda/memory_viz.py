@@ -4,6 +4,7 @@ import os
 import io
 import subprocess
 from typing import Dict, Any
+__all__ = ["format_flamegraph", "segments", "memory", "compare", "stats", "Bytes"]
 
 def _frame_fmt(f):
     i = f['line']
