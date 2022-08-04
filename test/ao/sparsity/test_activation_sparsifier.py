@@ -9,6 +9,7 @@ from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.sparsity.sparsifier.utils import module_to_fqn
+from typing import List
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -219,7 +220,34 @@ class TestActivationSparsifier(TestCase):
         sparsifier2.load_state_dict(state_dict)
 
         assert sparsifier2.defaults == sparsifier1.defaults
-        assert sparsifier2.state == sparsifier1.state
+
+        # import pdb; pdb.set_trace()
+        for name, state in sparsifier2.state.items():
+            assert name in sparsifier1.state
+            mask1 = sparsifier1.state[name]['mask']
+            mask2 = state['mask']
+
+            if mask1 is None:
+                assert mask2 is None
+            else:
+                assert type(mask1) == type(mask2)
+                if isinstance(mask1, List):
+                    assert len(mask1) == len(mask2)
+                    for idx in range(len(mask1)):
+                        assert torch.all(mask1[idx] == mask2[idx])
+                else:
+                    # import pdb; pdb.set_trace()
+                    assert torch.all(mask1 == mask2)
+
+        # make sure that the state dict is stored as torch sparse
+        for _, state in state_dict['state'].items():
+            mask = state['mask']
+            if mask is not None:
+                if isinstance(mask, List):
+                    for idx in range(len(mask)):
+                        assert mask[idx].is_sparse
+                else:
+                    assert mask.is_sparse
 
         dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
 

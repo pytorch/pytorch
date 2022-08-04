@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -146,11 +147,6 @@ static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vec
 }
 
 static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -183,11 +179,6 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
 }
 
 static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -235,29 +226,55 @@ inline std::vector<c10::IValue> callOpByName(
 namespace {
 
 class VulkanAPITest : public ::testing::Test {
-public:
-#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-    void SetUp() {
-      at::native::vulkan::api::context()->reset_querypool();
+ public:
+  void SetUp() {
+    if (!at::is_vulkan_available()) {
+      GTEST_SKIP() << "Vulkan is not available";
     }
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+    at::native::vulkan::api::context()->reset_querypool();
+#endif
+  }
 
-    void TearDown() {
-      try {
-        at::native::vulkan::api::context()->querypool().extract_results();
-        at::native::vulkan::api::context()->querypool().print_results();
-      }
-      catch (const std::exception& e) {
-        std::cout << "Could not get querypool results!"
-                  << " Reason: " << e.what() << std::endl;
-      }
+  void TearDown() {
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+    try {
+      at::native::vulkan::api::context()->querypool().extract_results();
+      at::native::vulkan::api::context()->querypool().print_results();
+    } catch (const std::exception& e) {
+      std::cout << "Could not get querypool results!"
+                << " Reason: " << e.what() << std::endl;
     }
 #endif
+  }
 };
 
-TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
-  if (!at::is_vulkan_available()) {
-    return;
+TEST_F(VulkanAPITest, copy_to_texture) {
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 3D
+    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 2D
+    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 1D
+    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    at::Tensor in_vk_copied = in_cpu.vulkan();
+    at::Tensor out_copied = in_vk_copied.cpu();
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
   }
+}
+
+TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -273,10 +290,6 @@ TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
 }
 
 TEST_F(VulkanAPITest, add) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -295,10 +308,6 @@ TEST_F(VulkanAPITest, add) {
 }
 
 TEST_F(VulkanAPITest, add_broadcast0) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -317,10 +326,6 @@ TEST_F(VulkanAPITest, add_broadcast0) {
 }
 
 TEST_F(VulkanAPITest, add_broadcast1) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -339,9 +344,6 @@ TEST_F(VulkanAPITest, add_broadcast1) {
 }
 
 TEST_F(VulkanAPITest, add_broadcast2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
@@ -361,10 +363,6 @@ TEST_F(VulkanAPITest, add_broadcast2) {
 }
 
 TEST_F(VulkanAPITest, add_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -383,10 +381,6 @@ TEST_F(VulkanAPITest, add_) {
 }
 
 TEST_F(VulkanAPITest, add_broadcast0_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({16, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -405,10 +399,6 @@ TEST_F(VulkanAPITest, add_broadcast0_) {
 }
 
 TEST_F(VulkanAPITest, add_broadcast1_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 8, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -427,10 +417,6 @@ TEST_F(VulkanAPITest, add_broadcast1_) {
 }
 
 TEST_F(VulkanAPITest, add_scalar) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -448,10 +434,6 @@ TEST_F(VulkanAPITest, add_scalar) {
 }
 
 TEST_F(VulkanAPITest, add_scalar_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -469,10 +451,6 @@ TEST_F(VulkanAPITest, add_scalar_) {
 }
 
 TEST_F(VulkanAPITest, addmm) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr float alpha = 2.1f;
   constexpr float beta = 103.24;
 
@@ -493,10 +471,6 @@ TEST_F(VulkanAPITest, addmm) {
 }
 
 TEST_F(VulkanAPITest, addmm_expand) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr float alpha = 2.1f;
   constexpr float beta = 103.24;
 
@@ -517,10 +491,6 @@ TEST_F(VulkanAPITest, addmm_expand) {
 }
 
 TEST_F(VulkanAPITest, avg_pool2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::avg_pool2d(in_cpu, {5, 3}, {1, 2}, {2, 0}, true);
   const auto out_vulkan = at::avg_pool2d(in_cpu.vulkan(), {5, 3}, {1, 2}, {2, 0}, true);
@@ -535,10 +505,6 @@ TEST_F(VulkanAPITest, avg_pool2d) {
 
 TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   // Act: Vulkan batchnorm only supports evaluation mode
   EXPECT_THROW({
@@ -656,10 +622,6 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
 TEST_F(VulkanAPITest, batch_norm_small) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto input_cpu = at::rand({1, 4, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
@@ -688,10 +650,6 @@ TEST_F(VulkanAPITest, batch_norm_small) {
 
 TEST_F(VulkanAPITest, batch_norm_medium) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto input_cpu = at::rand({3, 8, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
@@ -722,9 +680,6 @@ TEST_F(VulkanAPITest, batch_norm_medium) {
 TEST_F(VulkanAPITest, batch_norm_large) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto input_cpu = at::rand({79, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
@@ -753,10 +708,6 @@ TEST_F(VulkanAPITest, batch_norm_large) {
 }
 
 TEST_F(VulkanAPITest, clamp) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -775,10 +726,6 @@ TEST_F(VulkanAPITest, clamp) {
 }
 
 TEST_F(VulkanAPITest, clamp_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
@@ -797,10 +744,6 @@ TEST_F(VulkanAPITest, clamp_) {
 }
 
 TEST_F(VulkanAPITest, conv2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
   constexpr std::array<int64_t, 2u> padding{1, 1};
@@ -870,10 +813,6 @@ TEST_F(VulkanAPITest, conv2d) {
 }
 
 TEST_F(VulkanAPITest, conv2d_dw) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 7;
   constexpr std::array<int64_t, 2u> stride{2, 3};
   constexpr std::array<int64_t, 2u> padding{0, 4};
@@ -942,10 +881,6 @@ TEST_F(VulkanAPITest, conv2d_dw) {
 }
 
 TEST_F(VulkanAPITest, conv2d_pw) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 1};
   constexpr std::array<int64_t, 2u> padding{0, 0};
@@ -1014,10 +949,6 @@ TEST_F(VulkanAPITest, conv2d_pw) {
 }
 
 TEST_F(VulkanAPITest, copy) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
@@ -1030,9 +961,6 @@ TEST_F(VulkanAPITest, copy) {
 }
 
 TEST_F(VulkanAPITest, cumsum) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -1060,10 +988,6 @@ TEST_F(VulkanAPITest, cumsum) {
 }
 
 TEST_F(VulkanAPITest, div) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1082,10 +1006,6 @@ TEST_F(VulkanAPITest, div) {
 }
 
 TEST_F(VulkanAPITest, div_broadcast0) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 1, 1}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1104,10 +1024,6 @@ TEST_F(VulkanAPITest, div_broadcast0) {
 }
 
 TEST_F(VulkanAPITest, div_broadcast1) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1126,10 +1042,6 @@ TEST_F(VulkanAPITest, div_broadcast1) {
 }
 
 TEST_F(VulkanAPITest, div_broadcast2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1148,10 +1060,6 @@ TEST_F(VulkanAPITest, div_broadcast2) {
 }
 
 TEST_F(VulkanAPITest, div_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1170,10 +1078,6 @@ TEST_F(VulkanAPITest, div_) {
 }
 
 TEST_F(VulkanAPITest, div_broadcast0_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({12, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1192,10 +1096,6 @@ TEST_F(VulkanAPITest, div_broadcast0_) {
 }
 
 TEST_F(VulkanAPITest, div_broadcast1_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 8, 29, 83}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1214,9 +1114,6 @@ TEST_F(VulkanAPITest, div_broadcast1_) {
 }
 
 TEST_F(VulkanAPITest, div_scalar) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
@@ -1235,10 +1132,6 @@ TEST_F(VulkanAPITest, div_scalar) {
 }
 
 TEST_F(VulkanAPITest, div_scalar_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1256,18 +1149,11 @@ TEST_F(VulkanAPITest, div_scalar_) {
 }
 
 TEST_F(VulkanAPITest, empty) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
 void test_glu(const at::IntArrayRef input_shape) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -1303,10 +1189,6 @@ TEST_F(VulkanAPITest, glu_ch_2) {
 }
 
 TEST_F(VulkanAPITest, hardsigmoid) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -1322,10 +1204,6 @@ TEST_F(VulkanAPITest, hardsigmoid) {
 }
 
 TEST_F(VulkanAPITest, hardsigmoid_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
@@ -1341,10 +1219,6 @@ TEST_F(VulkanAPITest, hardsigmoid_) {
 }
 
 TEST_F(VulkanAPITest, hardshrink) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   for (const auto lambd_value : {-4.2, -1.0, 0.42, 1.0, 4.2, 13.7}) {
     // Generate values between -10 and +10
     const auto in_cpu = (at::rand({3, 63, 79, 17}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;
@@ -1358,10 +1232,6 @@ TEST_F(VulkanAPITest, hardshrink) {
 }
 
 TEST_F(VulkanAPITest, hardshrink_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   for (const auto lambd_value : {0.42, 1.0, 4.2, 13.7}) {
     // Generate values between -10 and +10
     const auto in_cpu = (at::rand({3, 63, 79, 17}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;
@@ -1377,10 +1247,6 @@ TEST_F(VulkanAPITest, hardshrink_) {
 
 TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   // Act: incorrect normalized shape
   EXPECT_THROW({
@@ -1463,10 +1329,6 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
 TEST_F(VulkanAPITest, layer_norm_3d_small) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto input_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
@@ -1489,10 +1351,6 @@ TEST_F(VulkanAPITest, layer_norm_3d_small) {
 
 TEST_F(VulkanAPITest, layer_norm_3d_medium) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto input_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
@@ -1517,10 +1375,6 @@ TEST_F(VulkanAPITest, layer_norm_3d_medium) {
 TEST_F(VulkanAPITest, layer_norm_3d_large) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto input_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
@@ -1543,10 +1397,6 @@ TEST_F(VulkanAPITest, layer_norm_3d_large) {
 
 TEST_F(VulkanAPITest, layer_norm_4d_small) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto input_cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
@@ -1571,10 +1421,6 @@ TEST_F(VulkanAPITest, layer_norm_4d_small) {
 TEST_F(VulkanAPITest, layer_norm_4d_medium) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto input_cpu = at::rand({1, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
@@ -1598,10 +1444,6 @@ TEST_F(VulkanAPITest, layer_norm_4d_medium) {
 TEST_F(VulkanAPITest, layer_norm_4d_large) {
   c10::InferenceMode mode;
 
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto input_cpu = at::rand({1, 53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
@@ -1623,10 +1465,6 @@ TEST_F(VulkanAPITest, layer_norm_4d_large) {
 }
 
 TEST_F(VulkanAPITest, leaky_relu) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
     const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
     const auto in_vulkan = in_cpu.vulkan();
@@ -1645,10 +1483,6 @@ TEST_F(VulkanAPITest, leaky_relu) {
 }
 
 TEST_F(VulkanAPITest, leaky_relu_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
     auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
     auto vulkan = cpu.vulkan();
@@ -1666,10 +1500,6 @@ TEST_F(VulkanAPITest, leaky_relu_) {
 }
 
 TEST_F(VulkanAPITest, lerp) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1691,10 +1521,6 @@ TEST_F(VulkanAPITest, lerp) {
 }
 
 TEST_F(VulkanAPITest, lerp_broadcast0) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1716,10 +1542,6 @@ TEST_F(VulkanAPITest, lerp_broadcast0) {
 }
 
 TEST_F(VulkanAPITest, lerp_broadcast1) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1741,10 +1563,6 @@ TEST_F(VulkanAPITest, lerp_broadcast1) {
 }
 
 TEST_F(VulkanAPITest, lerp_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1766,10 +1584,6 @@ TEST_F(VulkanAPITest, lerp_) {
 }
 
 TEST_F(VulkanAPITest, lerp_broadcast0_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1791,10 +1605,6 @@ TEST_F(VulkanAPITest, lerp_broadcast0_) {
 }
 
 TEST_F(VulkanAPITest, lerp_broadcast1_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1816,10 +1626,6 @@ TEST_F(VulkanAPITest, lerp_broadcast1_) {
 }
 
 TEST_F(VulkanAPITest, lerp_scalar) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -1840,10 +1646,6 @@ TEST_F(VulkanAPITest, lerp_scalar) {
 }
 
 TEST_F(VulkanAPITest, lerp_scalar_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -1864,10 +1666,6 @@ TEST_F(VulkanAPITest, lerp_scalar_) {
 }
 
 TEST_F(VulkanAPITest, hardswish) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -1883,10 +1681,6 @@ TEST_F(VulkanAPITest, hardswish) {
 }
 
 TEST_F(VulkanAPITest, threshold) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({2, 11, 57, 23}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -1901,10 +1695,6 @@ TEST_F(VulkanAPITest, threshold) {
 }
 
 TEST_F(VulkanAPITest, hardswish_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
@@ -1920,9 +1710,6 @@ TEST_F(VulkanAPITest, hardswish_) {
 }
 
 TEST_F(VulkanAPITest, max_pool2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({5, 13, 55, 68}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -1968,10 +1755,6 @@ TEST_F(VulkanAPITest, mean2d) {
 }
 
 TEST_F(VulkanAPITest, mm) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = m1_cpu.mm(m2_cpu);
@@ -1988,10 +1771,6 @@ TEST_F(VulkanAPITest, mm) {
 }
 
 TEST_F(VulkanAPITest, mul) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2010,10 +1789,6 @@ TEST_F(VulkanAPITest, mul) {
 }
 
 TEST_F(VulkanAPITest, mul_broadcast0) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2032,10 +1807,6 @@ TEST_F(VulkanAPITest, mul_broadcast0) {
 }
 
 TEST_F(VulkanAPITest, mul_broadcast1) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2054,10 +1825,6 @@ TEST_F(VulkanAPITest, mul_broadcast1) {
 }
 
 TEST_F(VulkanAPITest, mul_broadcast2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2076,10 +1843,6 @@ TEST_F(VulkanAPITest, mul_broadcast2) {
 }
 
 TEST_F(VulkanAPITest, mul_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2098,10 +1861,6 @@ TEST_F(VulkanAPITest, mul_) {
 }
 
 TEST_F(VulkanAPITest, mul_broadcast0_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({12, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2120,10 +1879,6 @@ TEST_F(VulkanAPITest, mul_broadcast0_) {
 }
 
 TEST_F(VulkanAPITest, mul_broadcast1_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 8, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2142,10 +1897,6 @@ TEST_F(VulkanAPITest, mul_broadcast1_) {
 }
 
 TEST_F(VulkanAPITest, mul_scalar) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2163,10 +1914,6 @@ TEST_F(VulkanAPITest, mul_scalar) {
 }
 
 TEST_F(VulkanAPITest, mul_scalar_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2184,10 +1931,6 @@ TEST_F(VulkanAPITest, mul_scalar_) {
 }
 
 TEST_F(VulkanAPITest, reflection_pad2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2203,10 +1946,6 @@ TEST_F(VulkanAPITest, reflection_pad2d) {
 }
 
 TEST_F(VulkanAPITest, replication_pad2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2224,9 +1963,6 @@ TEST_F(VulkanAPITest, replication_pad2d) {
 }
 
 TEST_F(VulkanAPITest, reshape) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({7, 11, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2246,9 +1982,6 @@ TEST_F(VulkanAPITest, reshape) {
 }
 
 TEST_F(VulkanAPITest, reshape_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto cpu = at::rand({9, 4, 12, 6}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2268,10 +2001,6 @@ TEST_F(VulkanAPITest, reshape_) {
 }
 
 void test_select(const at::IntArrayRef input_shape, int64_t dim, int64_t index) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::select(in_cpu, dim, index);
 
@@ -2299,10 +2028,6 @@ TEST_F(VulkanAPITest, select_3d_depth_large) {
 }
 
 TEST_F(VulkanAPITest, sigmoid) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -2318,10 +2043,6 @@ TEST_F(VulkanAPITest, sigmoid) {
 }
 
 TEST_F(VulkanAPITest, sigmoid_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   auto vulkan = cpu.vulkan();
 
@@ -2386,10 +2107,6 @@ TEST_F(VulkanAPITest, DISABLED_log_softmax) {
 }
 
 TEST_F(VulkanAPITest, tanh) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -2405,10 +2122,6 @@ TEST_F(VulkanAPITest, tanh) {
 }
 
 TEST_F(VulkanAPITest, tanh_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   auto vulkan = cpu.vulkan();
 
@@ -2424,10 +2137,6 @@ TEST_F(VulkanAPITest, tanh_) {
 }
 
 TEST_F(VulkanAPITest, sub) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2446,10 +2155,6 @@ TEST_F(VulkanAPITest, sub) {
 }
 
 TEST_F(VulkanAPITest, sub_broadcast0) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2468,10 +2173,6 @@ TEST_F(VulkanAPITest, sub_broadcast0) {
 }
 
 TEST_F(VulkanAPITest, sub_broadcast1) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2490,10 +2191,6 @@ TEST_F(VulkanAPITest, sub_broadcast1) {
 }
 
 TEST_F(VulkanAPITest, sub_broadcast2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
@@ -2512,10 +2209,6 @@ TEST_F(VulkanAPITest, sub_broadcast2) {
 }
 
 TEST_F(VulkanAPITest, sub_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2534,10 +2227,6 @@ TEST_F(VulkanAPITest, sub_) {
 }
 
 TEST_F(VulkanAPITest, sub_broadcast0_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({16, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2556,10 +2245,6 @@ TEST_F(VulkanAPITest, sub_broadcast0_) {
 }
 
 TEST_F(VulkanAPITest, sub_broadcast1_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   auto a_cpu = at::rand({3, 8, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
@@ -2578,11 +2263,6 @@ TEST_F(VulkanAPITest, sub_broadcast1_) {
 }
 
 TEST_F(VulkanAPITest, transposed_conv2d) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 2};
@@ -2658,10 +2338,6 @@ TEST_F(VulkanAPITest, transposed_conv2d) {
 }
 
 TEST_F(VulkanAPITest, upsample_nearest2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
 
@@ -2677,10 +2353,6 @@ TEST_F(VulkanAPITest, upsample_nearest2d) {
 }
 
 void test_unbind(const at::IntArrayRef input_shape, int64_t dim) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::unbind(in_cpu, dim);
 
@@ -2713,9 +2385,6 @@ TEST_F(VulkanAPITest, unbind_3d_depth_large) {
 }
 
 TEST_F(VulkanAPITest, view_explicit) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2735,9 +2404,6 @@ TEST_F(VulkanAPITest, view_explicit) {
 }
 
 TEST_F(VulkanAPITest, view_inferred) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({7, 11, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2758,10 +2424,6 @@ TEST_F(VulkanAPITest, view_inferred) {
 
 TEST_F(VulkanAPITest, view_invalid_inputs) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   // Act: only one dimension can be inferred
   EXPECT_THROW({
@@ -2784,11 +2446,6 @@ TEST_F(VulkanAPITest, view_invalid_inputs) {
 
 #if !defined(__APPLE__)
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_samefeature_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2808,11 +2465,6 @@ TEST_F(VulkanAPITest, DISABLED_cat_dim1_samefeature_success) {
 }
 
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_difffeature_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu1 = at::rand({3, 3, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2832,11 +2484,6 @@ TEST_F(VulkanAPITest, DISABLED_cat_dim1_difffeature_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim1_texture2d_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: 2D Texture (VK_IMAGE_VIEW_TYPE_2D)
   const auto in_cpu1 = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2857,11 +2504,6 @@ TEST_F(VulkanAPITest, cat_dim1_texture2d_success) {
 #endif /* !defined(__APPLE__) */
 
 TEST_F(VulkanAPITest, cat_dim1_singledepth_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch x channel (1x1) = single depth texture
   const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2881,11 +2523,6 @@ TEST_F(VulkanAPITest, cat_dim1_singledepth_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim1_singletensor_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: single input tensor
   const auto in_cpu1 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
 
@@ -2903,11 +2540,6 @@ TEST_F(VulkanAPITest, cat_dim1_singletensor_success) {
 }
 
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_twotensors_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: two input tensors
   const auto in_cpu1 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2926,11 +2558,6 @@ TEST_F(VulkanAPITest, DISABLED_cat_dim1_twotensors_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch=1 and channel (a multiple of 4 <-> channel %4 == 0)
   const auto in_cpu1 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2950,11 +2577,6 @@ TEST_F(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch=2 and channel (a multiple of 4 <-> channel %4 == 0)
   const auto in_cpu1 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2974,11 +2596,6 @@ TEST_F(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch=1 and channel (different multiples of 4 <-> channel %4 == 0)
   const auto in_cpu1 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -2998,11 +2615,6 @@ TEST_F(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
 }
 
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_mult4ch_nonmult4ch_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch=1 and channel (a mixed set of multiples and non-multiples of 4)
   const auto in_cpu1 = at::rand({3, 3, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3023,11 +2635,6 @@ TEST_F(VulkanAPITest, DISABLED_cat_dim1_mult4ch_nonmult4ch_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim2_sameheight_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3047,11 +2654,6 @@ TEST_F(VulkanAPITest, cat_dim2_sameheight_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim2_diffheight_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3071,11 +2673,6 @@ TEST_F(VulkanAPITest, cat_dim2_diffheight_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim2_singledepth_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: batch x channel (1x1) = single depth texture
   const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3095,11 +2692,6 @@ TEST_F(VulkanAPITest, cat_dim2_singledepth_success) {
 }
 
 TEST_F(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
   {
     const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3144,11 +2736,6 @@ TEST_F(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
 }
 
 TEST_F(VulkanAPITest, permute_2d_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
 
@@ -3166,11 +2753,6 @@ TEST_F(VulkanAPITest, permute_2d_success) {
 }
 
 TEST_F(VulkanAPITest, permute_3d_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
   std::vector<std::vector<int64_t>> all_dims;
@@ -3195,11 +2777,6 @@ TEST_F(VulkanAPITest, permute_3d_success) {
 }
 
 TEST_F(VulkanAPITest, permute_4d_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
   std::vector<std::vector<int64_t>> all_dims;
@@ -3224,11 +2801,6 @@ TEST_F(VulkanAPITest, permute_4d_success) {
 }
 
 TEST_F(VulkanAPITest, permute_4dmclaren_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange: McLaren Model usage
   const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
 
@@ -3246,11 +2818,6 @@ TEST_F(VulkanAPITest, permute_4dmclaren_success) {
 }
 
 TEST_F(VulkanAPITest, permute_4dbig_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({3, 9, 89, 91}, at::device(at::kCPU).dtype(at::kFloat));
   std::vector<std::vector<int64_t>> all_dims;
@@ -3274,11 +2841,6 @@ TEST_F(VulkanAPITest, permute_4dbig_success) {
 }
 
 TEST_F(VulkanAPITest, permute_negativedims_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({5, 4, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
 
@@ -3296,11 +2858,6 @@ TEST_F(VulkanAPITest, permute_negativedims_success) {
 }
 
 TEST_F(VulkanAPITest, permute_invalidinputs_exceptions) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
 
@@ -3419,6 +2976,130 @@ TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
   }, ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, stack_invalid_inputs) {
+  // Act: Vulkan stack expects at least one tensor
+  EXPECT_THROW({
+    at::stack({}, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack expects dim = 0
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 1);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack expects 2 dimensional inputs
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack inputs must have matching sizes
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({6, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
+  }, ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, stack_1_tensor) {
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_2_tensors) {
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_3_tensors) {
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_4_tensors) {
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu4 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_from_1_to_20_tensors) {
+  std::vector<at::Tensor> tensors_cpu = {};
+  std::vector<at::Tensor> tensors_vulkan = {};
+
+  for (const auto i : c10::irange(20)) {
+    at::Tensor in_cpu = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    tensors_cpu.emplace_back(in_cpu);
+    tensors_vulkan.emplace_back(in_cpu.vulkan());
+    at::Tensor out_cpu = at::stack(tensors_cpu, 0);
+    at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      std::cout << "Error when stacking " << i << " tensors" << std::endl;
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+    ASSERT_TRUE(check);
+  }
 }
 
 TEST_F(VulkanAPITest, clone_success) {
@@ -3693,9 +3374,6 @@ class MobileNetV2 final : public OpsList {
 };
 
 TEST_F(VulkanAPITest, mobilenetv2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
   c10::InferenceMode mode;
 
   MobileNetV2 mn2;
@@ -3712,11 +3390,6 @@ TEST_F(VulkanAPITest, mobilenetv2) {
 }
 
 TEST_F(VulkanAPITest, gru_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int H_in = 5;  // input_size
   const int H_out = 7; // hidden_size
@@ -3784,11 +3457,6 @@ TEST_F(VulkanAPITest, gru_success) {
 }
 
 TEST_F(VulkanAPITest, gru_mclareninputs_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int H_in = 384;  // input_size
   const int H_out = 384; // hidden_size
@@ -3852,11 +3520,6 @@ TEST_F(VulkanAPITest, gru_mclareninputs_success) {
 }
 
 TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int H_in = 17;  // input_size
   const int H_out = 50; // hidden_size
@@ -3950,11 +3613,6 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
 }
 
 TEST_F(VulkanAPITest, gru_prepack_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int H_in = 81;  // input_size
   const int H_out = 10; // hidden_size
@@ -3994,13 +3652,13 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
 
   auto prepack = callOpByName(
-      "vulkan_prepack::gru_prepack",
+      "vulkan_prepack::create_gru_context",
       "",
       std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
         weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
   auto out_vulkan = callOpByName(
-      "vulkan_prepack::gru_run",
+      "vulkan_prepack::run_gru_context",
       "",
       in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
 
@@ -4024,11 +3682,6 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
 }
 
 TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int H_in = 70;  // input_size
   const int H_out = 2; // hidden_size
@@ -4065,7 +3718,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: incorrect # of weights/biases
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) }),
@@ -4076,13 +3729,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu_2d.vulkan(), h0_cpu.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -4091,13 +3744,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu.vulkan(), h0_cpu_2d.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -4105,7 +3758,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: has_biases should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -4115,7 +3768,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: train should be false
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -4125,7 +3778,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: bidirectional should be false
   EXPECT_THROW({
      auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -4135,7 +3788,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: batch_first should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -4145,7 +3798,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: dropout should be 0.0
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -4158,10 +3811,6 @@ void test_linear(
     const at::IntArrayRef weight_shape,
     const at::IntArrayRef bias_shape) {
   c10::InferenceMode mode;
-
-  if (!at::is_vulkan_available()) {
-    return;
-  }
 
   const auto input_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto weight = at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
@@ -4202,11 +3851,6 @@ TEST_F(VulkanAPITest, linear_4d) {
 }
 
 TEST_F(VulkanAPITest, lstm_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int input_size = 5;
   const int hidden_size = 7;
@@ -4287,11 +3931,6 @@ TEST_F(VulkanAPITest, lstm_success) {
 }
 
 TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int input_size = 384;
   const int hidden_size = 384;
@@ -4368,11 +4007,6 @@ TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
 }
 
 TEST_F(VulkanAPITest, lstm_prepack_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   // Arrange
   const int input_size = 81;
   const int hidden_size = 10;

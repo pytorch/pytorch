@@ -149,20 +149,20 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-cuda11_6-py3_7-gcc7-build:
-    name: linux-bionic-cuda11.6-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_10-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.10-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
-  linux-bionic-cuda11_6-py3_7-gcc7-test:
-    name: linux-bionic-cuda11.6-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_10-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.10-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
+    needs: linux-bionic-cuda11_6-py3_10-gcc7-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -234,6 +234,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "windows.4xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
   win-vs2019-cuda11_6-py3-build:

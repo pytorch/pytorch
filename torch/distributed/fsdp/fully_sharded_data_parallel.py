@@ -71,7 +71,7 @@ from ._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
 )
-from .flat_param import FlatParameter, FlatParamHandle, ParamInfo
+from .flat_param import FlatParameter, FlatParamHandle
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
@@ -1843,6 +1843,23 @@ class FullyShardedDataParallel(nn.Module):
                 submodule._state_dict_type = prev_state_dict_type
                 submodule._state_dict_config = prev_state_dict_config
 
+    @property
+    def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._fsdp_wrapped_module.handle.parameter_module_names()
+        ):
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            # Activation checkpoint adds a prefix that has to be
+            # removed as well.
+            module_name = module_name.replace(
+                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+            )
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
     def _full_post_state_dict_hook(
         self,
         state_dict: Dict[str, Any],
@@ -1871,25 +1888,8 @@ class FullyShardedDataParallel(nn.Module):
 
         # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
         # processing buffers.
-        shared_param_infos = [
-            ParamInfo(param_name, module, module_name)
-            for (param_name, module, module_name, _, _, _)
-            in self._fsdp_wrapped_module.handle.flat_param._shared_param_infos
-        ]
-        for param_name, _, module_name in itertools.chain(
-            self._fsdp_wrapped_module.handle.flat_param._param_infos, shared_param_infos
-        ):
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            # Activation checkpoint adds a prefix that has to be
-            # removed as well.
-            module_name = module_name.replace(
-                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-            )
-            fqn = f"{prefix}{module_name}{param_name}"
-
+        for fqn, param_name, module_name in self._param_fqns:
+            fqn = f"{prefix}{fqn}"
             clean_key = fqn
             clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
@@ -1983,24 +1983,25 @@ class FullyShardedDataParallel(nn.Module):
         if not self._fsdp_wrapped_module.has_params:
             return state_dict
 
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            fqn = f"{prefix}{module_name}{param_name}"
-
-            # Create a ShardedTensor for the unflattened, non-sharded parameter.
-            param = state_dict[fqn]
-            local_shard = param.chunk(self.world_size)[self.rank].clone()
-            offsets = [0 for _ in param.size()]
-            offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
-            local_shards = [
-                Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
-            ]
-            state_dict[fqn] = init_from_local_shards(
-                local_shards, param.size(), process_group=self.process_group
-            )  # type: ignore[assignment]
+        assert self.training_state != TrainingState_.SUMMON_FULL_PARAMS, (
+            "Inside _sharded_post_load_state_dict_hook, the training_state must "
+            "not be SUMMON_FULL_PARAMS."
+        )
+        with self._summon_full_params(recurse=False, writeback=False):
+            for fqn, _, _ in self._param_fqns:
+                # Create a ShardedTensor for the unflattened, non-sharded parameter.
+                param = functools.reduce(getattr, fqn.split("."), self.module)
+                local_shard = param.chunk(self.world_size)[self.rank].clone()
+                offsets = [0 for _ in param.size()]
+                offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
+                local_shards = [
+                    Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
+                ]
+                fqn = f"{prefix}{fqn}"
+                state_dict[fqn] = init_from_local_shards(
+                    local_shards, param.size(), process_group=self.process_group
+                )  # type: ignore[assignment]
+        state_dict.pop(f"{prefix}{FLAT_PARAM}")
         return state_dict
 
     @staticmethod
@@ -2108,24 +2109,19 @@ class FullyShardedDataParallel(nn.Module):
             else:
                 return {}
 
-        elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
+        elif (
+            self._state_dict_type == StateDictType.LOCAL_STATE_DICT or
+            self._state_dict_type == StateDictType.SHARDED_STATE_DICT
+        ):
             if (
                 self._fsdp_wrapped_module.flat_param is not None and
                 not self._fsdp_wrapped_module.flat_param._is_sharded
             ):
                 raise RuntimeError(
-                    "local_state_dict can only be called "
+                    "sharded_state_dict/local_state_dict can only be called "
                     "when parameters are flatten and sharded."
                 )
             return super().state_dict(*args, **kwargs)
-        elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            summon_ctx = (
-                self._summon_full_params(recurse=False, writeback=False)
-                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
-                contextlib.suppress()
-            )
-            with summon_ctx:
-                return super().state_dict(*args, **kwargs)
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
@@ -2971,20 +2967,7 @@ class FullyShardedDataParallel(nn.Module):
                         # This is a two-step process to avoid potential underflow and overflow.
                         output.div_(self.gradient_postdivide_factor)
 
-                    # Note that we need to cast grads back to the full precision if
-                    # 1) parameters were in reduced precision during fwd, as grads
-                    # would thus be in this reduced precision, or
-                    # 2) parameters did not have precision reduced, but grads
-                    # had reduced precision for communication.
-                    if (
-                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
-                    ):
-                        # Cast gradients back to the full parameter precision so that
-                        # optimizer.step() happens in full precision.
-                        orig_param_grad_data = output
-                        output.data = output.data.to(dtype=param.data.dtype)
-                        # Don't let this memory get reused until after the transfer.
-                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    self._cast_grad_to_param_dtype(output, param)
 
                     # To support gradient accumulation outside `no_sync()`, we save
                     # the gradient data to `param._saved_grad_shard` before the
@@ -3021,25 +3004,7 @@ class FullyShardedDataParallel(nn.Module):
                         # then a default hook (`all_reduce`) will be used
                         self.communication_hook(self.communication_hook_state, param.grad)
 
-                    # Note that we need to cast grads back to the full precision if
-                    # 1) parameters were in reduced precision during fwd, as grads
-                    # would thus be in this reduced precision, or
-                    # 2) parameters did not have precision reduced, but grads
-                    # had reduced precision for communication.
-                    # If a lower precision hook is registered, gradients are casted
-                    # back by the hook.
-                    # However, if a low precision hook is attached to the model.
-                    # casting happens inside the hook.
-                    if (
-                        not self._low_precision_hook_enabled() and
-                        (self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce())
-                    ):
-                        # Cast gradients back to the full parameter precision so that
-                        # optimizer.step() happens in full precision.
-                        orig_param_grad_data = param.grad.data
-                        param.grad.data = param.grad.data.to(dtype=param.data.dtype)
-                        # Don't let this memory get reused until after the transfer.
-                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    self._cast_grad_to_param_dtype(param.grad, param)
 
                 # Regardless of sharding or not, offload the grad to CPU if we are
                 # offloading params. This is so param and grad reside on same device
@@ -3060,6 +3025,35 @@ class FullyShardedDataParallel(nn.Module):
                 # are underway in the post_backward stream. See:
                 # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
                 orig_grad_data.record_stream(self._streams["post_backward"])
+
+    def _cast_grad_to_param_dtype(
+        self,
+        grad: torch.Tensor,
+        param: FlatParameter,
+    ):
+        """
+        Casts gradient ``grad`` back to the full parameter dtype so that the
+        optimizer step runs with that dtype. This performs an actual cast if
+        1. parameters were in reduced precision during the forward since then
+        gradients would be in that reduced precision, or
+        2. parameters were not in reduced precision but gradients were in
+        reduced precision for communication.
+        However, if a low precision communication hook is registered, then this
+        dtype cast happens in the hook instead.
+        """
+        self._assert_state(TrainingState_.BACKWARD_POST)
+        if (
+            not self._low_precision_hook_enabled()
+            and (
+                self._mixed_precision_enabled_for_params()
+                or self._mixed_precision_enabled_for_reduce()
+            )
+        ):
+            low_prec_grad_data = grad.data
+            grad.data = grad.data.to(dtype=param.dtype)
+            # Do not let the low precision gradient memory get reused until
+            # the cast to full parameter precision completes
+            low_prec_grad_data.record_stream(torch.cuda.current_stream())
 
     def _queue_wait_for_post_backward(self) -> None:
         """Try to queue a `wait_for_post_backward` callback.
@@ -4130,7 +4124,7 @@ class FullyShardedDataParallel(nn.Module):
                             peers to communicate with next in `GossipGrad <https://arxiv.org/abs/1803.05880>`_, etc.
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Callable with the following signature:
+            hook (Callable): Callable with the following signature:
                             ``hook: Callable[torch.Tensor] -> None``:
                             This function takes in a Python tensor, which represents
                             the full, flattened, unsharded gradient with respect to all variables

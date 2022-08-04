@@ -153,8 +153,10 @@ void div_mode_template(const Tensor& self, const Tensor& other,
 
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
 {
-  if (alpha.toDouble() == 0.0)
+  if (alpha.toDouble() == 0.0) {
     const_cast<Tensor&>(output) = self.clone();
+    return;
+  }
 
   const bool alpha_has_value = alpha.toDouble() != 1.0;
   if (alpha_has_value) {

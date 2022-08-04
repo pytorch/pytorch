@@ -1,12 +1,23 @@
+#include <ATen/ArrayRef.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <torch/library.h>
+#include <vector>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
 namespace {
+
+bool broadcast_input(const Tensor& input1, const Tensor& input2) {
+  return ((height_size(input1) > 1 && height_size(input2) == 1) ||
+          (height_size(input2) > 1 && height_size(input1) == 1) ||
+          (height_size(input1) == height_size(input2))) &&
+      ((width_size(input1) > 1 && width_size(input2) == 1) ||
+       (width_size(input2) > 1 && width_size(input1) == 1) ||
+       (width_size(input1) == width_size(input2)));
+}
 
 void check_inputs(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(
@@ -18,35 +29,43 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
         "Vulkan binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
   }
 
-  const uint32_t input1_h = height_size(input1);
-  const uint32_t input1_w = width_size(input1);
-  const uint32_t input2_h = height_size(input2);
-  const uint32_t input2_w = width_size(input2);
-
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
-  if (input1_h != input2_h) {
-    if (input1_h > input2_h) {
-      TORCH_CHECK(input2_h == 1, broadcast_error_msg);
-      TORCH_CHECK(input2_w == input1_w || input2_w == 1, broadcast_error_msg);
-    } else if (input2_h > input1_h) {
-      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
-      TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
-    }
-  } else if (input1_w != input2_w) {
-    if (input1_w > input2_w) {
-      TORCH_CHECK(input2_w == 1, broadcast_error_msg);
-    } else if (input2_w > input1_w) {
-      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
-    }
-  }
+
+  TORCH_CHECK(broadcast_input(input1, input2), broadcast_error_msg);
 }
 
-bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
-  return (
-      (input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1) ||
-      (input2.extents().data[2u] > 1 && input1.extents().data[2u] == 1) ||
-      input2.extents().data[0u] > input1.extents().data[0u]);
+std::vector<int64_t> broadcast_size(
+    const Tensor& input1,
+    const Tensor& input2) {
+  std::vector<int64_t> out = {};
+  int input1_size = input1.sizes().size();
+  int input2_size = input2.sizes().size();
+  if (input1_size > input2_size) {
+    for (int i = 0; i < input1_size; i++) {
+      out.push_back(input1.sizes()[i]);
+    }
+  } else {
+    for (int i = 0; i < input2_size; i++) {
+      out.push_back(input2.sizes()[i]);
+    }
+  }
+
+  if (width_size(input1) > 1 && width_size(input2) == 1) {
+    out[out.size() - 1] = width_size(input1);
+  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
+    out[out.size() - 1] = width_size(input2);
+  }
+
+  if (out.size() > 1) {
+    if (height_size(input1) > 1 && height_size(input2) == 1) {
+      out[out.size() - 2] = height_size(input1);
+    } else if (height_size(input2) > 1 && height_size(input1) == 1) {
+      out[out.size() - 2] = height_size(input2);
+    }
+  }
+
+  return out;
 }
 } // namespace
 using namespace api::utils;
@@ -167,7 +186,7 @@ Tensor arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_first_input(v_self, v_other) ? v_other.sizes() : v_self.sizes(),
+      broadcast_size(self_arg, other_arg),
       v_self.options(),
   };
 
@@ -234,7 +253,7 @@ Tensor quantized_arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_first_input(v_self, v_other) ? v_other.sizes() : v_self.sizes(),
+      broadcast_size(self_arg, other_arg),
       self.options().dtype(c10::kQUInt8),
       scale,
       zero_point};
@@ -379,6 +398,33 @@ Tensor quantized_add(
     const int64_t zero_point) {
   return quantized_arithmetic_tensor(
       self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_add));
+}
+
+Tensor quantized_sub(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const double scale,
+    const int64_t zero_point) {
+  return quantized_arithmetic_tensor(
+      self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_sub));
+}
+
+Tensor quantized_mul(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const double scale,
+    const int64_t zero_point) {
+  return quantized_arithmetic_tensor(
+      self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_mul));
+}
+
+Tensor quantized_div(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const double scale,
+    const int64_t zero_point) {
+  return quantized_arithmetic_tensor(
+      self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_div));
 }
 
 Tensor add_tensor(

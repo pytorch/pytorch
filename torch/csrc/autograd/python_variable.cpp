@@ -576,6 +576,12 @@ static int THPVariable_clear(THPVariable* self) {
   return 0;
 }
 
+int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(
+      false, "Tensor tp_traverse function was not overriden properly");
+  return 0;
+}
+
 PyObject* THPVariable_pynew(
     PyTypeObject* type,
     PyObject* args,
@@ -617,9 +623,9 @@ static PyObject* THPVariable_make_subclass(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None)",
   });
-  ParsedArgs<6> parsed_args{};
+  ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -651,6 +657,10 @@ static PyObject* THPVariable_make_subclass(
   if (r.toBool(5)) {
     data.unsafeGetTensorImpl()->set_custom_layout(true);
   }
+  if (!r.isNone(6)) {
+    data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
+  }
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -1646,7 +1656,7 @@ PyTypeObject THPVariableType = {
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     // Also set by metaclass
-    nullptr, /* tp_traverse */
+    (traverseproc)THPFunction_traverse, /* tp_traverse */
     (inquiry)THPVariable_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
@@ -1693,7 +1703,7 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
@@ -1905,7 +1915,7 @@ static int traverse_slots(
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
-  mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  mp = type->tp_members;
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
@@ -2299,7 +2309,12 @@ c10::IntArrayRef concrete_strides_fn(
   auto out = torchDispatchFromTensorImpl(
       self,
       "stride",
-      py::module::import("torch").attr("ops").attr("aten").attr("stride").ptr(),
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("stride")
+          .attr("default")
+          .ptr(),
       "torch.ops.aten");
 
   if (out == Py_None) {
@@ -2406,9 +2421,10 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
         : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.data());
+    // TODO: the buffer will need to be made owning later
+    symints.append(si.as_int_unchecked());
   }
 
   auto result = values_from_buffer(self, symints);
