@@ -305,11 +305,12 @@ class TestCuda(TestCase):
             ptr = events[-1].ptr
             self.assertTrue(events[-1].size == 1)
         finally:
-            torch.cuda.caching_allocator_delete(mem)
-            events = torch.cuda.get_alloc_free_events()[current_device]
-            self.assertTrue(len(events) == (num_events + 1))
-            self.assertEqual(events[-1].ptr, ptr)
-            self.assertTrue(events[-1].size < 0)
+            if mem is not None:
+                torch.cuda.caching_allocator_delete(mem)
+                events = torch.cuda.get_alloc_free_events()[current_device]
+                self.assertTrue(len(events) == (num_events + 1))
+                self.assertEqual(events[-1].ptr, ptr)
+                self.assertTrue(events[-1].size < 0)
 
     def test_check_error(self):
         # Assert this call doesn't raise.
