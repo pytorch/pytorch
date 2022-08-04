@@ -9,6 +9,7 @@ from torchgen.model import (
     Argument,
     BaseTy,
     BaseType,
+    FunctionSchema,
     ListType,
     NativeFunction,
     OptionalType,
@@ -447,12 +448,8 @@ class PythonSignature:
 # dedicated data model to store these extra properties.
 @dataclass(frozen=True)
 class PythonSignatureDeprecated(PythonSignature):
-    # We need keep the order of arguments in deprecated signature.
-    # Particularly, method signature might have 'self' not at the beginning, e.g.:
-    #   addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
-    # When generating lambda function signature we need follow the exact order (even for method=True):
-    #   [](Scalar beta, const Tensor & self, const Tensor & mat1, const Tensor & mat2) -> Tensor
-    deprecated_args_names: Tuple[str, ...]
+    # Schema for the deprecated function
+    deprecated_schema: FunctionSchema
 
     # The deprecated signature might miss some arguments that the corresponding
     # C++ signature expects. We need store the constant default values to pass in.
@@ -725,21 +722,33 @@ def argument(a: Argument) -> PythonArgument:
 def signature(
     f: NativeFunction, *, method: bool = False, pyi: bool = False
 ) -> PythonSignature:
+    return signature_from_schema(
+        f.func, category_override=f.category_override, method=method, pyi=pyi
+    )
+
+
+def signature_from_schema(
+    func: FunctionSchema,
+    *,
+    category_override: Optional[str],
+    method: bool = False,
+    pyi: bool = False,
+) -> PythonSignature:
     args: List[Argument] = []
-    args.extend(f.func.arguments.pre_self_positional)
+    args.extend(func.arguments.pre_self_positional)
     # Skip SelfArgument if this is method.
-    if not method and f.func.arguments.self_arg is not None:
-        args.append(f.func.arguments.self_arg.argument)
-    args.extend(f.func.arguments.post_self_positional)
-    args.extend(f.func.arguments.pre_tensor_options_kwarg_only)
+    if not method and func.arguments.self_arg is not None:
+        args.append(func.arguments.self_arg.argument)
+    args.extend(func.arguments.post_self_positional)
+    args.extend(func.arguments.pre_tensor_options_kwarg_only)
     # Skip TensorOptionsArguments. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    args.extend(f.func.arguments.post_tensor_options_kwarg_only)
-    args.extend(f.func.arguments.out)
+    args.extend(func.arguments.post_tensor_options_kwarg_only)
+    args.extend(func.arguments.out)
 
-    input_arg_set = set(a.name for a in f.func.arguments.flat_positional)
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    input_arg_set = set(a.name for a in func.arguments.flat_positional)
+    kwarg_only_set = set(a.name for a in func.arguments.flat_kwarg_only)
+    out_arg_set = set(a.name for a in func.arguments.out)
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(
@@ -756,23 +765,23 @@ def signature(
     # source of drift between eager and JIT. Pull this logic out to a shared place.
 
     has_tensor_input_arg = any(
-        a.type.is_tensor_like() for a in f.func.arguments.flat_non_out
+        a.type.is_tensor_like() for a in func.arguments.flat_non_out
     )
-    if any(a.name == "requires_grad" for a in f.func.schema_order_arguments()):
+    if any(a.name == "requires_grad" for a in func.schema_order_arguments()):
         raise ValueError(
             "argument named requires_grad is reserved, should not explicitly add it in the schema"
         )
 
     # [old codegen] this probably won't work if one of the returns is not a tensor,
     # but it will produce a compile-time error that is obvious.
-    has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
+    has_tensor_return = any(r.type.is_tensor_like() for r in func.returns)
 
-    name: str = cpp.name(f.func)
-    is_factory_function = f.category_override == "factory" or (
+    name: str = cpp.name(func)
+    is_factory_function = category_override == "factory" or (
         has_tensor_return and not has_tensor_input_arg
     )
     is_like_or_new_function = (
-        f.category_override in ("new", "like")
+        category_override in ("new", "like")
         or name.startswith("new_")
         or name.endswith("_like")
     )
@@ -781,7 +790,7 @@ def signature(
     if is_factory_function or is_like_or_new_function:
 
         def topt_default_init(name: str) -> Optional[str]:
-            topt_args = f.func.arguments.tensor_options
+            topt_args = func.arguments.tensor_options
             if topt_args is None:
                 return None
             a = getattr(topt_args, name)
@@ -842,10 +851,10 @@ def signature(
             )
         )
 
-    returns = PythonReturns(returns=f.func.returns)
+    returns = PythonReturns(returns=func.returns)
 
     return PythonSignature(
-        name=str(f.func.name.name),
+        name=str(func.name.name),
         input_args=input_args,
         input_kwargs=input_kwargs,
         output_args=PythonOutArgument.from_outputs(outputs),
@@ -1035,20 +1044,19 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 def dispatch_lambda_args(
     ps: PythonSignature, f: NativeFunction
 ) -> Tuple[DispatchLambdaArgument, ...]:
-    # Start with cpp arguments - dispatch lambda signature always include 'self'
-    cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
-
-    # Special reorder logic for deprecated python signature
     if isinstance(ps, PythonSignatureDeprecated):
-        m: Dict[str, Binding] = dict((a.name, a) for a in cpp_args)
-        # reorder according to the deprecated signature
-        # ignore 'out' argument when binding to non-output function.
-        ordered_args = filter(
-            lambda n: n != "out" or f.func.is_out_fn(), ps.deprecated_args_names
-        )
-        cpp_args = list(map(lambda n: m[n], ordered_args))
+        schema = ps.deprecated_schema
+    else:
+        schema = f.func
 
-    out_args: Set[str] = set(a.name for a in f.func.arguments.out)
+    # Start with cpp arguments - dispatch lambda signature always include 'self'
+    cpp_args = cpp.arguments(
+        arguments=schema.arguments,
+        faithful=False,
+        method=False,
+        cpp_no_default_args=f.cpp_no_default_args,
+    )
+    out_args: Set[str] = set(a.name for a in schema.arguments.out)
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: Binding) -> DispatchLambdaArgument:

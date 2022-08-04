@@ -77,7 +77,7 @@
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
-      "approved_by": ["mruberry", "ngimel", "janeyx99"],
+      "approved_by": ["mruberry", "ngimel", "janeyx99", "svekars"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",

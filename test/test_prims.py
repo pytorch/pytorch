@@ -146,7 +146,7 @@ class TestPrims(TestCase):
         # This test is not intended to test the correctness of the nvfuser implementation
         from torch._C._nvfuser import FusionDefinition as fd
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {
             name
             for name in prim_nvfuser_ops
@@ -180,6 +180,56 @@ class TestPrims(TestCase):
         expected = execute(gm, a.mT, executor="aten")
         actual = execute(gm, a.mT, executor="nvfuser")
         self.assertEqual(expected, actual)
+
+    def test_nvfuser_capability_context(self, device):
+        # This test is to ensure that the torch calls are replaced with refs
+        # based on the nvfuser+prims capability
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        # It's assumed that digamma is not supported by nvfuser
+        # If it's ever supported, this test will need to be updated
+        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.digamma(a)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
+        call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+        includes_aten_digamma = any(
+            torch.ops.aten.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        includes_prims_digamma = any(
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertTrue(includes_aten_digamma)
+        self.assertFalse(includes_prims_digamma)
+
+        # Check mixed case, sigmoid is replaced with refs, but digamma is not
+        def func(a):
+            return torch.sigmoid(torch.digamma(a))
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+        includes_aten_sigmoid = any(
+            torch.ops.aten.sigmoid.default == node.target
+            for node in call_function_nodes
+        )
+        includes_prims_digamma = any(
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_aten_sigmoid)
+        self.assertFalse(includes_prims_digamma)
 
     @onlyCUDA
     @skipCUDAIfRocm

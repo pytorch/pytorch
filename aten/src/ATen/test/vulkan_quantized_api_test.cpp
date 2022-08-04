@@ -99,16 +99,26 @@ namespace {
 
 class VulkanAPITest : public ::testing::Test {
  public:
-#if defined(__ANDROID__) // to avoid `Undefined symbols for architecture arm64`
-                         // error
-  static void SetUpTestSuite() {
-    at::native::vulkan::api::context()->querypool().enable();
+  void SetUp() {
+    if (!at::is_vulkan_available()) {
+      GTEST_SKIP() << "Vulkan is not available";
+    }
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+    at::native::vulkan::api::context()->reset_querypool();
+#endif
   }
 
-  static void TearDownTestSuite() {
-    at::native::vulkan::api::context()->querypool().disable(false);
-  }
+  void TearDown() {
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+    try {
+      at::native::vulkan::api::context()->querypool().extract_results();
+      at::native::vulkan::api::context()->querypool().print_results();
+    } catch (const std::exception& e) {
+      std::cout << "Could not get querypool results!"
+                << " Reason: " << e.what() << std::endl;
+    }
 #endif
+  }
 };
 
 at::Tensor cpu_to_vulkan(at::Tensor in_cpu) {
@@ -153,10 +163,6 @@ at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
 }
 
 TEST_F(VulkanAPITest, support_vulkan) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const double scale = 0.1;
   const int64_t zero_point = 10;
 
@@ -195,10 +201,6 @@ TEST_F(VulkanAPITest, support_vulkan) {
 }
 
 TEST_F(VulkanAPITest, quantize_per_tensor) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu =
       at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
@@ -227,10 +229,6 @@ TEST_F(VulkanAPITest, quantize_per_tensor) {
 }
 
 TEST_F(VulkanAPITest, quantize_dequantize) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu =
       at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
@@ -269,10 +267,6 @@ TEST_F(VulkanAPITest, quantize_dequantize) {
 }
 
 TEST_F(VulkanAPITest, quantized_add) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu =
       at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
@@ -292,7 +286,6 @@ TEST_F(VulkanAPITest, quantized_add) {
   const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
-
   const double scale3 = 0.15;
   const int zero_point3 = 15;
   const auto reg_added_tensors = callOpByName(
@@ -305,6 +298,104 @@ TEST_F(VulkanAPITest, quantized_add) {
   const auto out_vulkan_deq =
       at::native::vulkan::ops::dequantize(vulk_added_tensors);
   auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 0.5;
+  const auto check = at::allclose(
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_add_broadcast) {
+  const auto in_cpu =
+      at::rand({2, 13, 1, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 =
+      at::rand({2, 13, 32, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
+  const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto in_cpu3 =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_added_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu3);
+
+  float rtol = 0;
+  float atol = 0.5;
+   const auto check = at::allclose(
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_add_broadcast1) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu =
+      at::rand({2, 12, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 =
+      at::rand({12, 1, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
+  const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto in_cpu3 =
+      at::rand({2, 12, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_added_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu3);
 
   float rtol = 0;
   float atol = 0.5;
@@ -318,16 +409,16 @@ TEST_F(VulkanAPITest, quantized_add) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, quantized_add_broadcast) {
+TEST_F(VulkanAPITest, quantized_add_broadcast2) {
   if (!at::is_vulkan_available()) {
     return;
   }
 
   const auto in_cpu =
-      at::rand({2, 13, 1, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+      at::rand({32, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
   const auto in_cpu2 =
-      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+      at::rand({1, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan2 = in_cpu2.vulkan();
 
   const double scale = 0.1;
@@ -351,9 +442,63 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
   const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
       out_vulkan, out_vulkan2, scale3, zero_point3);
 
+  const auto in_cpu3 =
+      at::rand({32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto out_vulkan_deq =
       at::native::vulkan::ops::dequantize(vulk_added_tensors);
-  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu3);
+
+  float rtol = 0;
+  float atol = 0.5;
+  const auto check = at::allclose(
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+
+TEST_F(VulkanAPITest, quantized_add_broadcast3) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu =
+      at::rand({32, 24}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 =
+      at::rand({1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
+  const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto in_cpu3 =
+      at::rand({32, 24}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_added_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu3);
 
   float rtol = 0;
   float atol = 0.5;
@@ -368,10 +513,6 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
 }
 
 TEST_F(VulkanAPITest, quantized_add_dif_params) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   const auto in_cpu =
       at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
@@ -418,10 +559,6 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
 }
 
 TEST_F(VulkanAPITest, conv2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
   constexpr std::array<int64_t, 2u> padding{1, 1};
@@ -526,10 +663,6 @@ TEST_F(VulkanAPITest, conv2d) {
 }
 
 TEST_F(VulkanAPITest, conv2d_pw) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 1};
   constexpr std::array<int64_t, 2u> padding{0, 0};
@@ -633,10 +766,6 @@ TEST_F(VulkanAPITest, conv2d_pw) {
 }
 
 TEST_F(VulkanAPITest, conv2d_dw) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
   constexpr int64_t groups = 7;
   constexpr std::array<int64_t, 2u> stride{2, 3};
   constexpr std::array<int64_t, 2u> padding{0, 4};
@@ -731,6 +860,185 @@ TEST_F(VulkanAPITest, conv2d_dw) {
   float atol = 1;
   const auto check =
       at::allclose(output_cpu, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_sub) {
+  float r1 = 4.0;
+  float r2 = 7.0;
+
+  float r3 = 2.0;
+  float r4 = 5.0;
+  const auto in_cpu = (r1 - r2) *
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
+      r2;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 = (r3 - r4) *
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
+      r4;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const auto reg_subtracted_tensors = at::sub(in_cpu, in_cpu2);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto vulk_subtracted_tensors = at::native::vulkan::ops::quantized_sub(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_subtracted_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 0.5;
+  const auto check = at::allclose(
+      reg_subtracted_tensors, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_mul) {
+  const auto in_cpu =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto reg_mul_tensors = callOpByName(
+      "quantized::mul", "", out_cpu, out_cpu2, scale3, zero_point3);
+  const auto vulk_mul_tensors = at::native::vulkan::ops::quantized_mul(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_mul_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 1.5;
+  const auto check = at::allclose(
+      at::dequantize(reg_mul_tensors[0].toTensor()),
+      output_for_dequantized_vulkan,
+      rtol,
+      atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_div) {
+  float r1 = 2.0;
+  float r2 = 3.5;
+
+  float r3 = 4.0;
+  float r4 = 5.5;
+  const auto in_cpu = (r1 - r2) *
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
+      r2;
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto in_cpu2 = (r3 - r4) *
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
+      r4;
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_cpu2 = at::quantize_per_tensor(
+      in_cpu2, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const auto reg_div_tensors = at::div(in_cpu, in_cpu2);
+
+  const double scale3 = 0.15;
+  const int zero_point3 = 15;
+  const auto vulk_div_tensors = at::native::vulkan::ops::quantized_div(
+      out_vulkan, out_vulkan2, scale3, zero_point3);
+
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(vulk_div_tensors);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 1;
+  const auto check =
+      at::allclose(reg_div_tensors, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantized_upsample_nearest2d) {
+  const auto in_cpu =
+      at::rand({2, 13, 12, 27}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6}, 1, 1);
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto upsample_vulkan =
+      at::native::vulkan::ops::quantized_upsample_nearest2d(
+          out_vulkan, {4, 6}, 1, 1);
+
+  const auto in_cpu2 =
+      at::rand({2, 13, 4, 6}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(upsample_vulkan);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 1;
+  const auto check =
+      at::allclose(out_cpu, output_for_dequantized_vulkan, rtol, atol);
 
   if (!check) {
     std::cout << "Max Diff allowed: " << rtol << std::endl;
