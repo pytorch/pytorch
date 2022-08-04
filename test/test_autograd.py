@@ -6209,7 +6209,7 @@ for shape in [(1,), ()]:
             # Dummy class for the purpose of creating a weakref
             pass
 
-        def get_ref(input_requires_grad, nb_hooks, remove_hook_during_backward):
+        def get_ref(input_requires_grad, nb_hooks):
             t = torch.randn(10, requires_grad=input_requires_grad)
             a = torch.tensor(1., requires_grad=True)
 
@@ -6242,14 +6242,12 @@ for shape in [(1,), ()]:
 
         for nb_hooks in (3,):
             for input_requires_grad in (True,):
-                for remove_hook_during_backward in (True, False):
-                    ref_ = get_ref(
-                        input_requires_grad=input_requires_grad,
-                        nb_hooks=nb_hooks,
-                        remove_hook_during_backward=remove_hook_during_backward
-                    )
-                    gc.collect()
-                    self.assertIsNone(ref_())
+                ref_ = get_ref(
+                    input_requires_grad=input_requires_grad,
+                    nb_hooks=nb_hooks,
+                )
+                gc.collect()
+                self.assertIsNone(ref_())
 
 
     def test_input_buffer_accum(self):
