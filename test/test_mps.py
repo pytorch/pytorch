@@ -1548,6 +1548,12 @@ class TestMPS(TestCase):
     def test_bool_full(self):
         x = torch.full((3, 3), True, device='mps')
 
+    # Empty unary op should return tensor of the same size
+    def test_empty_neg(self):
+        x = torch.tensor([[]], device='mps')
+        y = -x
+        self.assertEqual(x, y)
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
