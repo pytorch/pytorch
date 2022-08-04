@@ -74,22 +74,6 @@ ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
   }
 }
 
-IncludeBackendComponentGuard::IncludeBackendComponentGuard(
-    BackendComponent include)
-    : tls_(&raw_local_dispatch_key_set),
-      tls_change_(!tls_->included().has_backend(include)),
-      include_backend_(include) {
-  if (tls_change_) {
-    tls_->set_included(tls_->included() | DispatchKeySet(include_backend_));
-  }
-}
-
-IncludeBackendComponentGuard::~IncludeBackendComponentGuard() {
-  if (tls_change_) {
-    tls_->set_included(tls_->included().remove_backend(include_backend_));
-  }
-}
-
 // Non-RAII API
 // Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h
 // for details.

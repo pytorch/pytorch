@@ -256,14 +256,30 @@ def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
         raise NotImplementedError('Not yet implemented')
 
 
+@register_inference_rule(torch.nn.functional.embedding)
+def embedding_inference_rule_functional(n: Node, symbols, constraints, counter):
+    assert isinstance(n.args[0], Node)
+
+    embedding_dim_weights = symbols[n.args[1]]
+
+    # will treat this as a static shape. So we will not use matching.
+    weight_dims, counter = gen_tensor_dims(2, counter)
+    equality_constraint = BinConstraintT(embedding_dim_weights, TensorType(weight_dims), op_eq)
+    embedding_dim = weight_dims[1]
+    constraints, counter = gen_embedding_rules(n, symbols, embedding_dim, counter)
+    return [equality_constraint] + constraints, counter
+
+
 @register_inference_rule(torch.nn.modules.sparse.Embedding)
 def embedding_inference_rule(n: Node, module_instance, symbols, constraints, counter):
     """
     The output shape differs from the input shape in the last dimension
     """
     assert isinstance(n.args[0], Node)
+    return gen_embedding_rules(n, symbols, module_instance.embedding_dim, counter)
 
-    embedding_dim = module_instance.embedding_dim  # number
+
+def gen_embedding_rules(n: Node, symbols, embedding_dim, counter):
 
     embedding_output, counter = gen_tvar(counter)
     symbols[n] = embedding_output
@@ -286,6 +302,16 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
         c2.append(c_tensor_i)
 
     return [Disj([c1, Disj(c2)])], counter
+
+
+@register_inference_rule(torch.tensor)
+def tensor_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    If the tensor is a scalar, we will skip it since we
+    do not support scalars yet. We will add support in the future
+    if it's needed. For our examples so far, scalars are not needed.
+    """
+    return [], counter
 
 
 @register_inference_rule("reshape")
@@ -815,6 +841,15 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([both_dyn, *const])], counter
 
 
+@register_inference_rule(torch.nn.functional.layer_norm)
+def layer_norm_functional(n: Node, symbols, constraints, counter):
+    """
+    We generate the constraint: input = output
+    """
+    assert isinstance(n.args[0], Node)
+    return gen_layer_norm_constraints(n, n.args[1], symbols, counter)
+
+
 @register_inference_rule(torch.nn.LayerNorm)
 def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, counter):
     """
@@ -822,6 +857,10 @@ def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, co
     Input should be consistent with the normalized_shape
     """
     assert isinstance(n.args[0], Node)
+    return gen_layer_norm_constraints(n, module_instance.normalized_shape, symbols, counter)
+
+
+def gen_layer_norm_constraints(n: Node, normalized_shape, symbols, counter):
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
@@ -838,15 +877,10 @@ def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, co
 
         c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims_rhs), op_eq),
                            BinConstraintT(output, TensorType(new_dims_rhs), op_eq)] +
-                          add_layer_norm_constraints(new_dims_rhs, list(module_instance.normalized_shape)) +
+                          add_layer_norm_constraints(new_dims_rhs, list(normalized_shape)) +
                           nat_constraints)
         c2.append(c_tensor_i)
-
-
     return [Disj([c1, Disj(c2)])], counter
-
-    # return [BinConstraintT(input, output, op_eq),
-    #         BinConstraintT(input, normalized_shape, op_consistency)], counter
 
 @register_inference_rule(torch.nn.Dropout)
 @register_inference_rule(torch.nn.ReLU)
@@ -861,6 +895,7 @@ def relu_inference_rule(n: Node, module_instance, symbols, constraints, counter)
     assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
 
+
 @register_inference_rule(torch.nn.Linear)
 def linear_inference_rule(n: Node, module_instance, symbols, constraints, counter):
     """
@@ -868,6 +903,19 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     If the input is Dyn, then so should the output
     """
     assert isinstance(n.args[0], Node)
+    return linear_constraints(n, module_instance.in_features, module_instance.out_features, symbols, counter)
+
+
+@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
+    assert isinstance(n.args[0], Node)
+    weight_dims, counter = gen_tensor_dims(2, counter)
+    equality_constraint = BinConstraintT(n.args[1], TensorType(weight_dims), op_eq)
+    constraints, counter = linear_constraints(n, weight_dims[0], weight_dims[1], symbols, counter)
+    return [equality_constraint] + constraints, counter
+
+
+def linear_constraints(n: Node, in_features, out_features, symbols, counter):
     linear_output, counter = gen_tvar(counter)
     symbols[n] = linear_output
     linear_input = symbols[n.args[0]]
@@ -886,11 +934,9 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
 
         c_tensor_i = Conj([BinConstraintT(linear_input, TensorType(new_dims_rhs_1), op_eq),
                            BinConstraintT(linear_output, TensorType(new_dims_rhs_2), op_eq)] +
-                          add_linear_constraints(new_dims_rhs_1, new_dims_rhs_2, module_instance) +
+                          add_linear_constraints(new_dims_rhs_1, new_dims_rhs_2, in_features, out_features) +
                           nat_constraints)
         c2.append(c_tensor_i)
-
-
     return [Disj([c1, Disj(c2)])], counter
 
 def add_layer_norm_constraints(input_dim, normalized_dim):
@@ -914,13 +960,13 @@ def add_layer_norm_constraints(input_dim, normalized_dim):
         return constraints
 
 
-def add_linear_constraints(dims1, dims2, module_instance):
+def add_linear_constraints(dims1, dims2, in_features, out_features):
     assert len(dims1) == len(dims2)
     constraints = []
     for i in range(len(dims1)):
         if i == len(dims1) - 1:
-            constraints.append(BinConstraintD(dims1[i], module_instance.in_features, op_consistency))
-            constraints.append(BinConstraintD(dims2[i], module_instance.out_features, op_eq))
+            constraints.append(BinConstraintD(dims1[i], in_features, op_consistency))
+            constraints.append(BinConstraintD(dims2[i], out_features, op_eq))
         else:
             constraints.append(BinConstraintD(dims1[i], dims2[i], op_eq))
 
@@ -1077,6 +1123,16 @@ class ConstraintGenerator:
         if n.op == 'placeholder':
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
+
+            if n.type != Dyn and (not isinstance(n.type, TensorType)):
+
+                if n.type == torch.nn.parameter.Parameter:
+                    # since we have a parameter, the shape must be static
+                    assert 'example_value' in n.meta
+                    n.type = TensorType(n.meta['example_value'].size())
+                else:
+                    n.type = Dyn
+
             c1 = BinConstraintT(n.type, x, op_precision)
             c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
