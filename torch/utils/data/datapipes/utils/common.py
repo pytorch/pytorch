@@ -75,7 +75,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         non_default_pos_or_kwonly = list(filter(lambda p: p.default is p.empty, pos_or_kwonly))
         if len(pos_or_kwonly) != input_col_size:
             if contains_var_positional(sig):
-              pass
+                pass
             elif len(non_default_pos_or_kwonly) != input_col_size:
                 raise ValueError(
                     f"The function {fn_name} takes {len(non_default_pos_or_kwonly)} "
