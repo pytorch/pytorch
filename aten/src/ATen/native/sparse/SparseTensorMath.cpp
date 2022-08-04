@@ -960,7 +960,7 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   }
   // Neither of inputs is a wrapped scalar, but zero_dim
   // is at least 0-dim, so we coalesce it to convert to
-  // scalar.
+  // a scalar.
   const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim.coalesce());
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
