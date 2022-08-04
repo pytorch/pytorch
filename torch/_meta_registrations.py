@@ -351,7 +351,7 @@ def meta_conv(
         device_hint = input_tensor.fake_device.type
     else:
         device_hint = "cuda"  # default to cuda
-    
+
     mem_fmt = pick_memory_format(device_hint)
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
