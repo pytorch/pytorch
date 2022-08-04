@@ -948,7 +948,22 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
 }
 
 Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& result) {
-  result = at::matmul(tensor1, tensor2);
+  // TODO: this is a very quick and dirty implementation
+  //       should improve it to avoid the intermediate memory usage
+  Tensor function_result = at::matmul(tensor1, tensor2);
+  auto function_result_ptr = get_nested_tensor_impl(function_result);
+  std::vector<int64_t> sizes;
+  for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
+    c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
+    if (opt_size.has_value()) {
+      sizes.push_back(*opt_size);
+    }
+    else {
+      sizes.push_back(-1);
+    }
+  }
+  result.reshape(sizes);
+  result.copy_(function_result);
   return result;
 }
 
