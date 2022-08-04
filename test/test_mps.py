@@ -6660,7 +6660,10 @@ class TestConsistency(TestCase):
                 if not op.supports_autograd:
                     continue
 
-                if key in self.BACKWARD_BLOCK_LIST or str(dtype) not in MPS_DTYPES_REQ_GRAD:
+                if str(dtype) not in MPS_DTYPES_REQ_GRAD:
+                    continue
+
+                if key in self.BACKWARD_BLOCK_LIST:
                     if self.BACKWARD_BLOCK_LIST[key] is None or str(dtype) in self.BACKWARD_BLOCK_LIST[key]:
                         continue
 
