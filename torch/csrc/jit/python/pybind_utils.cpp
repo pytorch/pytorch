@@ -82,7 +82,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::SymIntType:
       return torch::is_symint_node(obj)
-          ? obj.cast<c10::SymbolicIntNode*>()->toSymInt()
+          ? obj.cast<c10::SymIntNodeImpl*>()->toSymInt()
           : c10::SymInt{py::cast<int64_t>(obj)};
     case TypeKind::IntType:
     // NB: Typically, these switches are completely dead, because
@@ -195,7 +195,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
             auto si = torch::is_symint_node(elm)
-                ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+                ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
                 : c10::SymInt{py::cast<int64_t>(elm)};
             symints.push_back(si);
           }

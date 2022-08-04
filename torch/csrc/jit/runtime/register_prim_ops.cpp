@@ -660,7 +660,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
         [](Stack& stack) {
-#if defined BUILD_LITE_INTERPRETER
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
           bool enabled = at::autocast::is_enabled();
@@ -671,7 +671,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_autocast_cpu_enabled() -> bool"),
         [](Stack& stack) {
-#if defined BUILD_LITE_INTERPRETER
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
           bool enabled = at::autocast::is_cpu_enabled();
