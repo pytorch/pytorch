@@ -157,6 +157,11 @@ at::Tensor sum_backward(
     at::IntArrayRef sizes,
     at::OptionalIntArrayRef opt_dims,
     bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -325,7 +330,7 @@ at::Tensor std_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim);
 Tensor var_mean_backward(
@@ -995,6 +1000,11 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     c10::string_view reduce,
     bool include_self,
     const Tensor& result);
+
+Tensor take_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& indices);
 
 } // namespace details
 } // namespace generated

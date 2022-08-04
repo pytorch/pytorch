@@ -27,11 +27,14 @@ enum class EventType : uint8_t {
   Allocation,
   OutOfMemory,
   PyCall,
-  PyCCall
+  PyCCall,
+  Kineto
 };
 
 template <EventType>
 struct ExtraFields;
+
+struct Result;
 
 struct TorchOpBasicFields {
   int64_t sequence_number_;
@@ -45,9 +48,17 @@ struct TorchOpBasicFields {
   uint64_t end_tid_{0};
 };
 
+struct TensorMetadata {
+  void* ptr_;
+  c10::ScalarType dtype_;
+  uint32_t dim_;
+  c10::Layout layout_;
+};
+
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -145,7 +156,7 @@ using strong_t = strong::
 
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
-using PyCFunction = strong_t<PyObject*, struct PyCFunction_>;
+using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 
 struct NNModuleInfo {
   PyModuleSelf self_;
@@ -200,10 +211,44 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
   at::StringView function_name_;
 };
 
+template <>
+struct ExtraFields<EventType::Kineto> {
+  // Mirrors `libkineto::GenericTraceActivity::Flow`. This information is used
+  // during post processing to properly embed Kineto events into the broader
+  // profiler tree structure. End users are not generally expected to use these
+  // fields directly, but they are available for debugging.
+  struct Flow {
+    uint32_t id{0};
+    uint32_t type{0};
+    uint32_t start{0};
+  };
+
+  std::string name_;
+  int64_t duration_us_;
+  uint64_t correlation_id_;
+  libkineto::ActivityType activity_type_;
+  Flow flow;
+  std::weak_ptr<Result> linked_activity_{};
+};
+
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename... Args>
   [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
+  }
+
+  template <typename T>
+  decltype(auto) visit(T&& visitor) {
+    return c10::visit(std::forward<T>(visitor), extra_fields_);
+  }
+
+  template <typename T>
+  decltype(auto) visit(T&& visitor) const {
+    return c10::visit(std::forward<T>(visitor), extra_fields_);
+  }
+
+  EventType tag() const {
+    return visit([](const auto& i) { return deduceTag(i); });
   }
 
   std::string name() const;
@@ -222,14 +267,15 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::Allocation>,
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
-      ExtraFields<EventType::PyCCall>>
+      ExtraFields<EventType::PyCCall>,
+      ExtraFields<EventType::Kineto>>
       extra_fields_;
 
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
   template <EventType E>
@@ -242,6 +288,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         start_tid_{start_tid},
         kineto_info_{kineto_info},
         extra_fields_{std::move(extra_fields)} {}
+
+  template <EventType E>
+  static EventType deduceTag(const ExtraFields<E>&) {
+    return E;
+  }
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
@@ -284,12 +335,6 @@ class InputOutputEncoder final {
     Scalar,
     Other,
     TERMINATOR
-  };
-
-  struct TensorMetadata {
-    void* ptr_;
-    c10::ScalarType dtype_;
-    uint32_t dim_;
   };
 
   void push(const at::Tensor& t);
@@ -450,7 +495,10 @@ class TORCH_API RecordQueue {
   void stop();
 
   // NB: This is a destructive operation.
-  std::vector<std::shared_ptr<Result>> getRecords(
+  std::pair<
+      std::vector<std::shared_ptr<Result>>,
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
+  getRecords(
       std::function<time_t(approx_time_t)> time_converter,
       uint64_t start_time_us,
       uint64_t end_time_us);

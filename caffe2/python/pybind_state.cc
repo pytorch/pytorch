@@ -568,7 +568,7 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "nets",
           [](Workspace* self) {
-            CHECK_NOTNULL(self);
+            TORCH_CHECK_NOTNULL(self);
             std::map<std::string, py::object> nets;
             for (const auto& name : self->Nets()) {
               LOG(INFO) << "name: " << name;
@@ -580,7 +580,7 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "blobs",
           [](Workspace* self) {
-            CHECK_NOTNULL(self);
+            TORCH_CHECK_NOTNULL(self);
             std::map<std::string, py::object> blobs;
             for (const auto& name : self->Blobs()) {
               blobs[name] = py::cast(self->GetBlob(name));

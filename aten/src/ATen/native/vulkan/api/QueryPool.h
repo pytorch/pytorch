@@ -79,6 +79,7 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
+  uint64_t get_total_op_ns(std::string op_name);
 };
 
 } // namespace api
