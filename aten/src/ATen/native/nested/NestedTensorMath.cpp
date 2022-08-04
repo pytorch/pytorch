@@ -122,7 +122,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  auto buffer = get_nested_tensor_impl(self) -> get_buffer();
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
   at::relu_(buffer);
   return self;
 }
@@ -132,8 +132,8 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  auto buffer = get_nested_tensor_impl(self) -> get_buffer();
-  at::gelu_(buffer,approximate);
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  at::gelu_(buffer, approximate);
   return self;
 }
 
