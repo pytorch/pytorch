@@ -7,7 +7,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
@@ -266,6 +266,29 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         return _fn
 
     return _out_wrapper
+
+
+def backwards_not_supported(prim):
+    class BackwardsNotSupported(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, args_spec, *flat_args):
+            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
+            g = torch._C._AutoDispatchBelowAutograd()
+            try:
+                return prim(*args, **kwargs)
+            finally:
+                del g
+
+        @staticmethod
+        def backward(ctx, *args):
+            raise RuntimeError("backwards not supported on prim")
+
+    @wraps(prim)
+    def _autograd_impl(*args, **kwargs):
+        flat_args, args_spec = tree_flatten((args, kwargs))
+        return BackwardsNotSupported.apply(args_spec, *flat_args)
+
+    return _autograd_impl
 
 
 # TODO: when tracing this will add torch tensors and not TensorMeta objects
