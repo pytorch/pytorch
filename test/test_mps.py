@@ -6608,6 +6608,7 @@ class TestConsistency(TestCase):
         'logaddexp2': None,  # `aten::pow.Scalar_out`
         'nn.functional.mse_loss': ['torch.float16'],  # `Half`
         'nn.functional.smooth_l1_loss': ['torch.float16'],  # `Half`
+        'nn.functional.embedding': None,  # #82809
     }
 
     # Used for accept mode only
@@ -6689,7 +6690,7 @@ class TestConsistency(TestCase):
 
                 if isinstance(cpu_sample.input, (list, tuple)):
                     for cpu_sample_, mps_sample_ in zip(cpu_sample.input, mps_sample.input):
-                        self.assertEqual(cpu_sample_, mps_sample_)
+                        self.assertEqual(cpu_sample_.input.grad, mps_sample_.input.grad)
                 else:
                     self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
 
