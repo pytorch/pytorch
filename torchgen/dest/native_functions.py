@@ -1,11 +1,12 @@
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
-from torchgen.context import with_native_function_and_index
-from torchgen.utils import mapMaybe
-from torchgen.model import NativeFunction, NativeFunctionsGroup, BackendIndex
-from torchgen.api.types import kernel_signature
 import torchgen.api.meta as meta
 import torchgen.api.structured as structured
+from torchgen.api.types import kernel_signature
+
+from torchgen.context import with_native_function_and_index
+from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
+from torchgen.utils import mapMaybe
 
 
 @with_native_function_and_index

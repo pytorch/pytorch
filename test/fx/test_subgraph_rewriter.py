@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import os
 import sys
@@ -593,4 +593,66 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_outs = comparison_fn(x1, x2)
         test_outs = traced.forward(x1, x2)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_with_unused_args(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y
+
+        def pattern(x, y):
+            return x + y
+
+        def replacement(x, y):
+            return x - y
+
+        def comparison(x1, x2, x3):
+            return x1 - x2
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        x1 = torch.randn(3, 4)
+        x2 = torch.randn(3, 4)
+        x3 = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+        placeholder_nodes = [n for n in traced.graph.nodes if n.op == "placeholder"]
+        assert len(placeholder_nodes) == 3
+
+        ref_outs = comparison_fn(x1, x2, x3)
+        test_outs = traced.forward(x1, x2, x3)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_call_method(self):
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x.dequantize()
+                x = x.sigmoid()
+                x = x.to(torch.float16)
+                return x
+
+        def pattern(x):
+            x = x.dequantize()
+            x = x.sigmoid()
+            x = x.to(torch.float16)
+            return x
+
+        def replacement(x):
+            return x
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(replacement)
+
+        x1 = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x1)
+        test_outs = traced.forward(x1)
         self.assertEqual(ref_outs, test_outs)

@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx.passes"]
 
 from dataclasses import dataclass
 import operator
