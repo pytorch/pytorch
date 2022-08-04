@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at { namespace functorch {
 
@@ -232,15 +233,21 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
+  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+      const Tensor& first, optional<int64_t> first_bdim,
+      const Tensor& second, optional<int64_t> second_bdim) {
+    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
+                op_name, ": The input tensor A must have at least 2 dimensions.");
+    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
+                op_name, ": The input tensor B must have at least 2 dimensions.");
+    return _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+  }
+
   static oneOutput apply_one(
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(!first_bdim.has_value() || first.dim() > 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(!second_bdim.has_value() || second.dim() > 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
@@ -250,11 +257,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
-              op_name, ": The input tensor B must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, /*do_type_promotion=*/false);
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
@@ -291,6 +294,39 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
   return std::make_tuple(at::matrix_exp(self_), 0);
 }
 
+fourOutputs solve_ex_batch_rule(
+    const Tensor& A, optional<int64_t> A_bdim,
+    const Tensor& B, optional<int64_t> B_bdim,
+    bool left, bool check_errors) {
+  auto batch_size = get_bdim_size2(A, A_bdim, B, B_bdim);
+  const auto A_logical_rank = rankWithoutBatchDim(A, A_bdim);
+  const auto B_logical_rank = rankWithoutBatchDim(B, B_bdim);
+  const auto max_logical_rank = std::max(A_logical_rank, B_logical_rank);
+
+  TORCH_CHECK(A_logical_rank >= 2,
+            "linalg.solve: The input tensor A must have at least 2 dimensions.");
+
+  int b_logical_rank = max_logical_rank;
+  if (A_logical_rank > B_logical_rank) {  // vector case: B was a vector or batched vector
+    // not accurate but matches linalg error message
+    TORCH_CHECK(B_logical_rank >= 1, "linalg.solve: The input tensor B must have at least 2 dimensions.");
+    b_logical_rank = max_logical_rank - 1;
+  } else {  // matrix case: A and B are both matrices or batches of matrices
+    TORCH_CHECK(B_logical_rank >= 2, "linalg.solve: The input tensor B must have at least 2 dimensions.");
+  }
+
+  // basically binary pointwise helper but if B was a vector incoming, we must pad it to be 1 dim smaller than A
+  auto A_ = moveBatchDimToFront(A, A_bdim);
+  auto B_ = moveBatchDimToFront(B, B_bdim);
+  A_ = maybePadToLogicalRank(A_, A_bdim, max_logical_rank);
+  B_ = maybePadToLogicalRank(B_, B_bdim, b_logical_rank);
+
+  A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
+  B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
+  const auto res = _linalg_solve_ex(A_, B_, left, check_errors);
+  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
+}
+
 c10::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
   if (t.dim() == 1 && t.size(0) == 0) {
     return c10::optional<int64_t>();
@@ -319,7 +355,6 @@ fourOutputs linalg_lstsq_batch_rule(
   const auto res_3_bdim = batch_dim_if_not_empty(res_3);
   return std::make_tuple(std::get<0>(res), 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
 }
-
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
   LinalgCheckMatrixUnaryRuleHelper<\
@@ -432,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
+  VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
