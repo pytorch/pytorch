@@ -831,7 +831,7 @@ def _check_numpy_cpp_works():
     try:
         torch.tensor([0.]).numpy()
         return True
-    except:
+    except Exception:
         return False
 
 TEST_NUMPY = _check_module_exists('numpy') and _check_numpy_cpp_works()
