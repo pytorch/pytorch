@@ -4,6 +4,7 @@
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
 

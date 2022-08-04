@@ -33,12 +33,7 @@ constexpr auto exclude_keys_for_meta_dispatch =
     c10::DispatchKeySet({
         c10::DispatchKey::FuncTorchDynamicLayerBackMode,
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
-        c10::DispatchKey::Python,
-        // The idea here is that this exclude set is used in conjunction
-        // with adding MetaBit to the TLS include keyset.
-        // That means that we will *always* dispatch to meta kernels,
-        // and so we want to skip BackendSelect entirely (which will do the wrong thing).
-        c10::DispatchKey::BackendSelect
+        c10::DispatchKey::Python
     });
 
 
@@ -79,41 +74,6 @@ inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Te
     outputs.push_back(to_meta(t_list[i]));
   }
   return outputs;
-}
-
-inline c10::DispatchKeySet getKeySet(const Tensor& t) {
-    return t.key_set();
-}
-
-inline c10::DispatchKeySet getKeySet(const c10::optional<Tensor>& t) {
-  if (t.has_value()) {
-    return getKeySet(*t);
-  }
-  return c10::DispatchKeySet();
-}
-
-inline c10::DispatchKeySet getKeySet(const TensorList& t_list) {
-  auto out = DispatchKeySet();
-  for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
-  }
-  return out;
-}
-
-inline c10::DispatchKeySet getKeySet(const c10::List<Tensor>& t_list) {
-  auto out = DispatchKeySet();
-  for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
-  }
-  return out;
-}
-
-inline c10::DispatchKeySet getKeySet(const c10::List<c10::optional<Tensor>>& t_list) {
-  auto out = DispatchKeySet();
-  for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
-  }
-  return out;
 }
 
 

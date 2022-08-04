@@ -348,6 +348,10 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
+
+        if kwargs.get("device", None) is not None:
+            meta_kwargs["device"] = "meta"
+
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -404,7 +408,6 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.arange: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
@@ -432,9 +435,7 @@ meta_function_expected_failures = {
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.linspace: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.logcumsumexp : {f64, bf16, f32},
-    torch.logspace: {bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
@@ -633,6 +634,7 @@ aten = torch.ops.aten
 
 # these always fail
 meta_dispatch_expected_failures = {
+    aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten._fft_c2c.out : {f16, c64, i8, f64, c128, i32, i64, f32, c32, b8, i16, u8},
     aten._fft_r2c.out : {f16, i8, f64, i32, i64, f32, b8, i16, u8},
     aten.cholesky.default : {c64, c128, f64, f32},
@@ -870,6 +872,10 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
+
+    def test_empty_quantized(self):
+        r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
+        self.assertEqual(r.device.type, 'meta')
 
 instantiate_device_type_tests(TestMeta, globals())
 
