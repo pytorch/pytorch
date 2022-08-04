@@ -2,7 +2,6 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-import functools
 from typing import Any
 
 
@@ -96,8 +95,7 @@ class BackwardHook(object):
 
         return tuple(res)
 
-    def _set_user_hook(self, grad_fn, user_hook):
-        @functools.wraps(user_hook)
+    def _set_user_hook(self, grad_fn):
         def hook(grad_input, _):
             if self.grad_outputs is None:
                 raise RuntimeError("Module backward hook for grad_input is called before "
@@ -107,23 +105,25 @@ class BackwardHook(object):
                                    "output depends on the input and that the loss is computed "
                                    "based on the output.")
 
-            grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
-            res = user_hook(self.module, grad_input, self.grad_outputs)
+            res = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
 
-            # To avoid leaks, remove the saved grad_outputs after the execution of the last input hook
-            self.counter -= 1
-            if self.counter == 0:
-                self.grad_outputs = None
+            for hook in self.user_hooks:
+                out = hook(self.module, res, self.grad_outputs)
 
-            if res is None:
-                return res
+                if out is None:
+                    continue
 
-            if len(res) != len(grad_input):
-                raise RuntimeError("Backward hook returned an invalid number of grad_input, "
-                                   "got {}, but expected {}".format(len(res), len(grad_input)))
+                if len(out) != len(res):
+                    raise RuntimeError("Backward hook returned an invalid number of grad_input, "
+                                       "got {}, but expected {}".format(len(out), len(res)))
+
+                res = out
+
+            self.grad_outputs = None
+
             return self._unpack_none(self.input_tensors_index, res)
+
         grad_fn.register_hook(hook)
-        self.counter += 1
 
     def _apply_on_tensors(self, fn, args):
         # Can be used to apply the given function to the tensors contained in the
@@ -160,8 +160,7 @@ class BackwardHook(object):
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
-            for hook in self.user_hooks:
-                self._set_user_hook(grad_fn, hook)
+            self._set_user_hook(grad_fn)
 
         res, input_idx = self._apply_on_tensors(fn, args)
         self.n_inputs = len(args)
