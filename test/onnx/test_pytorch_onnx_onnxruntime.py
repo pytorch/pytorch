@@ -8696,7 +8696,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M(), (x))
 
     def test_rrelu_eval(self):
-
         x = torch.tensor([0.5, -0.5])
         self.run_test(torch.nn.RReLU(0.1, 0.3).eval(), x)
 
