@@ -69,6 +69,10 @@ struct mnt_wrapper <c10::complex<double>>{
   static constexpr int MAX_NUM_THREADS = 256;
 };
 
+constexpr int max_reduce_threads(c10::ScalarType type) {
+  return type == kComplexDouble ? 256 : 512;
+}
+
 struct ReduceConfig {
   static constexpr int BLOCK_X = 0;
   static constexpr int BLOCK_Y = 1;
@@ -509,7 +513,7 @@ struct ReduceOp {
       data -= shift;
       end += shift;
       if(threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()){
-        value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift);
+        value = ops.reduce(value, c10::load(data + threadIdx.x), threadIdx.x - shift);
       }
       end -= align_elements;
       data += align_elements;
@@ -531,15 +535,11 @@ struct ReduceOp {
       value_list[i] = ident;
     }
 
-    scalar_t values[input_vec_size];
-
-    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
-
     while (idx * input_vec_size + input_vec_size - 1 < end) {
-      *values_vector = reinterpret_cast<const load_t*>(data)[idx];
+      const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (index_t i = 0; i < input_vec_size; i++) {
-        value_list[i] = ops.reduce(value_list[i], values[i], shift + idx * input_vec_size + i);
+        value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
       }
       idx += stride;
     }
@@ -549,7 +549,8 @@ struct ReduceOp {
     if (config.should_reduce_tail()) {
       int idx = tail_start + threadIdx.x;
       if (idx < end) {
-        value_list[0] = ops.reduce(value_list[0], data[idx], idx + shift);
+        const auto value = c10::load(data + idx);
+        value_list[0] = ops.reduce(value_list[0], value, idx + shift);
       }
     }
 
@@ -569,7 +570,6 @@ struct ReduceOp {
 
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     using load_t = at::native::memory::aligned_vector<scalar_t, output_vec_size>;
-    const load_t* data = reinterpret_cast<const load_t*>(data_);
 
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_vec_t value_list[vt0];
@@ -587,7 +587,8 @@ struct ReduceOp {
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
-        values[i] = data[calc(idx + i * stride) / output_vec_size];
+        const auto offset = calc(idx + i * stride) / output_vec_size;
+        values[i] = memory::load_vector<output_vec_size>(data_, offset);
       }
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
@@ -606,7 +607,8 @@ struct ReduceOp {
       if (idx >= end) {
         break;
       }
-      values[i] = data[calc(idx) / output_vec_size];
+      const auto offset = calc(idx) / output_vec_size;
+      values[i] = memory::load_vector<output_vec_size>(data_, offset);
       idx += stride;
     }
     idx = idx_;
@@ -898,43 +900,37 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   }
 }
 
-template<char const *name, typename scalar_t, typename out_scalar_t,
-int vt0, typename R>
-static void launch_jitted_reduce_kernel(DeviceIndex idx, const ReduceConfig& config,
-R& reduction, const std::string& func) {
-  constexpr int max_threads = mnt_wrapper<scalar_t>::MAX_NUM_THREADS;
+inline void launch_jitted_reduce_kernel(
+    std::mutex &jiterator_mutex,
+    std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
+    const at::cuda::jit::KernelDescriptor &desc,
+    int vt0, const ReduceConfig& config, void *reduction) {
   dim3 block = config.block();
   dim3 grid = config.grid();
 
-  static std::mutex _jiterator_mutex;
-  static std::vector<std::array<at::cuda::jit::NvrtcFunction, 3>> fns(c10::cuda::device_count());
   int shared_memory = config.shared_memory_size();
   at::cuda::jit::NvrtcFunction* fn_ptr;
   switch(config.output_vec_size) {
   case 4:
-    fn_ptr = &fns[idx][0];
+    fn_ptr = &fn_cache[0];
     break;
   case 2:
-    fn_ptr = &fns[idx][1];
+    fn_ptr = &fn_cache[1];
     break;
   default:
-    fn_ptr = &fns[idx][2];
+    fn_ptr = &fn_cache[2];
   }
   if (!fn_ptr->function) {
-    std::string f_inputs_type_str = at::cuda::jit::typeName<scalar_t>();
-    std::string accum_type_str = at::cuda::jit::typeName<at::opmath_type<scalar_t>>();
-    std::string result_type_str = at::cuda::jit::typeName<out_scalar_t>();
-    int max_threads_codegen = max_threads/config.output_vec_size;
-    auto code = at::cuda::jit::generate_reduction_code(1, func, name, vt0,
-                                               f_inputs_type_str, accum_type_str, result_type_str,
-                                               true, false, config.output_vec_size, max_threads_codegen);
+    int max_threads_codegen =
+        max_reduce_threads(desc.f_inputs_type) / config.output_vec_size;
+    auto code = at::cuda::jit::generate_reduction_code(
+        desc, vt0, true, false, config.output_vec_size, max_threads_codegen);
 
-    *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_"+std::string(name));
-
+    *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
   }
   constexpr int kernel_args = 1;
   void* args[kernel_args];
-  args[0] = static_cast<void*>(&reduction);
+  args[0] = reduction;
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory);
 }
 
@@ -1313,9 +1309,17 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 
-  launch_jitted_reduce_kernel<name, scalar_t,
-  out_scalar_t, vt0>(iter.device().index(),
-  config, reduce, func);
+  constexpr int nInputs = 1;
+  constexpr int nOutputs = 1;
+  static auto desc = at::cuda::jit::make_kernel_descriptor<
+    out_scalar_t, scalar_t>(name, func, nInputs, nOutputs);
+
+  static std::mutex jiterator_mutex;
+  static std::vector<std::array<at::cuda::jit::NvrtcFunction, 3>> fn_cache(c10::cuda::device_count());
+  auto &cache = fn_cache[iter.device().index()];
+
+  launch_jitted_reduce_kernel(
+      jiterator_mutex, cache, desc, vt0, config, &reduce);
 }
 
 }} // namespace at::native

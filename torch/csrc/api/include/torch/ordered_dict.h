@@ -170,9 +170,12 @@ class OrderedDict {
   /// `OrderedDict` into a vector of `std::pair<Key, Value>`.
   ::std::vector<std::pair<Key, Value>> pairs() const;
 
-  /// Returns true if both dicts contain the same keys and values, in the same order.
-  template<typename K, typename V>
-  friend bool operator==(const OrderedDict<K, V> &a, const OrderedDict<K, V> &b);
+  /// Returns true if both dicts contain the same keys and values, in the same
+  /// order.
+  template <typename K, typename V>
+  friend bool operator==(
+      const OrderedDict<K, V>& a,
+      const OrderedDict<K, V>& b);
 
  private:
   /// A mapping from a key to an index into the `items_` vector.
@@ -345,8 +348,8 @@ typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::operator[](
 }
 
 template <typename Key, typename Value>
-const typename OrderedDict<Key, Value>::
-    Item& OrderedDict<Key, Value>::operator[](size_t index) const {
+const typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::
+operator[](size_t index) const {
   TORCH_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
   return items_[index];
 }
@@ -502,16 +505,22 @@ void OrderedDict<Key, Value>::reserve(size_t requested_capacity) {
   items_.reserve(requested_capacity);
 }
 
-template<typename K, typename V>
-bool operator==(const torch::OrderedDict<K, V>& a, const torch::OrderedDict<K, V>& b) {
+template <typename K, typename V>
+bool operator==(
+    const torch::OrderedDict<K, V>& a,
+    const torch::OrderedDict<K, V>& b) {
   using Item = typename torch::OrderedDict<K, V>::Item;
-  if (a.index_ != b.index_) return false;
-  if (a.items_.size() != b.items_.size()) return false;
-  // NOTE: There's no point in comparing keys for items_, as we already know that index is equal.
-  return std::equal(a.items_.begin(), a.items_.end(),
-                    b.items_.begin(),
-                    [](const Item& a, const Item& b)
-                    { return a.value() == b.value(); });
+  if (a.index_ != b.index_)
+    return false;
+  if (a.items_.size() != b.items_.size())
+    return false;
+  // NOTE: There's no point in comparing keys for items_, as we already know
+  // that index is equal.
+  return std::equal(
+      a.items_.begin(),
+      a.items_.end(),
+      b.items_.begin(),
+      [](const Item& a, const Item& b) { return a.value() == b.value(); });
 }
 
 } // namespace torch

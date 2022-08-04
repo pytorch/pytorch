@@ -4,17 +4,18 @@
 import unittest
 
 import numpy as np
-from pytorch_helper import PyTorchModule
-from test_pytorch_common import skipIfNoLapack
 
 import torch.nn.init as init
 import torch.onnx
 from caffe2.python.core import workspace
 from caffe2.python.model_helper import ModelHelper
+from pytorch_helper import PyTorchModule
 from torch import nn
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
-class TestCaffe2Backend(unittest.TestCase):
+class TestCaffe2Backend(common_utils.TestCase):
     @skipIfNoLapack
     @unittest.skip("test broken because Lapack was always missing.")
     def test_helper(self):
@@ -67,4 +68,4 @@ class TestCaffe2Backend(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

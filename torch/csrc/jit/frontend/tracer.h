@@ -40,6 +40,8 @@ using ::c10::ivalue::ConstantString;
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API std::atomic<bool>& getTracerStateWarnMode();
+
 struct TORCH_API TracingState
     : public std::enable_shared_from_this<TracingState> {
   TracingState();
@@ -48,7 +50,7 @@ struct TORCH_API TracingState
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool warn = true;
+  bool warn = getTracerStateWarnMode();
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

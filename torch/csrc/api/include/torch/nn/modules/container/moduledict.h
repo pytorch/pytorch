@@ -40,10 +40,10 @@ namespace nn {
 /// Why should you use `ModuleDict` instead of a simple `map` or `OrderedDict`?
 /// The value a `ModuleDict` provides over manually calling an ordered map of
 /// modules is that it allows treating the whole container *as a single module*,
-/// such that performing a transformation on the `ModuleDict` applies to each of the
-/// modules it stores (which are each a registered submodule of the `ModuleDict`).
-/// For example, calling `.to(torch::kCUDA)` on a `ModuleDict` will move each module
-/// in the map to CUDA memory. For example:
+/// such that performing a transformation on the `ModuleDict` applies to each of
+/// the modules it stores (which are each a registered submodule of the
+/// `ModuleDict`). For example, calling `.to(torch::kCUDA)` on a `ModuleDict`
+/// will move each module in the map to CUDA memory. For example:
 ///
 /// \rst
 /// .. code-block:: cpp
@@ -61,20 +61,23 @@ namespace nn {
 /// \endrst
 ///
 /// Finally, `ModuleDict` provides a lightweight container API, such as allowing
-/// iteration over submodules, positional access, adding new modules from a vector
-/// of key-module pairs or an `OrderedDict` or another `ModuleDict` after
+/// iteration over submodules, positional access, adding new modules from a
+/// vector of key-module pairs or an `OrderedDict` or another `ModuleDict` after
 /// construction via `update`.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
  public:
-  using Iterator = torch::OrderedDict<std::string, std::shared_ptr<Module>>::Iterator;
-  using ConstIterator = torch::OrderedDict<std::string, std::shared_ptr<Module>>::ConstIterator;
+  using Iterator =
+      torch::OrderedDict<std::string, std::shared_ptr<Module>>::Iterator;
+  using ConstIterator =
+      torch::OrderedDict<std::string, std::shared_ptr<Module>>::ConstIterator;
 
   ModuleDictImpl() = default;
 
   /// Constructs the `ModuleDict` from a list of string-Module pairs.
   explicit ModuleDictImpl(
-      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
+      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>&
+          modules) {
     update(modules);
   }
 
@@ -136,7 +139,8 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
 
   /// Remove all items from the `ModuleDict`.
   void clear() {
-    // Not remove the registration of modules to make it consistent with python version.
+    // Not remove the registration of modules to make it consistent with python
+    // version.
     modules_.clear();
   }
 
@@ -195,19 +199,22 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   std::shared_ptr<Module> pop(const std::string& key) {
     auto module = modules_[key];
     modules_.erase(key);
-    // Not remove the registration of the module to make it consistent with python version.
+    // Not remove the registration of the module to make it consistent with
+    // python version.
     return module;
   }
 
   /// Updated the `ModuleDict` with a vector of key-module pairs.
   void update(
-      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
+      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>&
+          modules) {
     for (auto& item : modules) {
       insert(item.first, item.second);
     }
   }
 
-  /// Updated the `ModuleDict` with key-value pairs from `OrderedDict` or `ModuleDict`.
+  /// Updated the `ModuleDict` with key-value pairs from `OrderedDict` or
+  /// `ModuleDict`.
   template <typename Container>
   void update(const Container& container) {
     for (auto& item : container) {
@@ -215,7 +222,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     }
   }
 
-private:
+ private:
   /// Private `OrderedDict` holding the key-Module pairs.
   torch::OrderedDict<std::string, std::shared_ptr<Module>> modules_;
 
@@ -225,13 +232,11 @@ private:
     if (contains(key)) {
       modules_[key] = std::move(module);
       replace_module(key, modules_[key]);
-    }
-    else {
+    } else {
       modules_.insert(key, std::move(module));
       register_module(key, modules_.back().value());
     }
   }
-
 };
 
 /// A `ModuleHolder` subclass for `ModuleDictImpl`.

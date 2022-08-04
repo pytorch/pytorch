@@ -28,10 +28,10 @@ class ObservedGraphModule(GraphModule):
             '_activation_post_process_indexes',
             '_patterns',
             '_qconfig_map',
-            '_prepare_custom_config_dict',
+            '_prepare_custom_config',
             '_equalization_qconfig_map',
             '_node_name_to_scope',
-            '_qconfig_dict',
+            '_qconfig_mapping',
             '_is_qat',
             '_observed_node_names']).union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}

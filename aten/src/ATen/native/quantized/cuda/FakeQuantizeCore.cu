@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/quantized/fake_quant_affine.h>
+#include <ATen/native/quantized/FakeQuantAffine.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <thrust/tuple.h>

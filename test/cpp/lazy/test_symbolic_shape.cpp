@@ -52,9 +52,7 @@ class LazyShapeTest : public ::testing::Test {
 class DynamicInputShapeNode : public Node {
  public:
   explicit DynamicInputShapeNode(Shape& shape)
-      : Node(OpKind(), /* num_outputs */ 1),
-        hash_(0),
-        shape_(shape) {}
+      : Node(OpKind(), /* num_outputs */ 1), hash_(0), shape_(shape) {}
   ~DynamicInputShapeNode() override = default;
 
   const std::vector<Output>& operands() const override {
@@ -71,8 +69,12 @@ class DynamicInputShapeNode : public Node {
     return {shape_};
   }
 
-  hash_t hash() const override { return hash_; }
-  hash_t shapeHash() const override { return hash_; }
+  hash_t hash() const override {
+    return hash_;
+  }
+  hash_t shapeHash() const override {
+    return hash_;
+  }
 
  private:
   hash_t hash_;

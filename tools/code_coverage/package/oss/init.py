@@ -1,11 +1,11 @@
 import argparse
 import os
-from typing import List, Optional, Tuple, cast
+from typing import cast, List, Optional, Tuple
 
 from ..util.setting import (
+    CompilerType,
     JSON_FOLDER_BASE_DIR,
     LOG_DIR,
-    CompilerType,
     Option,
     Test,
     TestList,

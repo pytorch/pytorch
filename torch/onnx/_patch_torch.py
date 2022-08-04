@@ -8,10 +8,11 @@ import torch._C._onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
 
 
+# TODO(#78694): Refactor the patching process to make it more transparent to users.
 def _graph_op(
     g: torch._C.Graph,
     opname: str,
-    *raw_args: torch._C.Node,
+    *raw_args: torch._C.Value,
     outputs: int = 1,
     **kwargs,
 ) -> Union[torch._C.Value, Tuple[torch._C.Value, ...]]:
