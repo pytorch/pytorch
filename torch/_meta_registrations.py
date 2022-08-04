@@ -307,12 +307,13 @@ def meta_conv(
                 )
         return ret_shape
 
+    # TODO: use suggest_memory_format to get memory_format
     def is_channels_last(ten):
         return ten.is_contiguous(memory_format=torch.channels_last)
 
     def pick_memory_format(device_hint):
         if device_hint == "cuda":
-            if is_channels_last(input_tensor) and is_channels_last(weight):
+            if is_channels_last(input_tensor) or is_channels_last(weight):
                 return torch.channels_last
         else:
             if is_channels_last(input_tensor):
