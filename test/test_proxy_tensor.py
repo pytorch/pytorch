@@ -13,8 +13,9 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
+from torch import nn
 import re
 
 aten = torch.ops.aten
@@ -134,6 +135,109 @@ class TestProxyTensor(TestCase):
             return a + b
         self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
 
+    def test_isolated_graphmodule(self):
+        def is_any_sum(gm):
+            return any(node.target == torch.ops.aten.sum.default for node in gm.graph.nodes)
+
+        def is_any_digamma(gm):
+            return any(node.target == torch.ops.aten.digamma.default for node in gm.graph.nodes)
+
+        def is_any_sigmoid(gm):
+            return any(node.target == torch.ops.aten.sigmoid.default for node in gm.graph.nodes)
+
+        def inner(x):
+            return torch.sum(x)
+
+        def f(x):
+            gm = get_isolated_graphmodule(inner, (x,), {})
+            self.assertTrue(is_any_sum(gm))
+            return x + torch.randn(x.shape)
+
+        # get_isolated_graphmodule uses make_fx internally that shouldn't be traced
+        # by the outer make_fx call
+        traced = make_fx(f)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+
+        # When factory functions are used, they should not be traced
+        # by the outer make_fx call
+        def inner_with_factory():
+            val = torch.tensor(float(1))
+            val.add_(2)
+            return torch.full((10, 10), val).sum()
+
+        def f1(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2(x):
+            gm = get_isolated_graphmodule(f1, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify nested make_fx calls don't make factory functions to be leaked
+        # into the outer graph
+        def f2(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertTrue(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify interaction with non-ProxyTensor modes
+        from torch.testing._internal.logging_tensor import LoggingTensorMode
+
+        def f1_logging(x):
+            with LoggingTensorMode():
+                gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2_logging(x):
+            with LoggingTensorMode(), LoggingTensorMode():
+                gm = get_isolated_graphmodule(f1_logging, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        traced = make_fx(f2_logging)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify interaction with another tensor subclass
+        # This case currently doesn't work and should raise an error
+        # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def f1_logging_tensor(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
+
+        def f2_logging_tensor(x):
+            x = LoggingTensor(x)
+            gm = get_isolated_graphmodule(f1_logging_tensor, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
+
+        with self.assertRaisesRegex(AssertionError, "ProxyTensor is wrapped with another Tensor subclass"):
+            traced = make_fx(f2_logging_tensor)(torch.randn(3))
+            self.assertFalse(is_any_sum(traced))
+            self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+            self.assertTrue(is_any_digamma(traced))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
         mod = torchvision.models.resnet18()
@@ -238,6 +342,28 @@ class TestProxyTensor(TestCase):
         self.assertEqual(g(), f())
         # In case we mutated shared state in the g graph!
         self.assertEqual(g(), f())
+
+    def test_constant_unbind(self):
+        def f():
+            val = torch.tensor([2])
+            r, = torch.unbind(val, 0)
+            return r.item()
+
+        g = make_fx(f)()
+        self.assertEqual(g(), f())
+
+    def test_issue82547(self):
+        x = nn.Parameter(torch.randn(3, 3))
+
+        def f():
+            return torch.ops.aten.t.default(x)
+        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(3, 3))
+        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
 
     def test_use_fake_and_tensor(self):
         def f(x, y):
@@ -430,19 +556,14 @@ make_fx_failures = {
 
     # ???
     xfail('nn.functional.ctc_loss'),
-    # Sparse tensors are not supported with faketensors for now
-    xfail('to_sparse'),
+    # proxy tensor doesn't support sparse correctly right now
+    skip('to_sparse'),
     # segfaults
     skip('block_diag'),
 }
 
 fake_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
-    xfail('complex'),
-    xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
-    xfail('linalg.matrix_power'),
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('mvlgamma', 'mvlgamma_p_1'),
@@ -455,6 +576,10 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -549,6 +674,7 @@ symbolic_tensor_failures = {
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fill', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('flatten', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('float', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('float_power', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
@@ -595,6 +721,7 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
     xfail('linalg.matrix_norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -813,12 +940,13 @@ symbolic_tensor_failures = {
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('tile', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('topk', ''),  # aten.topk.default - couldn't find symbolic meta function/decomposition
-    xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
+    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('var', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promotion!
     xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
@@ -828,6 +956,7 @@ symbolic_tensor_failures = {
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
+    xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 
 def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
