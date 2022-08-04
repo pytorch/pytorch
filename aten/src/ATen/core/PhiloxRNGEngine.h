@@ -76,7 +76,7 @@ public:
     incr_n(offset);
   }
 
-  inline void reset_state(uint64_t seed = 67280421310721,
+  C10_HOST_DEVICE inline void reset_state(uint64_t seed = 67280421310721,
                                  uint64_t subsequence = 0) {
     key_[0] = static_cast<uint32_t>(seed);
     key_[1] = static_cast<uint32_t>(seed >> 32);
