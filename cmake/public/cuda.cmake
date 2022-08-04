@@ -267,11 +267,11 @@ add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cublas_static)
+        CUDA::cublas_static CUDA::cublasLt_static)
 else()
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cublas)
+        CUDA::cublas CUDA::cublasLt)
 endif()
 
 # cudnn public and private interfaces
