@@ -141,8 +141,8 @@ class APoTObserver(ObserverBase):
             observer: APoTObserver to calculate qparams
             signed: bool to indicate if qparams should be signed/unsigned
     """
-    def quant_levels_visualization(self, observer: APoTObserver, signed=False):
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed)
+    def quant_levels_visualization(self, signed=False):
+        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(signed)
 
         xs = [float(x) / 1000.0 for x in range(1000)]
         ys = [apot_to_float(float_to_apot(x, quantization_levels, level_indices, alpha),
