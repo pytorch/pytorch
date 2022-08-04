@@ -3626,13 +3626,13 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
 
   auto prepack = callOpByName(
-      "vulkan_prepack::gru_prepack",
+      "vulkan_prepack::create_gru_context",
       "",
       std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
         weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
   auto out_vulkan = callOpByName(
-      "vulkan_prepack::gru_run",
+      "vulkan_prepack::run_gru_context",
       "",
       in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
 
@@ -3692,7 +3692,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: incorrect # of weights/biases
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) }),
@@ -3703,13 +3703,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu_2d.vulkan(), h0_cpu.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -3718,13 +3718,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu.vulkan(), h0_cpu_2d.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -3732,7 +3732,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: has_biases should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3742,7 +3742,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: train should be false
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3752,7 +3752,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: bidirectional should be false
   EXPECT_THROW({
      auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3762,7 +3762,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: batch_first should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3772,7 +3772,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: dropout should be 0.0
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),

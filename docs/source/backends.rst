@@ -11,6 +11,7 @@ These backends include:
 
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
