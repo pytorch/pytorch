@@ -13,7 +13,6 @@ from . import config
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
-INDUCTOR = False
 
 
 class InvalidNodeBase(object):
@@ -208,7 +207,7 @@ def _count_ops(graph):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs
+    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser"
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -277,12 +276,12 @@ def min_cut_rematerialization_partition(
     prims = torch.ops.prims
 
     pointwise_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward]  # noqa: E501
-    if INDUCTOR:
+    if compiler == "inductor":
         pointwise_ops += [prims.div, prims.convert_element_type, aten.sign, aten.clone]  # noqa: E501
     misc_ops = [aten.to, aten.type_as, operator.getitem]
 
     reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
-    if INDUCTOR:
+    if compiler == "inductor":
         reduction_ops += [prims.var, prims.sum, aten.var]
 
     # not recomputed by default since these are kinda expensive/hard to fuse into
@@ -293,7 +292,7 @@ def min_cut_rematerialization_partition(
 
     # These are the view ops that NVFuser can fuse
     view_ops = [aten.squeeze, aten.unsqueeze]
-    if INDUCTOR:
+    if compiler == "inductor":
         view_ops += [prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors]  # noqa: E501
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d]  # noqa: E501
@@ -334,6 +333,8 @@ def min_cut_rematerialization_partition(
                 return True
             if node.target == operator.getitem:
                 return False
+            if compiler == "inductor" and node.dist_from_bw > 4:
+                return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
             if 'tensor_meta' not in node.meta:
