@@ -9,7 +9,7 @@ import torch.ao.quantization as tq
 from torch import nn
 from torch.ao import sparsity
 from torch.testing._internal.common_utils import TestCase
-from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, convert_to_reference_fx
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, convert_to_reference_fx, prepare_qat_fx
 from torch.ao.sparsity import fqn_to_module
 
 logging.basicConfig(
@@ -475,6 +475,52 @@ class TestFxComposability(TestCase):
         self.assertTrue(_module_has_activation_post_process(mod, "5"))
         sparsifier.step()
         sparsity_level = _calculate_sparsity(fqn_to_module(mod, "5.0.weight"))
+        mod(example)
+        mod = convert_fx(mod)
+
+        # check that final module is the expected quantized module and that the model runs
+        self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.nn.intrinsic.quantized.LinearReLU))
+        self.assertEqual(mod(example).shape, torch.Size([1, 4, 4, 4]))
+
+        # check that module was actually sparsified
+        cur_sparsity = _calculate_sparsity(fqn_to_module(mod, "5")._weight_bias()[0])
+        self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
+        self.assertGreaterAlmostEqual(
+            sparsity_level, sparse_config[0]["sparsity_level"]
+        )
+        self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
+
+    def test_s_prep_before_qat_prep_fx(self):
+        r"""
+        This test checks that the ordering of sparse prepare -> prepare_qat_fx -> convert_fx
+        compose cleanly without issue and that the final result is sparsified without
+        having to call squash mask before convert_fx.
+        """
+        (
+            mod,
+            sparsifier,
+            sparse_config,
+        ) = _get_model_and_sparsifier_and_sparse_config()
+        sparsifier.prepare(mod, config=sparse_config)
+
+        example = torch.randn(1, 4, 4, 4)
+        qconfig = tq.get_default_qat_qconfig("fbgemm")
+        qconfig_mapping = tq.QConfigMapping() \
+            .set_module_name("4", qconfig) \
+            .set_module_name("5", qconfig)
+        mod = prepare_qat_fx(mod, qconfig_mapping, (example,))
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during prepare
+        self.assertTrue(hasattr(fqn_to_module(mod, "0.0"), "parametrizations"))
+        self.assertTrue(hasattr(fqn_to_module(mod, "5"), "parametrizations"))
+        self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.nn.intrinsic.qat.LinearReLU))
+
+        # check that correct observers were inserted and that matching
+        # occured successfully
+        self.assertTrue(_module_has_activation_post_process(mod, "5"))
+        sparsifier.step()
+        sparsity_level = _calculate_sparsity(fqn_to_module(mod, "5.weight"))
         mod(example)
         mod = convert_fx(mod)
 
