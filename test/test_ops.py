@@ -1562,7 +1562,6 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.masked_fill',
         '_refs.transpose',
         '_refs.var',
         '_refs.rsub',
