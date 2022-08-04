@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/utils/pybind.h>
 #ifdef USE_CUDA
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #endif
