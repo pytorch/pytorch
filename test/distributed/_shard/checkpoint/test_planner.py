@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-from re import S
 import sys
 
 import torch
@@ -117,7 +116,7 @@ class TestSavePlan(TestCase):
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
-        #the default global plan updates all indexes to include hints
+        # The default global plan updates all indexes to include hints
         for new_plan, old_plan in zip(final_plans, all_plans):
             for new_item, old_item in zip(new_plan.items, old_plan.items):
                 self.assertEqual(new_item.index, old_item.index)
@@ -134,7 +133,7 @@ class TestSavePlan(TestCase):
                     self.assertEqual(item_md.properties, old_item.tensor_data.properties)
 
                     self.assertIsNotNone(new_item.index.index)
-                    #make sure the hint is correct
+                    # Make sure the hint is correct
                     self.assertEqual(item_md.chunks[new_item.index.index], old_item.tensor_data.chunk)
 
     def test_local_load_plan(self):
@@ -153,14 +152,14 @@ class TestSavePlan(TestCase):
         metadata = create_default_local_metadata(state_dict)
 
         load_plan = create_default_local_load_plan(state_dict, metadata)
-        #This will create 3 entries
+        # This will create 3 entries
         self.assertEqual(3, len(load_plan.items))
         st_item = next(ri for ri in load_plan.items if ri.dest_index.fqn == "st")
         tensor_item = next(ri for ri in load_plan.items if ri.dest_index.fqn == "tensor")
         bytes_item = next(ri for ri in load_plan.items if ri.dest_index.fqn == "value")
 
         self.assertEqual(st_item.type, LoadItemType.TENSOR)
-        # this is an exact copy 
+        # This is an exact copy
         self.assertEqual(st_item.dest_index, MetadataIndex("st", [8]))
         self.assertEqual(st_item.dest_offsets, torch.Size([0]))
         self.assertEqual(st_item.storage_index, MetadataIndex("st", [8]))
@@ -190,16 +189,16 @@ class TestSavePlan(TestCase):
                 }
 
 
-        # rank 1 has a 16 bytes shard from [16, 32[
+        # Rank 1 has a 16 bytes shard from [16, 32[
         world8_state_dict = create_state_dict(rank=1, world_size=8)
         world8_metadata = create_default_local_metadata(world8_state_dict)
 
-        # rank 1 has a 32 bytes shard from [32, 64[
+        # Rank 1 has a 32 bytes shard from [32, 64[
         world4_state_dict = create_state_dict(rank=1, world_size=4)
         world4_metadata = create_default_local_metadata(world4_state_dict)
 
-        #First scenario, going from world=8 to world=4, need to load 2 shards
-        # each 4-world shard has 32 elements, so it needs to load 2 shards
+        # First scenario, going from world=8 to world=4, need to load 2 shards
+        # Each 4-world shard has 32 elements, so it needs to load 2 shards
         load_plan = create_default_local_load_plan(world4_state_dict, world8_metadata)
         self.assertEqual(2, len(load_plan.items))
         low_ri = next(ri for ri in load_plan.items if ri.dest_offsets == torch.Size([0]))
@@ -248,9 +247,9 @@ class TestSavePlan(TestCase):
 
         load_plan = create_default_local_load_plan(world3_state_dict, world4_metadata)
         self.assertEqual(2, len(load_plan.items))
-        # this is [30, 60] to load [40, 60] 
+        # this is [30, 60] to load [40, 60]
         low_ri = next(ri for ri in load_plan.items if ri.dest_offsets == torch.Size([0]))
-        # this is [60, 90] to load [60, 80] 
+        # this is [60, 90] to load [60, 80]
         high_ri = next(ri for ri in load_plan.items if ri.dest_offsets == torch.Size([20]))
 
         self.assertEqual(low_ri.storage_index, MetadataIndex("st", [30]))
