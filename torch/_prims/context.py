@@ -1,4 +1,5 @@
 import functools
+from contextlib import nullcontext
 from typing import Any, Callable, Dict, Sequence
 
 import torch
@@ -111,9 +112,15 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False, should_fallback_fn=lambda *_: False):
+    def __init__(
+        self,
+        strict=False,
+        should_fallback_fn=lambda *_: False,
+        prims_mode_cls=nullcontext,
+    ):
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
+        self.prims_mode_cls = prims_mode_cls
 
     def __torch_function__(
         self,
@@ -125,8 +132,10 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         # For primitive operations, run them as is without interception
+        # Unless we are in prims_mode, in which case we want to use nvprims
         if orig_func in torch_function_passthrough or orig_func in all_prims():
-            return orig_func(*args, **kwargs)
+            with self.prims_mode_cls():
+                return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
@@ -164,5 +173,7 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 TorchRefsNvfuserCapabilityMode = functools.partial(
-    TorchRefsMode, should_fallback_fn=_is_func_unsupported_nvfuser
+    TorchRefsMode,
+    should_fallback_fn=_is_func_unsupported_nvfuser,
+    prims_mode_cls=NvfuserPrimsMode,
 )

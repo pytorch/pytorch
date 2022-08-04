@@ -189,7 +189,7 @@ class TestPrims(TestCase):
 
         # It's assumed that digamma is not supported by nvfuser
         # If it's ever supported, this test will need to be updated
-        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         a = torch.randn(3, 3, device=device)
 
@@ -200,7 +200,7 @@ class TestPrims(TestCase):
             gm = make_fx(func)(a)
 
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
-        call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_digamma = any(
             torch.ops.aten.digamma.default == node.target
             for node in call_function_nodes
@@ -219,7 +219,7 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
-        call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_sigmoid = any(
             torch.ops.aten.sigmoid.default == node.target
             for node in call_function_nodes
@@ -228,8 +228,13 @@ class TestPrims(TestCase):
             torch.ops.prims.digamma.default == node.target
             for node in call_function_nodes
         )
+        includes_nvprims_exp = any(
+            torch.ops.nvprims.exp.default == node.target
+            for node in call_function_nodes
+        )
         self.assertFalse(includes_aten_sigmoid)
         self.assertFalse(includes_prims_digamma)
+        self.assertTrue(includes_nvprims_exp)
 
     @onlyCUDA
     @skipCUDAIfRocm
