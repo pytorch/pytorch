@@ -37,6 +37,8 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       tags_.emplace_back(Tag::Scalar);
       // Scalars are small enough that they are stored in ivalues without an
       // extra memory alloc
+      // TODO: further optimize this by maybe giving Profiler access to the
+      // guts of IValue.
       ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
