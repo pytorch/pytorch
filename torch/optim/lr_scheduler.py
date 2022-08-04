@@ -11,7 +11,7 @@ from .optimizer import Optimizer
 
 __all__ = ['LambdaLR', 'MultiplicativeLR', 'StepLR', 'MultiStepLR', 'ConstantLR', 'LinearLR',
            'ExponentialLR', 'SequentialLR', 'CosineAnnealingLR', 'ChainedScheduler', 'ReduceLROnPlateau',
-           'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR']
+           'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR', 'PolynomialLR']
 
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
@@ -707,20 +707,20 @@ class PolynomialLR(_LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        total_iters (int): After this step, learning rate stops decreasing.
+        total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
         min_lr (float or list): A scalar or a list of scalars. A
             lower bound on the learning rate of all param groups
             or each group respectively. Default: 0.
-        power (int): The power of the polynomial. Defaults to linear, 1.0.
+        power (int): The power of the polynomial. Default: ``1.0``.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
     Example:
         >>> # Assuming optimizer uses lr = 0.001 for all groups
-        >>> # lr = 0.0010   if epoch == 0
-        >>> # lr = 0.0008   if epoch == 1
-        >>> # lr = 0.0006   if epoch == 2
-        >>> # lr = 0.0004   if epoch == 3
+        >>> # lr = 0.00010   if epoch == 0
+        >>> # lr = 0.00075   if epoch == 1
+        >>> # lr = 0.00050   if epoch == 2
+        >>> # lr = 0.00025   if epoch == 3
         >>> # lr = 0.0      if epoch >= 4
         >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
         >>> for epoch in range(100):
