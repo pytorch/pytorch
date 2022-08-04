@@ -1,4 +1,3 @@
-
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
@@ -6,34 +5,35 @@
 namespace c10 {
 
 std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
-  SymIntNode a = a_.is_symbolic() ? a_.toSymIntNodeImpl() : nullptr;
-  SymIntNode b = b_.is_symbolic() ? b_.toSymIntNodeImpl() : nullptr;
+  SymIntNode a, b;
+  if (a_.is_symbolic())
+    a = a_.toSymIntNodeImpl();
+  if (b_.is_symbolic())
+    b = b_.toSymIntNodeImpl();
 
   SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
-    a = common->wrap(a_.data());
+    a = common->wrap(a_.as_int_unchecked());
     a_.toSymInt(a); //
   }
   if (!b) {
-    b = common->wrap(b_.data());
+    b = common->wrap(b_.as_int_unchecked());
     b_.toSymInt(b);
   }
   return {a, b};
 }
 
 SymIntNode SymInt::toSymIntNodeImpl() const {
-  auto& st = getSymIntTable();
   TORCH_CHECK(is_symbolic());
-  return st.getNode(static_cast<uint64_t>(data_) & ~MASK);
+  return SymIntNode::reclaim_copy(toSymIntNodeImplUnowned());
 }
 
 c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
-  auto& sit = getSymIntTable();
-  uint64_t idx = sit.addNode(sin_sp);
-  TORCH_CHECK(idx < MAX_SYM_IDX, "SymIntNodeImpl index overflow: ", idx);
-  uint64_t data = idx | IS_SYM;
-  return c10::SymInt(static_cast<int64_t>(data));
+  auto ptr = static_cast<uint64_t>(
+      reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
+  auto rep = (ptr & ~MASK) | IS_SYM;
+  return c10::SymInt(static_cast<int64_t>(rep));
 }
 
 SymInt SymInt::operator+(SymInt sci) const {

@@ -1543,6 +1543,24 @@ class TestMPS(TestCase):
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu())
 
+    # See https://github.com/pytorch/pytorch/issues/82427
+    # Test should not crash
+    def test_bool_full(self):
+        x = torch.full((3, 3), True, device='mps')
+
+    # See https://github.com/pytorch/pytorch/issues/82663
+    def test_bool_expand(self):
+        x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
+        y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
+        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
+
+    # Empty unary op should return tensor of the same size
+    def test_empty_neg(self):
+        x = torch.tensor([[]], device='mps')
+        y = -x
+        self.assertEqual(x, y)
+
+
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6307,6 +6325,7 @@ class TestConsistency(TestCase):
                                 'torch.int32',
                                 'torch.int64',
                                 'torch.uint8'],
+        'nn.functional.prelu': ['torch.float32'],
         'nn.functional.selu': ['torch.float32'],
         'nn.functional.silu': ['torch.float32'],
         'nn.functional.smooth_l1_loss': ['torch.float32',
