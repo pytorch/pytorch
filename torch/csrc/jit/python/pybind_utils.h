@@ -731,6 +731,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
+  } else if (ivalue.isGenerator()) {
+    return py::cast(ivalue.toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -850,7 +852,7 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl())
                             : py::cast(si.expect_int());
   } else {
     AT_ERROR(

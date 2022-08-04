@@ -639,7 +639,7 @@ void ReplaceWithMaybeCopy(
     static const auto select_tensor_symbol =
         fromQualString("static_runtime::select_tensor");
     auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
-    DCHECK_EQ(new_node->outputs().size(), 2);
+    TORCH_DCHECK_EQ(new_node->outputs().size(), 2);
     select_tensor_node->addInput(n->input(0));
     for (auto* output : new_node->outputs()) {
       select_tensor_node->addInput(output);

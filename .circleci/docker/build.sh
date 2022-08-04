@@ -141,7 +141,7 @@ case "$image" in
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -151,7 +151,7 @@ case "$image" in
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -244,14 +244,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-focal-rocm5.0-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=5.0
-    ;;
   pytorch-linux-focal-rocm5.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
@@ -259,6 +251,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=5.1.1
+    ;;
+  pytorch-linux-focal-rocm5.2-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.2
     ;;
   pytorch-linux-focal-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7

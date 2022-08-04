@@ -36,12 +36,6 @@ void pack_buffer_to_vtensor(
                                           : VK_KERNEL(nchw_to_image);
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       kernel,
       // pipeline barrier
@@ -104,12 +98,6 @@ void pack_vtensor_to_staging(
   api::utils::uvec3 extents_to_use = is_quantized ? copy_extents : extents;
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       kernel,
       // pipeline barrier
