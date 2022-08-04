@@ -19,6 +19,7 @@ import zipfile
 from typing import (
     Any,
     Callable,
+    cast,
     Collection,
     Dict,
     List,
@@ -28,7 +29,6 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 import torch
@@ -547,6 +547,7 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
+    _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros

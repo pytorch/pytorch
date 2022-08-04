@@ -172,7 +172,7 @@ class CuDNNWrapper {
     if (!sync_state.state.get()) {
       sync_state.state.reset(new CuDNNState(context_->device_id()));
     }
-    CHECK_NOTNULL(sync_state.state.get())->execute(context_->cuda_stream(), f);
+    TORCH_CHECK_NOTNULL(sync_state.state.get())->execute(context_->cuda_stream(), f);
   }
 
  protected:

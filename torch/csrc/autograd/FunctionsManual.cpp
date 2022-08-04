@@ -595,6 +595,21 @@ Tensor sum_backward(
   return grad.expand(sizes);
 }
 
+Tensor sum_backward(
+    const Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_symint(sizes);
+  }
+}
+
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -607,11 +622,12 @@ Tensor nansum_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim) {
-  auto n = dim.size() == 0 ? numel : _safe_size(shape, dim);
-  return sum_backward(grad, shape, dim, keepdim) / n;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
+  return sum_backward(grad, shape, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -1295,25 +1311,19 @@ Tensor sparse_sparse_matmul_backward(
 Tensor renorm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Scalar& p_s,
+    const Scalar& p,
     int64_t dim,
     const Scalar& maxnorm) {
-  auto self_sizes = self.sizes();
-  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
-  at::DimVector reduce_dims(self_sizes.size());
+  auto n = self.dim();
+  dim = c10::maybe_wrap_dim(dim, n);
+  auto reduce_dims = at::DimVector(n);
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-  auto dtype = self.scalar_type();
-  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
-  const auto p = p_s.toDouble();
 
-  Tensor norm;
-  if (acc_type != dtype) {
-    norm = at::linalg_vector_norm(
-        self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
-  } else {
-    norm = at::linalg_vector_norm(self, p, reduce_dims, /*keepdim=*/true);
-  }
+  auto acc_type =
+      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto norm = at::linalg_vector_norm(
+      self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
   const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
@@ -3979,10 +3989,22 @@ Tensor differential_analytic_matrix_function(
   meta_grad_sizes[A.dim() - 1] *= 2;
 
   auto n = A.size(-1);
-  auto meta_grad = at::zeros(meta_grad_sizes, grad.options());
-  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  Tensor meta_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as both `A` and `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({A, grad})) {
+    meta_grad = at::cat(
+        {at::cat({A, grad}, -1), at::cat({at::zeros_like(A), A}, -1)}, -2);
+  } else {
+    meta_grad = at::zeros(meta_grad_sizes, grad.options());
+    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
+    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
+    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  }
 
   return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
 }
@@ -6547,6 +6569,21 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   }
 
   return std::make_tuple(grad_self, grad_src);
+}
+
+Tensor take_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& indices) {
+  Tensor grad_self = at::zeros_like(self);
+  // For Composite Compliance,
+  // if `grad` and `indices` are CCT but `self` is not
+  // then we use the out-of-place variant of `put`.
+  if (!isTensorSubclassLike(self) &&
+      areAnyTensorSubclassLike({grad, indices})) {
+    return grad_self.put(indices, grad, true);
+  }
+  return grad_self.put_(indices, grad, true);
 }
 
 } // namespace details

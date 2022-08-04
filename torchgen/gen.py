@@ -38,6 +38,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_view_inverse_declaration,
     gen_symint_view_copy_kernel,
 )
+from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
 from torchgen.model import (
     Argument,
@@ -243,7 +244,12 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
                 f"Consider adding 'structured=True' to the delegated operator"
             )
-        if "inplace_view" in f.tags:
+        # See Note [resize_ in Functionalization]
+        # resize_() is technically an inplace view op (and therefore needs the tag),
+        # but it would be overkill to add a true "view" variant of resize.
+        # Instead, resize_() gets special treatment in functionalization,
+        # and we have a resize() op that is non-aliasing + functional.
+        if "inplace_view" in f.tags and str(f.func.name) != "resize_":
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
@@ -903,12 +909,14 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
+                assert f.func.arguments.has_tensor_arg()
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
+                assert not f.func.arguments.has_tensor_arg()
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
@@ -1363,17 +1371,18 @@ def get_native_function_declarations(
     newline = "\n"
     for f in grouped_native_functions:
         native_function_namespaces = set()
-        for backend_idx in backend_indices.values():
+        dispatch_keys = set()
+        for dispatch_key, backend_idx in backend_indices.items():
             backend_metadata = backend_idx.get_kernel(f)
-            namespace = (
-                backend_metadata.cpp_namespace
-                if backend_metadata
-                else DEFAULT_KERNEL_NAMESPACE
-            )
-            native_function_namespaces.add(namespace)
+            if backend_metadata:
+                namespace = backend_metadata.cpp_namespace
+                dispatch_keys.add(dispatch_key)
+                native_function_namespaces.add(namespace)
+            else:
+                namespace = DEFAULT_KERNEL_NAMESPACE
             assert (
-                len(native_function_namespaces) == 1
-            ), "Codegen only supports one namespace per operator."
+                len(native_function_namespaces) <= 1
+            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
                 dest.compute_native_function_declaration(f, backend_idx)
             )
@@ -1841,6 +1850,10 @@ def gen_headers(
         },
     )
 
+    cpu_fm.write(
+        "VmapGeneratedPlumbing.h", lambda: gen_all_vmap_plumbing(native_functions)
+    )
+
     def gen_aten_interned_strings() -> Dict[str, str]:
         attrs = set()  # All function argument names
         names = set()  # All ATen function names
@@ -1883,7 +1896,7 @@ def gen_headers(
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
     def gen_tags_enum() -> Dict[str, str]:
-        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
     core_fm.write("enum_tag.h", gen_tags_enum)
 
@@ -2302,8 +2315,13 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
             if g1.view_copy is None or g2.view_copy is None:
                 continue
             # TODO: make this more first class in the data model
-            same_base_op = str(g1.view_copy.func.name.name) == str(
-                g2.view_copy.func.name.name
+            g1_base_name = str(g1.view_copy.func.name.name)
+            g2_base_name = str(g2.view_copy.func.name.name)
+
+            same_base_op = (
+                g1_base_name == g2_base_name
+                and g1.view_copy.func.arguments.symints_to_ints()
+                == g2.view_copy.func.arguments.symints_to_ints()
             )
             op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
             op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
