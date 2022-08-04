@@ -232,15 +232,21 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
+  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+      const Tensor& first, optional<int64_t> first_bdim,
+      const Tensor& second, optional<int64_t> second_bdim) {
+    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
+                op_name, ": The input tensor A must have at least 2 dimensions.");
+    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
+                op_name, ": The input tensor B must have at least 2 dimensions.");
+    return _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+  }
+
   static oneOutput apply_one(
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(!first_bdim.has_value() || first.dim() > 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(!second_bdim.has_value() || second.dim() > 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
@@ -250,11 +256,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
-              op_name, ": The input tensor B must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, /*do_type_promotion=*/false);
+    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
