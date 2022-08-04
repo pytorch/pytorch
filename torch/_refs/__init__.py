@@ -2183,10 +2183,11 @@ def constant_pad_nd(
         memory_format=memory_format,
     )
 
-    if value == 0 and input.dtype == torch.bool:
-        value = False
+    from torch._prims_common import dtype_to_type
+
+    scalar_type = dtype_to_type(output.dtype)
     # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
+    output = torch.fill(output, scalar_type(value))  # type: ignore[arg-type]
 
     c_output = output
     for i in range(l_diff, l_inp):
