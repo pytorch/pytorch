@@ -4406,8 +4406,6 @@ class TestCudaComm(TestCase):
         torch.cuda.memory.enable_memory_history()
         x = torch.rand(311, 411).cuda()
         ss = torch.cuda.memory.snapshot()
-        import pickle
-        open('hi', 'wb').write(pickle.dumps(ss))
         found_it = False
         for seg in ss:
             for b in seg['blocks']:
