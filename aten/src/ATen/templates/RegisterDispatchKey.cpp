@@ -50,28 +50,5 @@ $external_backend_headers
 $dispatch_headers
 $ops_headers
 
-
-namespace at {
-
-// NB: TORCH_LIBRARY_IMPL must be in an anonymous namespace to avoid
-// ambiguity with conflicting identifiers that may have been defined in
-// at namespace already.
-namespace {
-
-${dispatch_helpers}
-
-${dispatch_anonymous_definitions}
-
-${static_init_dispatch_registrations}
-
-} // anonymous namespace
-
-${deferred_dispatch_registrations}
-
-namespace ${dispatch_namespace} {
-
-${dispatch_namespaced_definitions}
-
-} // namespace ${dispatch_namespace}
-
-} // namespace at
+// See template file RegisterDispatchDefinitions.ini
+$dispatch_definitions
