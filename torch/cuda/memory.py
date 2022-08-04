@@ -613,4 +613,4 @@ def save_memory_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
         snapshot = memory_snapshot()
     with open(filename, 'w') as f:
-        f.write(_segments(snapshot))
+        f.write(_memory(snapshot))

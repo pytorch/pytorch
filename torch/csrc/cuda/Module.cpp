@@ -527,18 +527,18 @@ struct Frame {
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
   ~StackContext() {
-    for(auto& f : frames) {
+    for (auto& f : frames) {
       Py_XDECREF((PyObject*)f.code);
     }
   }
   static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
     py::gil_scoped_acquire acquire;
     auto r = std::make_unique<StackContext>();
-    PyThreadState *tstate = PyThreadState_GET();
+    PyThreadState* tstate = PyThreadState_GET();
     PyFrameObject* f = tstate->frame;
     while (f) {
       Py_XINCREF((PyObject*)f->f_code);
-      r->frames.emplace_back(Frame {f->f_code, f->f_lasti});
+      r->frames.emplace_back(Frame{f->f_code, f->f_lasti});
       f = f->f_back;
     }
     return r;
@@ -549,9 +549,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
-  using c10::cuda::CUDACachingAllocator::SegmentInfo;
   using c10::cuda::CUDACachingAllocator::History;
-
+  using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
   py::str device_s = "device";
   py::str address_s = "address";
@@ -596,18 +595,20 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
                : (blockInfo.active ? active_pending_free_s : inactive_s));
       if (blockInfo.history) {
         py::list history;
-        History * h = blockInfo.history;
+        History* h = blockInfo.history;
         while (h) {
           py::dict history_entry;
-          history_entry[addr_s] = (int64_t) h->addr;
+          history_entry[addr_s] = (int64_t)h->addr;
           history_entry[real_size_s] = h->real_size;
           if (h->context) {
             py::list frames;
-            auto sc = (StackContext*) h->context.get();
+            auto sc = (StackContext*)h->context.get();
             for (auto& f : sc->frames) {
               py::dict frame;
-              frame[filename_s] = py::reinterpret_borrow<py::object>(f.code->co_filename);
-              frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
+              frame[filename_s] =
+                  py::reinterpret_borrow<py::object>(f.code->co_filename);
+              frame[name_s] =
+                  py::reinterpret_borrow<py::object>(f.code->co_name);
               frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
               frames.append(std::move(frame));
             }
@@ -643,7 +644,6 @@ PyObject* THCPModule_enableMemoryHistory(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
 
 PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -901,7 +901,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
-    {"_cuda_enableMemoryHistory", THCPModule_enableMemoryHistory, METH_NOARGS, nullptr},
+    {"_cuda_enableMemoryHistory",
+     THCPModule_enableMemoryHistory,
+     METH_NOARGS,
+     nullptr},
 
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,

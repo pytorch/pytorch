@@ -98,7 +98,6 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-
 struct Context {
   virtual ~Context() {}
 };
@@ -109,7 +108,8 @@ struct History {
   void* addr;
   size_t real_size; // unrounded, actually requested size
   std::unique_ptr<Context> context; // per-watcher context
-  std::unique_ptr<History> next; // when blocks are merged we keep records of what used to be in the block
+  std::unique_ptr<History> next; // when blocks are merged we keep records of
+                                 // what used to be in the block
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
@@ -119,7 +119,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  History* history = nullptr; //borrowed reference because it is owned by the allocator
+  History* history =
+      nullptr; // borrowed reference because it is owned by the allocator
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -133,8 +134,6 @@ struct SegmentInfo {
   bool is_large = false;
   std::vector<BlockInfo> blocks;
 };
-
-
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
@@ -166,7 +165,6 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
-
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 } // namespace CUDACachingAllocator

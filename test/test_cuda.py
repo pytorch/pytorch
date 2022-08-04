@@ -4411,7 +4411,7 @@ class TestCudaComm(TestCase):
             for b in seg['blocks']:
                 if 'history' in b:
                     for h in b['history']:
-                        if h['real_size'] == 311*411*4:
+                        if h['real_size'] == 311 * 411 * 4:
                             found_it = True
         self.assertTrue(found_it)
         if not IS_WINDOWS:

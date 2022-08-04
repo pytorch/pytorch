@@ -283,7 +283,7 @@ struct AllocParams {
 
 int trimHistoryBefore(Block* block, void* point) {
   int n = 0;
-  while (block->history &&  block->history->addr < point) {
+  while (block->history && block->history->addr < point) {
     block->history = std::move(block->history->next);
     ++n;
   }
@@ -549,6 +549,7 @@ class DeviceCachingAllocator {
   // in case we want multiple captures to share the same pool
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
   CreateContextFn context_recorder_;
+
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
@@ -564,8 +565,10 @@ class DeviceCachingAllocator {
   // Thus, do not call a public method from another public method.
 
   Block* malloc(int device, size_t orig_size, cudaStream_t stream) {
-    // done outside the lock because we don't know what locks the recorder needs to have...
-    std::unique_ptr<Context> context = context_recorder_ ? context_recorder_() : nullptr;
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have...
+    std::unique_ptr<Context> context =
+        context_recorder_ ? context_recorder_() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -734,7 +737,11 @@ class DeviceCachingAllocator {
     block->allocated = true;
     if (context) {
       trimHistoryBefore(block, (char*)block->ptr + size);
-      block->history = std::unique_ptr<History>(new History {block->ptr, orig_size, std::move(context), std::move(block->history)});
+      block->history = std::unique_ptr<History>(new History{
+          block->ptr,
+          orig_size,
+          std::move(context),
+          std::move(block->history)});
       if (!block->history_last) {
         block->history_last = block->history.get();
       }
@@ -927,7 +934,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<int64_t>(head_block->ptr);
-      segment_info.stream = (int64_t) head_block->stream;
+      segment_info.stream = (int64_t)head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
 
       const Block* block = head_block;

@@ -3,6 +3,7 @@ import sys
 import os
 import io
 import subprocess
+from typing import Dict, Any
 
 def _frame_fmt(f):
     i = f['line']
@@ -16,10 +17,13 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if not os.path.exists(flamegraph_script):
         import urllib.request
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
-        urllib.request.urlretrieve('https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl', flamegraph_script)
+        urllib.request.urlretrieve(
+            'https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl', flamegraph_script)
         subprocess.run(['chmod', '+x', flamegraph_script])
     args = [flamegraph_script, '--countname', 'bytes']
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding='utf-8')
+    assert p.stdin is not None
+    assert p.stdout is not None
     p.stdin.write(flamegraph_lines)
     p.stdin.close()
     result = p.stdout.read()
@@ -39,7 +43,7 @@ def _write_blocks(f, prefix, blocks):
             accounted_for_size += sz
             frames = h['frames']
             if frames:
-                frame_s = ';'.join([ _frame_fmt(f) for f  in reversed(frames) ])
+                frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
             else:
                 frame_s = "<non-python>"
             f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
@@ -89,8 +93,10 @@ def compare(before, after, format_flamegraph=format_flamegraph):
 class Bytes:
     def __init__(self, value):
         self.value = value
+
     def __add__(self, rhs):
         return Bytes(self.value + rhs)
+
     def __repr__(self):
         num = self.value
         # https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
@@ -101,7 +107,7 @@ class Bytes:
         return f"{num:.1f}YiB"
 
 def stats(snapshot):
-    result = {}
+    result : Dict[str, Any] = {}
     result['segments'] = len(snapshot)
     result['total_size'] = Bytes(0)
     for seg in snapshot:
@@ -109,7 +115,7 @@ def stats(snapshot):
         for b in seg['blocks']:
             if b['state'] not in result:
                 result[b['state']] = Bytes(0)
-            total_size  += b['size']
+            total_size += b['size']
             result[b['state']] += b['size']
         assert seg['total_size'] == total_size
         result['total_size'] += total_size
@@ -136,15 +142,19 @@ if __name__ == "__main__":
     stats_a = subparsers.add_parser('stats', description='Prints overall allocation statistics')
     stats_a.add_argument('input', help=pickled)
 
-    segments_a = subparsers.add_parser('segments', description='Generate a flamegraph that visualizes what memory is stored in each allocator segment (aka block)')
+    description = 'Generate a flamegraph that visualizes what memory is stored in each allocator segment (aka block)'
+    segments_a = subparsers.add_parser('segments', description=description)
     segments_a.add_argument('input', help=pickled)
     _output(segments_a)
 
-    memory_a = subparsers.add_parser('memory', description="Generate a flamegraph the program locations contributing to CUDA memory usage.")
+    description = "Generate a flamegraph the program locations contributing to CUDA memory usage."
+    memory_a = subparsers.add_parser('memory', description=description)
     memory_a.add_argument('input', help=pickled)
     _output(memory_a)
 
-    compare_a = subparsers.add_parser('compare', description='Generate a flamegraph that shows segments (aka blocks) that have been added or removed between two different memorys snapshots.')
+    description = 'Generate a flamegraph that shows segments (aka blocks) that have been added ' \
+        'or removed between two different memorys snapshots.'
+    compare_a = subparsers.add_parser('compare', description=description)
     compare_a.add_argument('before', help=pickled)
     compare_a.add_argument('after', help=pickled)
     _output(compare_a)
