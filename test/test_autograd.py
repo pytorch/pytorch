@@ -6240,8 +6240,8 @@ for shape in [(1,), ()]:
 
             return ref
 
-        for nb_hooks in (3,):
-            for input_requires_grad in (True,):
+        for nb_hooks in (1, 2, 3):
+            for input_requires_grad in (True, False):
                 ref_ = get_ref(
                     input_requires_grad=input_requires_grad,
                     nb_hooks=nb_hooks,
