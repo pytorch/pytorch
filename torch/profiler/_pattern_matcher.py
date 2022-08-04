@@ -192,7 +192,7 @@ class ExtraCUDACopyPattern(Pattern):
         if not event.children:
             return False
         event = event.children[0]
-        if event.name() != "cudaMemcpyAsync":
+        if not event.name().endswith("MemcpyAsync"):
             return False
         # Up one level
         event = to_event
