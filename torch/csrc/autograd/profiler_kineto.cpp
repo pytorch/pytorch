@@ -697,7 +697,7 @@ int64_t KinetoEvent::debugHandle() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::TorchOp>& i) { return i.debug_handle_; },
       [](const ExtraFields<EventType::Backend>& i) { return i.debug_handle_; },
-      [](const auto&) ->int64_t { return -1; }));
+      [](const auto&) -> int64_t { return -1; }));
 }
 
 uint8_t KinetoEvent::deviceIndex() const {
