@@ -122,7 +122,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stop monitoring script
-        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
         shell: bash
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
