@@ -108,6 +108,7 @@ class BackwardHook(object):
 
             grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
             res = user_hook(self.module, grad_input, self.grad_outputs)
+            self.grad_outputs = None
             if res is None:
                 return res
 
@@ -176,7 +177,7 @@ class BackwardHook(object):
                         if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
-
+                    self.grad_outputs = None
             grad_fn.register_hook(hook)
 
         is_tuple = True
