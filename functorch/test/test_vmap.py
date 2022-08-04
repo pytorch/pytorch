@@ -3093,11 +3093,38 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 
 class TestVmapOperatorsOpInfo(TestCase):
+
+    def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule):
+        def test():
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            aliases = (op.op,) + op.aliases
+            for sample_input, func in itertools.product(sample_inputs_itr, aliases):
+                arg_values = (sample_input.input,) + sample_input.args
+                kwarg_values = sample_input.kwargs
+                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
+
+                generator = get_fallback_and_vmap_exhaustive(
+                    func, arg_values, kwarg_values,
+                    is_batch_norm_and_training=is_batch_norm_and_training)
+                for loop_out, batched_out in generator:
+                    # empty_like and new_empty produce garbage values so we just check the shapes.
+                    if op.name == 'empty_like' or op.name == 'new_empty':
+                        self.assertEqual(loop_out.shape, batched_out.shape)
+                        continue
+                    self.assertEqual(loop_out, batched_out)
+
+        if check_has_batch_rule:
+            check_vmap_fallback(self, test, op)
+        else:
+            test()
+
     vmap_fail = {
         # These are things that we either cannot fix or are not actually problems
         xfail('resize_'),
         xfail('resize_as_'),
         xfail('to_sparse'),
+        xfail('__getitem__'),  # dynamic mask
+        xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
@@ -3123,7 +3150,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
-        xfail('matrix_exp'),
         xfail('histogramdd'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.embedding_bag'),
@@ -3158,31 +3184,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
-        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample_input in sample_inputs_itr:
-            arg_values = [sample_input.input] + list(sample_input.args)
-            kwarg_values = sample_input.kwargs
-            is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-            try:
-                generator = get_fallback_and_vmap_exhaustive(
-                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                for loop_out, batched_out in generator:
-                    # empty_like and new_empty produce garbage values so we just check the shapes.
-                    if op.name == 'empty_like' or op.name == 'new_empty':
-                        self.assertEqual(loop_out.shape, batched_out.shape)
-                        continue
-                    self.assertEqual(loop_out, batched_out)
-                for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(
-                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                    for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out)
-            # todo(chilli): Garbage hack I added to deal with indexing not working
-            except Exception as e:
-                # Checking if we're throwing an error because of dynamic shapes.
-                if "dynamic" in e.args[0]:
-                    continue
-                raise e
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
@@ -3205,7 +3207,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.cholesky'),
         xfail('linalg.eigvals'),
         xfail('linalg.eigvalsh'),
-        xfail('linalg.inv'),
         xfail('linalg.lstsq'),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_norm'),
@@ -3279,7 +3280,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout2d', ''),
         xfail('normal', 'number_mean'),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
         xfail('nn.functional.triplet_margin_loss', ''),
@@ -3303,26 +3303,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.max_unpool3d', ''),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
-        def test():
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-            for sample_input in sample_inputs_itr:
-                arg_values = [sample_input.input] + list(sample_input.args)
-                kwarg_values = sample_input.kwargs
-                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-                generator = get_fallback_and_vmap_exhaustive(
-                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                for loop_out, batched_out in generator:
-                    # empty_like and new_empty produce garbage values so we just check the shapes.
-                    if op.name == 'empty_like' or op.name == 'new_empty':
-                        self.assertEqual(loop_out.shape, batched_out.shape)
-                        continue
-                    self.assertEqual(loop_out, batched_out)
-                for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(
-                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
-                    for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out)
-        check_vmap_fallback(self, test, op)
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -3584,6 +3565,38 @@ class TestVmapOperatorsOpInfo(TestCase):
         a = with_vmap(vmap)
         b = with_vmap(_fake_vmap)
         self.assertEqual(a, b)
+
+    @ops(filter(lambda op: "linalg" in op.name, functorch_lagging_op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
+        xfail('linalg.vector_norm'),  # can accept vector inputs
+        skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
+    })
+    def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            if sample.input.dim() != 2 or sample.input.shape[0] == 0:
+                continue
+            test_input = sample.input[0]  # using the sample input avoids numerical inconsistency issues
+            with self.assertRaisesRegex(RuntimeError, "dimension"):
+                op(test_input, *sample.args, **sample.kwargs)
+
+            def op_wrapper(inp):
+                return op(inp, *sample.args, **sample.kwargs)
+
+            # square inputs are more likely to pass linalg checks
+            test_input = test_input.expand(test_input.shape[0], test_input.shape[0])
+            with self.assertRaisesRegex(RuntimeError, "dimension"):
+                return vmap(op_wrapper)(test_input)
+
+    def test_vmap_multi_dot_failure_1D_input(self):
+        # special exception for first and last tensors so making giving 3 items avoids special cases
+        inputs = (torch.randn(3, 3), torch.randn(3), torch.randn(3, 3))
+        with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
+            torch.linalg.multi_dot(inputs)
+
+        # square inputs are more likely to pass linalg checks
+        inputs = tuple(i.expand(i.shape[0], i.shape[0]) for i in inputs)
+        with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
+            return vmap(torch.linalg.multi_dot)(inputs)
 
 
 class TestRandomness(TestCase):
