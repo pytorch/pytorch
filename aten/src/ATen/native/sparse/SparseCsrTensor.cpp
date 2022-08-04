@@ -165,15 +165,15 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   }
   const int nrows = size[batch_ndim] / blocksize[0];
   const int ncols = size[batch_ndim + 1] / blocksize[1];
-  int ncompressed_dims, nplain_dims;
-  std::tie(ncompressed_dims, nplain_dims) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
-                                                                                      [&] { return std::make_tuple(nrows, ncols); },
-                                                                                      [&] { return std::make_tuple(ncols, nrows); });
+  int compressed_dim_size, plain_dim_size;
+  std::tie(compressed_dim_size, plain_dim_size) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
+                                                                                            [&] { return std::make_tuple(nrows, ncols); },
+                                                                                            [&] { return std::make_tuple(ncols, nrows); });
   // 3.8
   TORCH_CHECK(
-              compressed_indices.size(-1) == ncompressed_dims + 1,
+              compressed_indices.size(-1) == compressed_dim_size + 1,
               compressed_indices_name, ".shape[-1] must be equal to the number of ",
-              compressed_dim_name, "s + 1 (=", ncompressed_dims + 1, "), but got ", compressed_indices.size(-1));
+              compressed_dim_name, "s + 1 (=", compressed_dim_size + 1, "), but got ", compressed_indices.size(-1));
   // 3.9, 3.10
   TORCH_CHECK(
               plain_indices.size(-1) == values_nnz,
@@ -198,8 +198,8 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
         /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
         compressed_indices,
         plain_indices,
-        ncompressed_dims,
-        nplain_dims,
+        compressed_dim_size,
+        plain_dim_size,
         values_nnz
     );
   }
@@ -357,23 +357,23 @@ DimVector _estimate_sparse_compressed_tensor_size(
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1)
   };
   DimVector size = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
-  int64_t ncompressed_dims = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
-  int64_t nplain_dims = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
-                                                   [&]() -> int64_t {
-                                                     if (plain_indices.numel() > 0) {
-                                                       return plain_indices.max().item<scalar_t>() + 1;
-                                                     } else {
-                                                       return 0;
-                                                     }
-                                                   });
+  int64_t compressed_dim_size = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
+  int64_t plain_dim_size = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
+                                                      [&]() -> int64_t {
+                                                        if (plain_indices.numel() > 0) {
+                                                          return plain_indices.max().item<scalar_t>() + 1;
+                                                        } else {
+                                                          return 0;
+                                                        }
+                                                      });
   AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
       [&]{
-        size.push_back(ncompressed_dims * blocksize[0]);
-        size.push_back(nplain_dims * blocksize[1]);
+        size.push_back(compressed_dim_size * blocksize[0]);
+        size.push_back(plain_dim_size * blocksize[1]);
       },
       [&]{
-        size.push_back(nplain_dims * blocksize[0]);
-        size.push_back(ncompressed_dims * blocksize[1]);
+        size.push_back(plain_dim_size * blocksize[0]);
+        size.push_back(compressed_dim_size * blocksize[1]);
       });
   for (int i=0; i<dense_ndim; i++) {
     int64_t j = batch_ndim + 1 + base_ndim + i;
@@ -705,10 +705,44 @@ Tensor empty_like_sparse_csr(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
+  TORCH_CHECK(options.layout() == self.layout(),
+    "empty_like with different sparse layout is not supported (self is ",
+    self.layout(), " but you requested ", options.layout(), ")");
   if (options.layout() == kSparseCsr) {
     auto result = at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().clone(),
         self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
+  } else if (options.layout() == kSparseCsc) {
+    auto result = at::native::_sparse_csc_tensor_unsafe(
+        self.ccol_indices().clone(),
+        self.row_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
+  } else if (options.layout() == kSparseBsr) {
+    auto result = at::native::_sparse_bsr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+
+    return result;
+  } else if (options.layout() == kSparseBsc) {
+    auto result = at::native::_sparse_bsc_tensor_unsafe(
+        self.ccol_indices().clone(),
+        self.row_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -780,7 +814,7 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         self.layout() == kSparseCsr || self.layout() == kSparseCsc,
         "select(): selecting non-batch dimensions is currently only supported for non-blocked sparse compressed layouts tensors.");
     TORCH_CHECK(
-        self.dim() == 2,
+        n_batch == 0,
         "select(): selecting rows or columns is not implemented for batched sparse compressed tensors.")
     // Converting to COO and calling select is slightly slower than operating
     // on the CSR indices directly for constructing a COO vector, however

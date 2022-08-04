@@ -207,11 +207,14 @@ class TestSparseCompressed(TestCase):
             # replaced with a N-list where N==len(densesize) and the
             # shape corresponds to densesize.
 
+            max_val = torch.iinfo(dtype).max if dtype in [torch.int16, torch.int8, torch.uint8] else None
+
             def list_add(lst, value):
                 # recursively add a value to lst items
                 if isinstance(lst, list):
                     return [list_add(item, value) for item in lst]
-                return lst + value
+                rc = lst + value
+                return rc if max_val is None else (rc % max_val)
 
             def stretch_values(value, bdim, values_item_shape):
                 # replace a value with a new value that extends the
@@ -604,6 +607,29 @@ class TestSparseCompressed(TestCase):
         if not count:
             raise ValueError("Expected at least one sample with keepdim and/or explicit mask for reductions.")
 
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @all_sparse_compressed_layouts('layout2')
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_empty_like(self, layout, layout2, device, dtype):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout):
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            if layout == layout2:
+                result = torch.empty_like(sparse, layout=layout2)
+                compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[result.layout]
+                torch._validate_sparse_compressed_tensor_args(compressed_indices_mth(result),
+                                                              plain_indices_mth(result),
+                                                              result.values(),
+                                                              result.shape,
+                                                              result.layout)
+                self.assertEqual(sparse.shape, result.shape)
+            else:
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "empty_like with different sparse layout is not supported",
+                    lambda: torch.empty_like(sparse, layout=layout2)
+                )
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -939,9 +965,10 @@ class TestSparseCSR(TestCase):
                                                        index_dtype=index_dtype,
                                                        blocksize=blocksize,
                                                        dense_dims=2)
-        sparse_hybrid_selected = sparse_hybrid.select(4, 1)
-        expected_sparse_hybrid_selected = sparse_hybrid.values().select(-2, 1)
-        self.assertEqual(expected_sparse_hybrid_selected, sparse_hybrid_selected)
+        sparse_hybrid_dense_selected = sparse_hybrid.select(4, 1)
+        expected_sparse_hybrid_dense_selected = sparse_hybrid.values().select(-2, 1)
+        self.assertEqual(expected_sparse_hybrid_dense_selected, sparse_hybrid_dense_selected)
+
 
 
         # selecting rows/col with batch dims not allowed
@@ -2498,12 +2525,12 @@ class TestSparseCSR(TestCase):
             else:
                 if layout_a is torch.sparse_bsc:
                     # workaround no dense<->bsc
-                    b_bsr = self._convert_to_layout(a.transpose(0, 1).contiguous(), torch.sparse_bsr)
+                    b_bsr = self._convert_to_layout(a.transpose(-2, -1).contiguous(), torch.sparse_bsr)
                     # bsr of the transpose is bsc of this
                     b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(),
                                                         b_bsr.col_indices(),
                                                         b_bsr.values().transpose(-2, -1).contiguous(),
-                                                        size=(b_bsr.shape[-1], b_bsr.shape[-2]))
+                                                        size=a.shape)
                     torch._validate_sparse_compressed_tensor_args(b.ccol_indices(), b.row_indices(), b.values(), b.shape, b.layout)
                 else:
                     b = self._convert_to_layout(a, layout_a)
