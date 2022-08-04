@@ -53,6 +53,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # It will be BC-breaking, but we should fix their schemas.
         # should be inplace?
         "record_stream",
+        # See Note [resize_ in Functionalization]
+        "resize_",
     ]
 )
 
@@ -246,6 +248,26 @@ def unwrap_tensor_args(
     return unwrap_tensor_args_str, context
 
 
+# converts  all tensor-like arguments to meta tensors, which are used to compute stride info. Returns:
+# (1) a string containing all of the logic that does the conversions.
+# (2) a context, to be used by translate(), with all of the relevant bindings.
+def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
+    context: List[Binding] = []
+    unwrapped_tensor_args: List[str] = []
+    for arg in sig.arguments():
+        if is_tensor_like(arg.argument):
+            # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
+            a_ = arg.name
+            unwrapped_name = f"{arg.name}_meta"
+            unwrapped_tensor_args.append(f"auto {unwrapped_name} = to_meta({a_});")
+            context.append(arg.with_name(unwrapped_name))
+        else:
+            # for non-tensor inputs, we want to pass them directly into the redispatch calls.
+            context.append(arg)
+    unwrap_tensor_args_str = "\n        ".join(unwrapped_tensor_args)
+    return unwrap_tensor_args_str, context
+
+
 # The functionalization codegen currently expects view op schemas to have this form:
 # foo(Tensor(a), ...) -> Tensor(a) (e.g. transpose)
 # foo(Tensor(a!), ...) -> Tensor(a!) (e.g. transpose_)
@@ -314,21 +336,21 @@ def emit_view_functionalization_body(
         reverse_lambda = FunctionalizationLambda.from_func(g, is_reverse=True)
 
         # The meta API call should use the same arguments, but convert all tensors to meta tensors first.
-        # meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+        meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
         meta_call_args = [
-            e.expr
-            for e in translate(
-                dispatcher_sig.arguments(), call_sig.arguments(), method=False
-            )
+            e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
+
+        has_dynamic_shape = [f'has_dynamic_shape({x.name})' for x in dispatcher_sig.arguments() if is_tensor_like(x.argument)]
+        any_has_dynamic_shape = ' || '.join(has_dynamic_shape)
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      {unwrap_tensor_args_str}
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
+        {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
@@ -346,16 +368,10 @@ def emit_view_functionalization_body(
         }}
       );
       {return_type} reference_tensor_output;
-      {{
+      if (!{any_has_dynamic_shape}) {{
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        // See Note [Using TLS for MetaBit in Functionalization]
-        auto inner_backend_key = c10::highestPriorityBackendTypeId(
-            ({' | '.join(['c10::DispatchKeySet()']
-            + [f'getKeySet({a.name})' for a in unwrapped_args_ctx if is_tensor_like(a.argument)])})
-        );
-        c10::impl::IncludeDispatchKeyGuard layout_include_guard(c10::toFunctionalityKey(inner_backend_key));
-        c10::impl::IncludeBackendComponentGuard meta_include_guard(c10::BackendComponent::MetaBit);
+        {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       // This function adds the above view meta to the current tensor and replays them off the base,
@@ -367,7 +383,9 @@ def emit_view_functionalization_body(
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      if (!{any_has_dynamic_shape}) {{
+        at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      }}
       return {view_tensor_name};
     }}
 """
@@ -383,27 +401,10 @@ def emit_view_functionalization_body(
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       {return_type} reference_tensor_output;
-      {{
+      if (!{any_has_dynamic_shape}) {{
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-
-        // Note [Using TLS for MetaBit in Functionalization]
-        // Using TLS to manually include the meta key, so to coerce the dispatcher into
-        // letting us re-use meta kernels.
-        // We also need to make sure to use SparseMeta/DenseMeta/NestedTensorMeta,
-        // depending on layout type of the inner tensor.
-        //
-        // It is much more convenient to do this than to try to construct a meta tensor
-        // directly from the current tensor's metadata, because of SymInt handling.
-        // Basically, if our meta kernels every try to use tensor properties like .numel(),
-        // we want to faithfully call the symbolic shape code to do this,
-        // which requires shunting the .numel() call to the inner tensor.
-        auto inner_backend_key = c10::highestPriorityBackendTypeId(
-            ({' | '.join(['c10::DispatchKeySet()']
-            + [f'getKeySet({a.name})' for a in unwrapped_args_ctx if is_tensor_like(a.argument)])})
-        );
-        c10::impl::IncludeDispatchKeyGuard layout_include_guard(c10::toFunctionalityKey(inner_backend_key));
-        c10::impl::IncludeBackendComponentGuard meta_include_guard(c10::BackendComponent::MetaBit);
+        {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       {return_type} tmp_output;
@@ -428,8 +429,10 @@ def emit_view_functionalization_body(
         }}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
-      // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      if (!{any_has_dynamic_shape}) {{
+        // See  Note [Propagating strides in the functionalization pass]
+        at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      }}
       return out;
     }}
 """
@@ -607,31 +610,24 @@ def emit_inplace_functionalization_body(
             ]
         )
 
-    meta_call_args = [
-        e.expr
-        for e in translate(
-            dispatcher_sig.arguments(), dispatcher_sig.arguments(), method=False
-        )
-    ]
+    meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+
+    has_dynamic_shape = [f'has_dynamic_shape({x.name})' for x in dispatcher_sig.arguments() if is_tensor_like(x.argument)]
+    any_has_dynamic_shape = ' || '.join(has_dynamic_shape)
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      {unwrap_tensor_args_str}
-      if ({str(f.func.kind() == SchemaKind.inplace).lower()}) {{
+      // For now, only run meta kernels (for error checking) when dynamic shapes aren't involved.
+      if ({str(f.func.kind() == SchemaKind.inplace).lower()} && !({any_has_dynamic_shape})) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        // See Note [Using TLS for MetaBit in Functionalization]
-        auto inner_backend_key = c10::highestPriorityBackendTypeId(
-            ({' | '.join(['c10::DispatchKeySet()']
-            + [f'getKeySet({a.name})' for a in unwrapped_args_ctx if is_tensor_like(a.argument)])})
-        );
-        c10::impl::IncludeDispatchKeyGuard layout_include_guard(c10::toFunctionalityKey(inner_backend_key));
-        c10::impl::IncludeBackendComponentGuard meta_include_guard(c10::BackendComponent::MetaBit);
-        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(meta_call_args)});
+        {meta_conversion_str}
+        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
+      {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
         if (({check_any_non_mutated_args_are_functional})) {{
          // case 1: trying to mutate a non functional tensor with a functional tensor is an error

@@ -80,6 +80,11 @@ class vTensorStorage final {
 
   // Validation
   void verify() const;
+
+ public:
+  inline VkFormat texture_format() {
+    return image_.format();
+  }
 };
 
 class vTensor final {
@@ -139,6 +144,13 @@ class vTensor final {
     return view_->extents_;
   }
 
+  /*
+   * Get a c10::ScalarType that corresponds to the image format of the texture
+   */
+  inline c10::ScalarType texture_dtype() const {
+    return api::c10_scalartype(view_->texture_format());
+  }
+
   inline const TensorOptions& options() const {
     return view_->options_;
   }
@@ -168,10 +180,20 @@ class vTensor final {
         c10::multiply_integers(sizes());
   }
 
-  inline VkDeviceSize buffer_bytes() {
-    return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
-        view_->extents_.data[0u] * view_->extents_.data[1u] *
+  /*
+   * Number of "cells" in the image texture. 4 cells make up a texel.
+   */
+  inline VkDeviceSize numcells() {
+    return view_->extents_.data[0u] * view_->extents_.data[1u] *
         (4u * view_->extents_.data[2u]);
+  }
+
+  /*
+   * Number of bytes needed for a buffer to receive all data in the texture
+   */
+  inline VkDeviceSize buffer_bytes() {
+    return c10::elementSize(this->texture_dtype()) * view_->extents_.data[0u] *
+        view_->extents_.data[1u] * (4u * view_->extents_.data[2u]);
   }
 };
 
