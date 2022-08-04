@@ -150,6 +150,17 @@ class TestPySymInt(TestCase):
 
 
     @skipIfNoSympy
+    def test_reverse_arith_ops(self):
+        shape_env = ShapeEnv()
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 // a == 5 // 2)
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 * a == 5 * 2)
+
+
+    @skipIfNoSympy
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)

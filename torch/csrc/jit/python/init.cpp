@@ -1236,7 +1236,7 @@ void initJITBindings(PyObject* module) {
           "__rtruediv__",
           [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
             auto snb = toSymIntNode(a, b);
-            return a->truediv(snb);
+            return snb->truediv(a);
           })
       .def(
           "__floordiv__",
@@ -1248,7 +1248,7 @@ void initJITBindings(PyObject* module) {
           "__rfloordiv__",
           [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
             auto snb = toSymIntNode(a, b);
-            return a->floordiv(snb);
+            return snb->floordiv(a);
           })
       .def(
           "__mod__",
