@@ -224,6 +224,7 @@ __all__ = [
     "vsplit",
     "vstack",
     "unflatten",
+    "unbind",
     #
     # Tensor Creation
     #
@@ -2723,6 +2724,18 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
         )
     out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
     return torch.reshape(a, out_shape)
+
+
+def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
+    dim = utils.canonicalize_dim(t.ndim, dim)
+    check(
+        len(t.shape) > 0,
+        lambda: "dimension specified as 0 but tensor has no dimensions",
+        IndexError,
+    )
+    return tuple(
+        torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
+    )
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
