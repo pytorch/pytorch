@@ -33,7 +33,9 @@ class Linear(torch.nn.Module):
 
         qweight = torch._empty_affine_quantized([out_features, in_features],
                                                 scale=1, zero_point=0, dtype=torch.qint8)
-        self._packed_params = linear.LinearPackedParams(dtype)
+        self._packed_params = linear.LinearPackedParams(row_block_size=row_block_size,
+                                                        col_block_size=col_block_size,
+                                                        dtype=dtype)
         self._packed_params.set_weight_bias(qweight, bias, row_block_size, col_block_size)
 
     def _get_name(self):
@@ -87,6 +89,8 @@ class Linear(torch.nn.Module):
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor],
                         row_block_size: Optional[int], col_block_size: Optional[int]) -> None:
         assert row_block_size is not None and col_block_size is not None
+        self.out_features = w.shape[0]
+        self.in_features = w.shape[1]
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod

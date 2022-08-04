@@ -89,9 +89,10 @@ properly in order to ensure that the new :class:`Function` works properly with
 the autograd engine.
 
 - :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` must be
-  used when saving input or output tensors of the forward to be used later in the backward.
-  Anything else, i.e., non-tensors and tensors that are neither input nor output
-  should be stored directly on `ctx`.
+  used to save any tensors to be used in the backward pass. Non-tensors should
+  be stored directly on `ctx`. If tensors that are neither input nor output
+  are saved for backward your :class:`~Function` may not support double backward
+  (see step 3).
 - :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
   mark any input that is modified inplace by the forward function.
 - :meth:`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must

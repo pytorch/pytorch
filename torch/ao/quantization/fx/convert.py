@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
+from torch.ao.quantization.quant_type import QuantType
 import torch
 import copy
 import warnings
@@ -44,6 +45,7 @@ from .graph_module import (
     is_observed_standalone_module,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
+from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
     get_custom_module_class_keys,
     get_quantize_node_info,
@@ -318,7 +320,7 @@ def convert_standalone_module(
     """
     # TODO: remove is_reference flag
     if is_reference:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference
+        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference_fx
     else:
         convert_fn = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
@@ -460,8 +462,10 @@ def convert_weighted_module(
     # root_module_to_quantized_reference_module: module mapping from root (floating point) module class
     # to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
-    ref_qmodule_cls = root_module_to_quantized_reference_module.get(type(float_module), None)
-    assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type(float_module)}"
+    ref_qmodule_cls = root_module_to_quantized_reference_module.get(type_before_parametrizations(float_module), None)
+    assert (
+        ref_qmodule_cls is not None
+    ), f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
         fused_module[0] = ref_qmodule  # type: ignore[operator]
@@ -473,7 +477,7 @@ def convert_custom_module(
         node: Node,
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
-        custom_module_class_mapping: Dict[Callable, Callable],
+        custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
         statically_quantized_custom_module_nodes: Set[Node]):
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
@@ -579,14 +583,6 @@ def convert(
 
     node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-
-    # TODO this should be removed now that gpu support for quantization is being supported.
-    # however in practice, as of 7/22/2021, certain functions that get called by convert expect
-    # only cpu arguments.
-    # As an example, in TestQuantizeFxModels.test_qat_functional_linear when device='cuda',
-    # fold_weight will call quantized::linear_prepack which doesn't support QuantizedCuda backend.
-    if not is_reference:
-        model.cpu()
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -764,16 +760,18 @@ def convert(
             elif is_observed_standalone_module(modules[node.target]):
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config_dict)
-            elif type(modules[node.target]) in set(
+            # below this point `type_before_parametrizations` is used
+            # instead of `type` to handle situations with fx quant + sparsity
+            elif type_before_parametrizations(modules[node.target]) in set(
                     root_module_classes).union(qat_module_classes).union(fused_module_classes):
                 # extra check for fused module classes to make sure they are fused module classes
                 # of target modules
-                if type(modules[node.target]) in fused_module_classes and \
-                   type(modules[node.target][0]) not in root_module_classes:
+                if type_before_parametrizations(modules[node.target]) in fused_module_classes and \
+                   type_before_parametrizations(modules[node.target][0]) not in root_module_classes:
                     continue
                 convert_weighted_module(
                     node, modules, observed_node_names, qconfig_map, backend_config_dict)
-            elif type(modules[node.target]) in custom_module_classes:
+            elif type_before_parametrizations(modules[node.target]) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,
                     statically_quantized_custom_module_nodes)

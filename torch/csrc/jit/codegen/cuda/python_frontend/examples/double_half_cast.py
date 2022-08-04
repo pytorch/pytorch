@@ -9,13 +9,10 @@ with FusionDefinition(fusion) as fd :
     t0 = fd.define_tensor(2, DataType.Double)
     t1 = fd.define_tensor(2, DataType.Double)
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t0h = fd.Ops.cast(DataType.Half, t0)
-    t1h = fd.Ops.cast(DataType.Half, t1)
-    t2 = fd.Ops.add(t0h, t1h)
-    t3 = fd.Ops.relu(t2)
+    t0h = fd.ops.cast(t0, DataType.Half)
+    t1h = fd.ops.cast(t1, DataType.Half)
+    t2 = fd.ops.add(t0h, t1h)
+    t3 = fd.ops.relu(t2)
 
     fd.add_output(t3)
 

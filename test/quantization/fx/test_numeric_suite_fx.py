@@ -13,7 +13,7 @@ import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
-    convert_to_reference,
+    convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -1765,9 +1765,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.Sigmoid(),
         ).eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 1, 1, 1),)
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
 
         # extract weights
@@ -1984,7 +1984,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         example_inputs = (torch.randn(1, 4),)
         qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
         mp = prepare_fx(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
-        mq = convert_to_reference(mp)
+        mq = convert_to_reference_fx(mp)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
     def test_mul_add_cat_stack_skips_shadowing(self):
