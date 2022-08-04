@@ -1103,7 +1103,7 @@ Tensor zeros_symint(c10::SymIntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+    return at::zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
