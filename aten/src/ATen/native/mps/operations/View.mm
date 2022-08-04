@@ -86,7 +86,8 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
 
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                           const IntArrayRef& stride, int64_t offset,
-                                          const IntArrayRef& base_shape, bool needsScatter)
+                                          const IntArrayRef& base_shape, bool needsScatter,
+                                          const bool needsBoolCast)
 {
   MPSGraph* mpsGraph = cachedGraph->graph();
   MPSGraphTensor *outputTensor = nil;
@@ -126,7 +127,17 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
     indicesTensor = [mpsGraph additionWithPrimaryTensor: indicesTensor
                                         secondaryTensor: cachedGraph->storageOffsetTensor
                                                    name: nil];
-    MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor: cachedGraph->inputTensor
+    MPSGraphTensor *inputTensor = cachedGraph->inputTensor;
+
+    // Workaround for bool scatter/gather deficiency
+    // See https://github.com/pytorch/pytorch/issues/82663
+    if (needsBoolCast) {
+      inputTensor = [mpsGraph castTensor:inputTensor
+                                  toType:MPSDataTypeInt8
+                                    name:@"Cast away from bool"];
+    }
+
+    MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor: inputTensor
                                                         withShape: @[@-1]
                                                              name: nil];
     MPSGraphTensor *reshapedIndicesTensor = [mpsGraph reshapeTensor: indicesTensor
@@ -153,6 +164,14 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
       outputTensor =  [mpsGraph reshapeTensor: gatheredTensor
                               withShapeTensor: shapeTensor
                                          name: nil];
+    }
+
+    // Workaround for bool scatter/gather deficiency
+    // See https://github.com/pytorch/pytorch/issues/82663
+    if (needsBoolCast) {
+      outputTensor = [mpsGraph castTensor:outputTensor
+                                   toType:MPSDataTypeBool
+                                     name:@"Cast back to bool"];
     }
   }
   return outputTensor;
@@ -205,6 +224,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
             if (inputType ==  MPSDataTypeUInt8) {
                 inputType =  MPSDataTypeInt8;
             }
+            auto needsBoolCast = inputType == MPSDataTypeBool;
             // Self is the input tensor we are creating view of
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
             newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]);
@@ -214,7 +234,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
             if (needsScatter) {
               newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
             }
-            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter);
+            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }
         return newCachedGraph;
       }));

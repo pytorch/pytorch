@@ -392,7 +392,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor& self, bool unbiased) {
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool unbiased,
     bool keepdim) {
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
