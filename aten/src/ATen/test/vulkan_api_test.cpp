@@ -362,6 +362,43 @@ TEST_F(VulkanAPITest, add_broadcast2) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, add_broadcast3) {
+
+  const auto a_cpu = at::rand({3, 4, 41, 53}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 1, 41, 53}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::add(a_cpu, b_cpu, 2.5f);
+  const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2.5f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_broadcast4) {
+  const auto a_cpu = at::rand({3, 4, 41, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 41, 53}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::add(a_cpu, b_cpu, 2.5f);
+  const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2.5f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, add_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -445,6 +482,69 @@ TEST_F(VulkanAPITest, add_scalar_) {
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
     showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto c_cpu = at::add(a_cpu, b_scalar, 2.1f);
+  const auto c_vulkan = at::add(a_vulkan, b_scalar, 2.1f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_scalar_wrapped_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  a_cpu.add_(b_scalar, 2.1f);
+  a_vulkan.add_(b_scalar, 2.1f);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_to_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::add(a, b_cpu, 2.1f);
+  const auto c_vulkan = at::add(a, b_vulkan, 2.1f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -1059,6 +1159,42 @@ TEST_F(VulkanAPITest, div_broadcast2) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, div_broadcast3) {
+  const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 1, 179, 221}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::div(a_cpu, b_cpu);
+  const auto c_vulkan = at::div(a_vulkan, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, div_broadcast4) {
+  const auto a_cpu = at::rand({3, 4, 41, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 41, 53}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::div(a_cpu, b_cpu);
+  const auto c_vulkan = at::div(a_vulkan, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, div_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat))+0.01;
   auto a_vulkan = a_cpu.vulkan();
@@ -1143,6 +1279,69 @@ TEST_F(VulkanAPITest, div_scalar_) {
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
     showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, div_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto c_cpu = at::div(a_cpu, b_scalar);
+  const auto c_vulkan = at::div(a_vulkan, b_scalar);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, div_scalar_wrapped_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  a_cpu.div_(b_scalar);
+  a_vulkan.div_(b_scalar);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, div_to_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto b_cpu = at::rand({2, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::div(a, b_cpu);
+  const auto c_vulkan = at::div(a, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -1842,6 +2041,42 @@ TEST_F(VulkanAPITest, mul_broadcast2) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, mul_broadcast3) {
+  const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 1, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::mul(a_cpu, b_cpu);
+  const auto c_vulkan = at::mul(a_vulkan, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mul_broadcast4) {
+  const auto a_cpu = at::rand({3, 4, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::mul(a_cpu, b_cpu);
+  const auto c_vulkan = at::mul(a_vulkan, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, mul_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -1925,6 +2160,69 @@ TEST_F(VulkanAPITest, mul_scalar_) {
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
     showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mul_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto c_cpu = at::mul(a_cpu, b_scalar);
+  const auto c_vulkan = at::mul(a_vulkan, b_scalar);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mul_scalar_wrapped_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  a_cpu.mul_(b_scalar);
+  a_vulkan.mul_(b_scalar);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mul_to_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::mul(a, b_cpu);
+  const auto c_vulkan = at::mul(a, b_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -2208,6 +2506,42 @@ TEST_F(VulkanAPITest, sub_broadcast2) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, sub_broadcast3) {
+  const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 1, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::sub(a_cpu, b_cpu, 2.5f);
+  const auto c_vulkan = at::sub(a_vulkan, b_vulkan, 2.5f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_broadcast4) {
+  const auto a_cpu = at::rand({3, 4, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({1, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::sub(a_cpu, b_cpu, 2.5f);
+  const auto c_vulkan = at::sub(a_vulkan, b_vulkan, 2.5f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, sub_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -2257,6 +2591,111 @@ TEST_F(VulkanAPITest, sub_broadcast1_) {
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
     showRtol(b_cpu, b_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_scalar) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  const auto c_cpu = at::sub(a_cpu, b_scalar, 2.1f);
+  const auto c_vulkan = at::sub(a_vulkan, b_scalar, 2.1f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_scalar_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  a_cpu.sub_(b_scalar, 2.1f);
+  a_vulkan.sub_(b_scalar, 2.1f);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto c_cpu = at::sub(a_cpu, b_scalar, 2.1f);
+  const auto c_vulkan = at::sub(a_vulkan, b_scalar, 2.1f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_scalar_wrapped_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_scalar = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  a_cpu.sub_(b_scalar, 2.1f);
+  a_vulkan.sub_(b_scalar, 2.1f);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::sub(a, b_cpu, 2.1f);
+  const auto c_vulkan = at::sub(a, b_vulkan, 2.1f);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
