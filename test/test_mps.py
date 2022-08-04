@@ -6693,7 +6693,7 @@ class TestConsistency(TestCase):
 
                 if isinstance(cpu_sample.input, (list, tuple)):
                     for cpu_sample_, mps_sample_ in zip(cpu_sample.input, mps_sample.input):
-                        self.assertEqual(cpu_sample_.input.grad, mps_sample_.input.grad)
+                        self.assertEqual(cpu_sample_.grad, mps_sample_.grad)
                 else:
                     self.assertEqual(cpu_sample.input.grad, mps_sample.input.grad)
 
