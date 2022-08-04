@@ -117,28 +117,6 @@ class C10_API ExcludeDispatchKeyGuard {
   DispatchKeySet exclude_;
 };
 
-// Use with care.
-// BackendComponents get treated specially in DispatchKeySet,
-// but there are rare occasions when we'd like to add them directly to TLS.
-// See DispatchKeySet.h comments for an overview of why BackendComponent
-// requires extra care.
-class C10_API IncludeBackendComponentGuard {
- public:
-  IncludeBackendComponentGuard(BackendComponent k);
-  IncludeBackendComponentGuard(const IncludeBackendComponentGuard&) = delete;
-  IncludeBackendComponentGuard operator=(const IncludeBackendComponentGuard&) =
-      delete;
-  IncludeBackendComponentGuard(IncludeBackendComponentGuard&&) = delete;
-  IncludeBackendComponentGuard operator=(IncludeBackendComponentGuard&&) =
-      delete;
-  ~IncludeBackendComponentGuard();
-
- private:
-  PODLocalDispatchKeySet* tls_;
-  bool tls_change_;
-  BackendComponent include_backend_;
-};
-
 struct C10_API ForceDispatchKeyGuard {
  public:
   ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set)

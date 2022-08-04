@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -247,6 +248,31 @@ class VulkanAPITest : public ::testing::Test {
 #endif
   }
 };
+
+TEST_F(VulkanAPITest, copy_to_texture) {
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 3D
+    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 2D
+    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 1D
+    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    at::Tensor in_vk_copied = in_cpu.vulkan();
+    at::Tensor out_copied = in_vk_copied.cpu();
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+  }
+}
 
 TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   c10::InferenceMode mode;
@@ -3626,13 +3652,13 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
 
   auto prepack = callOpByName(
-      "vulkan_prepack::gru_prepack",
+      "vulkan_prepack::create_gru_context",
       "",
       std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
         weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
   auto out_vulkan = callOpByName(
-      "vulkan_prepack::gru_run",
+      "vulkan_prepack::run_gru_context",
       "",
       in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
 
@@ -3692,7 +3718,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: incorrect # of weights/biases
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) }),
@@ -3703,13 +3729,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu_2d.vulkan(), h0_cpu.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -3718,13 +3744,13 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
     auto out_vulkan = callOpByName(
-        "vulkan_prepack::gru_run",
+        "vulkan_prepack::run_gru_context",
         "",
         in_cpu.vulkan(), h0_cpu_2d.vulkan(), prepack[0]);
   }, ::c10::Error);
@@ -3732,7 +3758,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: has_biases should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3742,7 +3768,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: train should be false
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3752,7 +3778,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: bidirectional should be false
   EXPECT_THROW({
      auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3762,7 +3788,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: batch_first should be true
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
@@ -3772,7 +3798,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Act: dropout should be 0.0
   EXPECT_THROW({
     auto prepack = callOpByName(
-        "vulkan_prepack::gru_prepack",
+        "vulkan_prepack::create_gru_context",
         "",
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),

@@ -1528,7 +1528,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     loss for input tensors using the :math:`l_p` distance as the distance function.
 
     Args:
-        distance_function (callable, optional): A nonnegative, real-valued function that
+        distance_function (Callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
         margin (float, optional): A nonnegative margin representing the minimum difference
