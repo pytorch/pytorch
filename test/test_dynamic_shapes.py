@@ -127,7 +127,7 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymbolicIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
 class TestPySymInt(TestCase):
@@ -229,6 +229,9 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[0] == 5)
         self.assertTrue(z.shape[1] == 4)
         self.assertTrue(z.shape[2] == 3)
+
+        z = y.expand((y.shape[1],))
+        z = y.expand(y.shape[1])
 
     @skipIfNoSympy
     def test_size_expressions(self):

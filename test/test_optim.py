@@ -320,6 +320,32 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
+    def _test_complex_2d(self, optimizer_constructor, f=None):
+        if f is None:
+            f = rosenbrock
+        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
+        a1_real = a1.real.clone().detach()
+        a1_imag = a1.imag.clone().detach()
+        a1_real.requires_grad_()
+        a1_imag.requires_grad_()
+        optim1 = optimizer_constructor([a1])
+        optim2 = optimizer_constructor([a1_real, a1_imag])
+
+        for i in range(10):
+            optim1.zero_grad()
+            optim2.zero_grad()
+            a2 = torch.complex(a1_real, a1_imag)
+            f(a1).backward()
+            f(a2).backward()
+
+            self.assertEqual(a1.grad.real, a1_real.grad)
+            self.assertEqual(a1.grad.imag, a1_imag.grad)
+
+            optim1.step()
+            optim2.step()
+            self.assertEqual(a1.real, a1_real)
+            self.assertEqual(a1.imag, a1_imag)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -467,9 +493,8 @@ class TestOptim(TestCase):
             ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 300
+        kIterations = 4
         device = 'cuda'
-        failed = 0
         for optimizers, params in optimizer_pairs_with_flags:
             res, state = [], []
             for opt in optimizers:
@@ -501,24 +526,14 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                try:
-                    self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
-                except AssertionError:
-                    failed = 1
-                    print("Parameter mismatch for ", optimizers)
+                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    try:
-                        self.assertEqual(st_p_state[k], mt_p_state[k])
-                    except AssertionError:
-                        failed = 1
-                        print(optimizers, params, "\nState mismatch for key ", k)
-        if failed == 1:
-            raise RuntimeError("Mismatch for some params or state dict")
+                    self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -586,26 +601,13 @@ class TestOptim(TestCase):
                  lambda opt: ReduceLROnPlateau(opt)],
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-
-    # Test whether variance parameter is always real
-    def test_complex_adam_variance(self):
-        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        target = torch.randn(5, 5, dtype=torch.complex64)
-        optimizer = optim.Adam([complex_param], lr=0.001)
-
-        for i in range(20):
-            optimizer.zero_grad()
-            loss = (complex_param - target).pow(2).sum()
-            loss.backward()
-            optimizer.step()
-            for idx in optimizer.state_dict()['state'].keys():
-                variance = optimizer.state_dict()['state'][idx]['exp_avg_sq']
-                self.assertEqual(variance.imag, torch.zeros(variance.imag.shape))
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:

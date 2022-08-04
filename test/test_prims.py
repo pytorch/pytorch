@@ -38,7 +38,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             # Same shape
             shape = (5, 5)
@@ -104,7 +104,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             shape = (5, 5)
             a = make_arg(shape)
@@ -146,11 +146,11 @@ class TestPrims(TestCase):
         # This test is not intended to test the correctness of the nvfuser implementation
         from torch._C._nvfuser import FusionDefinition as fd
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {
             name
             for name in prim_nvfuser_ops
-            if getattr(torch.ops.prims, name).default.impl_nvfuser is None
+            if getattr(torch.ops.nvprims, name, None) is None
         }
         assert (
             len(ops_without_nvfuser_impl) == 0
@@ -181,13 +181,68 @@ class TestPrims(TestCase):
         actual = execute(gm, a.mT, executor="nvfuser")
         self.assertEqual(expected, actual)
 
+    def test_nvfuser_capability_context(self, device):
+        # This test is to ensure that the torch calls are replaced with refs
+        # based on the nvfuser+prims capability
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        # It's assumed that digamma is not supported by nvfuser
+        # If it's ever supported, this test will need to be updated
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.digamma(a)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_aten_digamma = any(
+            torch.ops.aten.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        includes_prims_digamma = any(
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertTrue(includes_aten_digamma)
+        self.assertFalse(includes_prims_digamma)
+
+        # Check mixed case, sigmoid is replaced with refs, but digamma is not
+        def func(a):
+            return torch.sigmoid(torch.digamma(a))
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_aten_sigmoid = any(
+            torch.ops.aten.sigmoid.default == node.target
+            for node in call_function_nodes
+        )
+        includes_prims_digamma = any(
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
+        )
+        includes_nvprims_exp = any(
+            torch.ops.nvprims.exp.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_aten_sigmoid)
+        self.assertFalse(includes_prims_digamma)
+        self.assertTrue(includes_nvprims_exp)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned(self, device):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
         # If it's ever supported, this test will need to be updated
-        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
@@ -216,7 +271,7 @@ class TestPrims(TestCase):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
         # If it's ever supported, this test will need to be updated
-        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
@@ -237,6 +292,24 @@ class TestPrims(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("is not supported by nvFuser" in str(w[-1].message))
 
+    def test_nvprims(self, device):
+        # This test is to ensure that nvfuser specific prims are exposed
+        # and can be traced with make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(a):
+            return torch.ops.nvprims.add(a, a)
+
+        a = torch.randn(3, 4, device=device)
+        gm = make_fx(func)(a)
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(node.name == "add_default")
+                self.assertTrue(node.target == torch.ops.nvprims.add.default)
+                self.assertFalse(node.target == torch.ops.prims.add.default)
+                self.assertFalse(node.target == torch.ops.aten.add.default)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
@@ -248,7 +321,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             shape = (5, 5)
             a = make_arg(shape)
@@ -275,7 +348,7 @@ class TestPrims(TestCase):
         b_dict = {"b": b}
 
         result_aten = fn(a, b_dict, executor="aten")
-        result_nvfuser = fn(a, b_dict, executor="nvfuser")
+        result_nvfuser = fn(a, b_dict, executor="strictly_nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
 
     @dtypes(torch.float32)
@@ -340,6 +413,19 @@ class TestPrims(TestCase):
                 expected = a.contiguous(memory_format=memory_format)
                 actual = refs.contiguous(a, memory_format=memory_format)
                 self.assertEqual(expected.stride(), actual.stride())
+
+    @dtypes(torch.float32)
+    def test_reshape_view_method(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((5, 5))
+        new_shape = 1, 5, 1, 5
+        result_eager = a.reshape(*new_shape)
+        result_refs = refs.reshape(a, *new_shape)
+        self.assertEqual(result_eager, result_refs)
+
+        result_eager = a.view(*new_shape)
+        result_refs = refs.view(a, *new_shape)
+        self.assertEqual(result_eager, result_refs)
 
 
 class TestPrimsBasic(TestCase):

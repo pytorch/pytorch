@@ -1037,6 +1037,152 @@ void validateMma(Fusion* fusion) {
   }
 }
 
+void validateSwizzle(Fusion* fusion) {
+  auto used_vals = fusion->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    if (tv->hasSwizzleOp()) {
+      // Make sure no swizzle op is inlined:
+      auto inlined_swizzles = ir_utils::getAllSwizzlesBetween(
+          tv->getMaybeRFactorDomain(),
+          {tv->domain()->domain().begin(),
+           tv->domain()->domain().begin() + tv->getComputeAtPosition()});
+      TORCH_INTERNAL_ASSERT(
+          inlined_swizzles.empty(), "No support for inlined swizzles");
+    }
+  }
+}
+
+void validateAndConvertIterDomainGrouping(Fusion* fusion) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    bool is_grouped = false;
+    for (const auto id_idx : c10::irange(tv->nDims())) {
+      const auto id = tv->axis(id_idx);
+      auto ptype = GpuLower::current()
+                       ->caMap()
+                       ->getConcreteMappedID(id, IdMappingMode::LOOP)
+                       ->getParallelType();
+      if (ptype != ParallelType::Group) {
+        // Not a grouped ID
+        continue;
+      }
+
+      // Remember if a grouped ID is found
+      is_grouped = true;
+
+      // Grouping only makes sense for the normal iteration type
+      TORCH_CHECK(
+          id->getIterType() == IterType::Iteration,
+          "Invalid use of ParallelType::Group.",
+          " Grouping of ",
+          id->getIterType(),
+          " is not allowed. ",
+          tv->toString());
+
+      // Extent must be static
+      TORCH_CHECK(
+          id->extent()->getInt().has_value(),
+          "Invalid use of ParallelType::Group.",
+          " IterDomain must have a static extent: ",
+          id->toString());
+
+      // The CA position must be left of any grouped ID
+      TORCH_CHECK(
+          tv->getComputeAtPosition() <= id_idx,
+          "Invalid use of ParallelType::Group.",
+          " ComputeAt position must be left of grouped IDs: ",
+          tv->toString());
+
+      // Similarly, the produce-at position must be left of any grouped ID
+      TORCH_CHECK(
+          tv->getMaxProducerPosition() <= id_idx,
+          "Invalid use of ParallelType::Group.",
+          " ProduceAt position must be left of grouped IDs: ",
+          tv->toString());
+
+      // Halo is not allowed
+      TORCH_CHECK(
+          GpuLower::current()->haloInfo().getExtent(id) == nullptr,
+          "Invalid use of ParallelType::Group.",
+          " Grouping of halo-extended IterDomain, ",
+          id->toString(),
+          ", is not supported. ",
+          tv->toString());
+    }
+
+    if (!is_grouped) {
+      continue;
+    }
+
+    // Must be defined by ReductionOp
+    auto def = tv->definition();
+    TORCH_CHECK(
+        def != nullptr,
+        "Invalid use of ParallelType::Group.",
+        " Definition of tv with ParallelType::Group not found. ",
+        tv->toString());
+
+    TORCH_CHECK(
+        tv->definition()->isA<ReductionOp>() ||
+            tv->definition()->isA<GroupedReductionOp>(),
+        "Invalid use of ParallelType::Group. Only ReductionOp and GroupedReductionOp are allowed. ",
+        tv->definition()->toString());
+
+    // Convert ReductionOp to GroupedReductionOp
+    if (tv->definition()->isA<ReductionOp>()) {
+      auto rop = def->as<ReductionOp>();
+      auto is_allreduce = rop->isAllreduce();
+
+      TORCH_CHECK(
+          is_allreduce,
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for allreduce reductions: ",
+          rop->toString());
+
+      TORCH_CHECK(
+          tv->domain()->hasGridReduction(),
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for grid reductions: ",
+          rop->toString());
+
+      std::vector<BinaryOpType> op_types({rop->getReductionOpType()});
+      std::vector<Val*> init_vals({rop->init()});
+      std::vector<Val*> outputs({rop->out()});
+      std::vector<Val*> inputs({rop->in()});
+
+      fusion->removeExpr(rop);
+      IrBuilder::create<GroupedReductionOp>(
+          static_cast<IrContainer*>(fusion),
+          op_types,
+          init_vals,
+          outputs,
+          inputs,
+          is_allreduce);
+    }
+  }
+}
+
+void validateGroupedReductions(Fusion* fusion) {
+  for (auto expr : StmtSort::getExprs(fusion)) {
+    if (auto grouped_reduction_op = dynamic_cast<GroupedReductionOp*>(expr)) {
+      const auto num_exprs = grouped_reduction_op->numExprs();
+      int num_grouped_iterations = 1;
+      auto out_tv = ir_utils::getTvOutput(grouped_reduction_op);
+      for (auto axis : out_tv->domain()->domain()) {
+        if (axis->getParallelType() == ParallelType::Group) {
+          num_grouped_iterations *= axis->extent()->getInt().value();
+        }
+      }
+      TORCH_CHECK(
+          num_exprs * num_grouped_iterations <= kMaxNumGroupedReductions,
+          "Too many grouped reductions: ",
+          grouped_reduction_op->toString(),
+          ". Up to ",
+          kMaxNumGroupedReductions,
+          " reductions are allowed.");
+    }
+  }
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
