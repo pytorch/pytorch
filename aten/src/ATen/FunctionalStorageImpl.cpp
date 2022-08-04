@@ -1,5 +1,6 @@
 #include <ATen/FunctionalStorageImpl.h>
 
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
@@ -89,19 +90,10 @@ bool Alias::apply_updates() {
   return any_updates;
 }
 
-// Should we just add a sym_numel() so we don't need to do this?
-c10::SymInt compute_nbytes(c10::SymIntArrayRef sym_sizes, caffe2::TypeMeta dtype) {
-  SymInt size_bytes = dtype.itemsize();
-  for (auto s : sym_sizes) {
-    size_bytes = size_bytes * s;
-  }
-  return size_bytes;
-}
-
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
   : c10::StorageImpl(
       c10::StorageImpl::use_byte_size_t(),
-      compute_nbytes(value.sym_sizes(), value.dtype()),
+      at::detail::computeStorageNbytesSymInt(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.storage_offset()),
       DataPtr{nullptr, value.device()},
       // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
       nullptr,

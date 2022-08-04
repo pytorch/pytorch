@@ -107,13 +107,6 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-Tensor& copy_meta_(Tensor& self, const Tensor& src, bool non_blocking) {
-  if (src.is_meta() && !self.is_meta()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
-  }
-  return self;
-}
-
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
@@ -169,6 +162,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.is_same(src)) {
     return self;
+  }
+
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
   }
 
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).

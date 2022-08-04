@@ -266,6 +266,10 @@ c10::SymIntArrayRef concrete_sym_strides_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
 
+c10::SymInt concrete_sym_numel_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
+
 class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
@@ -281,6 +285,7 @@ class PyInterpreterHolder {
             &concrete_sizes_fn,
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
+            &concrete_sym_numel_fn,
             &concrete_sym_strides_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
@@ -627,9 +632,9 @@ static PyObject* THPVariable_make_subclass(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None)",
   });
-  ParsedArgs<6> parsed_args{};
+  ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -661,6 +666,10 @@ static PyObject* THPVariable_make_subclass(
   if (r.toBool(5)) {
     data.unsafeGetTensorImpl()->set_custom_layout(true);
   }
+  if (!r.isNone(6)) {
+    data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
+  }
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -2423,7 +2432,8 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
     auto si = torch::is_symint_node(elm)
         ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
         : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.data());
+    // TODO: the buffer will need to be made owning later
+    symints.append(si.as_int_unchecked());
   }
 
   auto result = values_from_buffer(self, symints);
@@ -2459,9 +2469,38 @@ c10::Layout concrete_layout_fn(
   return toLayout(out.ptr());
 }
 
+c10::SymInt concrete_sym_numel_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_numel",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_numel")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call numel on a tensor with symbolic shapes/strides");
+    return self->sym_numel_default();
+  }
+  return torch::is_symint_node(out)
+      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
+      : c10::SymInt{py::cast<int64_t>(out)};
+}
+
 c10::SymIntArrayRef concrete_sym_strides_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
   HANDLE_TH_ERRORS
   auto out = torchDispatchFromTensorImpl(
       self,
@@ -2486,9 +2525,9 @@ c10::SymIntArrayRef concrete_sym_strides_fn(
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
         : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.data());
+    symints.append(si.as_int_unchecked());
   }
 
   auto result = values_from_buffer(self, symints);

@@ -18,7 +18,7 @@
          "torch/csrc/onnx/**",
          "torch/onnx/**"
       ],
-      "approved_by": ["BowenBao", "garymm"],
+      "approved_by": ["BowenBao", "abock"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
