@@ -141,14 +141,6 @@ class ThreadLocal {
     return &var;                              \
   })
 
-#define C10_DEFINE_TLS(Type, Name)     \
-  ::c10::ThreadLocal<Type> Name([]() { \
-    thread_local Type var;             \
-    return &var;                       \
-  })
-
-#define C10_DECLARE_TLS_extern(Type, Name) extern ::c10::ThreadLocal<Type> Name
-
 #define C10_DECLARE_TLS_class_static(Class, Type, Name) \
   static ::c10::ThreadLocal<Type> Name
 
