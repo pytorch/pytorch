@@ -72,48 +72,6 @@ void Context::submit_compute_epilogue(
   command_buffer.dispatch(global_workgroup_size);
 }
 
-void Context::submit_texture_copy(
-    const PipelineBarrier& pipeline_barrier,
-    const api::VulkanImage& source,
-    const api::VulkanImage& destination,
-    const api::utils::uvec3& copy_range,
-    const api::utils::uvec3& src_offset,
-    const api::utils::uvec3& dst_offset,
-    const VkFence fence_handle) {
-  // Serialize recording to the shared command buffer. Do not initialize with a
-  // mutex just yet, since in some cases it will be externally managed.
-  std::unique_lock<std::mutex> cmd_lock;
-  // Refer to comments in submit_compute_job for explanation.
-  if (fence_handle == VK_NULL_HANDLE) {
-    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
-  }
-
-  set_cmd();
-
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_,
-      "copy_texture_to_texture",
-      create_extent3d({0, 0, 0}),
-      create_extent3d({0, 0, 0}));
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
-
-  cmd_.insert_barrier(pipeline_barrier);
-
-  cmd_.copy_texture_to_texture(
-      source, destination, copy_range, src_offset, dst_offset);
-
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
-
-  submit_count_++;
-  if (fence_handle != VK_NULL_HANDLE ||
-      submit_count_ >= config_.cmdSubmitFrequency) {
-    submit_cmd_to_gpu(fence_handle);
-  }
-}
-
 void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
   if (cmd_) {
     cmd_.end();

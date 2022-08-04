@@ -10,6 +10,20 @@ namespace api {
 // Utility Functions
 //
 
+/*
+ * This function is used to determine what image format to use for a given
+ * dtype.
+ *
+ * TODO: enable proper format selection between kFloat and kHalf.
+ *
+ * Context: due to limitations of the shader compilation system, at the moment
+ * it is not possible to support both 32 bit and 16 bit float formats since
+ * shaders will have to specify the format qualifier of texture inputs. Right
+ * now, shaders are compiled with either rgba16f or rgba32f qualifiers depending
+ * on whether USE_VULKAN_FP16_INFERENCE is set. Therefore, textures must be
+ * always created with the corresponding VkFormat. Consequently, kHalf tensors
+ * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
+ */
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -18,15 +32,34 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
 #else
       return VK_FORMAT_R32G32B32A32_SFLOAT;
 #endif /* USE_VULKAN_FP16_INFERENCE */
-
     case c10::kQUInt8:
       return VK_FORMAT_R8G8B8A8_UINT;
 
     default:
-      TORCH_CHECK(false, "Vulkan tensor format not supported!");
+      TORCH_CHECK(
+          false, "Vulkan vk_format(): no corresponding format for dtype");
   }
-  return VK_FORMAT_UNDEFINED;
 }
+
+/*
+ * This function is used to map a texture format to a corresponding
+ * c10::ScalarType. It is primarily used to set the data type of a
+ * StorageBuffer object that will receive copied data from a texture.
+ */
+c10::ScalarType c10_scalartype(const VkFormat image_format) {
+  switch (image_format) {
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+      return c10::kFloat;
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+      return c10::kHalf;
+    case VK_FORMAT_R8G8B8A8_UINT:
+      return c10::kQUInt8;
+
+    default:
+      TORCH_CHECK(false, "vulkan c10_scalartype(): Unknown VkFormat.");
+  }
+}
+
 //
 // MemoryBarrier
 //
@@ -137,7 +170,8 @@ MemoryMap::MemoryMap(const VulkanBuffer& buffer, const uint8_t access)
     : access_(access),
       allocator_(buffer.vma_allocator()),
       allocation_(buffer.allocation()),
-      data_(nullptr) {
+      data_(nullptr),
+      data_len_{buffer.mem_size()} {
   VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
 }
 
@@ -145,7 +179,8 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
     : access_(other.access_),
       allocator_(other.allocator_),
       allocation_(other.allocation_),
-      data_(other.data_) {
+      data_(other.data_),
+      data_len_{other.data_len_} {
   other.allocation_ = VK_NULL_HANDLE;
   other.data_ = nullptr;
 }

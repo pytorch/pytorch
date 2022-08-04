@@ -43,10 +43,17 @@ struct Layout final {
   };
 };
 
-uint32_t batch_size(const Tensor& tensor);
-uint32_t channels_size(const Tensor& tensor);
-uint32_t height_size(const Tensor& tensor);
-uint32_t width_size(const Tensor& tensor);
+uint32_t batch_size(const IntArrayRef);
+uint32_t batch_size(const Tensor&);
+
+uint32_t channels_size(const IntArrayRef);
+uint32_t channels_size(const Tensor&);
+
+uint32_t height_size(const IntArrayRef);
+uint32_t height_size(const Tensor&);
+
+uint32_t width_size(const IntArrayRef);
+uint32_t width_size(const Tensor&);
 
 api::utils::uvec3 adaptive_work_group_size(
     const api::utils::uvec3& global_work_group);
