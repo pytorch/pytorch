@@ -5828,7 +5828,7 @@ static Tensor _affine_jvp(
   return input_t;
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
+Tensor batch_norm_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
     const Tensor& weight_p,
@@ -5875,25 +5875,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
   c10::optional<Tensor> result_p = weight_p.defined()
       ? c10::optional<Tensor>((input_p - mean_p) * invstd_p)
       : c10::nullopt;
-  auto out_jvp = _affine_jvp(
+  return _affine_jvp(
       result_p,
       result_t,
       weight_p.defined() ? weight_p.view(view_size) : weight_p,
       weight_t.defined() ? weight_t.view(view_size) : weight_t,
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
-
-  if (train && (input_p.requires_grad() || at::isTensorSubclassLike(input_p))) {
-    // When input requires_grad, we assume that we will always backward and
-    // use saved_mean and saved_invstd to compute grad_input
-    // This unnecessarily slows down when we only want jvp(f) and vjp(f)
-    // but don't care about computating jvp(vjp(f))
-    auto var_t = var_backward(input_t, input_p, dims, /*correction=*/false, /*keepdim=*/true).sum(dims, /*keepdim=*/false);
-    auto mean_t = input_t.mean(dims, /*keepdim=*/false);
-    auto invstd_t = -0.5 * at::pow(invstd_p.view_as(var_t), 3) * var_t;
-    return std::make_tuple(out_jvp, std::move(mean_t), std::move(invstd_t));
-  } else {
-    return std::make_tuple(out_jvp, Tensor(), Tensor());
-  }
 }
 
 Tensor layer_norm_jvp(
@@ -5952,7 +5939,7 @@ Tensor group_norm_jvp(
   auto input_t_reshaped = input_t.view({1, N * groups, N ? -1 : 1});
   auto input_p_reshaped = input_p.view({1, N * groups, N ? -1 : 1});
 
-  auto result_t = std::get<0>(batch_norm_jvp(
+  auto result_t = batch_norm_jvp(
                       input_p_reshaped,
                       input_t_reshaped,
                       /*weight_p=*/{},
@@ -5964,7 +5951,7 @@ Tensor group_norm_jvp(
                       saved_mean,
                       saved_invstd,
                       /*train=*/true,
-                      /*eps=*/0))
+                      /*eps=*/0)
                       .view(input_shape);
 
   c10::optional<Tensor> result_p = c10::nullopt;
