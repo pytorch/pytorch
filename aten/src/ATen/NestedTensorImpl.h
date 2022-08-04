@@ -92,7 +92,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Store the size of the buffer for use in get_buffer().
   // get_buffer constructs a flat, contiguous tensor from the NestedTensor
   // storage
-  std::vector<int64_t> buffer_size_;
+  int64_t buffer_size_;
   const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors

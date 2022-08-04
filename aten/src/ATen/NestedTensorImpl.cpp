@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
@@ -115,16 +116,19 @@ NestedTensorImpl::NestedTensorImpl(
           Storage(buffer.storage()),
           generate_nested_key_set(buffer),
           buffer.dtype()),
-      buffer_size_(buffer.unsafeGetTensorImpl()->sizes().vec()),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
+  auto buffer_size_vec{buffer.unsafeGetTensorImpl()->sizes().vec()};
+  TORCH_INTERNAL_ASSERT(buffer_size_vec.size() == 1, "The buffer used to construct the nested tensor did not have a size of 1.")
+  buffer_size_ = buffer_size_vec[0];
+
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
-  TORCH_INTERNAL_ASSERT(buffer.is_cuda() || buffer.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer);
+  TORCH_INTERNAL_ASSERT(buffer.is_cuda() || buffer.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer.device());
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
