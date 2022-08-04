@@ -9,6 +9,7 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <Python.h> // NOLINT
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
