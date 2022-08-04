@@ -286,11 +286,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
     py::class_<TensorMetadata>(m, "_TensorMetadata")
-        .def_property_readonly("layout", [](const TensorMetadata& metadata) {
-          PyObject* layout_obj = torch::autograd::utils::wrap(metadata.layout_);
-          return py::reinterpret_borrow<py::object>(layout_obj);
+        .def_property_readonly(
+            "layout",
+            [](const TensorMetadata& metadata) {
+              PyObject* layout_obj =
+                  torch::autograd::utils::wrap(metadata.layout_);
+              return py::reinterpret_borrow<py::object>(layout_obj);
+            })
+        .def_property_readonly("device", [](const TensorMetadata& metadata) {
+          // Have to pull a copy of the existing Python Device object.
+          PyObject* thp_device = THPDevice_New(
+              c10::Device(metadata.device_type_, metadata.device_index_));
+          return py::reinterpret_borrow<py::object>(thp_device);
         });
-
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");

@@ -1231,6 +1231,8 @@ class TestTorchTidyProfiler(TestCase):
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
 
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
