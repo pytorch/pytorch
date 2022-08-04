@@ -428,6 +428,37 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.model()[output].arg(0).arg(1), b[0])
         self.assertEqual(s.model()[output].arg(1).arg(1), b[1])
 
+
+    def test_layer_norm_functional(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                return torch.nn.functional.layer_norm(x, (1024,))
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # make the output a size 1 tensor which should result
+        # in the migration of the input
+
+        b = BasicBlock().forward(torch.rand(1024))
+        input = z3.Const(1, tensor_type)
+        output = z3.Const(2, tensor_type)
+        s.add(output == tensor_type.tensor1(D(1, 1024)))
+        s.check()
+        self.assertEqual(s.model()[input], s.model()[output])
+        # input shape = output shape
+        self.assertEqual(b.shape[0], s.model()[input].arg(0).arg(1))
+
     def test_ne_int_long_type_as(self):
 
         class BasicBlock(torch.nn.Module):
