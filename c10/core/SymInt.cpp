@@ -33,7 +33,7 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto ptr = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
-  return c10::SymInt(static_cast<int64_t>(rep));
+  return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
 
 SymInt SymInt::operator+(SymInt sci) const {
