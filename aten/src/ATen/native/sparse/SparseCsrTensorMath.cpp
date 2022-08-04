@@ -1,3 +1,4 @@
+#include <ATen/core/ATen_fwd.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -20,6 +21,7 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_convert_bsc_to_csc_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
@@ -109,6 +111,28 @@
 
 namespace at {
 namespace meta {
+
+TORCH_META_FUNC(_convert_bsc_to_csc)
+(const Tensor& block_ccol_indices,
+ const Tensor& block_row_indices,
+ const Tensor& block_values,
+ const int64_t n_batch,
+ const int64_t n_block_row,
+ const int64_t n_block_col) {
+  int64_t n_batch_dim = block_ccol_indices.dim() - 1;
+  int64_t n_dense_dim = block_values.dim() - n_batch_dim - 3;
+  TORCH_CHECK(n_dense_dim == 0, "Dense dimensions are not supported");
+  TORCH_CHECK(n_batch_dim == 1, "Expected single batch dimension");
+  int64_t n_col = block_values.size(-1) * n_block_col;
+  int64_t nnz_block_per_batch = block_values.size(1);
+  int64_t nnz_per_batch =
+      nnz_block_per_batch * block_values.size(-2) * block_values.size(-1);
+  auto index_options = block_ccol_indices.options();
+  auto value_options = block_values.options();
+  set_output_raw_strided(0, {n_batch, n_col + 1}, {}, index_options, {});
+  set_output_raw_strided(1, {n_batch, nnz_per_batch}, {}, index_options, {});
+  set_output_raw_strided(2, {n_batch, nnz_per_batch}, {}, value_options, {});
+}
 
 TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {

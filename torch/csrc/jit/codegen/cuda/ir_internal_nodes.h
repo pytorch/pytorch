@@ -204,7 +204,9 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
 
-  size_t numReductions() const {
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping.
+  size_t numExprs() const {
     return reduction_op_types_.size();
   }
 
@@ -231,7 +233,9 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
   bool sameAs(const Statement* other) const override;
 
  private:
+  //! Reduction ops of grouped reductions
   const std::vector<BinaryOpType> reduction_op_types_;
+  //! Initial values of grouped reductions
   const std::vector<Val*> init_vals_;
   //! True if using the fused reduction kernel
   bool is_allreduce_ = false;
@@ -958,6 +962,13 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return parallel_type_ == ParallelType::Mma;
   }
 
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains.
+  static std::pair<IterDomain*, IterDomain*> swizzle(
+      Swizzle2DType swizzle_type,
+      IterDomain* in_x,
+      IterDomain* in_y);
+
   bool isMmaSwizzled() const {
     return is_mma_swizzled_;
   }
@@ -1161,6 +1172,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   // Reorder axes according to map[old_pos] = new_pos
   void reorder(const std::unordered_map<int, int>& old2new);
 
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains contained in this domain.
+  void swizzle(Swizzle2DType swizzle_type, int x, int y);
+
   // Transform TensorView according to merge and split transformations
   TensorDomain* view(
       const std::vector<std::shared_ptr<ViewTransform>>& transforms);
@@ -1289,6 +1304,56 @@ class TORCH_CUDA_CU_API Merge : public Expr {
   IterDomain* const out_ = nullptr;
   IterDomain* const outer_ = nullptr;
   IterDomain* const inner_ = nullptr;
+};
+
+//! Applies 2D swizzles on a rectangular tile defined by 2 iterdomains.
+class TORCH_CUDA_CU_API Swizzle2D : public Expr {
+ public:
+  Swizzle2D(
+      IrBuilderPasskey,
+      IterDomain* out_x,
+      IterDomain* out_y,
+      IterDomain* in_x,
+      IterDomain* in_y,
+      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle);
+
+  Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+
+  IterDomain* outX() const {
+    return out_x_;
+  }
+
+  IterDomain* outY() const {
+    return out_y_;
+  }
+
+  IterDomain* inX() const {
+    return in_x_;
+  }
+
+  IterDomain* inY() const {
+    return in_y_;
+  }
+
+  const auto& swizzleType() const {
+    return swizzle_type_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  // Output iterdomain pair corresponding
+  //  to the original input iterdomain pair.
+  IterDomain* const out_x_ = nullptr;
+  IterDomain* const out_y_ = nullptr;
+
+  // Input iterdomain pair.
+  IterDomain* const in_x_ = nullptr;
+  IterDomain* const in_y_ = nullptr;
+
+  // The type of predefined 1-to-1 functions
+  //  used for swizzling math.
+  Swizzle2DType swizzle_type_;
 };
 
 //! Integer value which has a special name
