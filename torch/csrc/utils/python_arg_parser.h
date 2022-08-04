@@ -97,8 +97,7 @@ struct type_caster<c10::SymInt> {
   PYBIND11_TYPE_CASTER(c10::SymInt, const_name("SymInt"));
   bool load(py::handle src, bool) {
     if (torch::is_symint_node(src)) {
-      auto si = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
-      value = si;
+      value = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
       return true;
     }
 
