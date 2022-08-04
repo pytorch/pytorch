@@ -33,19 +33,20 @@ constexpr auto exclude_keys_for_meta_dispatch =
     c10::DispatchKeySet({
         c10::DispatchKey::FuncTorchDynamicLayerBackMode,
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
-        c10::DispatchKey::Python,
-        // The idea here is that this exclude set is used in conjunction
-        // with adding MetaBit to the TLS include keyset.
-        // That means that we will *always* dispatch to meta kernels,
-        // and so we want to skip BackendSelect entirely (which will do the wrong thing).
-        c10::DispatchKey::BackendSelect
+        c10::DispatchKey::Python
     });
 
 
 inline Tensor to_meta(const Tensor& t) {
-    return at::native::empty_strided_symint_meta(t.sym_sizes(), t.sym_strides(),
+    if (!t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        return at::native::empty_strided_meta(t.sizes(), t.strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
+    } else {
+        return at::native::empty_strided_symint_meta(t.sym_sizes(), t.sym_strides(),
+/*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
+/*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
+    }
 }
 
 inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
@@ -81,41 +82,37 @@ inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Te
   return outputs;
 }
 
-inline c10::DispatchKeySet getKeySet(const Tensor& t) {
-    return t.key_set();
+inline bool has_dynamic_shape(const Tensor& t) {
+    return t.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
 }
 
-inline c10::DispatchKeySet getKeySet(const c10::optional<Tensor>& t) {
+inline bool has_dynamic_shape(const c10::optional<Tensor>& t) {
   if (t.has_value()) {
-    return getKeySet(*t);
+    return has_dynamic_shape(*t);
   }
-  return c10::DispatchKeySet();
+  return false;
 }
 
-inline c10::DispatchKeySet getKeySet(const TensorList& t_list) {
-  auto out = DispatchKeySet();
+inline bool has_dynamic_shape(const TensorList& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
+    if (has_dynamic_shape(t_list[i])) return true;
   }
-  return out;
+  return false;
 }
 
-inline c10::DispatchKeySet getKeySet(const c10::List<Tensor>& t_list) {
-  auto out = DispatchKeySet();
+inline bool has_dynamic_shape(const c10::List<Tensor>& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
+    if (has_dynamic_shape(t_list[i])) return true;
   }
-  return out;
+  return false;
 }
 
-inline c10::DispatchKeySet getKeySet(const c10::List<c10::optional<Tensor>>& t_list) {
-  auto out = DispatchKeySet();
+inline bool has_dynamic_shape(const c10::List<c10::optional<Tensor>>& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
-    out = out | getKeySet(t_list[i]);
+    if (has_dynamic_shape(t_list[i])) return true;
   }
-  return out;
+  return false;
 }
-
 
 ${func_definitions}
 

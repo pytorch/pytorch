@@ -9,6 +9,12 @@
 
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_to_copy.h>
+#endif
+
 namespace at {
 
 void FunctionalTensorWrapper::set_constructor_metadata() {
@@ -22,6 +28,13 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   if (!value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     refresh_numel();
     refresh_contiguous();
+  } else {
+    // Directly reflecting the sym sizes + strides on the wrapper isn't too important,
+    // because sym_sizes_custom() and sym_strides_custom() are overridden
+    // to plumb to the inner tensor.
+    // However, it's important that has_symbolic_sizes_strides_ is properly set on the wrapper,
+    // because that tells functionalization to turn off meta tensor kernels.
+    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
   }
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
@@ -218,7 +231,9 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
-    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
+    // and we want _to_copy() to show up in the graph, not the composite .to() operator
+    // (this can happen if autograd has already run by the time we enter this code)
+    value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
 
@@ -532,60 +547,42 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
+// For lists that have a mix of functional and nonfunctional tensors,
+// functionalization machinery should just unwrap the functional wrappers
+// and leave the ordinary tensors alone.
 bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
