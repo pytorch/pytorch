@@ -852,7 +852,7 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl())
                             : py::cast(si.expect_int());
   } else {
     AT_ERROR(

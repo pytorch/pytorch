@@ -1106,6 +1106,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/lazy/core/*.h',
                 'include/torch/csrc/lazy/core/internal_ops/*.h',
                 'include/torch/csrc/lazy/core/ops/*.h',
+                'include/torch/csrc/lazy/ts_backend/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
