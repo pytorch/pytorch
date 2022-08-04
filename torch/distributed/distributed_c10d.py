@@ -2034,15 +2034,22 @@ def scatter_object_list(
     scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
 
 
-def all_gather(tensor_list, tensor, group=None, async_op=False):
+def all_gather(output, tensor, group=None, async_op=False):
     """
-    Gathers tensors from the whole group in a list.
+    Gathers tensors from the whole group in a list or into a larger tensor.
 
     Complex tensors are supported.
 
     Args:
-        tensor_list (list[Tensor]): Output list. It should contain
-            correctly-sized tensors to be used for output of the collective.
+        output (list[Tensor] or Tensor): A list of tensors or a single tensor
+            to receive the all-gather result. When `output` is a list of
+            tensors, each tensor must have the same size as the corresponding
+            input tensor. When `output` is a single tensor, it must be
+            appropriately sized to have one of the following two forms:
+            (i) a concatenation of the input tensors along the primary
+            dimension, see ``torch.cat()``;
+            (ii) a stack of the input tensors along the primary dimension,
+            see ``torch.stack()``.
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -2053,6 +2060,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # Output in list form
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
@@ -2066,6 +2074,29 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> tensor_list
         [tensor([1, 2]), tensor([3, 4])] # Rank 0
         [tensor([1, 2]), tensor([3, 4])] # Rank 1
+
+        >>> # Output in tensor form
+        >>> # All tensors below are of torch.int64 dtype and on CUDA devices.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor_in = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
+        >>> tensor_in
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
+        >>> # Output in concatenation form
+        >>> tensor_out = torch.zeros(world_size * 2, dtype=torch.int64, device=device)
+        >>> dist.all_gather(tensor_out, tensor_in)
+        >>> tensor_out
+        tensor([1, 2, 3, 4], device='cuda:0') # Rank 0
+        tensor([1, 2, 3, 4], device='cuda:1') # Rank 1
+        >>> # Output in stack form
+        >>> tensor_out2 = torch.zeros(world_size, 2, dtype=torch.int64, device=device)
+        >>> dist.all_gather(tensor_out2, tensor_in)
+        >>> tensor_out2
+        tensor([[1, 2],
+                [3, 4]], device='cuda:0') # Rank 0
+        tensor([[1, 2],
+                [3, 4]], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
@@ -2081,20 +2112,23 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
         [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
 
-    """
-    # `tensor_list` would be understood as "tensor or list."
-    # If it is a single tensor, we would route it to the _all_gather_base implementation.
-    if isinstance(tensor_list, torch.Tensor):
-        return _all_gather_base(tensor_list, tensor, group, async_op)
+    .. warning::
+        Using a single tensor as `output` is not supported by the Gloo backend.
 
-    _check_tensor_list(tensor_list, "tensor_list")
+    """
+    # `output` can be a single tensor or a list of tensor.
+    # If it is a single tensor, we route it to the _all_gather_base implementation.
+    if isinstance(output, torch.Tensor):
+        return _all_gather_base(output, tensor, group, async_op)
+
+    _check_tensor_list(output, "output")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather")
         return
 
     tensor_list = [
-        t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list
+        t if not t.is_complex() else torch.view_as_real(t) for t in output
     ]
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
