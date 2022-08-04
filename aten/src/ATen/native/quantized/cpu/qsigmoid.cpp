@@ -106,7 +106,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
     // See https://stackoverflow.com/a/34448562/3606192 for potential
     // optimizations
-    double output_scale = 0.00390625;  // 1.0 / 2^8
+    double output_scale = 0.00392157;  // 1.0 / (2^8 -1)
     int64_t output_zero_point = 0;
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
