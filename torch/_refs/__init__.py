@@ -204,6 +204,7 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "meshgrid",
     "narrow",
     "native_layer_norm",
     "permute",
@@ -3326,6 +3327,82 @@ def logspace(
     return prims.to_dtype(torch.pow(base, ret), dtype)
 
 
+@overload
+def meshgrid(tensors: Sequence[TensorLikeType], indexing: str):
+    pass
+
+
+@overload
+def meshgrid(*tensors: TensorLikeType, indexing: str):
+    pass
+
+
+@register_decomposition(torch.ops.aten.meshgrid)
+def meshgrid(
+    *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
+    indexing: str,
+) -> List[TensorLikeType]:
+    # This ref simultaneously handles two overloads (see stubs above)
+    # The `indexing` argument is currently optional for torch.meshgrid, but we
+    # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
+    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+        assert len(tensors) == 1
+        tensors = tuple(tensors[0])
+
+    check(
+        py_all(isinstance(a, TensorLike) for a in tensors),
+        lambda: "meshgrid expects its inputs to be tensors",
+    )
+
+    check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
+
+    for i in range(len(tensors) - 1):
+        check(
+            tensors[i].dtype == tensors[i + 1].dtype,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same dtype",
+        )
+        check(
+            tensors[i].device == tensors[i + 1].device,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same device",
+        )
+
+    swap_first_and_second_tensors = False
+    if indexing == "xy":
+        swap_first_and_second_tensors = len(tensors) >= 2
+        if swap_first_and_second_tensors:
+            tensors = (tensors[1], tensors[0], *tensors[2:])
+    else:
+        check(
+            indexing == "ij",
+            lambda: (
+                'torch.meshgrid: indexing must be one of "xy" or "ij", '
+                f"but received: {indexing}"
+            ),
+        )
+
+    result_shape: List[int] = []
+    for t in tensors:
+        assert isinstance(t, TensorLike)  # mypy
+        check(
+            t.ndim == 0 or t.ndim == 1,
+            lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",
+        )
+        result_shape.append(t.numel())
+
+    grids: List[TensorLikeType] = []
+    for i, t in enumerate(tensors):
+        assert isinstance(t, TensorLike)  # mypy
+        if t.ndim == 0:
+            t = t.view((1,))
+        grids.append(prims.broadcast_in_dim(t, result_shape, (i,)))
+
+    if swap_first_and_second_tensors:
+        # Swap outputs if we originally swapped at the beginning
+        grids[0], grids[1] = grids[1], grids[0]
+
+    return grids
+
+
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 @register_decomposition(torch.ops.aten.empty_strided)
 def empty_strided(
@@ -3427,6 +3504,9 @@ def uniform(
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
 
 
+@register_decomposition(
+    [torch.ops.aten.masked_fill.Scalar, torch.ops.aten.masked_fill.Tensor]
+)
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
@@ -3439,7 +3519,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
+        # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
+        check(
+            a.device.type == "cuda" or value.device == a.device,
+            lambda: "Expected `value` to be on same device as `a`",
+        )
         value_type = utils.dtype_to_type(value.dtype)
+        if utils.is_cpu_scalar_tensor(value):
+            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -3454,10 +3541,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        return where(mask, python_type(value), a)
+        return torch.where(mask, python_type(value), a)
 
     assert isinstance(value, TensorLike)
-    return where(mask, prims.to_dtype(value, a.dtype), a)
+    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # CompositeImplicitAutograd - don't register decomp
