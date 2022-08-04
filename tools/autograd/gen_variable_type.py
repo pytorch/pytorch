@@ -804,8 +804,11 @@ def gen_variable_type_func(
             wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
                 unqual_operator_name_with_overload=f.func.name
             )
-        elif fn.info:
-            for key, _ in fn.info.items():
+            result["type_derived_method_definitions_Default"] = [type_definition]
+            result["wrapper_registrations_Default"] = [wrapper_registration]
+        else:
+            if not fn.info:
+                key = 'Default'
                 type_definition = METHOD_DEFINITION.substitute(
                     return_type=cpp.returns_type(f.func.returns).cpp_type(),
                     type_wrapper_name=type_wrapper_name(f, key=key),
@@ -813,10 +816,17 @@ def gen_variable_type_func(
                     formals=formals,
                 )
                 wrapper_registration = gen_wrapper_registration(f, key)
-                result[f"type_derived_method_definitions_{key}"] = [type_definition]
-                result[f"wrapper_registrations_{key}"] = [wrapper_registration]
-        else:
-            pass
+            else:
+                for key, _ in fn.info.items():
+                    type_definition = METHOD_DEFINITION.substitute(
+                        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                        type_wrapper_name=type_wrapper_name(f, key=key),
+                        type_definition_body=emit_body(fn, key=key),
+                        formals=formals,
+                    )
+                    wrapper_registration = gen_wrapper_registration(f, key)
+            result[f"type_derived_method_definitions_{key}"] = [type_definition]
+            result[f"wrapper_registrations_{key}"] = [wrapper_registration]
     # See Note [Manual Backend kernels]
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
     # If you want to register a kernel to Autograd, you must make the op abstract.
@@ -842,8 +852,8 @@ def emit_body(
 ) -> List[str]:
     assert dispatch_strategy(fn) == "use_derived"
     f = fn.func
-    info = fn.info[key]
-    fw_derivatives = fn.fw_derivatives.get(key, [])
+    info = fn.info[key] if fn.info else fn.info
+    fw_derivatives = fn.fw_derivatives.get(key, []) if fn.fw_derivatives else []
 
     name = cpp.name(f.func)
     inplace = f.func.kind() == SchemaKind.inplace

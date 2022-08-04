@@ -697,8 +697,6 @@ def create_differentiability_info(
             output_differentiability_conditions=output_differentiability_conditions,
         )
 
-    if defn_name == "abs":
-        print(canonical.func)
     return canonical.func, diffinfo_dict
 
 
