@@ -945,19 +945,19 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
 
   // if is_wrapped_scalar(zero_dim)
   if (zero_dim.is_coalesced()) {
-    const auto dense_vals = extract_vals_from_wrapped_scalar(zero_dim);
-    return _mul_dense_sparse_out(dense_vals, other, r);
+    const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim);
+    return _mul_dense_sparse_out(scalar_val, other, r);
   }
   // Here zero_dim is not a wrapped scalar, so we test other.
   if (is_wrapped_scalar(other)) {
-    const auto dense_vals = extract_vals_from_wrapped_scalar(other);
-    return _mul_dense_sparse_out(dense_vals, zero_dim, r);
+    const auto scalar_val = extract_vals_from_wrapped_scalar(other);
+    return _mul_dense_sparse_out(scalar_val, zero_dim, r);
   }
   // Neither of inputs is a wrapped scalar, but zero_dim
   // is at least 0-dim, so we coalesce it to convert to
   // scalar.
-  const auto dense_vals = extract_vals_from_wrapped_scalar(zero_dim.coalesce());
-  return _mul_dense_sparse_out(dense_vals, other, r);
+  const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim.coalesce());
+  return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
