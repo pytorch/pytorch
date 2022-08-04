@@ -245,7 +245,7 @@ struct BroadcastOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0))->template as<TensorView>();
+    auto arg = fd.getFusionState(args_.at(0))->template as<NvfTensorView>();
 
     const auto arg_ndims = arg->domain()->noReductions().size();
     TORCH_CHECK(
@@ -367,7 +367,7 @@ struct ConstantRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    NvfVal* output = IrBuilder::create<ExprType>(value_);
+    NvfVal* output = NvfIrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs_.at(0), output);
   }
 
@@ -468,7 +468,7 @@ struct InputTensorRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto tv = TensorViewBuilder()
+    auto tv = NvfTensorViewBuilder()
                   .ndims(symbolic_sizes_.size())
                   .contiguity(contiguous_info_)
                   .shape(symbolic_sizes_)
@@ -643,13 +643,13 @@ struct ScalarRecord : RecordFunctor {
   virtual void operator()(FusionDefinition& fd) final {
     NvfVal* output = nullptr;
     if (dtype_ == NvfDataType::Double) {
-      output = IrBuilder::create<torch::jit::fuser::cuda::Double>();
+      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Double>();
     } else if (dtype_ == NvfDataType::ComplexDouble) {
-      output = IrBuilder::create<torch::jit::fuser::cuda::ComplexDouble>();
+      output = NvfIrBuilder::create<torch::jit::fuser::cuda::ComplexDouble>();
     } else if (dtype_ == NvfDataType::Bool) {
-      output = IrBuilder::create<torch::jit::fuser::cuda::Bool>();
+      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Bool>();
     } else if (dtype_ == NvfDataType::Int) {
-      output = IrBuilder::create<torch::jit::fuser::cuda::Int>();
+      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Int>();
     } else {
       TORCH_CHECK(false, "Dtype is not supported:", dtype_);
     }

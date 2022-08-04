@@ -1,15 +1,16 @@
 
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
-using namespace torch::jit::fuser::cuda;
+using NvfFusionExecutorCache = torch::jit::fuser::cuda::FusionExecutorCache;
+using NvfFusion = torch::jit::fuser::cuda::Fusion;
 
 namespace nvfuser {
 
 class FusionOwner {
  public:
-  FusionOwner() : executor_cache_(std::make_unique<Fusion>()) {}
+  FusionOwner() : executor_cache_(std::make_unique<NvfFusion>()) {}
 
   // Non-copyable
   FusionOwner(const FusionOwner&) = delete;
@@ -18,7 +19,7 @@ class FusionOwner {
   std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs) {
     return executor_cache_.runFusionWithInputs(inputs);
   }
-  Fusion* fusionPtr() {
+  NvfFusion* fusionPtr() {
     return executor_cache_.fusion();
   }
 
@@ -30,7 +31,7 @@ class FusionOwner {
   }
 
  private:
-  FusionExecutorCache executor_cache_;
+  NvfFusionExecutorCache executor_cache_;
 };
 
 } // namespace nvfuser

@@ -1,12 +1,13 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_owner.h>
 
 //! nvFuser Fusion IR Types
 using NvfDataType = torch::jit::fuser::cuda::DataType;
 using NvfFusion = torch::jit::fuser::cuda::Fusion;
+using NvfFusionGuard = torch::jit::fuser::cuda::FusionGuard;
+using NvfIrBuilder = torch::jit::fuser::cuda::IrBuilder;
 using NvfTensorView = torch::jit::fuser::cuda::TensorView;
+using NvfTensorViewBuilder = torch::jit::fuser::cuda::TensorViewBuilder;
 using NvfVal = torch::jit::fuser::cuda::Val;
 
 namespace nvfuser {

@@ -13,8 +13,8 @@ FusionDefinition::FusionDefinition(FusionOwner* fusion_owner)
       ops(this) {}
 
 FusionDefinition* FusionDefinition::enter() {
-  prev_fusion_ = FusionGuard::getCurFusion();
-  FusionGuard::setCurFusion(fusionPtr());
+  prev_fusion_ = NvfFusionGuard::getCurFusion();
+  NvfFusionGuard::setCurFusion(fusionPtr());
   return this;
 }
 void FusionDefinition::exit() {
@@ -24,7 +24,7 @@ void FusionDefinition::exit() {
     (*functor)(*this);
   }
 
-  FusionGuard::setCurFusion(prev_fusion_);
+  NvfFusionGuard::setCurFusion(prev_fusion_);
   prev_fusion_ = nullptr;
 }
 
@@ -56,7 +56,7 @@ void FusionDefinition::setFusionState(size_t index, NvfVal* val) {
   fusion_state_.at(index) = val;
 }
 
-Fusion* FusionDefinition::fusionPtr() {
+NvfFusion* FusionDefinition::fusionPtr() {
   return fusion_owner_->fusionPtr();
 }
 
