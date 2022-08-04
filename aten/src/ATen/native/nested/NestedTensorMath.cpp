@@ -96,10 +96,6 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-inline at::Tensor get_buffer(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
 std::vector<at::Tensor> NestedTensor_unbind(
     const at::Tensor& self,
     int64_t dim) {
