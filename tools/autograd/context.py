@@ -16,3 +16,14 @@ def with_native_function_with_differentiability_info(
             return func(f)
 
     return wrapper
+
+
+def with_native_function_with_differentiability_info_and_key(
+    func: Callable[[NFWDI, str], T]
+) -> Callable[[NFWDI, str], T]:
+    @functools.wraps(func)
+    def wrapper(f: NFWDI, key: str) -> T:
+        with native_function_manager(f.func):
+            return func(f, key)
+
+    return wrapper

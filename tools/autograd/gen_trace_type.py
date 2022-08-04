@@ -458,11 +458,15 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 )
 
 
-def type_wrapper_name(f: NativeFunction) -> str:
+def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
     if f.func.name.overload_name:
-        return f"{cpp.name(f.func)}_{f.func.name.overload_name}"
+        name = f"{cpp.name(f.func)}_{f.func.name.overload_name}"
     else:
-        return cpp.name(f.func)
+        name = cpp.name(f.func)
+
+    if key != "Default":
+        name = name + f"_{key}"
+    return name
 
 
 @with_native_function

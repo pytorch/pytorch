@@ -3,6 +3,8 @@
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 import re
+
+import sys
 from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
@@ -46,6 +48,8 @@ from torchgen.model import (
 )
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
 
+sys.stdout = open("output3.txt", "w+")
+
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 # This function directly adds derivative entries for {view}_copy variants of each view op.
@@ -53,29 +57,43 @@ _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 # we generate them here instead of duplicating them in the yaml.
 # See Note [Codegen'd {view}_copy Operators]
 def add_view_copy_derivatives(
-    infos: List[DifferentiabilityInfo], view_groups: List[NativeFunctionsViewGroup]
-) -> List[DifferentiabilityInfo]:
+    infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    view_groups: List[NativeFunctionsViewGroup],
+) -> None:
     # Get the map from each view op's name to its corresponding view group
     view_name_to_group: Dict[OperatorName, NativeFunctionsViewGroup] = {
         g.view.func.name: g for g in view_groups
     }
 
-    view_copy_differentiability_infos = []
-    for info in infos:
-        maybe_view_group = view_name_to_group.get(info.func.func.name, None)
-        if maybe_view_group is not None and maybe_view_group.view_copy is not None:
-            view_copy_info = info.create_view_copy_from_view_derivative(
-                maybe_view_group
-            )
-            if view_copy_info is not None:
-                view_copy_differentiability_infos.append(view_copy_info)
+    view_infos = dict()
 
-    return view_copy_differentiability_infos
+    for name, info_dispatch_dict in infos.items():
+        # maybe_view_group only needs to be calculated once per info_dispatch_dict
+        maybe_view_group = None
+        fn_schema = None
+        view_copy_differentiability_infos = dict()
+        for dispatch_key, info in info_dispatch_dict.items():
+            if maybe_view_group is None:
+                maybe_view_group = view_name_to_group.get(info.func.func.name, None)
+            if maybe_view_group is not None and maybe_view_group.view_copy is not None:
+                view_copy_info = info.create_view_copy_from_view_derivative(
+                    maybe_view_group
+                )
+                if view_copy_info is not None:
+                    if fn_schema is None:
+                        fn_schema = view_copy_info.func.func
+                    view_copy_differentiability_infos[dispatch_key] = view_copy_info
+            else:
+                break
+        if len(view_copy_differentiability_infos) > 0:
+            view_infos[fn_schema] = view_copy_differentiability_infos
+
+    infos.update(view_infos)
 
 
 def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
-) -> Sequence[DifferentiabilityInfo]:
+) -> Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
@@ -118,13 +136,21 @@ def load_derivatives(
         # disambiguate them with a numeric suffix.
         op_counter = Counter[str]()
 
-        infos = [
-            create_differentiability_info(
-                defn, functions_by_signature, functions_by_schema, op_counter
+        # FIXME: change infos to a Dict[Key] --> Dict[DifferentiabilityInfo]
+        # maybe could be List[DifferentiabilityInfo] and add key field to DifferentiabilityInfo
+        # or alternatively DifferentiabilityInfoWithKey
+        infos = dict()
+        for defn_dict in definitions:
+            # key should perhaps be just the name and not the signature
+            if "Dispatch" not in defn_dict:
+                specification = defn_dict.pop("name")
+                defn_dict = {"name": specification, "Dispatch": {"Default": defn_dict}}
+            name, per_dispatch_diffinfos = create_differentiability_info(
+                defn_dict, functions_by_signature, functions_by_schema, op_counter
             )
-            for defn in definitions
-        ]
-        infos += add_view_copy_derivatives(infos, view_groups)
+            infos[name] = per_dispatch_diffinfos
+
+        add_view_copy_derivatives(infos, view_groups)
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
@@ -388,11 +414,11 @@ def is_forward_derivative_definition(
 
 
 def create_differentiability_info(
-    defn: Dict[Any, Any],
+    defn_dict: Dict[Any, Any],
     functions_by_signature: Dict[FunctionSchema, List[NativeFunction]],
     functions_by_schema: Dict[str, NativeFunction],
     op_counter: Counter[str],
-) -> DifferentiabilityInfo:
+) -> Tuple[FunctionSchema, Dict[str, DifferentiabilityInfo]]:
     """Processes a single entry `defn` in derivatives.yaml"""
 
     def canonical_function(
@@ -564,26 +590,8 @@ def create_differentiability_info(
         )
 
     # NB: Removes 'name' from defn dictionary
-    specification = defn.pop("name")
+    specification = defn_dict.pop("name")
     defn_name, _ = split_name_params(specification)
-    # NB: Removes 'output_differentiability' from defn dictionary
-    #     `None` means all differentiable.
-    output_differentiability = defn.pop("output_differentiability", None)
-    output_differentiability_conditions = None
-    if output_differentiability and any(
-        [isinstance(diff, str) for diff in output_differentiability]
-    ):
-        if len(output_differentiability) != 1:
-            raise RuntimeError(
-                f"Not supported: for {specification},"
-                f"output_differentiability must either be "
-                f"List[bool] or a List[str] where each str is a "
-                f"condition. In the case where it is a condition, "
-                f"we only support single-output functions. "
-                f"Please file us an issue. "
-            )
-        output_differentiability_conditions = output_differentiability
-        output_differentiability = [True]
 
     schema_function = functions_by_schema.get(specification)
     if not schema_function:
@@ -627,40 +635,71 @@ def create_differentiability_info(
             "Please use a different name in native_functions.yaml."
         )
 
-    (
-        derivatives,
-        forward_derivatives,
-        args_with_derivatives,
-        non_differentiable_arg_names,
-        available_named_gradients,
-    ) = set_up_derivatives(canonical)
+    diffinfo_dict = dict()
+    for key, defn in defn_dict["Dispatch"].items():
+        # NB: Removes 'output_differentiability' from defn dictionary
+        #     `None` means all differentiable.
+        output_differentiability = defn.pop("output_differentiability", None)
+        output_differentiability_conditions = None
+        if output_differentiability and any(
+            [isinstance(diff, str) for diff in output_differentiability]
+        ):
+            if len(output_differentiability) != 1:
+                raise RuntimeError(
+                    f"Not supported: for {specification},"
+                    f"output_differentiability must either be "
+                    f"List[bool] or a List[str] where each str is a "
+                    f"condition. In the case where it is a condition, "
+                    f"we only support single-output functions. "
+                    f"Please file us an issue. "
+                )
+            output_differentiability_conditions = output_differentiability
+            output_differentiability = [True]
 
-    used_named_gradients: Set[str] = set()
-    for d in derivatives:
-        used_named_gradients |= d.named_gradients
+        (
+            derivatives,
+            forward_derivatives,
+            args_with_derivatives,
+            non_differentiable_arg_names,
+            available_named_gradients,
+        ) = set_up_derivatives(canonical)
 
-    # only assign an op name if we are actually going to calculate a derivative
-    op = None
-    if args_with_derivatives:
-        op_prefix = _create_op_prefix(defn_name)
-        op = f"{op_prefix}{op_counter[op_prefix]}"
-        op_counter[op_prefix] += 1
+        used_named_gradients: Set[str] = set()
+        for d in derivatives:
+            used_named_gradients |= d.named_gradients
 
-    return DifferentiabilityInfo(
-        name=defn_name,
-        func=canonical,
-        op=op,
-        derivatives=derivatives,
-        forward_derivatives=forward_derivatives,
-        all_saved_inputs=dedup_vars([v for d in derivatives for v in d.saved_inputs]),
-        all_saved_outputs=dedup_vars([v for d in derivatives for v in d.saved_outputs]),
-        available_named_gradients=available_named_gradients,
-        used_named_gradients=used_named_gradients,
-        args_with_derivatives=args_with_derivatives,
-        non_differentiable_arg_names=non_differentiable_arg_names,
-        output_differentiability=output_differentiability,
-        output_differentiability_conditions=output_differentiability_conditions,
-    )
+        # only assign an op name if we are actually going to calculate a derivative
+        op = None
+        if args_with_derivatives:
+            op_prefix = _create_op_prefix(defn_name)
+            if key != "Default":
+                op_prefix = op_prefix + key
+            op = f"{op_prefix}{op_counter[op_prefix]}"
+            op_counter[op_prefix] += 1
+
+        diffinfo_dict[key] = DifferentiabilityInfo(
+            name=defn_name,
+            func=canonical,
+            op=op,
+            derivatives=derivatives,
+            forward_derivatives=forward_derivatives,
+            all_saved_inputs=dedup_vars(
+                [v for d in derivatives for v in d.saved_inputs]
+            ),
+            all_saved_outputs=dedup_vars(
+                [v for d in derivatives for v in d.saved_outputs]
+            ),
+            available_named_gradients=available_named_gradients,
+            used_named_gradients=used_named_gradients,
+            args_with_derivatives=args_with_derivatives,
+            non_differentiable_arg_names=non_differentiable_arg_names,
+            output_differentiability=output_differentiability,
+            output_differentiability_conditions=output_differentiability_conditions,
+        )
+
+    if defn_name == "abs":
+        print(canonical.func)
+    return canonical.func, diffinfo_dict
 
 
 GRAD_INDEX_REGEX = r"(?:^|\W)grads\[(\d+)\]"
@@ -871,6 +910,7 @@ def saved_variables(
     return formula, tuple(saved)
 
 
+# TODO: this might be the part where we append the dispatchkey to the name
 def _create_op_prefix(name: str) -> str:
     """Takes a native function name converts to a op prefix name.
 
