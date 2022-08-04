@@ -929,7 +929,7 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
 }
 
 Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return narrow_copy(self, dim, start, sym_length.expect_int());
+  return self.narrow_copy(dim, start, sym_length.expect_int());
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -1263,6 +1263,17 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  // reshape has special autograd logic since it sometimes returns a view but sometimes does not
+  // we have to intercept here instead of using dispatcher
+  // otherwise we will see "autograd still running" kind of error in inference mode:
+  // * if we create a tensor in inference mode scope,
+  //   then pass it to a inference mode decorated function,
+  //   everything is fine
+  // * but if we create the input tensor not with inference mode,
+  //   then errors like "Cannot set version_counter for inference tensor" arise
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, proposed_shape);
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
@@ -2530,11 +2541,7 @@ static inline Tensor sparse_compressed_transpose(
       [&self]() { return self.row_indices(); });
 
   const auto n_batch_dim = compressed_inds.dim() - 1;
-  const auto n_dense_dim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
-      self.layout(),
-      "n_dense_dim",
-      [&]() { return self.values().dim() - n_batch_dim - 1; },
-      [&]() { return self.values().dim() - n_batch_dim - 3; });
+  const auto n_dense_dim = self.dim() - n_batch_dim - 2;
 
   // In theory it works, but missing to_dense coverage to test
   TORCH_CHECK(
@@ -2572,7 +2579,7 @@ static inline Tensor sparse_compressed_transpose(
     };
     const auto dim1_type = classify_dim(dim1);
     TORCH_CHECK(
-        classify_dim(dim1) == transpose_type,
+        dim1_type == transpose_type,
         "transpose(): can only transpose dimensions of the same type (Batch, Sparse, Dense), got ",
         dim0,
         "(",
@@ -2604,17 +2611,17 @@ static inline Tensor sparse_compressed_transpose(
     // NB: This code should work, but is untestable due to lack of support for
     // dense dimensions in to_dense. The Debug assert is present to emphasize
     // the fact that the block should not be possible to hit this code block
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    TORCH_INTERNAL_ASSERT(
         false, "transpose(): Shouldn't have reached this point");
     result_vals = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         self.layout(),
         "sparse_transpose",
-        // un-blocked: dense dims in values are 1 position to the right (nnz
-        // dim) in values
-        [&]() { return self.values().transpose(dim0 + 1, dim1 + 1); },
-        // blocked: dense dims in values are 3 positions to the right  (nnz +
-        // blockshape dims) in values
-        [&]() { return self.values().transpose(dim0 + 3, dim1 + 3); });
+        // un-blocked: 2 sparse dims map to single nnz dim, so dense dim0/1 are
+        // one position left
+        [&]() { return self.values().transpose(dim0 - 1, dim1 - 1); },
+        // blocked: 2 sparse dims map to 3 (nnz, ) + blocksize dims, so dense
+        // dim0/1 are one position right
+        [&]() { return self.values().transpose(dim0 + 1, dim1 + 1); });
   } else /*if (transpose_type == TransposeDim::Sparse) */ {
     // Flip the layout
     result_layout = [](const Layout& layout) {
@@ -3025,7 +3032,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
@@ -3064,8 +3071,12 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   return result;
 }
 
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+  return native::unflatten_impl(self, dim, sizes, c10::nullopt);
+}
+
 Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
-  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+  return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
