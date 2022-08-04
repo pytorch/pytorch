@@ -1,31 +1,53 @@
 #pragma once
 #include <memory>
 
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_owner.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
+//! nvFuser Fusion IR Types
+using NvfFusionExecutorCache = torch::jit::fuser::cuda::FusionExecutorCache;
+using NvfFusion = torch::jit::fuser::cuda::Fusion;
 
 namespace nvfuser {
 
-class FusionCacheEntry {
- private:
-  bool is_end;
-  std::unique_ptr<FusionOwner> fusion_owner_;
+struct RecordFunctor;
 
-  std::shared_ptr<RecordFunctor> record_;
+struct FusionCacheEntry {
+  FusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  FusionCacheEntry();
+
+  std::shared_ptr<RecordFunctor> record;
   std::unordered_map<RecordFunctor*, std::unique_ptr<FusionCacheEntry>>
-      record_hash_map_;
+      record_hash_map;
+
+  bool is_terminal;
+  std::unique_ptr<NvfFusionExecutorCache> fusion_executor_cache;
 };
 
 class FusionManager {
+ public:
+  FusionManager();
+ 
+  //! Copy and Assignment of the FusionManager is not supported 
+  FusionManager(const FusionManager&) = delete;
+  FusionManager& operator=(const FusionManager&) = delete;
 
-  c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(RecordFunctor* rec);
+  std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
+  void printIr() const;
+  void printKernel() const;
+
+  c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(RecordFunctor* rec) const;
   void createFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  void traverseFusionCache(std::shared_ptr<RecordFunctor> &rec);
 
  private:
+  NvfFusionExecutorCache* fusionExecutorCachePtr() const;
+  NvfFusion* fusionPtr() const;
+
   //! The fusion cache is implemented as a prefix tree of entries containing
   //! a Record representing a Fusion Definition line entry.
-  std::unique_ptr<FusionCacheEntry> fusion_cache_start_ptr_;
-  FusionCacheEntry* fuson_cache_current_ptr_;
+  std::unique_ptr<FusionCacheEntry> fusion_cache_start_;
+  FusionCacheEntry* fusion_cache_ptr_;
 };
 
 } // namespace nvfuser

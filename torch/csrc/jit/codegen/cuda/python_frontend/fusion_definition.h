@@ -4,6 +4,7 @@
 //! nvFuser Fusion IR Types
 using NvfDataType = torch::jit::fuser::cuda::DataType;
 using NvfFusion = torch::jit::fuser::cuda::Fusion;
+using NvfFusionExecutorCache = torch::jit::fuser::cuda::FusionExecutorCache;
 using NvfFusionGuard = torch::jit::fuser::cuda::FusionGuard;
 using NvfIrBuilder = torch::jit::fuser::cuda::IrBuilder;
 using NvfTensorView = torch::jit::fuser::cuda::TensorView;
