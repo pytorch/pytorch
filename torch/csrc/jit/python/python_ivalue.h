@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
