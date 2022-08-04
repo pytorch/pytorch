@@ -313,6 +313,10 @@ class MaskedTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        from .reductions import apply_reduction, is_reduction
+        if is_reduction(func):
+            return apply_reduction(func, *args, **kwargs)
+
         if func in [torch.Tensor.where, torch.where]:
             assert len(args) == 3
             assert len(kwargs) == 0
@@ -345,6 +349,11 @@ class MaskedTensor(torch.Tensor):
             return None
 
         func = func.overloadpacket
+
+        from .reductions import apply_reduction, is_reduction
+
+        if is_reduction(func):
+            return apply_reduction(func, *args, **kwargs)
 
         from .passthrough import apply_pass_through_fn, is_pass_through_fn
 
