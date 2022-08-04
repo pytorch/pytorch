@@ -21085,6 +21085,17 @@ python_ref_db = [
         supports_out=True,
     ),
     PythonRefInfo(
+        "_refs.nn.functional.pairwise_distance",
+        torch_opinfo_name="nn.functional.pairwise_distance",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.pdist",
+        torch_opinfo_name="nn.functional.pdist",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
     ),
