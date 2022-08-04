@@ -810,7 +810,7 @@ class TestProfilerTree(TestCase):
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
                           cudaLaunchKernel
-                          void ..._kernel<...>(...)
+                            void ..._kernel<...>(...)
                           [memory]
                           aten::expand
                             aten::as_strided
@@ -841,7 +841,7 @@ class TestProfilerTree(TestCase):
                               aten::as_strided
                           aten::mm
                             cudaLaunchKernel
-                              std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, float, float, float, float, false, true, false, false, 7, false, cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
+                              void ..._kernel<...>(...)
                             [memory]
                           aten::t
                             aten::transpose
