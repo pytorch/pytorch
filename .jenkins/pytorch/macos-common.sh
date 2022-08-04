@@ -10,7 +10,7 @@ sysctl -a | grep machdep.cpu
 # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
   retry conda install -y \
-    numpy \
+    numpy=1.22 \
     pyyaml \
     setuptools \
     cmake \
