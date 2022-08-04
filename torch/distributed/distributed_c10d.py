@@ -2050,6 +2050,7 @@ def all_gather(output, tensor, group=None, async_op=False):
             dimension, see ``torch.cat()``;
             (ii) a stack of the input tensors along the primary dimension,
             see ``torch.stack()``.
+            Examples below may better explain the supported output forms.
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
