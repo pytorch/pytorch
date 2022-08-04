@@ -1,7 +1,7 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Tuple
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -322,7 +322,6 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
                            preserve_rng_state=preserve)
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
-tmp = []
 def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
     """Checkpointining without re-entrant autograd
     Args:
@@ -360,7 +359,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
     # sure that this is the only object having an owning reference to ensure that
     # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
     # data is cleared.
-    storage: Dict[Holder, torch.Tensor] = weakref.WeakKeyDictionary()
+    storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
     weak_holder_list = []
 
     def pack(x):
