@@ -3668,11 +3668,36 @@ class TestSparse(TestSparseBase):
             # check scalar multiplication
             s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             for scalar in (True, 1, 1.0):
-                res_sparse = s * scalar
+                res_sparse_right = s * scalar
+                res_sparse_left = scalar * s
                 res_dense = s.to_dense() * scalar
                 # check correctness and dtype
-                self.assertEqual(s.to(res_sparse.dtype), res_sparse)
-                self.assertEqual(res_sparse.dtype, res_dense.dtype)
+                self.assertEqual(s.to(res_sparse_right.dtype), res_sparse_right)
+                self.assertEqual(res_sparse_right, res_sparse_left)
+                self.assertEqual(res_sparse_right.dtype, res_dense.dtype)
+                self.assertEqual(res_sparse_left.dtype, res_dense.dtype)
+                # check scalar as 0-dim sparse tensor
+                tscalar = torch.tensor(scalar, device=device)
+                sscalar = tscalar.to_sparse()
+                res_sparse_right = s * sscalar
+                res_sparse_left = sscalar * s
+                self.assertEqual(res_sparse_right, res_sparse_left)
+                self.assertEqual(s.to(res_sparse_right.dtype), res_sparse_right)
+
+            # check non-coalesced 0-dim scalar
+            # we skip torch.bool because for such tensors
+            # coalesce.to_dense != to_dense
+            if dtype == torch.bool:
+                return
+
+            for scalar_dtype in (int, float):
+                scalar = scalar_dtype(1)
+                idx = torch.tensor([], device=device).reshape(0, 2)
+                val = torch.tensor([scalar, scalar], device=device)
+                sscalar = torch.sparse_coo_tensor(idx, val, ())
+                res_dense = s.to_dense() * sscalar.to_dense()
+                self.assertEqual((s * sscalar).to_dense(), res_dense)
+                self.assertEqual((sscalar * s).to_dense(), res_dense)
 
             # Case 1: sparse broadcasts over dense
             s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]

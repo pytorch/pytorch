@@ -147,7 +147,7 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
-Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask) {
+Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
     TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
     TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
     TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
@@ -165,7 +165,8 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask)
     sizes = sizes.cumsum(1).select(1, L - 1);
     nums = nums.to(sizes.options());
 
-    TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
+    if (mask_check)
+      TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
 
     sizes = sizes.reshape({N, 1});
     // N, ([d1=D, d2=D, ... dN=D])
