@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 

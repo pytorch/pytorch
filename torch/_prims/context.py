@@ -12,6 +12,7 @@ import torch._refs.special
 import torch.overrides
 
 from torch._prims_common import torch_function_passthrough
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 
 
 @functools.lru_cache(None)
@@ -68,15 +69,18 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.* functions and Tensor methods to
     use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
 
-    >>> with TorchRefsMode.push():
+    >>> with TorchRefsMode():
     ...     torch.add(x, y)  # calls torch._refs.add(x, y)
 
     By default, this context manager will fall back on the torch.* if the
     ref does not exist; set strict=True to error if this occurs.
+    If the ref exists we still would like to fall back on the torch.* sometimes,
+    this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False):
+    def __init__(self, strict=False, should_fallback_fn=lambda *_: False):
         self.strict = strict
+        self.should_fallback_fn = should_fallback_fn
 
     def __torch_function__(
         self,
@@ -93,6 +97,9 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
+            # If the ref exists query whether we should use it or not
+            if self.should_fallback_fn(self, func, args, kwargs):
+                return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
                 return func(*args, **kwargs)
@@ -101,3 +108,28 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
                 f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
             )
         return orig_func(*args, **kwargs)
+
+
+def _is_node_supported_nvfuser(node):
+    return (
+        node.op == "call_function"
+        and getattr(node.target, "impl_nvfuser", None) is not None
+    )
+
+
+def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
+    with torch.overrides.enable_torch_function_mode(
+        torch_function_mode, replace=torch_function_mode.inner
+    ):
+        gm = get_isolated_graphmodule(func, args, kwargs)
+
+    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    any_unsupported = any(
+        not _is_node_supported_nvfuser(node) for node in call_function_nodes
+    )
+    return any_unsupported
+
+
+TorchRefsNvfuserCapabilityMode = functools.partial(
+    TorchRefsMode, should_fallback_fn=_is_func_unsupported_nvfuser
+)

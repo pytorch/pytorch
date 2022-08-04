@@ -182,51 +182,7 @@ PythonTracerBase& PythonTracerBase::get() {
 }
 } // namespace python_tracer
 
-#define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(                                                  \
-    method_name,                                                         \
-    torch_op_field,                                                      \
-    backend_field,                                                       \
-    allocation_field,                                                    \
-    oom_field,                                                           \
-    py_field,                                                            \
-    py_c_field,                                                          \
-    kineto_field)                                                        \
-  OUT_T(method_name) Result::method_name() const {                       \
-    using out_t = OUT_T(method_name);                                    \
-    return c10::visit(                                                   \
-        c10::overloaded(                                                 \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {     \
-              (void)e;                                                   \
-              return torch_op_field;                                     \
-            },                                                           \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t {     \
-              (void)e;                                                   \
-              return backend_field;                                      \
-            },                                                           \
-            [&](const ExtraFields<EventType::Allocation>& e) -> out_t {  \
-              (void)e;                                                   \
-              return allocation_field;                                   \
-            },                                                           \
-            [&](const ExtraFields<EventType::OutOfMemory>& e) -> out_t { \
-              (void)e;                                                   \
-              return oom_field;                                          \
-            },                                                           \
-            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {      \
-              (void)e;                                                   \
-              return py_field;                                           \
-            },                                                           \
-            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {     \
-              (void)e;                                                   \
-              return py_c_field;                                         \
-            },                                                           \
-            [&](const ExtraFields<EventType::Kineto>& e) -> out_t {      \
-              (void)e;                                                   \
-              return kineto_field;                                       \
-            }),                                                          \
-        extra_fields_);                                                  \
-  }
-
+namespace {
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
   if (e.module_.has_value()) {
     return fmt::format(
@@ -239,14 +195,13 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-namespace {
 auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
       ? libkineto::ActivityType::USER_ANNOTATION
       : libkineto::ActivityType::CPU_OP;
 }
 
-auto torchOpEndNS(
+int64_t torchOpEndNS(
     const ExtraFields<EventType::TorchOp>& e,
     const bool finished,
     const std::weak_ptr<Result>& parent) {
@@ -270,62 +225,64 @@ auto kinetoEventCorrelationID(
 }
 } // namespace
 
-DEFINE_VISITOR(
-    name,
-    e.name_,
-    e.name_,
-    "[memory]",
-    "[OutOfMemory]",
-    toString(e),
-    e.function_name_.str(),
-    e.name_);
-DEFINE_VISITOR(
-    kinetoType,
-    scopeToType(e.scope_),
-    scopeToType(e.scope_),
-    libkineto::ActivityType::CPU_INSTANT_EVENT,
-    libkineto::ActivityType::CPU_INSTANT_EVENT,
-    libkineto::ActivityType::PYTHON_FUNCTION,
-    libkineto::ActivityType::PYTHON_FUNCTION,
-    e.activity_type_);
-DEFINE_VISITOR(
-    correlationID,
-    e.correlation_id_,
-    0,
-    0,
-    0,
-    0,
-    0,
-    kinetoEventCorrelationID(e, parent_));
-DEFINE_VISITOR(
-    endTimeNS,
-    torchOpEndNS(e, finished_, parent_),
-    e.end_time_us_ * 1000,
-    start_time_ns_,
-    start_time_ns_,
-    e.end_time_ns_,
-    e.end_time_ns_,
-    start_time_ns_ + e.duration_us_ * 1000);
-DEFINE_VISITOR(
-    endTID,
-    e.end_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_);
-DEFINE_VISITOR(
-    deviceType,
-    c10::DeviceType::CPU,
-    c10::DeviceType::CPU,
-    e.device_type_,
-    e.device_type_,
-    c10::DeviceType::CPU,
-    c10::DeviceType::CPU,
-    torch::autograd::profiler::deviceTypeFromActivity(e.activity_type_));
-#undef DEFINE_VISITOR
-#undef OUT_T
+#define ATTRIBUTE(event_type, expr)                  \
+  [&](const ExtraFields<EventType::event_type>& e) { \
+    (void)e;                                         \
+    return expr;                                     \
+  }
+
+std::string Result::name() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(Allocation, std::string("[memory]")),
+      ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
+      ATTRIBUTE(PyCall, toString(e)),
+      ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
+      [](const auto& e) -> std::string { return e.name_; }));
+}
+
+libkineto::ActivityType Result::kinetoType() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, scopeToType(e.scope_)),
+      ATTRIBUTE(Backend, scopeToType(e.scope_)),
+      ATTRIBUTE(Allocation, libkineto::ActivityType::CPU_INSTANT_EVENT),
+      ATTRIBUTE(OutOfMemory, libkineto::ActivityType::CPU_INSTANT_EVENT),
+      ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(PyCCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(Kineto, e.activity_type_)));
+}
+
+uint64_t Result::correlationID() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, e.correlation_id_),
+      ATTRIBUTE(Kineto, kinetoEventCorrelationID(e, parent_)),
+      [&](const auto&) -> uint64_t { return 0; }));
+}
+
+int64_t Result::endTimeNS() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
+      ATTRIBUTE(Backend, e.end_time_us_ * 1000),
+      ATTRIBUTE(Allocation, start_time_ns_),
+      ATTRIBUTE(OutOfMemory, start_time_ns_),
+      ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
+      [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
+}
+
+uint64_t Result::endTID() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, e.end_tid_),
+      [&](const auto&) -> uint64_t { return start_tid_; }));
+}
+
+c10::DeviceType Result::deviceType() const {
+  using torch::autograd::profiler::deviceTypeFromActivity;
+  return visit(c10::overloaded(
+      ATTRIBUTE(Allocation, e.device_type_),
+      ATTRIBUTE(OutOfMemory, e.device_type_),
+      ATTRIBUTE(Kineto, deviceTypeFromActivity(e.activity_type_)),
+      [&](const auto&) { return c10::DeviceType::CPU; }));
+}
+#undef ATTRIBUTE
 
 template <typename T, size_t ChunkSize>
 ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
@@ -656,13 +613,11 @@ class TransferEvents {
       auto e = toResult(activity);
       const auto* linked_activity = activity->linkedActivity();
       if (e && linked_activity) {
-        c10::visit(
-            c10::overloaded(
-                [&](ExtraFields<EventType::Kineto>& i) {
-                  i.linked_activity_ = toResult(linked_activity);
-                },
-                [](auto&) { TORCH_INTERNAL_ASSERT(false); }),
-            e->extra_fields_);
+        e->visit(c10::overloaded(
+            [&](ExtraFields<EventType::Kineto>& i) {
+              i.linked_activity_ = toResult(linked_activity);
+            },
+            [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
       }
     }
   }
@@ -670,12 +625,13 @@ class TransferEvents {
   void setKinetoTID(
       std::shared_ptr<Result>& r,
       std::shared_ptr<Result> parent) {
-    auto f = [&](ExtraFields<EventType::Kineto>& i) {
-      TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
-      r->start_tid_ =
-          parent ? parent->start_tid_ : at::RecordFunction::currentThreadId();
-    };
-    c10::visit(c10::overloaded(f, [](auto&) {}), r->extra_fields_);
+    r->visit(c10::overloaded(
+        [&](ExtraFields<EventType::Kineto>& i) {
+          TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
+          r->start_tid_ = parent ? parent->start_tid_
+                                 : at::RecordFunction::currentThreadId();
+        },
+        [](auto&) {}));
 
     for (auto& child : r->children_) {
       setKinetoTID(child, r);
@@ -687,42 +643,44 @@ class TransferEvents {
     ska::flat_hash_map<int, std::shared_ptr<Result>> flow_map;
     for (auto& e : results_.get()) {
       TORCH_INTERNAL_ASSERT(e != nullptr);
-      auto f = [&](const ExtraFields<EventType::Kineto>& i) {
-        if (i.flow.type == libkineto::kLinkAsyncCpuGpu && i.flow.start) {
-          auto inserted = flow_map.insert({i.flow.id, e});
+      e->visit(c10::overloaded(
+          [&](const ExtraFields<EventType::Kineto>& i) {
+            if (i.flow.type == libkineto::kLinkAsyncCpuGpu && i.flow.start) {
+              auto inserted = flow_map.insert({i.flow.id, e});
 #ifdef USE_ROCM
-          if (inserted.second) {
-            TORCH_WARN_ONCE(
-                "ROCTracer produced duplicate flow start: ", i.flow.id);
-          }
+              if (inserted.second) {
+                TORCH_WARN_ONCE(
+                    "ROCTracer produced duplicate flow start: ", i.flow.id);
+              }
 #else // USE_ROCM
-          TORCH_INTERNAL_ASSERT(inserted.second);
+              TORCH_INTERNAL_ASSERT(inserted.second);
 #endif // USE_ROCM
-        }
-        TORCH_INTERNAL_ASSERT(e->parent_.expired());
-        e->parent_ = i.linked_activity_;
-      };
-      c10::visit(c10::overloaded(f, [](const auto&) {}), e->extra_fields_);
+            }
+            TORCH_INTERNAL_ASSERT(e->parent_.expired());
+            e->parent_ = i.linked_activity_;
+          },
+          [](const auto&) {}));
     }
 
     // Second pass
     for (auto& e : results_.get()) {
-      auto f = [&](const ExtraFields<EventType::Kineto>& i) {
-        // Flow takes priority over linked event.
-        const auto it = flow_map.find(i.flow.id);
-        if (it != flow_map.end() &&
-            i.flow.type == libkineto::kLinkAsyncCpuGpu && !i.flow.start) {
-          e->parent_ = it->second;
-        }
+      e->visit(c10::overloaded(
+          [&](const ExtraFields<EventType::Kineto>& i) {
+            // Flow takes priority over linked event.
+            const auto it = flow_map.find(i.flow.id);
+            if (it != flow_map.end() &&
+                i.flow.type == libkineto::kLinkAsyncCpuGpu && !i.flow.start) {
+              e->parent_ = it->second;
+            }
 
-        // If a parent was set we have to do some bookkeeping.
-        auto parent = e->parent_.lock();
-        if (parent) {
-          parent->children_.push_back(e);
-          mark_finished(e);
-        }
-      };
-      c10::visit(c10::overloaded(f, [](const auto&) {}), e->extra_fields_);
+            // If a parent was set we have to do some bookkeeping.
+            auto parent = e->parent_.lock();
+            if (parent) {
+              parent->children_.push_back(e);
+              mark_finished(e);
+            }
+          },
+          [](const auto&) {}));
     }
 
     // Set TIDs now that we have established lineage.
@@ -832,11 +790,9 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     auto parent_it = stacks.find(event->start_tid_);
     if (parent_it == stacks.end()) {
-      auto fwd_tid = c10::visit(
-          c10::overloaded(
-              [](const op_fields& i) { return i.forward_tid_; },
-              [](const auto&) -> uint64_t { return 0; }),
-          event->extra_fields_);
+      auto fwd_tid = event->visit(c10::overloaded(
+          [](const op_fields& i) { return i.forward_tid_; },
+          [](const auto&) -> uint64_t { return 0; }));
       if (fwd_tid) {
         parent_it = stacks.find(fwd_tid);
       }
