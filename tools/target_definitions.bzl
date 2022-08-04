@@ -564,7 +564,7 @@ def add_torch_libs():
         deps = [
             ":_C_impl",
             "//caffe2:flatbuffer_loader",
-            "//caffe2:flatbuffer_serializer",
+            "//caffe2:flatbuffer_serializer_jit",
         ],
     )
 

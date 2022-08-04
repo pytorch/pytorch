@@ -1703,7 +1703,7 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1767,7 +1767,7 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
+        name = "flatbuffers_serializer_jit",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
@@ -1785,7 +1785,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
+            ":flatbuffer_serializer_mobile",
             ":mobile_bytecode",
             ":torch_core",
             ":torch_mobile_module",
@@ -1799,7 +1799,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
+            ":flatbuffer_serializer_mobile",
             ":flatbuffer_serializer_jit",
         ],
     )
