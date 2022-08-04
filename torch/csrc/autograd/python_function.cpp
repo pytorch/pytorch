@@ -611,14 +611,16 @@ static void _append_subgraph(
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
   }
-  // Find node position in graph, all subsequent nodes after are added to
+  // Find node position in owning block, all subsequent nodes after are added to
   // subgraph
-  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  auto owning_block = node->owningBlock();
+  auto it = std::find(
+      owning_block->nodes().begin(), owning_block->nodes().end(), node);
   // Skip TupleUnpack node if created
   if (!unpack_output) {
     it++;
   }
-  for (it++; it != graph->nodes().end(); ++it) {
+  for (it++; it != owning_block->nodes().end(); ++it) {
     torch::jit::Node* node = *it;
     auto* clone_node =
         subgraph->insertNode(subgraph->createClone(node, value_map_func));
