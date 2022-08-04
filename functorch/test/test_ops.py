@@ -706,7 +706,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
-        xfail('linalg.eig'),
         xfail('complex'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('pinverse'),
