@@ -868,7 +868,7 @@ Tensor lu_factor_ex_jvp(
     const Tensor& pivs,
     const bool pivot);
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
+Tensor batch_norm_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
     const Tensor& weight_p,
