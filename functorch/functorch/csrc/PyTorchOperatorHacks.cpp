@@ -22,40 +22,9 @@ namespace at { namespace functorch {
 // or call data_ptr. We have some idea of how to fix these things in the long term
 // (e.g. functionalization for the in-place operations).
 
-// TODO: can replace with better conditional functionalization
-static Tensor value_selecting_reduction_backward_hack(
-    const Tensor& grad,
-    int64_t dim,
-    const Tensor& indices,
-    IntArrayRef sizes,
-    bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    auto grad_ = grad.unsqueeze(dim);
-    auto indices_ = indices.unsqueeze(dim);
-    return at::zeros(sizes, grad_.options()).scatter(dim, indices_, grad_);
-  }
-  return at::zeros(sizes, grad.options()).scatter(dim, indices, grad);
-}
-
 // TODO: upstream into core
 Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
-}
-
-// TODO: https://github.com/pytorch/pytorch/issues/69991
-Tensor frobenius_norm_dim_hack(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  if (dim.size() == 1 || dim.size() == 0) {
-    return at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()){
-      return at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      return at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
-  }
 }
 
 static optional<std::tuple<Tensor,int64_t>> unwrap(const Tensor& tensor) {
@@ -136,59 +105,6 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
     return output.add_(*bias);
   }
   return output;
-}
-
-Tensor nuclear_norm_dim_hack(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-
-  auto permutation = at::native::create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-  Tensor p = self.permute(permutation);
-  Tensor result = at::sum(at::linalg_svdvals(p), -1, keepdim);
-  if (keepdim) {
-    result = result.unsqueeze(-1);
-    auto permutation_reverse = at::native::create_reverse_permutation(permutation);
-    result = result.permute(permutation_reverse);
-  }
-  return result;
-}
-
-Tensor nuclear_norm_hack(const Tensor& self, bool keepdim) {
-  TORCH_CHECK(
-    self.dim() == 2,
-    "Expected a tensor with 2 dimensions, but got a tensor with ",
-    self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-
-  return nuclear_norm_dim_hack(self, {0, 1}, keepdim);
-}
-
-Tensor binary_cross_entropy_with_logits_backward_hack(
-    const Tensor& grad, const Tensor& input, const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
-
-  Tensor grad_input;
-  if (pos_weight.defined()) {
-    auto t = pos_weight.mul(target);
-    grad_input = t.add(1).sub_(target).mul(input.sigmoid()).sub_(t).mul(grad);
-  } else {
-    grad_input = (input.sigmoid() - target).mul(grad);
-  }
-
-  if (weight.defined()) {
-    grad_input.mul(weight);
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    return grad_input / input.numel();
-  }
-
-  return grad_input;
 }
 
 static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -373,11 +289,8 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
 } // dropout_hack
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
-  m.impl("value_selecting_reduction_backward", value_selecting_reduction_backward_hack);
   m.impl("index_select_backward", index_select_backward_hack);
-  m.impl("frobenius_norm.dim", frobenius_norm_dim_hack);
   m.impl("linear", linear_hack);
-  m.impl("binary_cross_entropy_with_logits_backward", binary_cross_entropy_with_logits_backward_hack);
   m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);
   m.impl("trace_backward", trace_backward_decomp);
 
@@ -390,9 +303,6 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("feature_dropout_", dropout_hack::feature_dropout_);
   m.impl("alpha_dropout_", dropout_hack::alpha_dropout_);
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
-
-  m.impl("nuclear_norm", nuclear_norm_hack);
-  m.impl("nuclear_norm.dim", nuclear_norm_dim_hack);
 }
 
 }}
