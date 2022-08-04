@@ -43,6 +43,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.utils._mode_utils import no_dispatch
+import weakref
 
 import pickle
 
@@ -3467,7 +3468,6 @@ class TestAutograd(TestCase):
 
     def test_anomaly_assign_parent_cleanup(self):
         # Test that python objects created are properly cleaned up when assign_parent is called
-        import weakref
 
         def get_ref():
             # we use torch.exp here but any function that will construct a new node in its
@@ -3506,8 +3506,6 @@ class TestAutograd(TestCase):
 
     def test_nested_anomaly_printstack_cleanup(self):
         # Test if metadata dict PyObject is properly destroyed
-        import weakref
-
         def get_ref():
             # This is similar to the construction in test_anomaly_assign_parent_cleanup:
             #
@@ -6206,6 +6204,49 @@ for shape in [(1,), ()]:
             self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
+
+    def test_full_backward_hook_create_graph_true_cycle(self):
+        # If BackwardHook saves grad_output, it can create a cycle when we perform backward
+        # with create_graph=True
+        #
+        #   grad_output -> grad_output.grad_fn -> graph -> hook -> grad_output
+        #
+        class TestCls():
+            pass
+        def get_ref():
+            t = torch.randn(10, requires_grad=False)
+            a = torch.tensor(1., requires_grad=True)
+            class Test(nn.Module):
+                def forward(self, x):
+                    return x * a ** 2
+            mod = Test()
+
+            # Dummy class for the purpose of creating a weakref
+            def fn(mod, gI, gO):
+                print(gO, gI)
+                # Check that full_backward_hook still works
+                # self.assertTrue(torch.allclose(gI[0], 2 * a * gO[0]))
+                return None
+
+            mod.register_full_backward_hook(fn)
+            tmp = mod(t)
+
+            # Save dummy varible to graph and get a weak ref to it
+            test = TestCls()
+            ref = weakref.ref(test)
+            tmp.grad_fn.metadata["a"] = test
+
+            tmp.exp().sum().backward(create_graph=True)
+
+            # We also need this, or else there would still be a cycle!
+            a.grad = None
+
+            return ref
+
+        ref_ = get_ref()
+        gc.collect()
+        self.assertIsNone(ref_())
+
 
     def test_input_buffer_accum(self):
         leaf = torch.rand(2, 2, requires_grad=True)
