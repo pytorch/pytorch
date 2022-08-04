@@ -301,7 +301,7 @@ class TestCuda(TestCase):
         events = torch.cuda.get_alloc_free_events()[current_device]
         num_events = len(events)
         ptr = events[-1].ptr
-        self.assertTrue(events[-1].size > 0)
+        self.assertTrue(events[-1].size == 1)
 
         torch.cuda.caching_allocator_delete(mem)
         events = torch.cuda.get_alloc_free_events()[current_device]
