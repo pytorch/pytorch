@@ -30,6 +30,7 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
@@ -1084,6 +1085,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[0].op_type, "Gelu")
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
+    @skipIfNoLapack
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
             def forward(self, x):
@@ -1229,7 +1231,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         batch = torch.FloatTensor(1, 3)
 
         graph, _, _ = self._model_to_graph(
-            model, batch, input_names=["batch"], dynamic_axes={"batch": [0, 1]}
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]},
         )
         iter = graph.nodes()
         autograd1 = next(iter)
@@ -1301,6 +1307,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 "Graph parameter names does not match model parameters.",
             )
 
+    @skipIfNoCaffe2
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
             def __init__(self):

@@ -96,6 +96,11 @@ class Transform(object):
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_inv"] = None
+        return state
+
     @property
     def event_dim(self):
         if self.domain.event_dim == self.codomain.event_dim:
