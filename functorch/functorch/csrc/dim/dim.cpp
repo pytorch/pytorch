@@ -195,7 +195,7 @@ struct DimEntry {
     DimEntry(py::hdl<Dim> d) {
        std::memcpy(&data_, &d, sizeof(int64_t));
     }
-    bool operator==(const DimEntry& rhs) {
+    bool operator==(const DimEntry& rhs) const {
         return data_ == rhs.data_;
     }
 private:

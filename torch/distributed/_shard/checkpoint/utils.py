@@ -1,6 +1,11 @@
-from typing import List, Callable, Optional, Union, TypeVar, cast, Any
+from typing import List, Callable, Optional, Union, TypeVar, Dict, Any, cast
 import torch.distributed as dist
-from .api import CheckpointException
+from .api import (
+    CheckpointException,
+    _wrap_exception,
+    _is_wrapped_exception,
+    WRAPPED_EXCEPTION
+)
 
 import torch
 
@@ -15,8 +20,12 @@ from .metadata import (
     MetadataIndex,
 )
 
+
 T = TypeVar('T')
 R = TypeVar('R')
+
+def _get_failure_dict(results: List[Union[T, WRAPPED_EXCEPTION]]) -> Dict[int, WRAPPED_EXCEPTION]:
+    return cast(Dict[int, WRAPPED_EXCEPTION], {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)})
 
 class _DistWrapper:
     """
@@ -126,24 +135,24 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
-        local_data: Union[BaseException, T]
+        local_data: Union[WRAPPED_EXCEPTION, T]
         try:
             local_data = map_fun()
         except BaseException as e:
-            local_data = e
+            local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
         all_results: Optional[List[Union[R, CheckpointException]]] = None
         if self.is_coordinator:
             assert all_data is not None
-            node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
+            node_failures = _get_failure_dict(all_data)
 
             if len(node_failures) == 0:
                 try:
-                    # N.B. why can't mypy cast List[R] to List[Union[R, CheckpointException]]?
+                    # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(List[Union[R, CheckpointException]], reduce_fun(cast(List[T], all_data)))
                 except BaseException as e:
-                    node_failures[self.rank] = e
+                    node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 all_results = [CheckpointException(step, node_failures)] * self.get_world_size()
@@ -168,22 +177,22 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Broadcast the reduced value to all ranks.
         """
-        local_data: Union[T, BaseException]
+        local_data: Union[T, WRAPPED_EXCEPTION]
         try:
             local_data = map_fun()
         except BaseException as e:
-            local_data = e
+            local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
         result: Optional[Union[R, CheckpointException]] = None
         if self.is_coordinator:
             assert all_data is not None
-            node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
+            node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(List[T], all_data))
                 except BaseException as e:
-                    node_failures[self.rank] = e
+                    node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
@@ -205,15 +214,15 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
-        result: Union[T, BaseException]
+        result: Union[T, WRAPPED_EXCEPTION]
         try:
             result = map_fun()
         except BaseException as e:
-            result = e
+            result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
 
-        node_failures = {i: err for i, err in enumerate(all_results) if isinstance(err, BaseException)}
+        node_failures = _get_failure_dict(all_results)
         if len(node_failures) > 0:
             raise CheckpointException(step, node_failures)
         return cast(List[T], all_results)
@@ -235,7 +244,7 @@ class _DistWrapper:
             try:
                 result = map_fun()
             except BaseException as e:
-                result = CheckpointException(step, {self.rank: e})
+                result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
