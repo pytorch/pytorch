@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
@@ -15,7 +16,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor buffer,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
-      const std::vector<int64_t>& offsets);
+      std::vector<int64_t> offsets);
   // assume contiguous, `nested_stride_tensor` and `offsets`
   // can be infered from `nested_size_tensor`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
@@ -54,8 +55,13 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     return *optional_size;
   }
 
-  const at::Tensor& get_buffer() const {
-    return buffer_;
+  at::Tensor get_buffer() const {
+    auto buffer_key_set_ = c10::DispatchKeySet{c10::DispatchKey::Dense} |
+        c10::DispatchKeySet{this->key_set_.highestBackendKey()};
+    auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
+        Storage(storage_), buffer_key_set_, data_type_);
+    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size_));
+    return Tensor(buffer_tensor_impl);
   }
 
  protected:
@@ -83,8 +89,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
   void refresh_dim();
-
-  at::Tensor buffer_;
+  // Store the size of the buffer for use in get_buffer().
+  // get_buffer constructs a flat, contiguous tensor from the NestedTensor
+  // storage
+  int64_t buffer_size_;
   const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
