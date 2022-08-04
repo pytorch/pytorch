@@ -313,6 +313,10 @@ class MaskedTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        if func is torch.nn.functional.multi_head_attention_forward:
+            from .functions import multi_head_attention_forward as mha_mt
+            return mha_mt(*args, **kwargs)
+
         from .reductions import apply_reduction, is_reduction
         if is_reduction(func):
             return apply_reduction(func, *args, **kwargs)
@@ -369,6 +373,11 @@ class MaskedTensor(torch.Tensor):
 
         if is_native_binary(func):
             return apply_native_binary(func, *args, **kwargs)
+
+        from .matmul import apply_native_matmul, is_native_matmul
+
+        if is_native_matmul(func):
+            return apply_native_matmul(func, *args, **kwargs)
 
         assert len(args) > 0
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
