@@ -187,11 +187,13 @@ class ExtraCUDACopyPattern(Pattern):
         event = event.children[-1]
         if event.name() != "aten::copy_":
             return False
-        if not event.children:
+        # aten::copy_ should have the first 2 args dtype the same
+        dtypes = input_dtypes(event)
+        if len(dtypes) < 2:
             return False
-        event = event.children[0]
-        if not event.name().endswith("MemcpyAsync"):
+        if dtypes[0] != dtypes[1]:
             return False
+        event = to_event
         # Up one level
         event = event.parent
         if event is None:
@@ -625,7 +627,7 @@ def report_all_anti_patterns(prof,
     report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
-        ForLoopIndexingPattern(prof, should_benchmark),
+        #ForLoopIndexingPattern(prof, should_benchmark),
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
