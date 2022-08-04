@@ -608,7 +608,7 @@ class InputWeightEqualizationDetector(DetectorBase):
     INPUT_STR = "input"
 
     # default for what ratio we recommend input weight
-    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.5
+    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.4
 
     def __init__(self, ratio_threshold: float, ch_axis: int = 1):
         # ensure passed in inputs are valid
