@@ -458,6 +458,9 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
+
+  if (result.is_meta()) return result;
+
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
@@ -1088,19 +1091,19 @@ Tensor zeros(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  auto result = at::empty(size, options);
-  return result.zero_();
+  return at::zeros_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
 }
 
-Tensor zeros_symint(c10::SymIntArrayRef size,
+Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty_symint(size, options);
+  return result.zero_();
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
