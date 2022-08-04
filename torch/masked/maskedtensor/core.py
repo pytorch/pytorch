@@ -311,7 +311,7 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
-            kwargs = {}            
+            kwargs = {}
 
         if func in [torch.Tensor.where, torch.where]:
             assert len(args) == 3
