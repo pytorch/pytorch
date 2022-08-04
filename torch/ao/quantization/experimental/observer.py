@@ -138,11 +138,12 @@ class APoTObserver(ObserverBase):
 
     r"""Displays visualization of APoT quantization levels
         Args:
-            alpha: alpha APoT qparam (Tensor)
-            quantization_levels: quantization levels APoT qparam (Tensor)
-            level_indices: level indices APoT qparam (Tensor)
+            observer: APoTObserver to calculate qparams
+            signed: bool to indicate if qparams should be signed/unsigned
     """
-    def quant_levels_visualization(self, alpha, quantization_levels, level_indices):
+    def quant_levels_visualization(self, observer: APoTObserver, signed=False):
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed)
+
         xs = [float(x) / 1000.0 for x in range(1000)]
         ys = [apot_to_float(float_to_apot(x, quantization_levels, level_indices, alpha),
                             quantization_levels, level_indices).item() for x in xs]
