@@ -356,6 +356,11 @@ class MaskedTensor(torch.Tensor):
         if is_native_unary(func):
             return apply_native_unary(func, *args, **kwargs)
 
+        from .binary import apply_native_binary, is_native_binary
+
+        if is_native_binary(func):
+            return apply_native_binary(func, *args, **kwargs)
+
         assert len(args) > 0
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
             len(args) == 2
