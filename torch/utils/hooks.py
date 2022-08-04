@@ -111,7 +111,7 @@ class BackwardHook(object):
             res = user_hook(self.module, grad_input, self.grad_outputs)
 
             # To avoid leaks, remove the saved grad_outputs after the execution of the last input hook
-            self.counter -=1
+            self.counter -= 1
             if self.counter == 0:
                 self.grad_outputs = None
 

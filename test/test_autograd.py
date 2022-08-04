@@ -6225,9 +6225,11 @@ for shape in [(1,), ()]:
                 if remove_hook_during_backward:
                     handles[0].remove()
                 return None
+
             class Test(nn.Module):
                 def forward(self, x):
                     tmp = a ** 2
+                    # register a hook to try to remove the full backward hook during backward
                     tmp.grad_fn.register_hook(f)
                     return tmp * x ** 2
             mod = Test()
@@ -6253,12 +6255,12 @@ for shape in [(1,), ()]:
             a.grad = None
             t.grad = None
 
-            return ref, handles
+            return ref
 
-        for nb_hooks in (3,):
-            for input_requires_grad in (True,):
+        for nb_hooks in (1, 2, 3,):
+            for input_requires_grad in (True, False):
                 for remove_hook_during_backward in (True, False):
-                    ref_, handles = get_ref(
+                    ref_ = get_ref(
                         input_requires_grad=input_requires_grad,
                         nb_hooks=nb_hooks,
                         remove_hook_during_backward=remove_hook_during_backward
