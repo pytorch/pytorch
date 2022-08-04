@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import enum
 import functools
 import inspect
@@ -345,8 +346,9 @@ def quantized_args(
 
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
-    assert x.numel() == 1
-    return x.item()
+    if isinstance(x, torch.Tensor) and x.shape == ():
+        return x.item()
+    return None
 
 
 def _if_scalar_type_as(g: _C.Graph, self, tensor):
@@ -535,23 +537,35 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
+_ScalarAndTensorElementTypeGroup = collections.namedtuple(
+    "_ScalarAndTensorElementTypeGroup", ("tensor_element_types", "scalar_types")
+)
+_FPTypeGroup = _ScalarAndTensorElementTypeGroup(
+    (torch.float16, torch.float32, torch.float64, torch.bfloat16),
+    ("Float", "Double", "Half", "BFloat16"),
+)
+_BoolTypeGroup = _ScalarAndTensorElementTypeGroup((torch.bool,), ("Bool",))
+
+
+def _is_in_type_group(value, type_set):
+    if not value:
+        return False
+    if isinstance(value, torch.Tensor):
+        return value.dtype in type_set.tensor_element_types
+    scalar_type = value.type().scalarType()
+    if scalar_type is None:
+        warnings.warn(
+            "Type cannot be inferred, which might cause exported graph to produce incorrect results."
+        )
+    return scalar_type in type_set.scalar_types
+
+
 def _is_fp(value):
-    if value:
-        if isinstance(value, torch.Tensor):
-            return value.dtype in (
-                torch.float16,
-                torch.float32,
-                torch.float64,
-                torch.bfloat16,
-            )
-        else:
-            type = value.type().scalarType()
-            if type is None:
-                warnings.warn(
-                    "Type cannot be inferred, which might cause exported graph to produce incorrect results."
-                )
-            return type in ("Float", "Double", "Half", "BFloat16")
-    return False
+    return _is_in_type_group(value, _FPTypeGroup)
+
+
+def _is_bool(value):
+    return _is_in_type_group(value, _BoolTypeGroup)
 
 
 def _generate_wrapped_number(g, scalar):

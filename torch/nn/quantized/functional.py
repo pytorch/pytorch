@@ -545,7 +545,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
-        mode (string): algorithm used for upsampling:
+        mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'bilinear'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.

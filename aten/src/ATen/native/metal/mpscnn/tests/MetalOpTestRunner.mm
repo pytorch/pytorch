@@ -70,6 +70,8 @@
   REG_TEST("test_hardsigmoid", test_hardsigmoid);
   REG_TEST("test_hardswish_", test_hardswish_);
   REG_TEST("test_hardswish", test_hardswish);
+  REG_TEST("test_hardshrink_", test_hardshrink_);
+  REG_TEST("test_hardshrink", test_hardshrink);
   REG_TEST("test_leaky_relu_", test_leaky_relu_);
   REG_TEST("test_leaky_relu", test_leaky_relu);
   REG_TEST("test_upsampling_nearest2d_vec", test_upsampling_nearest2d_vec);

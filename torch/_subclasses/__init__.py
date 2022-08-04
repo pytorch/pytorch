@@ -1,6 +1,11 @@
 import torch
 
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, UnsupportedFakeTensorException, DynamicOutputShapeException
+from torch._subclasses.fake_tensor import (
+    DynamicOutputShapeException,
+    FakeTensor,
+    FakeTensorMode,
+    UnsupportedFakeTensorException,
+)
 
 __all__ = [
     "FakeTensor",

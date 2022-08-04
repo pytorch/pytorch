@@ -611,6 +611,13 @@ class DeviceCachingAllocator {
 
       stats.num_ooms += 1;
 
+      c10::reportOutOfMemoryToProfiler(
+          size,
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the

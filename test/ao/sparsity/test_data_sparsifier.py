@@ -2,7 +2,6 @@
 # Owner(s): ["module: unknown"]
 
 import logging
-import random
 import torch
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
@@ -138,15 +137,22 @@ class _BaseDataSparsiferTestCase(TestCase):
         sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
         all_data = data_list + data_with_config
         for some_data in all_data:
-            name1, data1, _ = self._get_name_data_config(some_data)
+            name1, data1, config = self._get_name_data_config(some_data, defaults=defaults)
             data1 = sparsifier._extract_weight(data1)
+            data1_old = copy.deepcopy(data1)
             assert torch.all(data1 == sparsifier.get_data(name=name1))
-            # get some other data at random and with the same name
-            rand_idx = random.randint(0, len(all_data) - 1)
-            _, data2, _ = self._get_name_data_config(all_data[rand_idx])
-            data2 = sparsifier._extract_weight(data2)
+
+            sparsifier.step()
+            mask = sparsifier.get_mask(name1)
+
+            data2 = torch.randn(data1.shape)  # add another data with the same shape as original data
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
+
+            assert torch.all(sparsifier.get_mask(name1) == mask)  # mask should not change
+            assert torch.all(data1_old == data1)
+
+            assert sparsifier.data_groups[name1] == config  # if replaced old_config should match new config
 
     def check_state_dict(self, data_list, data_with_config, defaults, **kwargs):
         sparsifier1 = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
@@ -163,13 +169,15 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.state) == len(sparsifier2.state)
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
-        for name in sparsifier1.state.keys():
+        state1 = state_dict1['state']
+        for name in state1.keys():
             # compare mask
             assert name in sparsifier2.state
             assert 'mask' in sparsifier2.state[name]
             assert 'mask' in sparsifier1.state[name]
-            mask1, mask2 = sparsifier1.state[name]['mask'], sparsifier2.state[name]['mask']
-            assert torch.all(mask1 == mask2)
+            mask1, mask2 = state1[name]['mask'], sparsifier2.state[name]['mask']
+            assert mask1.is_sparse and not mask2.is_sparse
+            assert torch.all(mask1.to_dense() == mask2)  # mask1 is stored as sparse coo now
 
             # compare data_groups
             dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups

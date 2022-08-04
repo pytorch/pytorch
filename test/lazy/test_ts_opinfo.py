@@ -134,6 +134,20 @@ class TestLazyTensor(JitTestCase):
         # out will have some pending mutations, which will be synced by the .cpu() call.
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
+    def test_tensor_ctr(self):
+        test_device = get_test_device()
+        inp = torch.tensor([[1, 2, 3, 4, 5]], device=test_device)
+        inp_lazy = torch.tensor([[1, 2, 3, 4, 5]], device='lazy')
+
+        def foo(x):
+            # Calling a view op to ensure that functionalization wrapping occurs.
+            return x.view(-1)
+
+        out_ref = foo(inp)
+        out = foo(inp_lazy)
+        torch.testing.assert_close(out_ref.cpu(), out.cpu())
+
+
 class TestLazyOpInfo(TestCase):
 
     @ops([op for op in op_db
