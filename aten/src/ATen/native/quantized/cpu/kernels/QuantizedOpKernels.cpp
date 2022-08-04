@@ -2805,7 +2805,7 @@ void quantized_normalize_kernel(
 
 void qmean_inner_dim_kernel(
     const Tensor& self,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype,
     Tensor& result) {
@@ -2813,7 +2813,8 @@ void qmean_inner_dim_kernel(
   ScalarType dtype = self.scalar_type();
   auto in_dims = self.sizes().vec();
   auto out_dims = in_dims;
-  size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  size_t num_dims_to_squeeze = is_all_reduce ? self.dim() : opt_dim.value().size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
   for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
