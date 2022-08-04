@@ -21866,6 +21866,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unflatten",
         torch_opinfo_name="unflatten",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.unbind",
