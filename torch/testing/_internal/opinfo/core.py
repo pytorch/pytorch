@@ -1,9 +1,15 @@
 from dataclasses import dataclass, asdict
 import collections.abc
 import operator
-from typing import Callable, List, Optional, Tuple, Iterable
+from typing import Any, Callable, List, Optional, Tuple, Iterable
+from enum import Enum
+import unittest
+import math
+from functools import partial
+from itertools import product
 
 import torch
+from torch.testing import make_tensor
 from torch.testing._internal.opinfo import utils
 from torchgen.utils import dataclass_repr
 from torch.testing._internal.common_utils import (
@@ -14,6 +20,13 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes,
     floating_and_complex_types_and,
+    floating_and_complex_types,
+    floating_types,
+)
+from torch.testing._internal.common_device_type import (
+    skipCPUIfNoFFT,
+    toleranceOverride,
+    tol,
 )
 
 # Reasonable testing sizes for dimensions
@@ -1159,3 +1172,1207 @@ class PythonRefInfo(OpInfo):
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
         super(PythonRefInfo, self).__init__(**ukwargs)
+
+
+def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
+    """Generates input tensors for testing reduction operators"""
+    yield make_tensor([], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield make_tensor([2], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield make_tensor([3, 5], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield make_tensor([3, 2, 1, 2], dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    """Generates a subset of all valid dim and keepdim kwargs given ndim that
+    is appropriate for testing reduction operators.
+    """
+
+    # Test default dim and keepdim
+    yield {}
+
+    # Test reducing inner and outer most dimensions
+    yield {'dim': 0, 'keepdim': True}
+    yield {'dim': -1, 'keepdim': False}
+
+    # Test reducing middle dimension
+    if ndim > 2:
+        yield {'dim': ndim // 2, 'keepdim': True}
+
+    if supports_multiple_dims:
+        # Test reducing all dimensions
+        yield {'dim': tuple(range(ndim)), 'keepdim': False}
+
+        # Test reducing both first and last dimensions
+        if ndim > 1:
+            yield {'dim': (0, -1), 'keepdim': True}
+
+        # Test reducing every other dimension starting with the second
+        if ndim > 3:
+            yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': False}
+
+
+def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for reduction operators."""
+
+    # TODO(@heitorschueroff) Once all reduction operators are using
+    # ReductionOpInfo use op_info.supports_multiple_dims directly.
+    supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
+
+    # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
+    # use op_info.generate_args_kwargs directly.
+    generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
+
+    for t in _generate_reduction_inputs(device, dtype, requires_grad):
+        for reduction_kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+            for args, kwargs in generate_args_kwargs(t, **reduction_kwargs):
+                kwargs.update(reduction_kwargs)
+                yield SampleInput(t.detach().requires_grad_(requires_grad), args=args, kwargs=kwargs)
+
+
+# NOTE [Reductions]:
+#
+# For testing purposes, we relax the definition of a reduction operator
+# as defined in the docstring below. We do this to capture operators with
+# a similar API so they can be tested automatically. However...
+#
+# Strictly speaking a reduction operator is an operator that can reduce an
+# array to a single scalar value and that can be computed from the partial
+# result of reducing subarrays. This usually means that the reduction operation
+# should be commutative and associative. This definition is important when it
+# comes to implementation as it determines how a reduction can be parallelized.
+#
+# For example, many summary statistics such as median, mode and quantile cannot
+# be computed from partial results because these are sorting and counting based
+# algorithms that need information that would be lost in the reduced value.
+class ReductionOpInfo(OpInfo):
+    """Reduction operator information.
+
+    An operator is a reduction operator if it reduces one or more dimensions of
+    the input tensor to a single value. Reduction operators must implement the
+    following signature:
+
+    - `op(input, *args, *, dim=None, keepdim=False, **kwargs) -> Tensor`
+
+    ReductionOpInfo tests that reduction operators implement a consistent API.
+    Optional features such as reducing over multiple dimensions are captured in
+    the optional keyword parameters of the ReductionOpInfo constructor.
+
+    If a reduction operator does not yet implement the full required API of
+    reduction operators, this should be documented by xfailing the failing
+    tests rather than adding optional parameters to ReductionOpInfo.
+
+    NOTE
+    The API for reduction operators has not yet been finalized and some
+    requirements may change.
+
+    See tests in test/test_reductions.py
+    """
+
+    def __init__(
+        self, name, *,
+
+        # The identity value for the operator if it has one.
+        identity: Optional[Any] = None,
+
+        # The nan policy for the operator if it implements one.
+        # - propagate: NaN values are propagated to the output
+        # - omit: NaN values are discarded during the reduction
+        nan_policy: Optional[str] = None,
+
+        # Whether the operator supports reducing multiple dimensions.
+        supports_multiple_dims: bool = True,
+
+        # Whether the operator promotes integral to floating point dtypes.
+        promotes_int_to_float: bool = False,
+
+        # Whether the operator promotes all integral dtypes to int64.
+        promotes_int_to_int64: bool = False,
+
+        # If a specific dtype is given, then the operator always returns that
+        # dtype irrespective of the input dtype. If None, the operator returns
+        # the dtype according to the type promotion rules above.
+        result_dtype: Optional[torch.dtype] = None,
+
+        # Casts complex results to real (e.g. linalg.norm or torch.var)
+        complex_to_real: bool = False,
+
+        # ReductionOpInfo tests generate their own input, dim and keepdim
+        # arguments and call this function to generate tuples of extra args and
+        # kwargs to use when calling the op. This is required for operators that
+        # have other required parameters besides the input tensor.
+        generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (yield tuple(), {}),
+
+        # Options from the OpInfo base class
+        **kwargs,
+    ):
+        self._original_reduction_args = locals().copy()
+        assert nan_policy in (None, 'propagate', 'omit')
+
+        # These are mutually exclusive options
+        assert not (result_dtype and promotes_int_to_float)
+        assert not (result_dtype and promotes_int_to_int64)
+        assert not (result_dtype and complex_to_real)
+        assert not (promotes_int_to_float and promotes_int_to_int64)
+
+        # Default sample_inputs_func for ReductionOpInfo which augments sample
+        # inputs from sample_inputs_reduction with the args and kwargs from
+        # generate_args_kwargs. This is only used if sample_inputs_func is None.
+        def sample_inputs_func(*args, **kwargs):
+            kwargs['supports_multiple_dims'] = supports_multiple_dims
+            kwargs['generate_args_kwargs'] = generate_args_kwargs
+            yield from sample_inputs_reduction(*args, **kwargs)
+
+        # Override OpInfo defaults and call base class __init__
+        kwargs.setdefault('inplace_variant', None)
+        kwargs.setdefault('sample_inputs_func', sample_inputs_func)
+        super().__init__(name, **kwargs)
+
+        self.identity = identity
+        self.nan_policy = nan_policy
+        self.supports_multiple_dims = supports_multiple_dims
+        self.promotes_int_to_float = promotes_int_to_float
+        self.promotes_int_to_int64 = promotes_int_to_int64
+        self.complex_to_real = complex_to_real
+        self.result_dtype = result_dtype
+        self.generate_args_kwargs = generate_args_kwargs
+
+# The base reference input generation for elementwise binary operations
+def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
+    yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
+    yield from generate_elementwise_binary_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+    if dtype is not torch.bool:
+        yield from generate_elementwise_binary_small_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+    if dtype not in (torch.bool, torch.uint8, torch.int8):
+        yield from generate_elementwise_binary_large_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+    yield from generate_elementwise_binary_broadcasting_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+    yield from generate_elementwise_binary_with_scalar_samples(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    yield from generate_elementwise_binary_with_scalar_and_type_promotion_samples(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    if dtype.is_floating_point or dtype.is_complex:
+        yield from generate_elementwise_binary_extremal_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+
+
+# Note that these references inputs use scalars for the SampleInput.input value,
+#   and many tests require SampleInput.input be a tensor or a list of tensors
+def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    if hasattr(op, "rhs_make_tensor_kwargs"):
+        exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
+    gen = partial(
+        _reference_inputs_elementwise_binary, op, device, dtype, requires_grad, exclude_zero, **kwargs
+    )
+
+    # yields "normal" samples
+    yield from gen()
+
+    # yields noncontiguous samples
+    for sample in gen():
+        yield sample.noncontiguous()
+
+    yield from generate_elementwise_binary_noncontiguous_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+
+    yield from generate_elementwise_binary_arbitrarily_strided_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+
+
+# A functional that extends an elementwise binary operator's bespoke error inputs
+#   with generic error inputs for the class of elementwise binary operations
+def make_error_inputs_elementwise_binary(error_inputs_func):
+    def error_inputs_func_wrapper(op, device, **kwargs):
+        if error_inputs_func is not None:
+            yield from error_inputs_func(op, device, **kwargs)
+
+        if not op.supports_rhs_python_scalar:
+            si = SampleInput(torch.tensor((1, 2, 3), device=device), args=(2,))
+            yield ErrorInput(si, error_type=Exception, error_regex="")
+
+        if not op.supports_one_python_scalar:
+            si = SampleInput(2, args=(torch.tensor((1, 2, 3), device=device),))
+            yield ErrorInput(si, error_type=Exception, error_regex="")
+
+        if (
+            not kwargs.get("skip_two_python_scalars", False)
+            and not op.supports_two_python_scalars
+        ):
+            si = SampleInput(2, args=(3,))
+            yield ErrorInput(si, error_type=Exception, error_regex="")
+
+    return error_inputs_func_wrapper
+
+# The following functions and classes are for testing elementwise binary operators.
+
+# Returns a generator of pairs of contiguous tensors on the requested device
+#   and with the requested dtype.
+#
+# This function is intended to test the non-vectorized and vectorized code
+#   paths of elementwise binary functions, as well as their handling of odd tensor
+#   sizes (like zero-dim tensors and tensors with zero elements).
+#
+# Each iterable will include an a tensor with no elements,
+#   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
+#   a large 2D tensor.
+def generate_elementwise_binary_tensors(op, *, device, dtype, requires_grad=False, exclude_zero=False):
+    shapes = (
+        # tensors with no elements
+        (0,),
+        (1, 0, 3),
+        # zero dim (scalar) tensor
+        (),
+        # small 1D tensor
+        (20,),
+        # medium 1D tensor
+        (812,),
+        # large 2D tensor
+        (1029, 917),
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+    for shape in shapes:
+        lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+        rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+        yield SampleInput(lhs, args=(rhs,))
+
+def generate_elementwise_binary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False, exclude_zero=False):
+    # shape, strides, offset
+    strided_cases = (
+        ((5, 6, 2), (1, 1, 7), 2),
+        ((5, 5, 4), (1, 1, 7), 2),
+        ((5, 5, 2), (4, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 5), 3),
+        ((9, 5, 2), (0, 1, 7), 3),
+    )
+
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+    for shape, strides, offset in strided_cases:
+        a = make_arg(500,).as_strided(shape, strides, offset)
+        b = make_arg(shape)
+        yield SampleInput(a, args=(b,))
+
+# Returns a generator of pairs of contiguous tensors on the requested device and with
+#   the requested dtype.
+#
+# Unlike the previous function, the values in these tensors are specified manually.
+def generate_elementwise_binary_small_value_tensors(
+    op, *, device, dtype, requires_grad=False, exclude_zero=None
+):
+    if exclude_zero is None:
+        if hasattr(op, "rhs_make_tensor_kwargs"):
+            exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
+    # defines interesting values
+    _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254)
+    _int_vals = (0, -1, 1, -55, 55, -127, 127, -128)
+    _float_vals = (
+        0.0,
+        -0.0,
+        -0.001,
+        0.001,
+        -0.25,
+        0.25,
+        -1.0,
+        1.0,
+        -math.pi / 2,
+        math.pi / 2,
+        -math.pi + 0.00001,
+        math.pi - 0.00001,
+        -math.pi,
+        math.pi,
+        -math.pi - 0.00001,
+        math.pi + 0.00001,
+    )
+
+    l_vals = []
+    r_vals = []
+
+    if dtype.is_floating_point:
+        prod = product(_float_vals, _float_vals)
+    elif dtype.is_complex:
+        complex_vals = product(_float_vals, _float_vals)
+        # Note the use of list is required here or the map generator will be
+        #  emptied by the following product and it won't produce the desired cross-product
+        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        prod = product(complex_vals, complex_vals)
+    elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+        prod = product(_int_vals, _int_vals)
+    elif dtype is torch.uint8:
+        prod = product(_unsigned_int_vals, _unsigned_int_vals)
+    else:
+        raise ValueError("Unsupported dtype!")
+
+    for l, r in prod:
+        l_vals.append(l)
+        if r == 0 and exclude_zero:
+            r_vals.append(1)
+        else:
+            r_vals.append(r)
+
+    lhs = torch.tensor(l_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+    rhs = torch.tensor(r_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    yield SampleInput(lhs, args=(rhs,))
+
+
+def generate_elementwise_binary_large_value_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    _large_int_vals = (-1113, 1113, -10701, 10701)
+    _large_float16_vals = (-501, 501, -1001.2, 1001.2, -13437.7, 13437.7)
+    _large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
+
+    l_vals = []
+    r_vals = []
+
+    if dtype == torch.float16:
+        prod = product(_large_float16_vals, _large_float16_vals)
+    elif dtype.is_floating_point:
+        prod = product(_large_float_vals, _large_float_vals)
+    elif dtype.is_complex:
+        complex_vals = product(_large_float_vals, _large_float_vals)
+        # Note the use of list is required here or the map generator will be
+        #  emptied by the following product and it won't produce the desired cross-product
+        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        prod = product(complex_vals, complex_vals)
+    elif dtype in (torch.int16, torch.int32, torch.int64):
+        prod = product(_large_int_vals, _large_int_vals)
+    else:
+        raise ValueError("Unsupported dtype!")
+
+    for l, r in prod:
+        l_vals.append(l)
+        r_vals.append(r)
+
+    lhs = torch.tensor(l_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+    rhs = torch.tensor(r_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    yield SampleInput(lhs, args=(rhs,))
+
+
+def generate_elementwise_binary_extremal_value_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    _float_extremals = (float("inf"), float("-inf"), float("nan"))
+
+    l_vals = []
+    r_vals = []
+
+    if dtype.is_floating_point:
+        prod = product(_float_extremals, _float_extremals)
+    elif dtype.is_complex:
+        complex_vals = product(_float_extremals, _float_extremals)
+        # Note the use of list is required here or the map generator will be
+        #  emptied by the following product and it won't produce the desired cross-product
+        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        prod = product(complex_vals, complex_vals)
+    else:
+        raise ValueError("Unsupported dtype!")
+
+    for l, r in prod:
+        l_vals.append(l)
+        r_vals.append(r)
+
+    lhs = torch.tensor(l_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+    rhs = torch.tensor(r_vals, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    yield SampleInput(lhs, args=(rhs,))
+
+    # Test case for NaN propagation
+    nan = float('nan') if dtype.is_floating_point else complex(float('nan'), float('nan'))
+    lhs = make_tensor((128, 128), device=device, dtype=dtype, requires_grad=requires_grad)
+    lhs.flatten()[::3] = nan
+    rhs = make_tensor((128, 128), device=device, dtype=dtype, requires_grad=requires_grad)
+    rhs.flatten()[::3] = nan
+
+    yield SampleInput(lhs, args=(rhs,))
+
+# Returns a generator of pairs of contiguous and noncontiguous tensors that
+#   require broadcasting
+def generate_elementwise_binary_broadcasting_tensors(
+    op, *, device, dtype, requires_grad=False, exclude_zero=False
+):
+    shapes = (
+        ((1,), ()),
+        ((2,), ()),
+        ((1,), (2,)),
+        ((2, 1), (2,)),
+        ((1, 2), (2,)),
+        ((3, 2), (2,)),
+        ((1, 3, 2), (2,)),
+        ((1, 3, 2), (3, 2)),
+        ((3, 1, 2), (3, 2)),
+        ((2, 3, 2), ()),
+        ((3, 1, 2), (1, 3, 2)),
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+    for shape, noncontiguous in product(shapes, [True, False]):
+        shape_lhs, shape_rhs = shape
+        lhs = make_arg(
+            shape_lhs, noncontiguous=noncontiguous, **op.lhs_make_tensor_kwargs
+        )
+        rhs = make_arg(
+            shape_rhs, noncontiguous=noncontiguous, **op.rhs_make_tensor_kwargs
+        )
+
+        yield SampleInput(lhs, args=(rhs,), broadcasts_input=True)
+
+
+# Returns a generator of pairs of contiguous tensors and scalars
+def generate_elementwise_binary_with_scalar_samples(
+    op, *, device, dtype, requires_grad=False
+):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    shapes = ((), (3,), (5, 3), (0, 1, 3), (1, 5))
+    if op.supports_rhs_python_scalar:
+        for shape in shapes:
+            lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+            rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+            lhs_scalar = make_arg((), **op.lhs_make_tensor_kwargs).item()
+            rhs_scalar = make_arg((), **op.rhs_make_tensor_kwargs).item()
+
+            yield SampleInput(lhs, args=(rhs_scalar,))
+
+        # Extends with scalar lhs
+        if op.supports_one_python_scalar:
+            yield SampleInput(lhs_scalar, args=(rhs,))
+
+    if op.supports_two_python_scalars:
+        lhs_scalar = make_arg((), **op.lhs_make_tensor_kwargs).item()
+        rhs_scalar = make_arg((), **op.rhs_make_tensor_kwargs).item()
+
+        yield SampleInput(lhs_scalar, args=(rhs_scalar,))
+
+# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
+    op, *, device, dtype, requires_grad=False
+):
+    # add these samples only for logical and comparison ops, arithmetic ops are not happy about extremal scalars
+    if op.name in ('eq', 'ne', 'gt', 'ge', 'lt', 'le', 'logical_and', 'logical_or', 'logical_xor'):
+        make_arg = partial(
+            make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        shape = (23,)  # this shape is big enough to trigger vectorization, and has non-vectorized tail
+        values = (float('nan'), float('inf'), -float('inf'))
+        scalar_tensors = tuple(torch.tensor(val) for val in values)
+        if op.supports_rhs_python_scalar:
+            lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+            rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+            for scalar in values + scalar_tensors:
+                yield SampleInput(lhs, args=(scalar,))
+                # Extends with scalar lhs
+                if op.supports_one_python_scalar:
+                    yield SampleInput(scalar, args=(rhs,))
+
+# Returns a generator of pairs of noncontiguous tensors
+def generate_elementwise_binary_noncontiguous_tensors(
+    op, *, device, dtype, requires_grad=False, exclude_zero=False
+):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+
+    # Generic noncontiguity
+    lhs = make_arg((1026,), noncontiguous=True, **op.lhs_make_tensor_kwargs)
+    rhs = make_arg((1026,), noncontiguous=True, **op.rhs_make_tensor_kwargs)
+
+    yield SampleInput(lhs.clone(), args=(rhs.clone(),))
+    yield SampleInput(lhs.contiguous(), args=(rhs,))
+
+    # Transposed
+    lhs = make_arg((789, 357), **op.lhs_make_tensor_kwargs)
+    rhs = make_arg((789, 357), **op.rhs_make_tensor_kwargs)
+
+    yield SampleInput(lhs.T, args=(rhs.T,))
+
+    # More noncontiguity
+    shapes = ((5, 7), (1024,))
+
+    for shape in shapes:
+        lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+        rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+
+        lhs_non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
+        lhs_non_contig.copy_(lhs)
+
+        rhs_non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
+        rhs_non_contig.copy_(rhs)
+
+        yield SampleInput(lhs_non_contig.clone(), args=(rhs_non_contig.clone(),))
+        yield SampleInput(lhs_non_contig.contiguous(), args=(rhs_non_contig,))
+
+    # Noncontiguous indices
+    shape = (2, 2, 1, 2)
+    lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+    rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+
+    lhs_non_contig = lhs[:, 1, ...]
+    rhs_non_contig = rhs[:, 1, ...]
+
+    yield SampleInput(lhs_non_contig.clone(), args=(rhs_non_contig.clone(),))
+    yield SampleInput(lhs_non_contig.contiguous(), args=(rhs_non_contig,))
+
+    # Expanded tensors
+    shapes = ((1, 3), (1, 7), (5, 7))
+
+    for shape in shapes:
+        lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+        rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+
+        lhs_non_contig = lhs.expand(3, -1, -1)
+        rhs_non_contig = rhs.expand(3, -1, -1)
+
+        yield SampleInput(lhs_non_contig, args=(rhs_non_contig,))
+
+
+# Sample inputs for elementwise binary operators, like add
+def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
+
+    if hasattr(op, "rhs_make_tensor_kwargs"):
+        exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
+
+    shapes = (
+        ((), ()),
+        ((_S,), ()),
+        ((_S, 1), (_S,)),
+        ((_M, _S), ()),
+        ((_S, _M, _S), (_M, _S)),
+        ((_S, _M, _S), (_S, _M, _S)),
+        ((_M, 1, _S), (_M, _S)),
+        ((_M, 1, _S), (1, _M, _S)),
+        ((0, 1, XS), (0, _M, XS)),
+    )
+
+    sample_kwargs = kwargs.get("sample_kwargs", {})
+
+    for shape_lhs, shape_rhs in shapes:
+        lhs = make_arg(shape_lhs, **op.lhs_make_tensor_kwargs)
+        rhs = make_arg(shape_rhs, **op.rhs_make_tensor_kwargs)
+        broadcasts_input = shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+        yield SampleInput(
+            lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input
+        )
+
+
+# Metadata class for binary "universal functions (ufuncs)" that accept two
+# tensor and have common properties
+class BinaryUfuncInfo(OpInfo):
+    """Operator information for 'universal binary functions (binary ufuncs).'
+    These are functions of two tensors with common properties like:
+      - they are elementwise functions
+      - the output shape is determined by the input shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
+    def __init__(
+        self,
+        name,
+        *,
+        sample_inputs_func=sample_inputs_elementwise_binary,
+        reference_inputs_func=reference_inputs_elementwise_binary,
+        error_inputs_func=None,
+        lhs_make_tensor_kwargs=None,
+        rhs_make_tensor_kwargs=None,
+        promotes_int_to_float=False,  # Set to true if the op promotes integer inputs to float
+        always_returns_bool=False,  # Set to true if the op always returns bool tensors
+        supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
+        supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
+        supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
+        **kwargs,
+    ):
+
+        self._original_binary_ufunc_args = locals().copy()
+
+        # Elementwise binary operations perform the equivalent of test_numpy_refs
+        #   in test_binary_ufuncs, but with additional test granularity. So the
+        #   generic test_ops.py test is skipped because it's redundant.
+        common_skips = (
+            DecorateInfo(
+                unittest.skip("Skipping redundant test."),
+                "TestCommon",
+                "test_numpy_refs",
+            ),
+        )
+        kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
+        super(BinaryUfuncInfo, self).__init__(
+            name,
+            sample_inputs_func=sample_inputs_func,
+            reference_inputs_func=reference_inputs_func,
+            error_inputs_func=make_error_inputs_elementwise_binary(error_inputs_func),
+            **kwargs,
+        )
+
+        # [lr]hs_make_tensor_kwargs are part of the OpInfo to be able to dynamically generate valid samples later on.
+        if lhs_make_tensor_kwargs is None:
+            lhs_make_tensor_kwargs = {}
+        self.lhs_make_tensor_kwargs = lhs_make_tensor_kwargs
+
+        if rhs_make_tensor_kwargs is None:
+            rhs_make_tensor_kwargs = {}
+        self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
+
+        self.promotes_int_to_float = promotes_int_to_float
+        self.always_returns_bool = always_returns_bool
+        self.supports_rhs_python_scalar = supports_rhs_python_scalar
+        self.supports_one_python_scalar = supports_one_python_scalar
+        self.supports_two_python_scalars = supports_two_python_scalars
+
+        if self.supports_two_python_scalars:
+            self.supports_one_python_scalar = True
+
+        if self.supports_one_python_scalar:
+            assert (
+                supports_rhs_python_scalar
+            ), "Can't support lhs and rhs Python scalars but not rhs scalars!"
+
+
+# The following functions and classes are for testing elementwise unary operators.
+def sample_inputs_elementwise_unary(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    if not op_kwargs:
+        op_kwargs = {}
+
+    _L = S if kwargs.get("small_inputs_only", False) else L
+
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
+    if op_info.supports_sparse_csr or op_info.supports_sparse_csc or op_info.supports_sparse_bsr or op_info.supports_sparse_bsc:
+        # Tensors with dim=2 for sparse compressed testing
+        yield SampleInput(
+            make_tensor(
+                (_L, _L),
+                device=device,
+                dtype=dtype,
+                low=low,
+                high=high,
+                requires_grad=requires_grad,
+            ),
+            kwargs=op_kwargs,
+        )
+    else:
+        # Creates a 1D, empty, and scalar tensor
+        for shape in ((_L,), (1, 0, 3), ()):
+            yield SampleInput(
+                make_tensor(
+                    shape,
+                    device=device,
+                    dtype=dtype,
+                    low=low,
+                    high=high,
+                    requires_grad=requires_grad,
+                ),
+                kwargs=op_kwargs,
+            )
+
+
+# Replace values satisfying condition with a safe value. This is used to block
+# out values the could cause singularity like tan(pi/2)
+def _replace_values_in_tensor(tensor, condition, safe_value):
+    mask = condition(tensor)
+    tensor.masked_fill_(mask, safe_value)
+
+
+# Helper to create a unary elementwise tensor with valid inputs
+def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
+    low, high = op.domain
+    low = low if low is None else low + op._domain_eps
+    high = high if high is None else high - op._domain_eps
+
+    a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
+
+    if op.reference_numerics_filter is not None and dtype is not torch.bool:
+        condition, safe_value = op.reference_numerics_filter
+        _replace_values_in_tensor(a, condition, safe_value)
+
+    return a
+
+
+# Restricts the values in the tensor to the domain of the
+# given elementwise unary operator
+def _filter_unary_elementwise_tensor(a, *, op):
+    # short-circuits for boolean tensors
+    if a.dtype is torch.bool:
+        return a
+
+    low, high = op.domain
+    low = low if low is None else low + op._domain_eps
+    high = high if high is None else high - op._domain_eps
+
+    if a.dtype is torch.uint8 and low is not None:
+        low = max(low, 0)
+
+    if not a.dtype.is_floating_point and not a.dtype.is_complex:
+        low = math.ceil(low) if low is not None else None
+        high = math.floor(high) if high is not None else None
+
+    if op.reference_numerics_filter is not None:
+        condition, safe_value = op.reference_numerics_filter
+        _replace_values_in_tensor(a, condition, safe_value)
+
+    if low is not None or high is not None:
+        if a.dtype.is_complex:
+            a.real.clamp_(low, high)
+            a.imag.clamp_(low, high)
+        else:
+            a.clamp_(min=low, max=high)
+
+    return a
+
+
+def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
+
+    # Special-cases bool
+    if dtype is torch.bool:
+        tensors = (
+            torch.empty(0, device=device, dtype=torch.bool),
+            torch.tensor(True, device=device),
+            torch.tensor(False, device=device),
+            torch.tensor((True, False), device=device),
+            make_tensor((812,), device=device, dtype=dtype),
+            make_tensor((1029, 917), device=device, dtype=dtype),
+        )
+        for a in tensors:
+            yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
+
+    shapes = (
+        (1029, 917),
+        (812,),
+        # Empty sizes
+        (0,),
+        (0, 3, 3),
+        (1, 0, 5),
+        (6, 0, 0, 0),
+        (3, 0, 1, 0),
+    )
+
+    make_arg = partial(
+        _make_unary_elementwise_tensor,
+        op=op,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    for shape in shapes:
+        a = make_arg(shape)
+        yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
+
+
+def generate_elementwise_unary_small_value_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    for sample in generate_elementwise_binary_small_value_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    ):
+        a = _filter_unary_elementwise_tensor(sample.input, op=op)
+        yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
+
+
+def generate_elementwise_unary_large_value_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    for sample in generate_elementwise_binary_large_value_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    ):
+        a = _filter_unary_elementwise_tensor(sample.input, op=op)
+        yield SampleInput(sample.input, kwargs=op.sample_kwargs(device, dtype, a)[0])
+
+
+def generate_elementwise_unary_extremal_value_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    for sample in generate_elementwise_binary_extremal_value_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    ):
+        yield SampleInput(
+            sample.input, kwargs=op.sample_kwargs(device, dtype, sample.input)[0]
+        )
+
+
+def generate_elementwise_unary_noncontiguous_tensors(
+    op, *, device, dtype, requires_grad=False
+):
+    low, high = op.domain
+    low = low if low is None else low + op._domain_eps
+    high = high if high is None else high - op._domain_eps
+
+    make_arg = partial(
+        _make_unary_elementwise_tensor,
+        op=op,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+
+    # Generic noncontiguity
+    t = make_arg((1026,), noncontiguous=True)
+    yield SampleInput(t, kwargs=op.sample_kwargs(device, dtype, t)[0])
+
+    # Transposed
+    t = make_arg((1024, 1024)).T
+    yield SampleInput(t, kwargs=op.sample_kwargs(device, dtype, t)[0])
+
+    # Expanded tensors
+    shapes = ((1, 3), (1, 7), (5, 7))
+
+    for shape in shapes:
+        t = make_arg(shape)
+        t_non_contig = t.expand(3, -1, -1)
+        yield SampleInput(
+            t_non_contig, kwargs=op.sample_kwargs(device, dtype, t_non_contig)[0]
+        )
+
+def generate_elementwise_unary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False):
+    # shape, strides, offset
+    strided_cases = (
+        ((5, 6, 2), (1, 1, 7), 2),
+        ((5, 5, 4), (1, 1, 7), 2),
+        ((5, 5, 2), (4, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 5), 3),
+        ((9, 5, 2), (0, 1, 7), 3),
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    for shape, strides, offset in strided_cases:
+        a = make_arg(500,).as_strided(shape, strides, offset)
+        yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
+
+# Reuses the elementwise binary generators for consistency
+# TODO: in the future generalize the reference generators to handle n-ary elementwise operations
+def _reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs):
+    yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
+
+    yield from generate_elementwise_unary_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+    )
+
+    if dtype is not torch.bool:
+        yield from generate_elementwise_unary_small_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+        )
+    if dtype not in (torch.bool, torch.uint8, torch.int8) and (
+        op.handles_large_floats
+        or (not dtype.is_floating_point and not dtype.is_complex)
+    ):
+        yield from generate_elementwise_unary_large_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+        )
+
+    if dtype.is_floating_point or (op.handles_complex_extremal_values and dtype.is_complex):
+        yield from generate_elementwise_unary_extremal_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+        )
+
+def reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs):
+    gen = partial(
+        _reference_inputs_elementwise_unary, op, device, dtype, requires_grad, **kwargs
+    )
+
+    # yields "normal" samples
+    yield from gen()
+
+    # yields noncontiguous samples
+    for sample in gen():
+        yield sample.noncontiguous()
+
+    yield from generate_elementwise_unary_noncontiguous_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+    )
+
+    yield from generate_elementwise_unary_arbitrarily_strided_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+    )
+
+
+# Metadata class for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+class UnaryUfuncInfo(OpInfo):
+    """Operator information for 'universal unary functions (unary ufuncs).'
+    These are functions of a single tensor with common properties like:
+      - they are elementwise functions
+      - the input shape is the output shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
+    def __init__(
+        self,
+        name,  # the string name of the function
+        *,
+        ref,  # a reference function
+        dtypes=floating_types(),
+        dtypesIfCUDA=None,
+        dtypesIfROCM=None,
+        domain=(None, None),  # the [low, high) domain of the function
+        handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
+        handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
+        supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
+        sample_inputs_func=sample_inputs_elementwise_unary,
+        reference_inputs_func=reference_inputs_elementwise_unary,
+        sample_kwargs=lambda device, dtype, input: ({}, {}),
+        supports_sparse=False,
+        reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
+        **kwargs,
+    ):
+        self._original_unary_ufunc_args = locals().copy()
+
+        super(UnaryUfuncInfo, self).__init__(
+            name,
+            dtypes=dtypes,
+            dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfROCM=dtypesIfROCM,
+            sample_inputs_func=sample_inputs_func,
+            reference_inputs_func=reference_inputs_func,
+            supports_sparse=supports_sparse,
+            **kwargs,
+        )
+        self.ref = ref
+        self.domain = domain
+        self.handles_complex_extremal_values = handles_complex_extremal_values
+        self.handles_large_floats = handles_large_floats
+        self.supports_complex_to_float = supports_complex_to_float
+        self.reference_numerics_filter = reference_numerics_filter
+
+        # test_unary_ufuncs.py generates its own inputs to test the consistency
+        # of the operator on sliced tensors, non-contig tensors, etc.
+        # `sample_kwargs` is a utility function to provide kwargs
+        # along with those inputs if required (eg. clamp).
+        # It should return two dictionaries, first holding kwarg for
+        # torch operator and second one for reference NumPy operator.
+        self.sample_kwargs = sample_kwargs
+
+        # Epsilon to ensure grad and gradgrad checks don't test values
+        #   outside a function's domain.
+        self._domain_eps = 1e-5
+
+
+def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
+    is_fp16_or_chalf = dtype == torch.complex32 or dtype == torch.half
+    if not is_fp16_or_chalf:
+        nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, (31,), device=device,
+                              dtype=dtype, requires_grad=requires_grad)
+    else:
+        # cuFFT supports powers of 2 for half and complex half precision
+        # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
+        # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
+        low = None
+        high = None
+        if self.name in ['fft.hfft', 'fft.irfft',
+                         '_refs.fft.hfft', '_refs.fft.irfft']:
+            shapes = ((2, 9, 9), (33,))
+        elif self.name in ['fft.hfft2', 'fft.irfft2',
+                           '_refs.fft.hfft2', '_refs.fft.irfft2']:
+            shapes = ((2, 8, 9), (33,))
+        elif self.name in ['fft.hfftn', 'fft.irfftn',
+                           '_refs.fft.hfftn', '_refs.fft.irfftn']:
+            shapes = ((2, 2, 33), (33,))
+            # Adjusting the limits because the test would be flaky due to over-saturation of float16
+            # See: https://github.com/pytorch/pytorch/pull/81416
+            low = -1.0
+            high = 1.0
+        else:
+            shapes = ((2, 8, 16), (32,))
+        nd_tensor = partial(make_tensor, shapes[0], device=device, low=low, high=high,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, shapes[1], device=device, low=low, high=high,
+                              dtype=dtype, requires_grad=requires_grad)
+
+    if self.ndimensional == SpectralFuncType.ND:
+        return [
+            SampleInput(nd_tensor(),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(s=(8,))),
+            SampleInput(oned_tensor()),
+
+            *(SampleInput(nd_tensor(),
+                          kwargs=dict(dim=dim))
+                for dim in [-1, -2, -3, (0, -1)]),
+        ]
+    elif self.ndimensional == SpectralFuncType.TwoD:
+        return [
+            SampleInput(nd_tensor(),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(s=(6, 8) if not is_fp16_or_chalf else (4, 8))),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(dim=0)),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(dim=(0, -1))),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(dim=(-3, -2, -1))),
+        ]
+    else:
+        return [
+            SampleInput(nd_tensor(),
+                        kwargs=dict(n=10 if not is_fp16_or_chalf else 8, dim=1, norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor(),
+                        kwargs=dict(n=7 if not is_fp16_or_chalf else 8)
+                        ),
+            SampleInput(oned_tensor()),
+
+            *(SampleInput(nd_tensor(),
+                          kwargs=dict(dim=dim))
+                for dim in [-1, -2, -3]),
+        ]
+
+
+SpectralFuncType = Enum('SpectralFuncType', ('OneD', 'TwoD', 'ND'))
+
+
+# Metadata class for Fast Fourier Transforms in torch.fft.
+class SpectralFuncInfo(OpInfo):
+    """Operator information for torch.fft transforms. """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref=None,  # Reference implementation (probably in np.fft namespace)
+                 dtypes=floating_and_complex_types(),
+                 ndimensional: SpectralFuncType,
+                 sample_inputs_func=sample_inputs_spectral_ops,
+                 decorators=None,
+                 **kwargs):
+
+        self._original_spectral_func_args = dict(locals()).copy()
+        self._original_spectral_func_args.update(kwargs)
+
+        decorators = list(decorators) if decorators is not None else []
+        decorators += [
+            skipCPUIfNoFFT,
+            DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
+                         "TestCommon", "test_complex_half_reference_testing")
+        ]
+
+        super().__init__(name=name,
+                         dtypes=dtypes,
+                         decorators=decorators,
+                         sample_inputs_func=sample_inputs_func,
+                         **kwargs)
+        self.ref = ref
+        self.ndimensional = ndimensional
+
+
+class ShapeFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for Shape manipulating operations like tile and roll"""
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref,  # a reference function
+                 dtypes=floating_types(),
+                 dtypesIfCUDA=None,
+                 dtypesIfROCM=None,
+                 sample_inputs_func=None,
+                 **kwargs):
+        super(ShapeFuncInfo, self).__init__(name,
+                                            dtypes=dtypes,
+                                            dtypesIfCUDA=dtypesIfCUDA,
+                                            dtypesIfROCM=dtypesIfROCM,
+                                            sample_inputs_func=sample_inputs_func,
+                                            **kwargs)
+        self.ref = ref
+
+
+def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None):
+    if same_size:
+        return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous) for _ in range(N)]
+    else:
+        return [make_tensor((N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous) for i in range(N)]
+
+
+def get_foreach_method_names(name):
+    # get torch inplace reference function
+    op_name = "_foreach_" + name
+    inplace_op_name = op_name + "_"
+
+    op = getattr(torch, op_name, None)
+    inplace_op = getattr(torch, inplace_op_name, None)
+
+    ref = getattr(torch, name, None)
+    ref_inplace = getattr(torch.Tensor, name + "_", None)
+    return op, inplace_op, ref, ref_inplace
+
+
+class ForeachFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for foreach functions"""
+    def __init__(self,
+                 name,
+                 dtypes=floating_and_complex_types(),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=None,
+                 supports_alpha_param=False,
+                 sample_inputs_func=sample_inputs_foreach,
+                 **kwargs):
+        super().__init__(
+            "_foreach_" + name,
+            dtypes=dtypes,
+            dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfROCM=dtypesIfROCM,
+            sample_inputs_func=sample_inputs_func,
+            **kwargs
+        )
+
+        foreach_method, foreach_method_inplace, torch_ref_method, torch_ref_inplace = get_foreach_method_names(name)
+        self.method_variant = foreach_method
+        self.inplace_variant = foreach_method_inplace
+        self.ref = torch_ref_method
+        self.ref_inplace = torch_ref_inplace
+        self.supports_alpha_param = supports_alpha_param
+
+        if name == "norm":
+            self.ref = torch.linalg.vector_norm
