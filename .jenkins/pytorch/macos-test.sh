@@ -6,9 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
-  pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" numba psutil scipy
+  pip install hypothesis "expecttest==0.1.3" "librosa>=0.6.2" numba psutil scipy
 else
-  pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
+  pip install hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
 fi
 
 # TODO move this to docker

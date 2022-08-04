@@ -88,10 +88,10 @@ jobs:
         if: inputs.build-environment == 'macos-12-py3-arm64'
         run: |
           # Conda is already installed and setup for bash here
-          # Create new conda environment and activate it
+          # Cleanup lingering conda environment and create
+          # a new one for this run
           conda env remove -n build
           conda create -n build python=3.9.12
-          conda activate build
           conda list
 
       - name: Install macOS homebrew dependencies
@@ -125,14 +125,12 @@ jobs:
           # wreak havoc internally
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
-          python3 --version
-          python3 -c "import platform; print(platform.platform())"
           arch
 
+          # This is a no-op for x86
           conda activate build
-          conda list
+
           python3 -mpip install dist/*.whl
-          conda list
           .jenkins/pytorch/macos-test.sh
 
       - name: Cleanup miniconda for arm64

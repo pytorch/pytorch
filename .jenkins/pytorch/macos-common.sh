@@ -7,19 +7,21 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 sysctl -a | grep machdep.cpu
 
-# NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
+  # We use different versions here as the arm build/tests runs on python 3.9
+  # while the x86 one runs on python 3.8
   retry conda install -y \
-    numpy=1.22 \
-    pyyaml \
-    setuptools \
-    cmake \
+    numpy=1.22.3 \
+    pyyaml=6.0 \
+    setuptools=61.2.0 \
+    cmake=3.22.1 \
     cffi \
     ninja \
     typing_extensions \
     dataclasses \
     pip
 else
+  # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
   retry conda install -y \
     mkl=2021.2.0 \
     mkl-include=2021.2.0 \
