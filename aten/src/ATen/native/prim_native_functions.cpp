@@ -22,5 +22,13 @@ bool is_nonzero(const Tensor& self) {
   }
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
+
+
+// Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+// within test/test_python_dispatch.py
+Tensor foobar(const Tensor& self, bool arg1, bool arg2, bool arg3) {
+  return self;
+}
+
 } // namespace meta
 } // namespace at

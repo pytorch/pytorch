@@ -11,11 +11,8 @@ with FusionDefinition(fusion1) as fd :
     t0 = fd.define_tensor(1)
     t1 = fd.define_tensor(3)
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t0_b = fd.Ops.broadcast_in_dim(t0, [2, 3, 4], [1])
-    t2 = fd.Ops.add(t0_b, t1)
+    t0_b = fd.ops.broadcast_in_dim(t0, [2, 3, 4], [1])
+    t2 = fd.ops.add(t0_b, t1)
 
     fd.add_output(t2)
 
@@ -46,11 +43,8 @@ with FusionDefinition(fusion2) as fd :
     t0 = fd.define_tensor(sizes=input1.size(), strides=input1.stride())
     t1 = fd.define_tensor(sizes=input2.size(), strides=input2.stride())
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t0_b = fd.Ops.broadcast_in_dim(t0, [2, 3, 4], [0, 1, 2])
-    t2 = fd.Ops.add(t0_b, t1)
+    t0_b = fd.ops.broadcast_in_dim(t0, [2, 3, 4], [0, 1, 2])
+    t2 = fd.ops.add(t0_b, t1)
 
     fd.add_output(t2)
 
@@ -76,11 +70,8 @@ with FusionDefinition(fusion3) as fd :
     t0 = fd.define_tensor([3, 1], [1, 1])
     t1 = fd.define_tensor(1)
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t1_b = fd.Ops.broadcast_in_dim(t1, [3, 3], [0])  # 1 -> 0
-    t2 = fd.Ops.add(t0, t1_b)
+    t1_b = fd.ops.broadcast_in_dim(t1, [3, 3], [0])  # 1 -> 0
+    t2 = fd.ops.add(t0, t1_b)
 
     fd.add_output(t2)
 

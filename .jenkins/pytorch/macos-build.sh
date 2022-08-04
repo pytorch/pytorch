@@ -3,6 +3,8 @@
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 # Build PyTorch
 if [ -z "${CI}" ]; then
@@ -70,5 +72,7 @@ fi
 if which sccache > /dev/null; then
   print_sccache_stats
 fi
+
+python tools/stats/export_test_times.py
 
 assert_git_not_dirty

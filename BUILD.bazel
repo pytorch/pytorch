@@ -50,6 +50,9 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSparseMeta.cpp",
+    "aten/src/ATen/RegisterQuantizedMeta.cpp",
+    "aten/src/ATen/RegisterNestedTensorMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
     "aten/src/ATen/CPUFunctions_inl.h",
@@ -76,6 +79,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/MethodOperators.h",
     "aten/src/ATen/NativeMetaFunctions.h",
     "aten/src/ATen/RegistrationDeclarations.h",
+    "aten/src/ATen/VmapGeneratedPlumbing.h",
     "aten/src/ATen/core/aten_interned_strings.h",
     "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
@@ -1357,7 +1361,7 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.0.8",
+        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1424,7 +1428,7 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         ":caffe2_protos",
-        "//third_party/miniz-2.0.8:miniz",
+        "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
@@ -1605,6 +1609,7 @@ cc_library(
         "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
+        "third_party/kineto/libkineto/include",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1656,6 +1661,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",

@@ -528,6 +528,46 @@ TensorView* abs(TensorView* tv) {
   return abs(tv->as<Val>())->as<TensorView>();
 }
 
+// The output of real(complex_tensor) are real numbers
+Val* real(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  // We use UnaryOpType::Set instead of UnaryOpType::Real to support non-complex
+  // tensors
+  return unaryOp(UnaryOpType::Set, v);
+}
+
+TensorView* real(TensorView* tv) {
+  return real(tv->as<Val>())->as<TensorView>();
+}
+
+// The output of imag(complex_tensor) are real numbers
+Val* imag(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
+    return out;
+  }
+  TORCH_CHECK(false, "imag not supported for non-complex tensors");
+}
+
+TensorView* imag(TensorView* tv) {
+  return imag(tv->as<Val>())->as<TensorView>();
+}
+
 // UNARY FLOAT CAST OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_FLOAT_OP(op_name, op_type)                       \
@@ -1091,7 +1131,11 @@ TensorView* sum(
 TensorView* max(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMinimumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
@@ -1100,7 +1144,11 @@ TensorView* max(
 TensorView* min(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMaximumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);
@@ -1522,13 +1570,14 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto cast_values = promoteValues(operands, common_dtype);
   v1 = cast_values[0];
   v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
-  auto out_dtype =
-      promote_type(v1->getDataType().value(), v2->getDataType().value());
+  auto out_dtype = common_dtype;
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
   // Even when v1 and v2 are scalar, the output is a tensor if the

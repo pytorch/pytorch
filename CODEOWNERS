@@ -13,7 +13,6 @@
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/native_functions.yaml @bdhirsh
 /aten/src/ATen/native/tags.yaml @anjali411
 
 # Tensorpipe RPC Agent.

@@ -25,14 +25,14 @@ from .storage import (
     StorageWriter,
 )
 
-from .api import CheckpointException
+from .utils import _DistWrapper
+
 
 # -------------- private functions --------------
 
 def _prepare(
     state_dict: Dict[str, Any],
     write_replicated_data: bool,
-    process_group: Optional[dist.ProcessGroup] = None,
 ) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
     """
     Build the serialization plan for a given state_dict
@@ -141,29 +141,18 @@ def save_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
+    distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
 
-    exceptions: List[Optional[BaseException]] = [None]
-    if is_coordinator:
-        try:
-            storage_writer.prepare()
-        except BaseException as e:
-            exceptions = [e]
+    distW.broadcast("prepare", storage_writer.prepare)
+    metadata = None
 
-    # Writing can only start once prepare has finished
-    if not no_dist:
-        dist.broadcast_object_list(exceptions, group=process_group, src=coordinator_rank)
-
-    if exceptions[0] is not None:
-        raise CheckpointException("failed to prepare storage", {coordinator_rank : exceptions[0]})
-
-    rank_write_error: Optional[BaseException]
-    try:
+    def write_step():
+        nonlocal metadata
         (
             metadata,
             bytes_write_requests,
             tensor_write_requests,
-        ) = _prepare(state_dict, is_coordinator, process_group)
+        ) = _prepare(state_dict, distW.is_coordinator)
 
         combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
         combined_writes.extend(tensor_write_requests)
@@ -173,44 +162,9 @@ def save_state_dict(
         bytes_futures = storage_writer.write_bytes(bytes_write_requests)
         tensor_futures = storage_writer.write_tensors(tensor_write_requests)
         torch.futures.wait_all([bytes_futures, tensor_futures])
-        rank_write_error = None
-    except BaseException as e:
-        rank_write_error = e
 
-    all_errors: List[Optional[BaseException]]
-    # collect all write errors
-    if not no_dist:
-        all_errors = [None] * dist.get_world_size(process_group)
-        dist.gather_object(
-            obj=rank_write_error,
-            object_gather_list=all_errors if is_coordinator else None,
-            dst=coordinator_rank
-        )
-    else:
-        all_errors = [rank_write_error]
+    def finish_checkpoint(_):
+        assert metadata is not None
+        storage_writer.finish(metadata=metadata)
 
-    result: List[Optional[CheckpointException]] = [None]
-    if is_coordinator:
-        message: Optional[str] = None
-        # gather produces an array of arrays, flatten it
-        if any(all_errors):
-            message = "Failed to write data"
-        else:
-            try:
-                storage_writer.finish(metadata=metadata)
-            except BaseException as e:
-                all_errors[coordinator_rank] = e
-                message = "Failed to finish checkpoint"
-
-        if message is not None:
-            node_failures = {i: err for i, err in enumerate(all_errors) if err is not None}
-            result[0] = CheckpointException(message, node_failures)
-
-    if not no_dist:
-        dist.broadcast_object_list(
-            result,
-            group=process_group,
-            src=coordinator_rank)
-
-    if result[0] is not None:
-        raise result[0]
+    distW.all_reduce("checkpoitn write", write_step, finish_checkpoint)

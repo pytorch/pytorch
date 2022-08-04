@@ -16,6 +16,18 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
+      run-doxygen:
+        required: false
+        type: boolean
+        default: false
+        description: If set, will enable C++ API doc generation using doxygen / breathe / exhale.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
@@ -68,6 +80,7 @@ jobs:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
+          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
@@ -84,6 +97,7 @@ jobs:
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
+            -e RUN_DOXYGEN \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \

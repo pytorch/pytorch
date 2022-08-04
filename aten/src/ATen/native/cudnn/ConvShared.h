@@ -48,7 +48,7 @@ void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool deterministic, bool allow_tf32);
+    int64_t groups, bool deterministic, bool allow_tf32, at::MemoryFormat memory_format);
 
 std::string repro_from_args(const ConvolutionParams& args);
 

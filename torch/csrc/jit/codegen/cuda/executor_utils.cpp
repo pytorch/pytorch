@@ -777,7 +777,12 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
-        const auto extent = root_domain[dim]->extent();
+        Val* extent = nullptr;
+        if (root_domain[dim]->hasExpandedExtent()) {
+          extent = root_domain[dim]->expandedExtent();
+        } else {
+          extent = root_domain[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -845,7 +850,12 @@ ExpressionEvaluator bindFusionInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");
       for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
+        Val* extent = nullptr;
+        if (root_dom[dim]->hasExpandedExtent()) {
+          extent = root_dom[dim]->expandedExtent();
+        } else {
+          extent = root_dom[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
