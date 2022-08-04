@@ -43,13 +43,12 @@ def generate_code(
     autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
-        # gen_autograd_python(
-        #     native_functions_path or NATIVE_FUNCTIONS_PATH,
-        #     tags_path or TAGS_PATH,
-        #     autograd_gen_dir,
-        #     autograd_dir,
-        # )
-        print("a")
+        gen_autograd_python(
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
+            autograd_gen_dir,
+            autograd_dir,
+        )
 
     if operator_selector is None:
         operator_selector = SelectiveBuilder.get_nop_selector()

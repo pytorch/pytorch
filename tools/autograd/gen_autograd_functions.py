@@ -4,7 +4,7 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, Dict
 
 from torchgen.api.autograd import (
     Derivative,
@@ -32,7 +32,7 @@ from torchgen.api.types import (
     tensorT,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.model import Argument
+from torchgen.model import Argument, FunctionSchema
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
@@ -364,7 +364,7 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 def gen_autograd_functions_lib(
     out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     """Functions.h and Functions.cpp body
@@ -374,8 +374,9 @@ def gen_autograd_functions_lib(
     """
 
     # only create an autograd function if we are actually going to calculate a derivative
+    diff_info_list = [info for diffinfo_dict in differentiability_infos.values() for info in diffinfo_dict.values()]
     infos = list(
-        filter(lambda info: info.args_with_derivatives, differentiability_infos)
+        filter(lambda info: info.args_with_derivatives, diff_info_list)
     )
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
@@ -397,7 +398,7 @@ def gen_autograd_functions_lib(
 
 def gen_autograd_functions_python(
     out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
 
@@ -417,8 +418,9 @@ def gen_autograd_functions_python(
         },
     )
 
+    diff_info_list = [info for diffinfo_dict in differentiability_infos.values() for info in diffinfo_dict.values()]
     infos = list(
-        filter(lambda info: info.args_with_derivatives, differentiability_infos)
+        filter(lambda info: info.args_with_derivatives, diff_info_list)
     )
     fm.write_sharded(
         "python_functions.cpp",
