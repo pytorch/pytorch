@@ -587,7 +587,7 @@ VulkanBuffer MemoryAllocator::create_storage_buffer(
   const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
   VmaAllocationCreateFlags create_flags = DEFAULT_ALLOCATION_STRATEGY;
-  if (gpu_only) {
+  if (!gpu_only) {
     create_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
   }
 

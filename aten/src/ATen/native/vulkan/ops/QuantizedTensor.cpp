@@ -49,12 +49,9 @@ Tensor quantize_per_tensor(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
+      // shader descriptor
       VK_KERNEL(quantize_per_tensor),
+      // barrier
       pipeline_barrier,
       // global work group size
       v_input.extents(),
@@ -112,12 +109,9 @@ Tensor dequantize_helper(
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
   context->submit_compute_job(
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
+      // shader descriptor
       VK_KERNEL(dequantize),
+      // pipeline barrier
       pipeline_barrier,
       // global work group size
       v_input.extents(),

@@ -1391,8 +1391,8 @@ class ShapePropagator : public PropertyPropBase {
               node, /*num_reduced_dim=*/0, /*upcast_integer=*/false, opt_dtype);
         }};
 
-    static const auto factory_with_ndim = [](Node* node,
-                                             int dim) -> type_vec_t {
+    static const auto factory_with_ndim =
+        [](Node* node, int dim, at::ScalarType default_dtype) -> type_vec_t {
       at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
@@ -1408,7 +1408,7 @@ class ShapePropagator : public PropertyPropBase {
       if (!maybe_dtype_option)
         return {};
       auto dtype =
-          (maybe_dtype_option->isNone() ? at::kDouble
+          (maybe_dtype_option->isNone() ? default_dtype
                                         : maybe_dtype_option->toScalarType());
 
       return {TensorType::create(
@@ -1491,12 +1491,23 @@ class ShapePropagator : public PropertyPropBase {
             "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::zeros(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+        },
+        [](Node* node) -> type_vec_t {
+          if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
+            return factory_with_ndim(
+                node, (int)maybe_size->size(), at::kDouble);
+          }
+          return {};
+        }};
+
+    static const register_formula_for randint{
+        {
             "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
-            return factory_with_ndim(node, (int)maybe_size->size());
+            return factory_with_ndim(node, (int)maybe_size->size(), at::kLong);
           }
           return {};
         }};

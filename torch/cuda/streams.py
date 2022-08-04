@@ -134,7 +134,7 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            return super(Stream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+            return super(ExternalStream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
 class Event(torch._C._CudaEventBase):
