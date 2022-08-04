@@ -1858,6 +1858,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
+    # TODO: move QConfigMapping tests to test/quantization/core
     def test_qconfig_mapping_set_global(self):
         qconfig = get_default_qconfig()
         qconfig_mapping = QConfigMapping()

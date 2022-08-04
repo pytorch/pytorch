@@ -35,7 +35,7 @@ class TestFakeQuantize(unittest.TestCase):
 
     r""" Tests fake quantize forward() method
          by comparing result with expected
-         float_to_reduced_precision mapping of input tensor.
+         quant_dequant_APoT mapping of input tensor.
          Uses input tensor with random values from 0 -> 1000
          and APoT observer with hard-coded values b=4, k=2
     """
