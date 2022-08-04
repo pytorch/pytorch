@@ -204,6 +204,7 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "meshgrid",
     "narrow",
     "native_layer_norm",
     "permute",
@@ -222,6 +223,8 @@ __all__ = [
     "view",
     "vsplit",
     "vstack",
+    "unflatten",
+    "unbind",
     #
     # Tensor Creation
     #
@@ -486,6 +489,18 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
         raise ValueError(msg)
 
     return prims.fill(a, value)
+
+
+def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+    r = prims.fill(a, value)
+    prims.copy_to(a, r)
+    return a
+
+
+def zero_(a: TensorLikeType) -> TensorLikeType:
+    r = prims.fill(a, 0)
+    prims.copy_to(a, r)
+    return a
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -2211,7 +2226,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_decomposition(torch.ops.aten.expand)
+@register_decomposition(torch.ops.aten.expand, disable_meta=True)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -2412,12 +2427,11 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.transpose(a, _permutation)
 
 
-def _reshape_view_helper(
-    a: TensorLikeType, shape: ShapeType, *, allow_copy: bool
-) -> TensorLikeType:
+def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
     # NOTE: Reshape may be given a shape with a -1 length
     # This indicates that the dimension's length should be inferred
     # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     for idx in range(len(shape)):
         if shape[idx] == -1:
@@ -2439,8 +2453,8 @@ def _reshape_view_helper(
                 )
                 raise ValueError(msg)
 
-            shape = list(shape)
-            shape[idx] = length
+            shape = list(shape)  # type: ignore[assignment]
+            shape[idx] = length  # type: ignore[index]
             break
 
     # Short-circuits if shape is the same
@@ -2554,8 +2568,11 @@ def _reshape_view_helper(
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 # CompositeImplicitAutograd - don't register decomp
-def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, shape, allow_copy=True)
+# NOTE: shape is a vararg because Tensor.reshape can be called with as
+# Tensor.reshape(a, b, c) or Tensor.reshape((a, b, c)) Function call
+# torch.reshape doesn't support unpacked shapes
+def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, *shape, allow_copy=True)
 
 
 @register_decomposition(torch.ops.aten.roll)
@@ -2696,8 +2713,33 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 0)
 
 
+# CompositeImplicitAutograd - don't register decomp
+def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    if not sizes:
+        raise RuntimeError("unflatten: sizes must be non-empty")
+    if -1 not in sizes and utils.prod(sizes) != a.shape[dim]:
+        raise RuntimeError(
+            f"unflatten: Provided sizes {sizes} don't multiply up to the size of dim {dim} ({a.shape[dim]}) in the input tensor"
+        )
+    out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
+    return torch.reshape(a, out_shape)
+
+
+def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
+    dim = utils.canonicalize_dim(t.ndim, dim)
+    check(
+        len(t.shape) > 0,
+        lambda: "dimension specified as 0 but tensor has no dimensions",
+        IndexError,
+    )
+    return tuple(
+        torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
+    )
+
+
 # Note: although squeeze is documented as having the out= kwarg it doesn't
-@register_decomposition(torch.ops.aten.squeeze)
+@register_decomposition(torch.ops.aten.squeeze, disable_meta=True)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
         dim = utils.canonicalize_dim(a.ndim, dim)
@@ -2891,7 +2933,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     return tensor_split(a, sections, 2)
 
 
-@register_decomposition(torch.ops.aten.t.default)
+@register_decomposition(torch.ops.aten.t.default, disable_meta=True)
 def t(a: TensorLikeType):
     # TODO: Add sparse support
     # if a.is_sparse:
@@ -2925,7 +2967,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unsqueeze)
+@register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -2933,10 +2975,13 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
+# NOTE: shape is a vararg because Tensor.reshape can be called with as
+# Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
+# doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(torch.ops.aten.view)
-def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, shape, allow_copy=False)
+@register_decomposition(torch.ops.aten.view, disable_meta=True)
+def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -2949,7 +2994,9 @@ def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
 ) -> TensorLikeType:
     check(
@@ -2971,7 +3018,13 @@ def empty(
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -2998,13 +3051,66 @@ def new_empty(
     )
 
 
-# TODO: missing kwargs (e.g. layout)
+@register_decomposition(torch.ops.aten.new_zeros)
+def new_zeros(
+    a: TensorLikeType,
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.zero_()
+    return r
+
+
+@register_decomposition(torch.ops.aten.new_ones)
+def new_ones(
+    a: TensorLikeType,
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.fill_(1)
+    return r
+
+
+@register_decomposition(torch.ops.aten.new_full)
+def new_full(
+    a: TensorLikeType,
+    size: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.fill_(fill_value)  # type: ignore[arg-type]
+    return r
+
+
 def empty_like(
     a: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
 
@@ -3017,15 +3123,23 @@ def empty_like(
         return torch.empty(
             a.shape,
             dtype=dtype,
+            layout=layout,
             device=device,
             requires_grad=requires_grad,
+            pin_memory=pin_memory,
             memory_format=memory_format,
         )
 
     # memory_format == torch.preserve_format
     strides = utils.compute_elementwise_output_strides(a)
     return torch.empty_strided(
-        a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        a.shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3057,8 +3171,16 @@ def arange(
     pass
 
 
-@register_decomposition(torch.ops.aten.arange)
-@out_wrapper()
+# See https://github.com/pytorch/pytorch/issues/82364
+# @register_decomposition(torch.ops.aten.arange)
+# @out_wrapper()
+@register_decomposition(
+    [
+        torch.ops.aten.arange.default,
+        torch.ops.aten.arange.start,
+        torch.ops.aten.arange.start_step,
+    ]
+)
 def arange(
     a: Optional[NumberType] = None,
     b: Optional[NumberType] = None,
@@ -3218,6 +3340,82 @@ def logspace(
     return prims.to_dtype(torch.pow(base, ret), dtype)
 
 
+@overload
+def meshgrid(tensors: Sequence[TensorLikeType], indexing: str):
+    pass
+
+
+@overload
+def meshgrid(*tensors: TensorLikeType, indexing: str):
+    pass
+
+
+@register_decomposition(torch.ops.aten.meshgrid)
+def meshgrid(
+    *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
+    indexing: str,
+) -> List[TensorLikeType]:
+    # This ref simultaneously handles two overloads (see stubs above)
+    # The `indexing` argument is currently optional for torch.meshgrid, but we
+    # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
+    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+        assert len(tensors) == 1
+        tensors = tuple(tensors[0])
+
+    check(
+        py_all(isinstance(a, TensorLike) for a in tensors),
+        lambda: "meshgrid expects its inputs to be tensors",
+    )
+
+    check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
+
+    for i in range(len(tensors) - 1):
+        check(
+            tensors[i].dtype == tensors[i + 1].dtype,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same dtype",
+        )
+        check(
+            tensors[i].device == tensors[i + 1].device,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same device",
+        )
+
+    swap_first_and_second_tensors = False
+    if indexing == "xy":
+        swap_first_and_second_tensors = len(tensors) >= 2
+        if swap_first_and_second_tensors:
+            tensors = (tensors[1], tensors[0], *tensors[2:])
+    else:
+        check(
+            indexing == "ij",
+            lambda: (
+                'torch.meshgrid: indexing must be one of "xy" or "ij", '
+                f"but received: {indexing}"
+            ),
+        )
+
+    result_shape: List[int] = []
+    for t in tensors:
+        assert isinstance(t, TensorLike)  # mypy
+        check(
+            t.ndim == 0 or t.ndim == 1,
+            lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",
+        )
+        result_shape.append(t.numel())
+
+    grids: List[TensorLikeType] = []
+    for i, t in enumerate(tensors):
+        assert isinstance(t, TensorLike)  # mypy
+        if t.ndim == 0:
+            t = t.view((1,))
+        grids.append(prims.broadcast_in_dim(t, result_shape, (i,)))
+
+    if swap_first_and_second_tensors:
+        # Swap outputs if we originally swapped at the beginning
+        grids[0], grids[1] = grids[1], grids[0]
+
+    return grids
+
+
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 @register_decomposition(torch.ops.aten.empty_strided)
 def empty_strided(
@@ -3226,15 +3424,26 @@ def empty_strided(
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
+
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    if layout is not None and layout is not torch.strided:
+        raise NotImplementedError(f"PrimTorch doesn't support layout={layout}")
 
     shape = utils.extract_shape_from_varargs(shape)
     dtype = torch.get_default_dtype() if dtype is None else dtype
     device = torch.device("cpu") if device is None else device
 
     return prims.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+        shape,
+        strides,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
 
 
@@ -3308,6 +3517,9 @@ def uniform(
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
 
 
+@register_decomposition(
+    [torch.ops.aten.masked_fill.Scalar, torch.ops.aten.masked_fill.Tensor]
+)
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
@@ -3320,7 +3532,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
+        # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
+        check(
+            a.device.type == "cuda" or value.device == a.device,
+            lambda: "Expected `value` to be on same device as `a`",
+        )
         value_type = utils.dtype_to_type(value.dtype)
+        if utils.is_cpu_scalar_tensor(value):
+            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -3335,10 +3554,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        return where(mask, python_type(value), a)
+        return torch.where(mask, python_type(value), a)
 
     assert isinstance(value, TensorLike)
-    return where(mask, prims.to_dtype(value, a.dtype), a)
+    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # CompositeImplicitAutograd - don't register decomp

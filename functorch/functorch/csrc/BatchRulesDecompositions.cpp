@@ -129,6 +129,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(index_select_backward);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(instance_norm);
+  OP_DECOMPOSE(inverse);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
   OP_DECOMPOSE(layer_norm);
@@ -137,10 +138,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_det);
+  OP_DECOMPOSE(linalg_inv);
   OP_DECOMPOSE(linalg_matmul);
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
+  OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
   OP_DECOMPOSE2(max, other );
@@ -156,12 +159,16 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(narrow);
   OP_DECOMPOSE(negative);
+  OP_DECOMPOSE2(frobenius_norm, dim);
+  OP_DECOMPOSE2(nuclear_norm, dim);
+  OP_DECOMPOSE(nuclear_norm);
   OP_DECOMPOSE(nll_loss_nd);
   OP_DECOMPOSE(nll_loss);
   OP_DECOMPOSE(nll_loss2d);
   OP_DECOMPOSE2(not_equal, Tensor );
   OP_DECOMPOSE(outer);
   OP_DECOMPOSE(pairwise_distance);
+  OP_DECOMPOSE(pinverse);
   OP_DECOMPOSE(poisson_nll_loss);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
@@ -210,6 +217,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE(value_selecting_reduction_backward);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   OP_DECOMPOSE(var_mean);
