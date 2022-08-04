@@ -61,15 +61,50 @@ def run_command(
 
 def lint_file(
     matching_line: str,
+    allowlist_pattern: str,
     replace_pattern: str,
     linter_name: str,
     error_name: str,
     error_description: str,
-) -> LintMessage:
+) -> Optional[LintMessage]:
     # matching_line looks like:
     #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
     split = matching_line.split(":")
     filename = split[0]
+
+    if allowlist_pattern:
+        try:
+            proc = run_command(["grep", "-nEHI", allowlist_pattern, filename])
+        except Exception as err:
+            return LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=linter_name,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=(
+                    f"Failed due to {err.__class__.__name__}:\n{err}"
+                    if not isinstance(err, subprocess.CalledProcessError)
+                    else (
+                        "COMMAND (exit code {returncode})\n"
+                        "{command}\n\n"
+                        "STDERR\n{stderr}\n\n"
+                        "STDOUT\n{stdout}"
+                    ).format(
+                        returncode=err.returncode,
+                        command=" ".join(as_posix(x) for x in err.cmd),
+                        stderr=err.stderr.decode("utf-8").strip() or "(empty)",
+                        stdout=err.stdout.decode("utf-8").strip() or "(empty)",
+                    )
+                ),
+            )
+
+        # allowlist pattern was found, abort lint
+        if proc.returncode == 0:
+            return None
 
     original = None
     replacement = None
@@ -109,7 +144,7 @@ def lint_file(
 
     return LintMessage(
         path=split[0],
-        line=int(split[1]),
+        line=int(split[1]) if len(split) > 1 else None,
         char=None,
         code=linter_name,
         severity=LintSeverity.ERROR,
@@ -131,9 +166,18 @@ def main() -> None:
         help="pattern to grep for",
     )
     parser.add_argument(
+        "--allowlist-pattern",
+        help="if this pattern is true in the file, we don't grep for pattern",
+    )
+    parser.add_argument(
         "--linter-name",
         required=True,
         help="name of the linter",
+    )
+    parser.add_argument(
+        "--match-first-only",
+        action="store_true",
+        help="only match the first hit in the file",
     )
     parser.add_argument(
         "--error-name",
@@ -174,8 +218,14 @@ def main() -> None:
         stream=sys.stderr,
     )
 
+    files_with_matches = []
+    if args.match_first_only:
+        files_with_matches = ["--files-with-matches"]
+
     try:
-        proc = run_command(["grep", "-nEHI", args.pattern, *args.filenames])
+        proc = run_command(
+            ["grep", "-nEHI", *files_with_matches, args.pattern, *args.filenames]
+        )
     except Exception as err:
         err_msg = LintMessage(
             path=None,
@@ -209,12 +259,14 @@ def main() -> None:
     for line in lines:
         lint_message = lint_file(
             line,
+            args.allowlist_pattern,
             args.replace_pattern,
             args.linter_name,
             args.error_name,
             args.error_description,
         )
-        print(json.dumps(lint_message._asdict()), flush=True)
+        if lint_message is not None:
+            print(json.dumps(lint_message._asdict()), flush=True)
 
 
 if __name__ == "__main__":
