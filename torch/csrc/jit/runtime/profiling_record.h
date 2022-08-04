@@ -82,8 +82,7 @@ namespace jit {
 using ::c10::TensorTypePtr;
 using Dimension = int64_t;
 
-TORCH_API int RegisterProfilingNode(const std::function<bool(const Node*)>&);
-TORCH_API void DeregisterProfilingNode(int index);
+TORCH_API void RegisterProfilingNode(const std::function<bool(const Node*)>&);
 
 struct ProfilingRecord;
 

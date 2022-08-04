@@ -45,7 +45,7 @@ class SchemaCheckMode(TorchDispatchMode):
             if are_tensors and before.layout != torch.sparse_csr and after.layout != torch.sparse_csr:
                 return not (
                     before.size() == after.size() and
-                    torch.all(torch.isclose(before, after, equal_nan=True)) and
+                    torch.allclose(before, after, equal_nan=True) and
                     md[0] == after.stride() and
                     md[1] == after.storage()._cdata
                 )
@@ -79,6 +79,7 @@ class SchemaCheckMode(TorchDispatchMode):
                         return (deepcopy(current.stride()), current.storage()._cdata)
                     except AttributeError as t:
                         return None
+                # Sparse CSR tensors do not have strides or storage
                 elif (e.layout != torch.sparse_csr):
                     return (deepcopy(e.stride()), e.storage()._cdata)
             return None
@@ -114,6 +115,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 md = cloned_metadata.get(name)
                 after = arguments.get(name)
                 for j in range(len(tuple_out)):
+                    # aten::_unsafe_view is intended to have incorrect aliasing notation (hence unsafe)
                     if has_aliased(tuple_out[j], after) and func._schema.name != 'aten::_unsafe_view':
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
