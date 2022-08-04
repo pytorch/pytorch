@@ -2457,7 +2457,7 @@ class IrParser {
 
     {
       std::array<const char*, kNumVarOps> Variance = {
-          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor",
           "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
       for (auto signature : Variance) {
         auto ptr_op = getOperatorForLiteral(signature);

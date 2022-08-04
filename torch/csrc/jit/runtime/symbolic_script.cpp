@@ -182,12 +182,12 @@ const std::vector<std::string> functions = {
             return torch.var(self, unbiased), backward
 
         def var_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
