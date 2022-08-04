@@ -51,6 +51,14 @@ SymInt SymInt::operator*(SymInt sci) const {
   return SymInt::toSymInt(res[0]->mul(res[1]));
 }
 
+SymInt SymInt::operator/(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return SymInt(data_ / sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->floordiv(res[1]));
+}
+
 bool SymInt::operator==(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ == sci.data_;
