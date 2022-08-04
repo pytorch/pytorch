@@ -7,6 +7,8 @@ on:
 jobs:
   do_rebase:
     runs-on: ubuntu-20.04
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -30,7 +32,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BRANCH: ${{ github.event.client_payload.branch }}
         run: |
           set -ex
@@ -45,7 +46,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -ex
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "rebase"

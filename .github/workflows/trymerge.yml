@@ -8,6 +8,8 @@ jobs:
   do_merge:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -29,7 +31,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
           ON_GREEN: ${{ github.event.client_payload.on_green}}
           LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
@@ -57,7 +58,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -ex
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
