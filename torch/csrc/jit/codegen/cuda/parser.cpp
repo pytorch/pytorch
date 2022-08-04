@@ -2458,7 +2458,7 @@ class IrParser {
     {
       std::array<const char*, kNumVarOps> Variance = {
           "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
-          "aten::std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
+          "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
       for (auto signature : Variance) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -2480,8 +2480,13 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   dims_list.has_value(), "Cannot fuse with dynamic axes");
               std::vector<int> dims;
-              for (const auto dim : dims_list->vec()) {
-                dims.emplace_back(static_cast<int>(dim));
+              if (!dims_list->empty()) {
+                for (const auto dim : dims_list->vec()) {
+                  dims.emplace_back(static_cast<int>(dim));
+                }
+              } else {
+                dims.resize(input->as<TensorView>()->nDims());
+                std::iota(dims.begin(), dims.end(), 0);
               }
 
               auto unbiased = constant_as<bool>(node->input(2));
