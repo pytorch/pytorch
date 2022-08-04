@@ -28,6 +28,10 @@ inline at::Tensor wrap_buffer(
       std::move(nested_stride_tensor), offsets);
 }
 
+inline at::Tensor get_buffer(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
 // The sizes of the underlying tensors
 inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* self_ptr) {
   int64_t ntensors = self_ptr->size(0);
