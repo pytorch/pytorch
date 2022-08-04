@@ -21,7 +21,7 @@ namespace mps {
 // Pad operations (1D/2D/3D forward and backward)
 Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef padding,
                          const c10::optional<Tensor>& grad_output_opt,
-                         MPSGraphPaddingMode mode, const string op_name)
+                         MPSGraphPaddingMode mode, double constantValue, const string op_name)
 {
   const int padding_size = (int) padding.size();
   const int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
@@ -150,7 +150,7 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                                                  withPaddingMode:mode
                                                      leftPadding:leftPadding
                                                     rightPadding:rightPadding
-                                                   constantValue:0
+                                                   constantValue:constantValue
                                                             name:nil];
             } else {
               newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
@@ -187,101 +187,116 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
 TORCH_IMPL_FUNC(reflection_pad1d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output)
 {
-  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt, MPSGraphPaddingModeReflect, "reflection_pad1d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt,
+                        MPSGraphPaddingModeReflect, 0.0, "reflection_pad1d_out_mps");
 }
 
 TORCH_IMPL_FUNC(reflection_pad1d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output, MPSGraphPaddingModeReflect, "reflection_pad1d_backward_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output,
+                        MPSGraphPaddingModeReflect, 0.0, "reflection_pad1d_backward_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad1d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output)
 {
-  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt, MPSGraphPaddingModeClampToEdge, "replication_pad1d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt,
+                        MPSGraphPaddingModeClampToEdge, 0.0, "replication_pad1d_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad1d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output, MPSGraphPaddingModeClampToEdge, "replication_pad1d_backward_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output,
+                        MPSGraphPaddingModeClampToEdge, 0.0, "replication_pad1d_backward_out_mps");
 }
 
 // 2D Reflection and Replication Padding
 Tensor& reflection_pad2d_out_mps(const Tensor& input, IntArrayRef padding, Tensor& output)
 {
-  return mps::pad_out_template(output, input, padding, c10::nullopt, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(output, input, padding, c10::nullopt, MPSGraphPaddingModeReflect, 0.0, __func__);
 }
 
 Tensor reflection_pad2d_mps(const Tensor& input, IntArrayRef padding)
 {
   Tensor output = at::empty({0}, input.options());
-  return mps::pad_out_template(output, input, padding, c10::nullopt, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(output, input, padding, c10::nullopt, MPSGraphPaddingModeReflect, 0.0, __func__);
 }
 
 Tensor& reflection_pad2d_backward_out_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding, Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, 0.0, __func__);
 }
 
 Tensor reflection_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding)
 {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, 0.0, __func__);
 }
 
 TORCH_IMPL_FUNC(replication_pad2d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output)
 {
-  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt, MPSGraphPaddingModeClampToEdge, "replication_pad2d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt,
+                        MPSGraphPaddingModeClampToEdge, 0.0, "replication_pad2d_out_mps");
 }
 
 Tensor& replication_pad2d_backward_out_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding, Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
 }
 
 Tensor replication_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding)
 {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
 }
 
 // 3D Reflection and Replication Padding
 TORCH_IMPL_FUNC(reflection_pad3d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output)
 {
-  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt, MPSGraphPaddingModeReflect, "reflection_pad3d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt,
+                        MPSGraphPaddingModeReflect, 0.0, "reflection_pad3d_out_mps");
 }
 
 TORCH_IMPL_FUNC(reflection_pad3d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output, MPSGraphPaddingModeReflect, "reflection_pad3d_backward_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(grad_input), input, padding, grad_output,
+                        MPSGraphPaddingModeReflect, 0.0, "reflection_pad3d_backward_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad3d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output)
 {
-  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt, MPSGraphPaddingModeClampToEdge, "replication_pad3d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, c10::nullopt,
+                        MPSGraphPaddingModeClampToEdge, 0.0, "replication_pad3d_out_mps");
 }
 
 Tensor& replication_pad3d_backward_out_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding, Tensor& grad_input)
 {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
 }
 
 Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding)
 {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
+}
+
+// backward pass is exlicitly handled in autograd by negating the "pad" argument
+Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value)
+{
+  Tensor output = at::empty({0}, self.options());
+  return mps::pad_out_template(output, self, pad, c10::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
 }
 
 // topk

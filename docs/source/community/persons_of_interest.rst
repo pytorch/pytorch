@@ -185,7 +185,8 @@ C10 utils and operator dispatch
 PyTorch -> ONNX
 ~~~~~~~~~~~~~~~
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
--  Gary Miguel (`garymm <https://github.com/garymm>`__)
+-  Aaron Bockover (`abock <https://github.com/abock>`__)
+-  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
 -  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
@@ -214,11 +215,12 @@ Windows
 -  (emeritus) Teng Gao (`gaoteng-git <https://github.com/gaoteng-git>`__)
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 
-Apple M1
-~~~~~~~~
+Apple M1/MPS
+~~~~~~~~~~~~
 
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
 
 PowerPC
 ~~~~~~~

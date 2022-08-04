@@ -487,9 +487,11 @@ inline bool is_symint_node(py::handle obj) {
 
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    return py::cast(symint.toSymIntNodeImpl()).release().ptr();
+    auto r = py::cast(symint.toSymIntNodeImpl()).release().ptr();
+    TORCH_INTERNAL_ASSERT(r);
+    return r;
   } else {
-    return THPUtils_packInt64(symint.data());
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 
