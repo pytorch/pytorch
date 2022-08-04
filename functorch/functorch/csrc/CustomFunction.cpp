@@ -2,6 +2,7 @@
 #include <functorch/csrc/CustomFunction.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
