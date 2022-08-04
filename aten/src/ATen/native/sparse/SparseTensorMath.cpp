@@ -943,6 +943,11 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
     return vals;
   };
 
+  // The code dispatches to mul(dense, sparse), and the goal
+  // is to delay calling into coalesce when converting one of
+  // the sparse arguments to dense if possible.
+  // This is possible when there is a 0-dim coalesced argument.
+
   // if is_wrapped_scalar(zero_dim)
   if (zero_dim.is_coalesced()) {
     const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim);
