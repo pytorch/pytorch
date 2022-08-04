@@ -4,7 +4,6 @@
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 import re
 
-import sys
 from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
@@ -47,8 +46,6 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
-
-sys.stdout = open("output3.txt", "w+")
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
