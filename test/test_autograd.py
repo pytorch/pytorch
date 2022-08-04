@@ -6205,47 +6205,66 @@ for shape in [(1,), ()]:
         gc.collect()
         self.assertTrue(ref.expired())
 
-    def test_full_backward_hook_create_graph_true_cycle(self):
+    def test_create_graph_and_full_backward_hook_cycle(self):
         # If BackwardHook saves grad_output, it can create a cycle when we perform backward
         # with create_graph=True
         #
         #   grad_output -> grad_output.grad_fn -> graph -> hook -> grad_output
         #
         class TestCls():
+            # Dummy class for the purpose of creating a weakref
             pass
-        def get_ref():
-            t = torch.randn(10, requires_grad=False)
+
+        def get_ref(input_requires_grad, nb_hooks, remove_hook_during_backward):
+            t = torch.randn(10, requires_grad=input_requires_grad)
             a = torch.tensor(1., requires_grad=True)
+
+            def f(*args):
+                # Removing the hooks during backward doesn't matter -
+                # All the hooks will still be executed, and counter will still go to zero
+                if remove_hook_during_backward:
+                    handles[0].remove()
+                return None
             class Test(nn.Module):
                 def forward(self, x):
-                    return x * a ** 2
+                    tmp = a ** 2
+                    tmp.grad_fn.register_hook(f)
+                    return tmp * x ** 2
             mod = Test()
 
-            # Dummy class for the purpose of creating a weakref
-            def fn(mod, gI, gO):
-                print(gO, gI)
-                # Check that full_backward_hook still works
-                # self.assertTrue(torch.allclose(gI[0], 2 * a * gO[0]))
-                return None
+            handles = []
+            for _ in range(nb_hooks):
+                handles.append(mod.register_full_backward_hook(lambda a, b, c: None))
 
-            mod.register_full_backward_hook(fn)
             tmp = mod(t)
 
-            # Save dummy varible to graph and get a weak ref to it
+            # Save dummy object to graph and get a weak ref to it
             test = TestCls()
             ref = weakref.ref(test)
             tmp.grad_fn.metadata["a"] = test
 
-            tmp.exp().sum().backward(create_graph=True)
+            with warnings.catch_warnings(record=True) as w:
+                tmp.exp().sum().backward(create_graph=True)
+            self.assertTrue(len(w) <= 1)
+            if len(w) == 1:
+                self.assertTrue("Using backward() with create_graph=True" in str(w[0].message))
 
-            # We also need this, or else there would still be a cycle!
+            # Remove the backward + create_graph=True cycle
             a.grad = None
+            t.grad = None
 
-            return ref
+            return ref, handles
 
-        ref_ = get_ref()
-        gc.collect()
-        self.assertIsNone(ref_())
+        for nb_hooks in (3,):
+            for input_requires_grad in (True,):
+                for remove_hook_during_backward in (True, False):
+                    ref_, handles = get_ref(
+                        input_requires_grad=input_requires_grad,
+                        nb_hooks=nb_hooks,
+                        remove_hook_during_backward=remove_hook_during_backward
+                    )
+                    gc.collect()
+                    self.assertIsNone(ref_())
 
 
     def test_input_buffer_accum(self):

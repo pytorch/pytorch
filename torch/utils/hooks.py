@@ -80,6 +80,7 @@ class BackwardHook(object):
         self.output_tensors_index = None
         self.n_inputs = -1
         self.input_tensors_index = None
+        self.counter = 0
 
     def _pack_with_none(self, indices, values, size):
         res = [None] * size
@@ -108,7 +109,12 @@ class BackwardHook(object):
 
             grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
             res = user_hook(self.module, grad_input, self.grad_outputs)
-            self.grad_outputs = None
+
+            # To avoid leaks, remove the saved grad_outputs after the execution of the last input hook
+            self.counter -=1
+            if self.counter == 0:
+                self.grad_outputs = None
+
             if res is None:
                 return res
 
@@ -117,6 +123,7 @@ class BackwardHook(object):
                                    "got {}, but expected {}".format(len(res), len(grad_input)))
             return self._unpack_none(self.input_tensors_index, res)
         grad_fn.register_hook(hook)
+        self.counter += 1
 
     def _apply_on_tensors(self, fn, args):
         # Can be used to apply the given function to the tensors contained in the
