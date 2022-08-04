@@ -2,7 +2,7 @@ import json
 import logging
 
 import math
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,7 +21,7 @@ from torchgen.model import (
 )
 from torchgen.static_runtime import config
 
-logger: logger = logging.getLogger()
+logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
@@ -229,7 +229,7 @@ def test_tensor_dim(op_name: str) -> int:
 
 
 test_tensor_shapes_string = '{"view_as_complex": "{2, 2}"}'
-test_tensor_shape_json = json.loads(test_tensor_shapes_string)
+test_tensor_shape_json: Dict[str, str] = json.loads(test_tensor_shapes_string)
 
 
 def test_tensor_shape(op_name: str) -> str:

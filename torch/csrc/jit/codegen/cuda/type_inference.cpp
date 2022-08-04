@@ -462,12 +462,20 @@ class NaiveTypePropagator {
             type0->withScalarType(type1->scalarType()), node);
         break;
       }
-      case aten::to: {
+      case aten::to:
+      case aten::_to_copy: {
         const auto type0 = getInputTensorType(node, 0);
         const auto out_dtype = toIValue(node->input(1));
-        TORCH_CHECK(out_dtype, "No output type specified");
-        copyScalarTypeAndDeviceToOutput(
-            type0->withScalarType(out_dtype->toScalarType()), node);
+        if (out_dtype.has_value() && out_dtype->isInt()) {
+          copyScalarTypeAndDeviceToOutput(
+              type0->withScalarType(out_dtype->toScalarType()), node);
+        } else {
+          TORCH_CHECK(
+              !out_dtype.has_value() || out_dtype->isNone(),
+              "dtype for cast unrecognized ",
+              out_dtype->tagKind());
+          copyScalarTypeAndDeviceToOutput(type0, node);
+        }
         break;
       }
       case prim::add_optional: {

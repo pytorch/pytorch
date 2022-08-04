@@ -127,7 +127,7 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymbolicIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
 class TestPySymInt(TestCase):
