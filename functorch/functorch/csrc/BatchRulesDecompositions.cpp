@@ -159,6 +159,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(narrow);
   OP_DECOMPOSE(negative);
+  OP_DECOMPOSE2(frobenius_norm, dim);
+  OP_DECOMPOSE2(nuclear_norm, dim);
+  OP_DECOMPOSE(nuclear_norm);
   OP_DECOMPOSE(nll_loss_nd);
   OP_DECOMPOSE(nll_loss);
   OP_DECOMPOSE(nll_loss2d);
@@ -214,6 +217,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE(value_selecting_reduction_backward);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   OP_DECOMPOSE(var_mean);
