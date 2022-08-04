@@ -655,6 +655,8 @@ class TestOperators(TestCase):
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
+        xfail('linalg.solve'),
+        xfail('linalg.tensorsolve'),
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -713,7 +715,6 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('put'),
         xfail('take'),
-        xfail('linalg.eigvals'),
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
@@ -786,15 +787,11 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('linalg.det'),
         xfail('linalg.eig'),
-        xfail('linalg.eigvals'),
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.pinv'),
         xfail('linalg.pinv', 'hermitian'),
-        xfail('linalg.slogdet'),
-        xfail('linalg.solve'),
-        xfail('logdet'),
         xfail('lu'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
@@ -830,7 +827,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_pool3d'),
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('linalg.tensorsolve'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
