@@ -204,6 +204,7 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "meshgrid",
     "narrow",
     "native_layer_norm",
     "permute",
@@ -3324,6 +3325,82 @@ def logspace(
         requires_grad=requires_grad,
     )
     return prims.to_dtype(torch.pow(base, ret), dtype)
+
+
+@overload
+def meshgrid(tensors: Sequence[TensorLikeType], indexing: str):
+    pass
+
+
+@overload
+def meshgrid(*tensors: TensorLikeType, indexing: str):
+    pass
+
+
+@register_decomposition(torch.ops.aten.meshgrid)
+def meshgrid(
+    *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
+    indexing: str,
+) -> List[TensorLikeType]:
+    # This ref simultaneously handles two overloads (see stubs above)
+    # The `indexing` argument is currently optional for torch.meshgrid, but we
+    # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
+    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+        assert len(tensors) == 1
+        tensors = tuple(tensors[0])
+
+    check(
+        py_all(isinstance(a, TensorLike) for a in tensors),
+        lambda: "meshgrid expects its inputs to be tensors",
+    )
+
+    check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
+
+    for i in range(len(tensors) - 1):
+        check(
+            tensors[i].dtype == tensors[i + 1].dtype,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same dtype",
+        )
+        check(
+            tensors[i].device == tensors[i + 1].device,  # type: ignore[union-attr]
+            lambda: "meshgrid expects all tensors to have the same device",
+        )
+
+    swap_first_and_second_tensors = False
+    if indexing == "xy":
+        swap_first_and_second_tensors = len(tensors) >= 2
+        if swap_first_and_second_tensors:
+            tensors = (tensors[1], tensors[0], *tensors[2:])
+    else:
+        check(
+            indexing == "ij",
+            lambda: (
+                'torch.meshgrid: indexing must be one of "xy" or "ij", '
+                f"but received: {indexing}"
+            ),
+        )
+
+    result_shape: List[int] = []
+    for t in tensors:
+        assert isinstance(t, TensorLike)  # mypy
+        check(
+            t.ndim == 0 or t.ndim == 1,
+            lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",
+        )
+        result_shape.append(t.numel())
+
+    grids: List[TensorLikeType] = []
+    for i, t in enumerate(tensors):
+        assert isinstance(t, TensorLike)  # mypy
+        if t.ndim == 0:
+            t = t.view((1,))
+        grids.append(prims.broadcast_in_dim(t, result_shape, (i,)))
+
+    if swap_first_and_second_tensors:
+        # Swap outputs if we originally swapped at the beginning
+        grids[0], grids[1] = grids[1], grids[0]
+
+    return grids
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints

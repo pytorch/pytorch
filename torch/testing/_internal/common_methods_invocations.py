@@ -19266,9 +19266,6 @@ op_db: List[OpInfo] = [
         skips=(
             # FIXME: cannot specify keepdim without dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: dim=None not supported
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
@@ -20806,6 +20803,18 @@ python_ref_db = [
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="variadic_tensors",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="list_of_tensors",
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
