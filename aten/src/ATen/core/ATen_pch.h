@@ -172,4 +172,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/symbol.h>
 
+#include <ATen/NativeFunctions.h>
+
 #pragma pop_macro("TORCH_ASSERT_NO_OPERATORS")
