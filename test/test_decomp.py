@@ -5,6 +5,7 @@ from torch import Tensor
 import torch.autograd
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
+from torch._prims.context import TorchRefsMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
@@ -415,7 +416,9 @@ class TestDecomp(TestCase):
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+                with TorchRefsMode():
+                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
