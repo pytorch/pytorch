@@ -1,5 +1,6 @@
 import torch
 import warnings
+import weakref
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 __all__ = [
@@ -321,6 +322,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
                            preserve_rng_state=preserve)
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+tmp = []
 def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
     """Checkpointining without re-entrant autograd
     Args:
@@ -350,23 +352,36 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: Dict[int, Optional[torch.Tensor]] = {}
-    counter = 0
+    # Custom class to be able to take weak references
+    class Holder():
+        pass
+    # The Holder object for each of the saved object is saved directly on the
+    # SavedVariable and is cleared when reset_data() is called on it. We MUST make
+    # sure that this is the only object having an owning reference to ensure that
+    # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
+    # data is cleared.
+    storage: Dict[Holder, torch.Tensor] = weakref.WeakKeyDictionary()
+    weak_holder_list = []
 
     def pack(x):
-        nonlocal counter
-        counter += 1
-        # TODO(varal7): Instead of returning indices, we can return things metadata (such as
+        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
         # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        return counter - 1
+        res = Holder()
+        weak_holder_list.append(weakref.ref(res))
+        return res
+
 
     def unpack(x):
         unpack_counter = 0
         if len(storage) == 0:
-
             def inner_pack(inner):
                 nonlocal unpack_counter
-                storage[unpack_counter] = inner.detach()
+                # The holder for the unpack_counter-th element must not have gone out
+                # of scope
+                assert weak_holder_list[unpack_counter]() is not None
+                # Use detach here to ensure we don't keep the temporary autograd
+                # graph created during the second forward
+                storage[weak_holder_list[unpack_counter]()] = inner.detach()
                 unpack_counter += 1
                 return None
 
@@ -398,7 +413,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                 " open an issue with details on your use case so that we can prioritize adding this."
             )
 
-        return storage.pop(x)
+        return storage[x]
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args, **kwargs)
