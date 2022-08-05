@@ -371,10 +371,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual std::string name() const;
 
   /// The difference between functions `should_compute_output` and
-  /// `task_should_compute_output`: `should_compute_output` is called
-  /// when constructing the node because the node itself is irreverent to the
-  /// graph_task, `task_should_compute_output` is called during the node
-  /// execution.
+  /// `task_should_compute_output`: The first one only considers the links in
+  /// the actual graph, while the second (that should only be called during the
+  /// backward/grad pass) also takes into account the current running graph task
+  /// to trim even more edges that are not needed.
   ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
