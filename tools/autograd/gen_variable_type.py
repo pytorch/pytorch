@@ -851,8 +851,10 @@ def gen_variable_type_func(
                     formals=formals,
                 )
                 wrapper_registration = gen_wrapper_registration(f, key)
+                result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key, _ in fn.info.items():
+                for key, _ in fn.info.items():                   
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(f.func.returns).cpp_type(),
                         type_wrapper_name=type_wrapper_name(f, key=key),
@@ -860,8 +862,8 @@ def gen_variable_type_func(
                         formals=formals,
                     )
                     wrapper_registration = gen_wrapper_registration(f, key)
-            result[f"type_derived_method_definitions_{key}"] = [type_definition]
-            result[f"wrapper_registrations_{key}"] = [wrapper_registration]
+                    result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                    result[f"wrapper_registrations_{key}"] = [wrapper_registration]
     # See Note [Manual Backend kernels]
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
     # If you want to register a kernel to Autograd, you must make the op abstract.
