@@ -8,11 +8,16 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 
-#include <ATen/ATen.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/isnan.h>
+#endif
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
