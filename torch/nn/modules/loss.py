@@ -1037,9 +1037,8 @@ class CrossEntropyLoss(_WeightedLoss):
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
-    The `input` is expected to contain the logits for each class (which do `not` need
-    to be positive or sum to 1, in general). This class will compute a softmax
-    followed by cross entropy to compute the final loss.
+    The `input` is expected to contain the unnormalized logits for each class (which do `not` need
+    to be positive or sum to 1, in general).
     `input` has to be a Tensor of size :math:`(C)` for unbatched input,
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
     `K`-dimensional case. The last being useful for higher dimension inputs, such
