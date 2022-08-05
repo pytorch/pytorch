@@ -1,11 +1,11 @@
 """ONNX exporter exceptions."""
 from __future__ import annotations
-import textwrap
 
+import textwrap
 from typing import Optional
 
-from torch.onnx import _constants
 from torch import _C
+from torch.onnx import _constants
 
 __all__ = [
     "OnnxExporterError",
