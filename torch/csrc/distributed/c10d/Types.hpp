@@ -71,6 +71,14 @@ struct ReduceOp {
     return other == op_;
   }
 
+  bool operator==(const ReduceOp::Kind other) {
+    return *this == static_cast<std::uint8_t>(other);
+  }
+
+  bool operator==(const ReduceOp& other) {
+    return *this == other.op_;
+  }
+
   Kind op_ = SUM;
   // supplement_ is "type-erased" storage for optional supplementary
   // data the op might need.

@@ -539,6 +539,21 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   reduce_op.def(py::init<::c10d::ReduceOp::Kind>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
+  // The following are for some kind of backward compatibility.
+  // Since c10d::ReduceOp had been an `enum class`, users can do comparison and
+  // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
+  // I define some member methods.
+  reduce_op
+      .def(
+          "__eq__",
+          [](const ::c10d::ReduceOp& self,
+             const ::c10d::ReduceOp::Kind& other) { return self == other; })
+      .def(
+          "__eq__",
+          [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
+            return self == other.op_;
+          })
+      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
   py::enum_<::c10d::ReduceOp::Kind>(reduce_op, "Kind")
       .value("SUM", ::c10d::ReduceOp::Kind::SUM)
