@@ -1041,9 +1041,16 @@ if(CUDAToolkit_FOUND)
   # nvtools can be installed outside the CUDA toolkit directory,
   # so search the NVTOOLSEXT_PATH windows only environment variable
   set(CMAKE_FIND_DEBUG_MODE ON)
+  set(nvToolsExt_EXTRA_PATHS)
+  if(WIN32)
+     set(nvToolsExt_EXTRA_PATHS
+         "$ENV{NVTOOLSEXT_PATH}"
+         "C:\\Program Files\\NVIDIA Corporation\\NvToolsExt")
+  endif()
+
   find_path(CUDAToolkit_nvToolsExt_INCLUDE_DIR nvToolsExt.h
       PATHS "${CUDAToolkit_INCLUDE_DIR}"
-            ENV NVTOOLSEXT_PATH
+            nvToolsExt_EXTRA_PATHS
       PATH_SUFFIXES include
       NO_DEFAULT_PATH)
   mark_as_advanced(CUDAToolkit_nvToolsExt_INCLUDE_DIR)
@@ -1051,13 +1058,10 @@ if(CUDAToolkit_FOUND)
   if(CUDAToolkit_nvToolsExt_INCLUDE_DIR)
     _CUDAToolkit_find_and_add_import_lib(nvToolsExt
         ALT nvToolsExt64 nvToolsExt64_1
-        EXTRA_HINTS ENV NVTOOLSEXT_PATH
+        EXTRA_HINTS nvToolsExt_EXTRA_PATHS
         EXTRA_INCLUDE_DIRS "${CUDAToolkit_nvToolsExt_INCLUDE_DIR}")
   endif()
 
-  if(NOT TARGET CUDA::nvToolsExt)
-    message(FATAL_ERROR "Failed to find nvToolsExt")
-  endif()
   set(CMAKE_FIND_DEBUG_MODE OFF)
 
   _CUDAToolkit_find_and_add_import_lib(OpenCL)
