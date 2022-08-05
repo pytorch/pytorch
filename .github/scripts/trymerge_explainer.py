@@ -2,7 +2,9 @@ import os
 import re
 from typing import List, Pattern, Tuple, Optional
 
-from trymerge import BOT_COMMANDS_WIKI, GitHubPR, gh_post_pr_comment
+from trymerge import GitHubPR, gh_post_pr_comment
+
+BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
 
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
@@ -72,7 +74,9 @@ class TryMergeExplainer(object):
                 "This means your PR will be merged immediately, bypassing any checks."
             )
         elif self.on_green:
-            return "This means that your PR will be merged once all signals have passed."
+            return (
+                "This means that your PR will be merged once all signals have passed."
+            )
         elif self.land_checks:
             if self.has_trunk_label:
                 land_check_msg_suffix = (
