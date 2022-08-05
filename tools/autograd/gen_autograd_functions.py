@@ -4,7 +4,7 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from typing import List, Sequence, Tuple, Dict
+from typing import Dict, List, Sequence, Tuple
 
 from torchgen.api.autograd import (
     Derivative,
@@ -374,10 +374,12 @@ def gen_autograd_functions_lib(
     """
 
     # only create an autograd function if we are actually going to calculate a derivative
-    diff_info_list = [info for diffinfo_dict in differentiability_infos.values() for info in diffinfo_dict.values()]
-    infos = list(
-        filter(lambda info: info.args_with_derivatives, diff_info_list)
-    )
+    diff_info_list = [
+        info
+        for diffinfo_dict in differentiability_infos.values()
+        for info in diffinfo_dict.values()
+    ]
+    infos = list(filter(lambda info: info.args_with_derivatives, diff_info_list))
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
 
@@ -418,10 +420,12 @@ def gen_autograd_functions_python(
         },
     )
 
-    diff_info_list = [info for diffinfo_dict in differentiability_infos.values() for info in diffinfo_dict.values()]
-    infos = list(
-        filter(lambda info: info.args_with_derivatives, diff_info_list)
-    )
+    diff_info_list = [
+        info
+        for diffinfo_dict in differentiability_infos.values()
+        for info in diffinfo_dict.values()
+    ]
+    infos = list(filter(lambda info: info.args_with_derivatives, diff_info_list))
     fm.write_sharded(
         "python_functions.cpp",
         infos,

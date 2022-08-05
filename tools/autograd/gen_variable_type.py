@@ -25,7 +25,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -721,6 +721,7 @@ def gen_variable_type(
     tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
+    used_keys: Set[str],
 ) -> None:
 
     """VariableType.h and VariableType.cpp body
@@ -729,7 +730,12 @@ def gen_variable_type(
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    fm1 = FileManager(
+        install_dir=out + "/templates", template_dir=template_path, dry_run=False
+    )
+    fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
     fm.write(
         "VariableType.h",
         lambda: {
@@ -737,11 +743,43 @@ def gen_variable_type(
         },
     )
 
-    # FIXME: update sharded keys
+    sharded_keys = set(
+        [f"type_derived_method_definitions_{key}" for key in used_keys]
+        + [f"wrapper_registrations_{key}" for key in used_keys]
+    )
+
+    def wrapper_registrations(used_keys):
+        a = []
+        for key in used_keys:
+            dispatch_key = key
+            if key == "Default":
+                dispatch_key = "Autograd"
+            s = (
+                f"TORCH_LIBRARY_IMPL(aten, {dispatch_key}, m) "
+                + "{\n"
+                + "${"
+                + f"wrapper_registrations_{key}"
+                + "}\n}"
+            )
+            a += [s]
+        return "\n\n".join(a)
+
+    fm1.write(
+        "VariableType.cpp",
+        lambda: {
+            "type_derived_method_definitions": "\n\n".join(
+                [
+                    "${" + f"type_derived_method_definitions_{key}" + "}"
+                    for key in used_keys
+                ]
+            ),
+            "wrapper_registrations": wrapper_registrations(used_keys),
+        },
+    )
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    fm.write_sharded(
+    fm2.write_sharded(
         "VariableType.cpp",
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
@@ -750,10 +788,7 @@ def gen_variable_type(
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
-        sharded_keys={
-            "type_derived_method_definitions_Default",
-            "wrapper_registrations_Default",
-        },
+        sharded_keys=sharded_keys,
     )
 
 
@@ -808,7 +843,7 @@ def gen_variable_type_func(
             result["wrapper_registrations_Default"] = [wrapper_registration]
         else:
             if not fn.info:
-                key = 'Default'
+                key = "Default"
                 type_definition = METHOD_DEFINITION.substitute(
                     return_type=cpp.returns_type(f.func.returns).cpp_type(),
                     type_wrapper_name=type_wrapper_name(f, key=key),

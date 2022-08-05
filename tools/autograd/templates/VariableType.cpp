@@ -49,15 +49,14 @@ namespace{
 namespace {
 
 
-${type_derived_method_definitions_Default}
+${type_derived_method_definitions}
+
 }
 }
 
 namespace {
 
-TORCH_LIBRARY_IMPL(aten, Autograd, m) {
-  ${wrapper_registrations_Default}
-}
+${wrapper_registrations}
 
 }
 

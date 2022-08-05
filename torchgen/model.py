@@ -52,6 +52,13 @@ DEFAULT_KERNEL_NAMESPACE = "at::native"
 BACKEND_COMPONENTS = "CPU CUDA HIP XLA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
 FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 
+AUTOGRAD_KEYS = [
+    "Autograd",
+    "AutogradOther",
+    "AutogradFunctionality",
+    "AutogradNestedTensor",
+] + ["Autograd" + component for component in BACKEND_COMPONENTS]
+
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen
 class DispatchKey(Enum):

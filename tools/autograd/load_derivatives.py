@@ -38,6 +38,7 @@ from torchgen.api.types import (
 from torchgen.context import with_native_function
 from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
 from torchgen.model import (
+    AUTOGRAD_KEYS,
     FunctionSchema,
     NativeFunction,
     NativeFunctionsViewGroup,
@@ -48,6 +49,10 @@ from torchgen.model import (
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
+
+_VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
+
+_USED_DISPATCH_KEYS = set()
 
 # This function directly adds derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
@@ -90,7 +95,7 @@ def add_view_copy_derivatives(
 
 def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
-) -> Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]:
+) -> Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
@@ -139,9 +144,9 @@ def load_derivatives(
         infos = dict()
         for defn_dict in definitions:
             # key should perhaps be just the name and not the signature
-            if "Dispatch" not in defn_dict:
+            if "dispatch" not in defn_dict:
                 specification = defn_dict.pop("name")
-                defn_dict = {"name": specification, "Dispatch": {"Default": defn_dict}}
+                defn_dict = {"name": specification, "dispatch": {"Default": defn_dict}}
             name, per_dispatch_diffinfos = create_differentiability_info(
                 defn_dict, functions_by_signature, functions_by_schema, op_counter
             )
@@ -151,7 +156,7 @@ def load_derivatives(
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
-    return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
+    return _GLOBAL_LOAD_DERIVATIVE_CACHE[key], _USED_DISPATCH_KEYS
 
 
 @with_native_function
@@ -633,17 +638,26 @@ def create_differentiability_info(
         )
 
     diffinfo_dict = dict()
-    for key, defn in defn_dict["Dispatch"].items():
+    for key, defn in defn_dict["dispatch"].items():
+        if key != "Default" and key not in _VALID_AUTOGRAD_KEYS:
+            raise RuntimeError(
+                f"Invalid dispatch key {key} in derivatives.yaml for {specification},"
+                f" expected key to be one of {_VALID_AUTOGRAD_KEYS}"
+            )
+        if key not in _USED_DISPATCH_KEYS:
+            _USED_DISPATCH_KEYS.add(key)
         # NB: Removes 'output_differentiability' from defn dictionary
         #     `None` means all differentiable.
         output_differentiability = defn.pop("output_differentiability", None)
+        if key != "Default":
+            print(key, specification, output_differentiability, "\n\n\n")
         output_differentiability_conditions = None
         if output_differentiability and any(
             [isinstance(diff, str) for diff in output_differentiability]
         ):
             if len(output_differentiability) != 1:
                 raise RuntimeError(
-                    f"Not supported: for {specification},"
+                    f"Not supported: for {specification} with dispatch {key},"
                     f"output_differentiability must either be "
                     f"List[bool] or a List[str] where each str is a "
                     f"condition. In the case where it is a condition, "
