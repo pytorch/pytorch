@@ -3,6 +3,7 @@
 set -eou pipefail
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID) \
+sudo modprobe backlight
 DRIVER_FN="NVIDIA-Linux-x86_64-515.57.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
