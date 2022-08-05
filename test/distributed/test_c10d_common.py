@@ -1139,7 +1139,7 @@ class AbstractCommTest(object):
         with self.assertRaisesRegex(RuntimeError, "not registered"):
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
-        self.assertEqual(dist.get_global_ranks(group), [1])
+        self.assertEqual(dist.get_process_group_ranks(group), [1])
 
 
 

@@ -334,10 +334,10 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
 
     Args:
         group (ProcessGroup): ProcessGroup to find the global rank from.
-        local_rank (int): Local rank to query.
+        group_rank (int): Group rank to query.
 
     Returns:
-        Global rank of ``local_rank`` relative to ``group``
+        Global rank of ``group_rank`` relative to ``group``
 
     N.B. calling this function on the default process group returns identity
     """
@@ -350,16 +350,15 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
             return rank
     raise RuntimeError(f"Group rank {group_rank} is not part of group {group}")
 
-def get_global_ranks(group: ProcessGroup) -> Sequence[int]:
+def get_process_group_ranks(group: ProcessGroup) -> Sequence[int]:
     """
-    Get all global ranks of the process group.
+    Get all ranks associated with ``group``.
 
     Args:
-        group (ProcessGroup): ProcessGroup to get the global ranks from.
+        group (ProcessGroup): ProcessGroup to get all ranks from.
 
     Returns:
-        List of global ranks ordered by local ranks.
-
+        List of global ranks ordered by group rank.
     """
     return list(_pg_group_ranks[group].keys())
 
@@ -2413,7 +2412,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.scatter(output_tensors, input_tensors, opts)
     else:
-        group_src_rank = get_local_rank(group, src)
+        group_src_rank = get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.scatter(output_tensors, input_tensors, opts)
 
