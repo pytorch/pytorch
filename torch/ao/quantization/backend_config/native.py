@@ -282,7 +282,7 @@ def get_test_only_legacy_native_backend_config_dict():
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack) with various additional
     fp16 ops in dictionary form.
     """
-    return BackendConfig.from_dict(get_test_only_legacy_native_backend_config_dict())
+    return get_test_only_legacy_native_backend_config().to_dict()
 
 __all__ = [
     "get_test_only_legacy_native_backend_config",
