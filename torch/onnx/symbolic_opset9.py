@@ -4098,11 +4098,13 @@ def narrow(g, input, dim, start, length):
     )
 
 
-def argmax(g, input, dim, keepdim):
+@symbolic_helper.parse_args("v", "v", "i")
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
-def argmin(g, input, dim, keepdim):
+@symbolic_helper.parse_args("v", "v", "i")
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 

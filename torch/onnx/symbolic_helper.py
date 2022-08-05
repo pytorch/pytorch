@@ -800,9 +800,9 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_c
     return scale_factor, mode
 
 
-def _argmin_argmax_helper(g, input, dim, keepdim, op_name):
-    keepdim = _parse_arg(keepdim, "i")
-
+def _argmin_argmax_helper(
+    g, input: torch._C.Value, dim: torch._C.Value, keepdim: int, op_name: str
+):
     def op_wrapper(input, axis_i, keepdims_i):
         if GLOBALS.export_onnx_opset_version >= 12:
             return g.op(
@@ -821,12 +821,17 @@ def _argmin_argmax_helper(g, input, dim, keepdim, op_name):
         output = op_wrapper(flattened, axis_i=0, keepdims_i=False)
         if keepdim:
             input_shape = g.op("Shape", input)
-            new_shape = g.op("Div", input_shape, input_shape)
+            input_shape_shape = g.op("Shape", input_shape)
+            new_shape = g.op(
+                "ConstantOfShape",
+                input_shape_shape,
+                value_t=torch.tensor([1], dtype=torch.int64),
+            )
             output = g.op("Reshape", output, new_shape)
         return output
-    else:
-        dim = _parse_arg(dim, "i")
-        return op_wrapper(input, axis_i=dim, keepdims_i=keepdim)
+
+    dim = _parse_arg(dim, "i")
+    return op_wrapper(input, axis_i=dim, keepdims_i=keepdim)
 
 
 def _interpolate_helper(name, dim, interpolate_mode):
