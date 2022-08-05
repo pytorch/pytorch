@@ -34,7 +34,7 @@ from gitutils import (
 from trymerge_explainer import (
     TryMergeExplainer,
     get_land_check_troubleshooting_message,
-    print_revert_message,
+    get_revert_message,
 )
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -394,7 +394,6 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
-BOT_COMMANDS_WIKI = 'https://github.com/pytorch/pytorch/wiki/Bot-commands'
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -1190,19 +1189,20 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
-    explainer = TryMergeExplainer(force, on_green, land_checks, pr, org, project)
+    explainer = TryMergeExplainer(force, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
     on_green, land_checks = explainer.get_flags()
 
     check_for_sev(org, project, force)
 
+    if force or can_skip_internal_checks(pr, comment_id):
+        # do not wait for any pending signals if PR is closed as part of co-development process
+        gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message())
+        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+
     if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
-    explainer.print_merge_message(land_check_commit, dry_run)
-
-    if force or can_skip_internal_checks(pr, comment_id):
-        # do not wait for any pending signals if PR is closed as part of co-development process
-        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
@@ -1269,7 +1269,7 @@ def main() -> None:
 
     if args.revert:
         try:
-            print_revert_message(org, project, args.pr_num, args.dry_run)
+            gh_post_pr_comment(org, project, args.pr_num, get_revert_message(org, project, pr.pr_num), args.dry_run)
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
