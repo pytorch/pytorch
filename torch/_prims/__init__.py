@@ -2316,10 +2316,10 @@ def _arange_aten(
     requires_grad: bool,
 ) -> TensorLikeType:
     # mypy: Not all union combinations were tried because there are too many unions
-    return torch.arange(  # type: ignore[call-overload, misc, arg-type]
-        start,
-        end,
-        step,
+    return torch.arange(  # type: ignore[call-overload, misc]
+        start,  # type: ignore[arg-type]
+        end,  # type: ignore[arg-type]
+        step,  # type: ignore[arg-type]
         dtype=dtype,
         device=device,
         layout=torch.strided,
