@@ -70,7 +70,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device, y.device)
             self.assertTrue(isinstance(out, FakeTensor))
 
-    def test_nan_to_num(self)
+    def test_nan_to_num(self):
         mode = FakeTensorMode(inner=None)
         with enable_torch_dispatch_mode(mode):
             x = torch.rand([4])
