@@ -4901,10 +4901,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     torch.argmax(input),
                     torch.argmin(input, keepdim=True),
                     torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
                 )
 
         self.run_test(ArgminArgmaxModel(), input)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_argmin_argmax(self):
         input = torch.randn(7, 3, 5)
         self._argmin_argmax_model(input)
