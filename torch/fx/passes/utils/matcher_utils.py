@@ -1,14 +1,32 @@
+from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-
-from torch.fx.subgraph_rewriter import Match
-
 from typing import Dict, List, Set
 
 __all__ = ['SubgraphMatcher']
+
+
+@compatibility(is_backward_compatible=False)
+@dataclass
+class _InternalMatch():
+    # Node from which the match was found
+    anchor: Node
+    # Maps nodes in the pattern subgraph to nodes in the larger graph
+    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+
+    # nodes in target graph that are matched placeholder in pattern
+    placeholder_nodes: List[Node] = field(default_factory=list)
+
+    # sink nodes in matched subgraph returned by output
+    returning_nodes: List[Node] = field(default_factory=list)
+
+    def __copy__(self):
+        return _InternalMatch(anchor=self.anchor, nodes_map=self.nodes_map.copy(),
+                              placeholder_nodes=self.placeholder_nodes.copy(),
+                              returning_nodes=self.returning_nodes.copy())
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcher:
@@ -92,8 +110,8 @@ class SubgraphMatcher:
                     return False
         return True
 
-    def _remove_overlapping_matches(self, matches: List[Match]) -> List[Match]:
-        non_overlapping_matches: List[Match] = list()
+    def _remove_overlapping_matches(self, matches: List[_InternalMatch]) -> List[_InternalMatch]:
+        non_overlapping_matches: List[_InternalMatch] = list()
         nodes_matched: Set[Node] = set()
 
         for match in matches:
@@ -110,7 +128,7 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
-    def _match_nodes(self, pn: Node, gn: Node, match: Match) -> bool:
+    def _match_nodes(self, pn: Node, gn: Node, match: _InternalMatch) -> bool:
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -142,7 +160,7 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> List[Match]:
+    def match(self, graph: Graph) -> List[_InternalMatch]:
         """
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
 
@@ -177,7 +195,7 @@ class SubgraphMatcher:
                 if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
-        matches: List[Match] = []
+        matches: List[_InternalMatch] = []
 
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
@@ -200,7 +218,7 @@ class SubgraphMatcher:
 
         # TODO: Match's anchor is set to the first of self.pattern_anchors[0] for now,
         # need to update the sematics of this field
-        match = Match(anchor=self.pattern_anchors[0])
+        match = _InternalMatch(anchor=self.pattern_anchors[0])
         backtracking(0, match)
 
         if self.fully_contained:
