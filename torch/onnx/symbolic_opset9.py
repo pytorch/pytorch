@@ -3065,9 +3065,7 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
@@ -3196,9 +3194,7 @@ def hardshrink(g, self, lambd):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -3221,9 +3217,7 @@ def softshrink(g, self, lambd):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -4300,17 +4294,12 @@ def scatter_add(g, self, dim, index, src):
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible"
         )
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+    scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
-        assert isinstance(dtype, torch.dtype)
-        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=scalar_type.dtype()))
     else:
-        dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
-        to_add = zeros_like(g, self, dtype)
+        to_add = zeros_like(g, self, scalar_type)
     to_add = symbolic_helper._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -5257,9 +5246,7 @@ def fill(g, self, value):
     if dtype is None:
         dtype = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
 
     return full_like(g, self, value, dtype)
 
@@ -5498,13 +5485,12 @@ class Prim:
 
     @staticmethod
     def dtype(g, self):
-        dtype = symbolic_helper._try_get_scalar_type(self)
-        if dtype is None:
-            dtype = "Float"
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-        return g.op("Constant", value_t=torch.tensor(dtype))
+        scalar_name = symbolic_helper._try_get_scalar_type(self)
+        if scalar_name is None:
+            scalar_name = "Float"
+        scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
+        # This node records a torch dtype as int
+        return g.op("Constant", value_t=torch.tensor(scalar_type))
 
     @staticmethod
     def tolist(g, input, dim_val, elem_ty_val):
