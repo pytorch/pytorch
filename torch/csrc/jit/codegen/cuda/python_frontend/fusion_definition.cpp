@@ -29,7 +29,7 @@ void FusionDefinition::buildFusionIr() {
 }
 
 FusionDefinition* FusionDefinition::enter() {
-  Trace::instance()->beginEvent("FusionDefinition Context Manager");
+  Nvf::inst::Trace::instance()->beginEvent("FusionDefinition Context Manager");
   FUSER_PERF_SCOPE("FusionDefinition::enter");
   fusion_manager_->resetFusionCachePtr();
   return this;
@@ -45,7 +45,7 @@ void FusionDefinition::exit() {
   } else {
     fusion_manager_->traverseFusionCache(end_record_);
   }
-  Trace::instance()->endEvent(nullptr);
+  Nvf::inst::Trace::instance()->endEvent(nullptr);
 }
 
 Scalar* FusionDefinition::defineScalar() {
@@ -65,12 +65,14 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(record);
   if (cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
-      std::cout << "\nFusionDefinition: Record hit in Fusion Cache.\n";
+      std::cout << "\nFusionDefinition: Record (hash: 0x" <<
+          std::hex << record->hash() << ") hit in Fusion Cache.\n";
     }
     recording_.emplace_back(cache_entry.value()->record);
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
-      std::cout << "\nFusionDefinition: Record mised in Fusion Cache.\n";
+      std::cout << "\nFusionDefinition: Record (hash: 0x" <<
+          std::hex << record->hash() << ") missed in Fusion Cache.\n";
     }
     recording_.emplace_back(record);
     fusion_manager_->createFusionCacheEntry(recording_.back());
