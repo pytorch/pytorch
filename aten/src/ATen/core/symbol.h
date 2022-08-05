@@ -81,6 +81,7 @@ struct TORCH_API Symbol {
   bool is_aten() const;
   bool is_cuda() const;
   bool is_prim() const;
+  bool is_prims() const;
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;

@@ -125,7 +125,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto padding_vec = padding_.vec();
   auto stride_vec = stride_.vec();
   auto dilation_vec = dilation_.vec();
-  setConvolutionParams(&key.params, input, maybe_padded_weight_, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32);
+  setConvolutionParams(&key.params, input, maybe_padded_weight_, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32, input.suggest_memory_format());
 
   // operator datatype needs to be int32 for int8 convolution, but we can
   // set the datatype for output tensor to int32 or fp32

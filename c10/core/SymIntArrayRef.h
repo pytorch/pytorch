@@ -15,6 +15,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <array>
 #include <initializer_list>
@@ -61,6 +62,11 @@ class SymIntArrayRef final {
       const c10::SymInt* data,
       size_t length)
       : wrapped_symint_array_ref(data, length) {}
+
+  template <typename U>
+  /* implicit */ SymIntArrayRef(
+      const SmallVectorTemplateCommon<c10::SymInt, U>& Vec)
+      : wrapped_symint_array_ref(Vec) {}
 
   /// Construct an SymIntArrayRef from a range.
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef(
@@ -189,7 +195,13 @@ class SymIntArrayRef final {
 
 TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
 TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
+TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
+    c10::SymIntArrayRef ar);
 
-std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const c10::SymIntArrayRef& list) {
+  return out << list.wrapped_symint_array_ref;
+}
 
 } // namespace c10

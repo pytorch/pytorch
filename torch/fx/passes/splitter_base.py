@@ -26,6 +26,7 @@ from .tools_common import (
 )
 import warnings
 
+__all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -58,11 +59,19 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
+        parser.add_argument(
+            "--op_lowering_disallow_list",
+            default="",
+            type=str,
+            help="A comma separated string which represents a disallow_list of "
+            "operator names."
+        )
         args, unknown = parser.parse_known_args()
 
         self.min_acc_module_size: int = args.min_acc_module_size
         self.skip_fusion: bool = args.skip_fusion
         self.allow_non_tensor: bool = args.allow_non_tensor
+        self.op_lowering_disallow_list: List[str] = args.op_lowering_disallow_list.split(",")
 
 
 @compatibility(is_backward_compatible=False)

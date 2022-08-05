@@ -273,6 +273,14 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.
   validateAndCollectVectorizeInfo(fusion_);
 
+  // Depends on ComputeAtMap and HaloInfo.
+  validateAndConvertIterDomainGrouping(fusion_);
+
+  // Assumes all grouped reductions are convered to
+  // GroupedReductionOp, which is done by
+  // validateAndConvertIterDomainGrouping
+  validateGroupedReductions(fusion_);
+
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   sync_map_.build(fusion_);
@@ -289,6 +297,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   doubleBufferInfo().build(fusion_);
 
+  compute_at_map_->allocateIndexVariables();
   // Run our passes keeping the lowered expressions and forwarding
   // them
 
