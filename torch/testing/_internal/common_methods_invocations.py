@@ -15156,151 +15156,162 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
            error_inputs_func=error_inputs_scatter_and_scatter_add),
-    OpInfo('bfloat16',
-           op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           skips=(
-               # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
-           )),
-    OpInfo('bool',
-           op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('byte',
-           op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           # The autograd test runner cannot handle functions that change dtype
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('char',
-           op=lambda x, *args, **kwargs: x.char(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           # The autograd test runner cannot handle functions that change dtype
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('double',
-           op=lambda x, *args, **kwargs: x.double(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('float',
-           op=lambda x, *args, **kwargs: x.float(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           skips=(
-               # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('half',
-           op=lambda x, *args, **kwargs: x.half(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=True,
-           skips=(
-               # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('int',
-           op=lambda x, *args, **kwargs: x.int(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('long',
-           op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('short',
-           op=lambda x, *args, **kwargs: x.short(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=False,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           )),
-    OpInfo('chalf',
-           op=lambda x, *args, **kwargs: x.chalf(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_conversion,
-           skips=(
-               # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
-               # use of lambda doesn't work with test_normalize_operator_exhaustive
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                            device_type='cpu'),
-               # TypeError: 'int' object is not iterable
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view',
-                            device_type='cpu'),
-               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view',
-                            device_type='cpu'),
-               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-           )
-           ),
+    UnaryUfuncInfo(
+        'bfloat16',
+        op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        skips=(
+            # autograd tests don't handle operators that change dtype
+            DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+        )),
+    UnaryUfuncInfo(
+        'bool',
+        op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'byte',
+        op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        # The autograd test runner cannot handle functions that change dtype
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'char',
+        op=lambda x, *args, **kwargs: x.char(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        # The autograd test runner cannot handle functions that change dtype
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'double',
+        op=lambda x, *args, **kwargs: x.double(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'float',
+        op=lambda x, *args, **kwargs: x.float(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        skips=(
+            # autograd tests don't handle operators that change dtype
+            DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'half',
+        op=lambda x, *args, **kwargs: x.half(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_autograd=True,
+        skips=(
+            # autograd tests don't handle operators that change dtype
+            DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'int',
+        op=lambda x, *args, **kwargs: x.int(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'long',
+        op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'short',
+        op=lambda x, *args, **kwargs: x.short(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+        )),
+    UnaryUfuncInfo(
+        'chalf',
+        op=lambda x, *args, **kwargs: x.chalf(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        skips=(
+            # autograd tests don't handle operators that change dtype
+            DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+            # use of lambda doesn't work with test_normalize_operator_exhaustive
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                         device_type='cpu'),
+            # TypeError: 'int' object is not iterable
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view',
+                         device_type='cpu'),
+            # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view',
+                         device_type='cpu'),
+            # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+            # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+        )
+    ),
     OpInfo('empty_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
