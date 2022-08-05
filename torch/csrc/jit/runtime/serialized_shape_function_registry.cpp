@@ -2115,51 +2115,7 @@ def transpose(self: List[int],
   return _1
 
 )=====")
-+ std::string(R"=====(def mean_dim(self: List[int],
-    dims: List[int],
-    keep_dim: bool,
-    dt: Any) -> List[int]:
-  out = annotate(List[int], [])
-  for idx in range(torch.len(self)):
-    is_mean_dim = False
-    for _0 in range(torch.len(dims)):
-      reduce_dim = dims[_0]
-      _1 = torch.len(self)
-      if torch.le(_1, 0):
-        dim_post_expr = 1
-      else:
-        dim_post_expr = _1
-      min = torch.neg(dim_post_expr)
-      max = torch.sub(dim_post_expr, 1)
-      if torch.lt(reduce_dim, min):
-        _2 = True
-      else:
-        _2 = torch.gt(reduce_dim, max)
-      if torch.__not__(_2):
-        pass
-      else:
-        ops.prim.RaiseException("AssertionError: ")
-      if torch.lt(reduce_dim, 0):
-        dim0 = torch.add(reduce_dim, dim_post_expr)
-        dim = dim0
-      else:
-        dim = reduce_dim
-      if torch.eq(idx, dim):
-        is_mean_dim0 = True
-      else:
-        is_mean_dim0 = is_mean_dim
-      is_mean_dim = is_mean_dim0
-    if is_mean_dim:
-      if keep_dim:
-        _3 = torch.append(out, 1)
-      else:
-        pass
-    else:
-      _4 = torch.append(out, self[idx])
-  return out
-
-)=====")
-+ std::string(R"=====(def sum_dim(self: List[int],
++ std::string(R"=====(def sum_mean_dim(self: List[int],
     opt_dims: Optional[List[int]],
     keep_dim: bool,
     dt: Any) -> List[int]:
@@ -2796,8 +2752,8 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
-    {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_dim"},
+    {"aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
+    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
     {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
