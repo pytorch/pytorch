@@ -1,13 +1,13 @@
-from typing import Dict, Any, List, Callable, Union, Tuple
+from typing import Dict, Any, List, Callable, Union, Tuple, Type
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .backend_config import BackendConfig
+from .backend_config import BackendConfig, DTypeConfig
 from ..quantization_types import Pattern
 
-def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[Dict[str, Any]]]:
-    pattern_to_dtype_configs: Dict[Pattern, List[Dict[str, torch.dtype]]] = dict()
+def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
+    pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = dict()
     for pattern, config in backend_config.configs.items():
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
@@ -32,8 +32,9 @@ def get_pattern_to_input_type_to_index(backend_config: BackendConfig) -> Dict[Pa
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
 
-def get_root_module_to_quantized_reference_module(backend_config: BackendConfig) -> Dict[Callable, Callable]:
-    mapping: Dict[Callable, Callable] = dict()
+def get_root_module_to_quantized_reference_module(
+        backend_config: BackendConfig) -> Dict[Type[torch.nn.Module], Type[torch.nn.Module]]:
+    mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = dict()
     for config in backend_config.configs.values():
         if config.root_module is not None and config.reference_quantized_module is not None:
             mapping[config.root_module] = config.reference_quantized_module
@@ -46,8 +47,8 @@ def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Uni
             fuser_method_mapping[pattern] = config.fuser_method
     return fuser_method_mapping
 
-def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Callable, Callable]:
-    module_to_qat_module: Dict[Callable, Callable] = dict()
+def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Pattern, Type[torch.nn.Module]]:
+    module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = dict()
     for pattern, config in backend_config.configs.items():
         if config.qat_module is not None:
             module_to_qat_module[pattern] = config.qat_module

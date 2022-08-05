@@ -584,6 +584,12 @@ def convert(
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
 
+    if isinstance(backend_config, Dict):
+        warnings.warn(
+            "Passing a backend_config_dict to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a BackendConfig instead.")
+        backend_config = BackendConfig.from_dict(backend_config)
+
     node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 

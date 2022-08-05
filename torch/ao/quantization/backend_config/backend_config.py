@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
 from torch.ao.quantization.backend_config.observation_type import ObservationType
@@ -219,10 +219,10 @@ class BackendPatternConfig:
         self.pattern = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         self.dtype_configs: List[DTypeConfig] = []
-        self.root_module: Optional[torch.nn.Module] = None
-        self.qat_module: Optional[torch.nn.Module] = None
-        self.reference_quantized_module: Optional[torch.nn.Module] = None
-        self.fused_module: Optional[torch.nn.Module] = None
+        self.root_module: Optional[Type[torch.nn.Module]] = None
+        self.qat_module: Optional[Type[torch.nn.Module]] = None
+        self.reference_quantized_module: Optional[Type[torch.nn.Module]] = None
+        self.fused_module: Optional[Type[torch.nn.Module]] = None
         self.fuser_method: Optional[Callable] = None
 
         # Temporary/internal configs
@@ -256,7 +256,7 @@ class BackendPatternConfig:
         self.dtype_configs = dtype_configs
         return self
 
-    def set_root_module(self, root_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_root_module(self, root_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the root for this pattern.
         For example, the root module for :class:`torch.nn.intrinsic.LinearReLU` should be :class:`torch.nn.Linear`.
@@ -264,21 +264,21 @@ class BackendPatternConfig:
         self.root_module = root_module
         return self
 
-    def set_qat_module(self, qat_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_qat_module(self, qat_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the QAT implementation for this pattern.
         """
         self.qat_module = qat_module
         return self
 
-    def set_reference_quantized_module(self, reference_quantized_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_reference_quantized_module(self, reference_quantized_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the reference quantized implementation for this pattern's root module.
         """
         self.reference_quantized_module = reference_quantized_module
         return self
 
-    def set_fused_module(self, fused_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_fused_module(self, fused_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the fused implementation for this pattern.
         """

@@ -111,7 +111,7 @@ from .custom_config import (
     StandaloneModuleConfigEntry,
 )
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 from collections import defaultdict
 
 
@@ -220,7 +220,7 @@ def is_input_arg_dtype_supported_by_backend(
 def is_output_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    dtype_config: Dict[str, torch.dtype],
+    dtype_config: DTypeConfig,
 ) -> bool:
     """ Check if the configured qconfig for the output
     is supported by the backend or not
@@ -245,7 +245,7 @@ def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_node_pattern: Optional[NodePattern],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    backend_config: BackendConfig,
+    backend_config: Optional[BackendConfig],
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
     the backend or not
@@ -254,7 +254,7 @@ def is_pattern_dtype_config_supported_by_backend(
         return True
     assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
-    dtype_configs: List[Dict[str, Any]] = pattern_to_dtype_configs.get(pattern, [])
+    dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
 
     # TODO: this only works for one input and one output patterns, need to generalize to multiple
     # inputs/output
@@ -285,7 +285,7 @@ def get_standalone_module_configs(
     prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
     parent_backend_config: Optional[BackendConfig],
-) -> Tuple[QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Optional[Dict[str, Any]]]:
+) -> Tuple[QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Optional[BackendConfig]]:
     """
     Returns the standalone module QConfigMapping and PrepareCustomConfig
     for `node`, assuming that the module pointed to by `node` is
@@ -306,7 +306,7 @@ def get_standalone_module_configs(
 
 def qat_swap_modules(
         root: torch.nn.Module,
-        module_to_qat_module: Dict[Callable, Callable]) -> None:
+        module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]]) -> None:
     convert(root, mapping=module_to_qat_module, inplace=True, remove_qconfig=False)
 
 def add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str]):
@@ -1314,7 +1314,12 @@ def insert_observers_for_model(
                         node_name_to_target_dtype, qconfig_map,
                         model, modules, graph)
 
-        #
+        # Second pass: Look for getitem nodes and make the input and output observers the same.
+        # Note: This is meant to be a workaround for the lack of dtype propagation. In the future,
+        # we should remove this pass if we can differentiate between tensors and non-tensors
+        # (e.g. dictionaries, lists) as getitem arguments.
+        _make_getitem_share_input_output_observers(model)
+
         # After this point, the current node has input and output observers
         # that it needs for itself inserted.
         #
@@ -1328,6 +1333,24 @@ def insert_observers_for_model(
             results_node = node
 
     return results_node
+
+def _make_getitem_share_input_output_observers(model: GraphModule):
+    """
+    For patterns (obs0 - getitem - obs1), make the output observer the same as the input observer,
+    such that the new pattern becomes (obs0 - getitem - obs0). Note that this does not handle
+    patterns with multiple nodes between the two observers, e.g. (obs0 - reshape - getitem - obs1).
+    """
+    modules = dict(model.named_modules(remove_duplicate=False))
+    for node in model.graph.nodes:
+        if not is_activation_post_process_node(node, modules):
+            continue
+        if node.args[0].op != "call_function" or node.args[0].target != operator.getitem:
+            continue
+        getitem_node = node.args[0]
+        assert(isinstance(getitem_node, Node))
+        if not is_activation_post_process_node(getitem_node.args[0], modules):
+            continue
+        maybe_make_input_output_share_observers(getitem_node, model, modules)
 
 def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
     """
@@ -1481,6 +1504,12 @@ def prepare(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
             "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
+
+    if isinstance(backend_config, Dict):
+        warnings.warn(
+            "Passing a backend_config_dict to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a BackendConfig instead.")
+        backend_config = BackendConfig.from_dict(backend_config)
 
     assert(isinstance(qconfig_mapping, QConfigMapping))
     assert(isinstance(_equalization_config, QConfigMapping))

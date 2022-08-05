@@ -9,7 +9,7 @@ from .fx import prepare  # noqa: F401
 from .fx.convert import convert
 from .backend_config import (  # noqa: F401
     BackendConfig,
-    get_tensorrt_backend_config,  
+    get_tensorrt_backend_config,
 )
 from .fx.graph_module import ObservedGraphModule
 from .fx.custom_config import (
@@ -451,7 +451,7 @@ def convert_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
-    qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a quantized model
@@ -516,8 +516,8 @@ def convert_to_reference_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
-    qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
-    backend_config: Dict[str, Any] = None,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a reference quantized model, a common interface
     between PyTorch quantization with other backends like accelerators. Callers should additionally

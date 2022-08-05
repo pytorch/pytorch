@@ -56,6 +56,12 @@ def fuse(
             "in a future version. Please pass in a FuseCustomConfig instead.")
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
+    if isinstance(backend_config, Dict):
+        warnings.warn(
+            "Passing a backend_config_dict to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a BackendConfig instead.")
+        backend_config = BackendConfig.from_dict(backend_config)
+
     input_root = model
     input_graph = model.graph
     named_modules = dict(input_root.named_modules())
