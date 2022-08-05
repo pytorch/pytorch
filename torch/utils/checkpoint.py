@@ -375,14 +375,15 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         if len(storage) == 0:
             def inner_pack(inner):
                 nonlocal unpack_counter
-                # The holder for the unpack_counter-th element must not have gone out
-                # of scope
-                assert weak_holder_list[unpack_counter]() is not None
+                unpack_counter += 1
+                # If the holder went out of scope, the SavedVariable is dead and so
+                # the value will never be read from the storage. Skip filling it.
+                if weak_holder_list[unpack_counter - 1]() is None:
+                    return
                 # Use detach here to ensure we don't keep the temporary autograd
                 # graph created during the second forward
-                storage[weak_holder_list[unpack_counter]()] = inner.detach()
-                unpack_counter += 1
-                return None
+                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
+                return
 
             def inner_unpack(packed):
                 raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
