@@ -497,7 +497,7 @@ class DynamicStaticDetector(DetectorBase):
             benefit_str = ""
 
             # strings for if dynamic quantized per tensor is needed
-            recommend_per_tensor = " We recommend to add a {} before this module if it is static."
+            recommend_per_tensor = ". We recommend to add a {} before this module if it is static."
             rec_lay_to_add = "dynamic quantize per tensor layer"
             dynamic_per_tensor_string = recommend_per_tensor.format(rec_lay_to_add)
             dynamic_per_tensor_reasoning_string = (
@@ -608,7 +608,7 @@ class InputWeightEqualizationDetector(DetectorBase):
     INPUT_STR = "input"
 
     # default for what ratio we recommend input weight
-    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.5
+    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.4
 
     def __init__(self, ratio_threshold: float, ch_axis: int = 1):
         # ensure passed in inputs are valid
