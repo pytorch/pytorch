@@ -23,4 +23,5 @@ test_aot_model_compiler() {
   popd
 }
 
-test_aot_model_compiler
+# Temporarily disable the test since NNC backend is no longer available.
+# test_aot_model_compiler
