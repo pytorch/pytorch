@@ -1,9 +1,7 @@
 import importlib
 import inspect
 
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_registry
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, symbolic_registry
 
 
 def register_quantized_ops(domain: str, version: int):

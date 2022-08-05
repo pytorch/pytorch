@@ -11,6 +11,9 @@ from typing import Optional
 
 from .utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
 
+__all__ = ['LinearPackedParams', 'Linear']
+
+
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 
