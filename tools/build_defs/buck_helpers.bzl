@@ -11,6 +11,7 @@ IGNORED_ATTRIBUTE_PREFIX = [
 IGNORED_ATTRIBUTES = [
     "feature",
     "platforms",
+    "contacts",
 ]
 
 def filter_attributes(kwgs):

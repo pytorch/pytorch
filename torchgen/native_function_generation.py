@@ -11,6 +11,7 @@ from torchgen.model import (
     Argument,
     BackendIndex,
     BackendMetadata,
+    BaseOperatorName,
     BaseTy,
     BaseType,
     DEFAULT_KERNEL_NAMESPACE,
@@ -193,14 +194,20 @@ def generate_function(
         # The new "functional" NativeFunction has:
         # - any mutable arguments have been converted into (immutable) returns.
         #   (if a mutable argument was not also a return, it gets converted to one)
-        # - a "functional" overload name.
+        # - "_functional" appended to the base name, ONLY IF this op has a mutable variant.
+        #   See Note [Overload Ambiguity With Functional Variants]
         # The default grouping logic in signature() actually already does this,
         # so we can piggy-back off it (but we still want return names)
         func = f.func.signature(keep_return_names=True).with_name(
-            f.func.name.remove_inplace().with_overload(
-                "functional"
-                if not f.func.name.overload_name
-                else f"{f.func.name.overload_name}_functional"
+            OperatorName(
+                name=BaseOperatorName(
+                    base=f.func.name.name.base,
+                    inplace=False,
+                    dunder_method=f.func.name.name.dunder_method,
+                    # See Note [Overload Ambiguity With Functional Variants]
+                    functional_overload=f.func.kind() == SchemaKind.mutable,
+                ),
+                overload_name=f.func.name.overload_name,
             )
         )
     elif k == SchemaKind.out:
@@ -297,9 +304,7 @@ def add_generated_native_functions(
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = (
-                has_inplace and "inplace_view" in d[SchemaKind.inplace].tags
-            ) or any(f.is_view_op for f in d.values())
+            has_view_ops = any(f.is_view_op for f in d.values())
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
