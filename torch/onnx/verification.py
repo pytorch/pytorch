@@ -116,14 +116,34 @@ def _ort_session(
 def _compare_ort_pytorch_outputs(
     ort_outs, pt_outs, rtol, atol, acceptable_error_percentage: Optional[float]
 ):
+    """
+    Compare ONNX Runtime and PyTorch outputs.
+
+    Args:
+        ort_outs: outputs from ONNX Runtime.
+        pt_outs: outputs from PyTorch.
+        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+            It should be a float of value between 0.0 and 1.0.
+
+    Raises:
+        AssertionError: if outputs from ONNX model and PyTorch model are not
+            equal up to specified precision.
+        ValueError: if arguments provided are invalid.
+    """
     pt_outs, _ = torch.jit._flatten(pt_outs)
     pt_outs = _unpack_to_numpy(pt_outs)
 
     assert len(pt_outs) == len(ort_outs), "number of outputs differ"
-    if acceptable_error_percentage:
-        assert (
-            acceptable_error_percentage <= 1.0 and acceptable_error_percentage >= 0.0
-        ), "if set, acceptable_error_percentage should be between 0.0 and 1.0"
+    if (
+        acceptable_error_percentage
+        and acceptable_error_percentage <= 1.0
+        and acceptable_error_percentage >= 0.0
+    ):
+        raise ValueError(
+            "If set, acceptable_error_percentage should be between 0.0 and 1.0"
+        )
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
         try:
@@ -578,6 +598,7 @@ def verify(
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
+        ValueError: if arguments provided are invalid.
     """
     if training == torch.onnx.TrainingMode.TRAINING:
         model.train()
