@@ -2,25 +2,15 @@
 
 import torch
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, make_tensor, parametrize, instantiate_parametrized_tests,
-)
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    ops,
-)
-from torch.testing._internal.common_methods_invocations import (
-    SampleInput,
-    binary_ufuncs,
-    reduction_ops,
-    unary_ufuncs,
+    make_tensor,
 )
 
-from torch._masked import _combine_input_and_mask
+from torch.testing._internal.common_methods_invocations import (
+    SampleInput,
+)
+
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
-from torch.masked.maskedtensor import masked_tensor, masked_bmm
-from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
-from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES
-from torch.masked.maskedtensor.reductions import REDUCE_NAMES
+
 
 def _compare_mt_t(mt_result, t_result):
     mask = mt_result.masked_mask
@@ -32,7 +22,6 @@ def _compare_mt_t(mt_result, t_result):
     a = mt_result_data.detach().masked_fill_(~mask, 0)
     b = t_result.detach().masked_fill_(~mask, 0)
     assert _tensors_match(a, b, exact=False)
-
 
 def _compare_mts(mt1, mt2):
     assert mt1.masked_data.layout == mt2.masked_data.layout
@@ -54,7 +43,6 @@ def _create_random_mask(shape, device):
     return make_tensor(
         shape, device=device, dtype=torch.bool, low=0, high=1, requires_grad=False
     )
-
 
 def _generate_sample_data(
     device="cpu", dtype=torch.float, requires_grad=True, layout=torch.strided
