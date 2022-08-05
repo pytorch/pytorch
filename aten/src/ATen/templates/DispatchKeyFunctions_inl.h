@@ -18,5 +18,10 @@
 
 ${DispatchKeyFunctions_inl_includes}
 
+namespace at {
+namespace ${dispatch_namespace} {
 
 ${dispatch_namespaced_declarations}
+
+} // namespace ${dispatch_namespace}
+} // namespace at
