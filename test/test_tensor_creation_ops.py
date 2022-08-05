@@ -2676,6 +2676,17 @@ class TestTensorCreation(TestCase):
             for strides in [(12, 4, 1), (2, 4, 6), (0, 0, 0)]:
                 _test(shape, strides, torch.float)
 
+        # Make sure sizes and strides have the same length
+        # https://github.com/pytorch/pytorch/issues/82416
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"dimensionality of sizes \(1\) must match dimensionality of strides \(0\)"):
+            dtype = torch.float64
+            x = torch.tensor(-4.8270, dtype=dtype, device=device)
+            size = (2,)
+            stride = ()
+            x.new_empty_strided(size, stride, dtype=dtype, device=device)
+
     def test_strided_mismatched_stride_shape(self, device):
         for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:
             with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
