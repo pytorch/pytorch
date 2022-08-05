@@ -2624,22 +2624,7 @@ static inline Tensor sparse_compressed_transpose(
         [&]() { return self.values().transpose(dim0 + 1, dim1 + 1); });
   } else /*if (transpose_type == TransposeDim::Sparse) */ {
     // Flip the layout
-    result_layout = [](const Layout& layout) {
-      switch (layout) {
-        case kSparseCsr:
-          return kSparseCsc;
-        case kSparseBsr:
-          return kSparseBsc;
-        case kSparseCsc:
-          return kSparseCsr;
-        case kSparseBsc:
-          return kSparseBsr;
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false, "Expected sparse compressed layout but got ", layout);
-      }
-    }(self.layout());
-
+    result_layout = sparse_csr::flip_compressed_layout(self.layout());
     result_vals = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         self.layout(),
         "sparse_transpose",
