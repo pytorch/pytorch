@@ -347,7 +347,7 @@ else()
         CUDA::cufft)
 endif()
 
-# cusparse.
+# cusparse
 add_library(caffe2::cusparse INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
@@ -357,6 +357,18 @@ else()
     set_property(
         TARGET caffe2::cusparse PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cusparse)
+endif()
+
+# cusolver
+add_library(caffe2::cusolver INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    set_property(
+        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
+        CUDA::cusolver_static)
+else()
+    set_property(
+        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_cusolver_LIBRARY})
 endif()
 
 # TensorRT
