@@ -77,6 +77,39 @@ FUSION_CONV_LINEAR_EXAMPLE = torch.nn.Sequential(
     torch.nn.Conv2d(3, 3, 2, 1),
 )
 
+# Test class
+# example model to use for tests
+class ThreeOps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(3, 3)
+        self.bn = nn.BatchNorm2d(3)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+    def get_example_inputs(self):
+        return (torch.randn(1, 3, 3, 3),)
+
+class TwoThreeOps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.block1 = ThreeOps()
+        self.block2 = ThreeOps()
+
+    def forward(self, x):
+        x = self.block1(x)
+        y = self.block2(x)
+        z = x + y
+        z = F.relu(z)
+        return z
+
+    def get_example_inputs(self):
+        return (torch.randn(1, 3, 3, 3),)
 
 class TestFxModelReportDetector(QuantizationTestCase):
 
@@ -837,39 +870,6 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
 
 class TestFxModelReportClass(QuantizationTestCase):
 
-    # example model to use for tests
-    class ThreeOps(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear = nn.Linear(3, 3)
-            self.bn = nn.BatchNorm2d(3)
-            self.relu = nn.ReLU()
-
-        def forward(self, x):
-            x = self.linear(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            return x
-
-        def get_example_inputs(self):
-            return (torch.randn(1, 3, 3, 3),)
-
-    class TwoThreeOps(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.block1 = TestFxModelReportClass.ThreeOps()
-            self.block2 = TestFxModelReportClass.ThreeOps()
-
-        def forward(self, x):
-            x = self.block1(x)
-            y = self.block2(x)
-            z = x + y
-            z = F.relu(z)
-            return z
-
-        def get_example_inputs(self):
-            return (torch.randn(1, 3, 3, 3),)
-
     @skipIfNoFBGEMM
     def test_constructor(self):
         """
@@ -885,7 +885,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             backend = torch.backends.quantized.engine
 
             # create a model
-            model = self.ThreeOps()
+            model = ThreeOps()
             q_config_mapping = QConfigMapping()
             q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
             model_prep = quantize_fx.prepare_fx(model, q_config_mapping, model.get_example_inputs()[0])
@@ -924,7 +924,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             # create model report object
 
             # create model
-            model = self.TwoThreeOps()
+            model = TwoThreeOps()
             # make an example set of detectors
             torch.backends.quantized.engine = "fbgemm"
             backend = torch.backends.quantized.engine
@@ -1029,8 +1029,8 @@ class TestFxModelReportClass(QuantizationTestCase):
             single_detector_set = set([DynamicStaticDetector()])
 
             # create our models
-            model_full = TestFxModelReportClass.TwoThreeOps()
-            model_single = TestFxModelReportClass.TwoThreeOps()
+            model_full = TwoThreeOps()
+            model_single = TwoThreeOps()
 
             # prepare and callibrate two different instances of same model
             # prepare the model
@@ -1102,7 +1102,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             detector_set.add(OutlierDetector(reference_percentile=0.95))
             detector_set.add(InputWeightEqualizationDetector(0.5))
 
-            model = self.TwoThreeOps()
+            model = TwoThreeOps()
 
             # get tst model and callibrate
             prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
@@ -1681,7 +1681,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             detector_set.add(OutlierDetector(reference_percentile=0.95))
             detector_set.add(InputWeightEqualizationDetector(0.5))
 
-            model = TestFxModelReportClass.TwoThreeOps()
+            model = TwoThreeOps()
 
             # get tst model and callibrate
             prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
@@ -1715,6 +1715,113 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
             returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()
             self.assertEqual(returned_plottable_feats, plottable_set)
+
+    def _prep_visualizer_helper(self):
+        r"""
+        Returns a mod rep visualizer that we test in various ways
+        """
+        # set backend for test
+        torch.backends.quantized.engine = "fbgemm"
+
+        # test with multiple detectors
+        detector_set = set()
+        detector_set.add(OutlierDetector(reference_percentile=0.95))
+        detector_set.add(InputWeightEqualizationDetector(0.5))
+
+        model = TwoThreeOps()
+
+        # get tst model and callibrate
+        prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+            model, detector_set, model.get_example_inputs()[0]
+        )
+
+        mod_rep_visualizer: ModelReportVisualizer = self._callibrate_and_generate_visualizer(
+            model, prepared_for_callibrate_model, mod_report
+        )
+
+        return mod_rep_visualizer
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_match_with_report(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            table_dict = mod_rep_visualizer.generate_filtered_tables()
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = table_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = table_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            # these two together should be the same as the generated report info in terms of keys
+            tensor_info_modules = set(row[1] for row in tensor_table)
+            channel_info_modules = set(row[1] for row in channel_table)
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+
+            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())
+            self.assertEqual(combined_modules, generated_report_keys)
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_no_match(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            # try a random filter and make sure that there are no rows for either table
+            empty_tables_dict = mod_rep_visualizer.generate_filtered_tables(module_fqn_filter="random not there module")
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = empty_tables_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = empty_tables_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            tensor_info_modules = set(row[1] for row in tensor_table)
+            channel_info_modules = set(row[1] for row in channel_table)
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            self.assertEqual(len(combined_modules), 0)  # should be no matching modules
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_single_feat_match(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            # try a matching filter for feature and make sure only those features show up
+            # if we filter to a very specific feature name, should only have 1 additional column in each table row
+            single_feat_dict = mod_rep_visualizer.generate_filtered_tables(feature_filter=OutlierDetector.MAX_VALS_KEY)
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = single_feat_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = single_feat_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            # get the number of features in each of these
+            tensor_info_features = len(tensor_headers)
+            channel_info_features = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+
+            # make sure that there are no tensor features, and that there is one channel level feature
+            self.assertEqual(tensor_info_features, 0)
+            self.assertEqual(channel_info_features, 1)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""

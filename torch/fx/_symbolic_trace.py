@@ -3,6 +3,7 @@ import functools
 import inspect
 import math
 import os
+import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -23,7 +24,7 @@ import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
-from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph, _ParamDescr
+from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, TracerBase
@@ -496,7 +497,7 @@ class Tracer(TracerBase):
                         )
                         self.create_proxy("call_function", _assert_is_none, args, {})
                     else:
-                        torch.warnings.warn(
+                        warnings.warn(
                             f"Was not able to add assertion to guarantee correct input {name} to "
                             f"specialized function. It is up to the user to make sure that your inputs match the "
                             f"inputs you specialized the function with."
@@ -540,11 +541,8 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-
-            # TODO: this seems sketchy. We're not carrying forward type annotations
-            # or default values
             self.graph._codegen = _PyTreeCodeGen(
-                _PyTreeInfo([_ParamDescr(arg, '', '') for arg in orig_args[:total_args]], in_spec, None)
+                _PyTreeInfo(orig_args[:total_args], in_spec, None)
             )
 
             def flatten_fn(*args):

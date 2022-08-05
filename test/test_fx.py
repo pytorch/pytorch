@@ -553,6 +553,25 @@ class TestFX(JitTestCase):
             self.assertTrue(new_node.stack_trace is not None)
             assert 'test_fx.py' in new_node.stack_trace
 
+    def test_stack_traces_with_transformer(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        new_gm = Transformer(gm).transform()
+
+        # nodes after Transformer should still preserve the original node's stack trace
+        for node in new_gm.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_fx.py' in node.stack_trace
+
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
@@ -1660,18 +1679,6 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
-
-    def test_pytree_unpack_annotations(self):
-        def foo(x : torch.Tensor, y : torch.Tensor, l : List[torch.Tensor]):
-            return torch.cat([x, y] + l)
-
-        concrete_args = {'l': [torch.fx._symbolic_trace.PH] * 10}
-        traced = torch.fx.symbolic_trace(foo, concrete_args=concrete_args)
-        x = torch.randn(5, 3)
-        y = torch.randn(5, 3)
-        l = [torch.randn(5, 3)] * 10
-
-        torch.testing.assert_close(traced(x, y, l), foo(x, y, l))
 
     def test_interpreter_run_node_override(self):
         class MyModule(torch.nn.Module):
@@ -3295,6 +3302,7 @@ class TestFX(JitTestCase):
             .run(scripted.code)
 
     @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
     def test_assert(self):
         def f(x):
             assert x > 1
@@ -3414,7 +3422,7 @@ class TestFX(JitTestCase):
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(var.name for var in free_vars)} = args_list"""
+    {', '.join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3449,7 +3457,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(var.name for var in free_vars)} = args_list"""
+    {', '.join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3478,7 +3486,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(var.name for var in free_vars)} = args_list"""
+    {', '.join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4032,7 +4040,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)

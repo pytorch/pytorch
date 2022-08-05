@@ -237,41 +237,29 @@ class _node_list:
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
-
-class _ParamDescr(NamedTuple):
-    name : str
-    maybe_type_annotation : str
-    maybe_default_arg : str
-
-
 class _PyTreeInfo(NamedTuple):
     """
     Contains extra info stored when we're using Pytrees
     """
-    orig_args: List[_ParamDescr]
+    orig_args: List[str]
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
-
-
 
 @compatibility(is_backward_compatible=False)
 class CodeGen(object):
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
 
-    def gen_fn_def(self, free_vars: List[_ParamDescr], maybe_return_annotation: str) -> str:
+    def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `gen_fn_def(['a', 'b'], '') == 'def forward(a, b):'`
         """
         # If the original function didn't have self as its first argument, we
         # would have added it.
-        if len(free_vars) == 0 or free_vars[0].name != 'self':
-            free_vars.insert(0, _ParamDescr('self', '', ''))
-        return f"def forward({', '.join(self._param_descr_to_param_for_sig(var) for var in free_vars)}){maybe_return_annotation}:"
-
-    def _param_descr_to_param_for_sig(self, descr : _ParamDescr):
-        return f'{descr.name}{descr.maybe_type_annotation}{descr.maybe_default_arg}'
+        if len(free_vars) == 0 or free_vars[0] != 'self':
+            free_vars.insert(0, 'self')
+        return f"def forward({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(self, output_args: Argument) -> str:
         """
@@ -307,7 +295,7 @@ class CodeGen(object):
         return []
 
     def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
-        free_vars: List[_ParamDescr] = []
+        free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
@@ -426,7 +414,7 @@ class CodeGen(object):
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
-                free_vars.append(_ParamDescr(node.target, maybe_type_annotation, maybe_default_arg))
+                free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != repr(node):
                     body.append(f'{repr(node)} = {raw_name}\n')
@@ -545,18 +533,17 @@ class _PyTreeCodeGen(CodeGen):
         assert(self.pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
-    def gen_fn_def(self, free_vars : List[_ParamDescr], maybe_return_annotation):
+    def gen_fn_def(self, free_vars, maybe_return_annotation):
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
-        has_orig_self = (function_args[0].name == 'self')
+        has_orig_self = (function_args[0] == 'self')
         if has_orig_self:
-            free_vars.insert(0, _ParamDescr('self', '', ''))
+            free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
             function_definition += f"""
-    {', '.join(var.name for var in free_vars)}, = fx_pytree.tree_flatten_spec\
-([{', '.join(arg.name for arg in function_args)}], self._in_spec)"""
+    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
         return function_definition
 
     def generate_output(self, output_args):

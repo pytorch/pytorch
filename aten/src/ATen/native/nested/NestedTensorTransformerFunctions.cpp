@@ -85,7 +85,6 @@ Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
   return wrap_buffer(result_buffer, new_sizes);
 }
 
-
 Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
     const Tensor& self,
     const Tensor& mat1,
