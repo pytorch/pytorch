@@ -17,6 +17,7 @@ __all__ = [
     "cross_entropy_loss",
     "dropout",
     "einsum",
+    "einsum_helper",
     "ge",
     "le",
     "native_dropout",
@@ -30,7 +31,7 @@ __all__ = [
 ]
 
 
-def _einsum_helper(g, equation, tensors):
+def einsum_helper(g, equation, tensors):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
     # ONNX does not support bool for Einsum inputs.
@@ -51,7 +52,7 @@ def _einsum_helper(g, equation, tensors):
 @symbolic_helper.parse_args("s", "v")
 def einsum(g, equation, tensor_list):
     tensors = symbolic_helper._unpack_list(tensor_list)
-    return _einsum_helper(g, equation, tensors)
+    return einsum_helper(g, equation, tensors)
 
 
 @symbolic_helper.parse_args("v", "v")
@@ -63,7 +64,7 @@ def outer(g, input, other):
             other,
             to_i=symbolic_helper.cast_pytorch_to_onnx[input.type().scalarType()],
         )
-    return _einsum_helper(g, "i,j->ij", [input, other])
+    return einsum_helper(g, "i,j->ij", [input, other])
 
 
 def _dropout_returns_masked_input_and_mask(
@@ -221,14 +222,36 @@ def celu(g, self, alpha):
     return g.op("Celu", self, alpha_f=alpha)
 
 
-@symbolic_helper.parse_args("v", "v", "i")
-def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
-    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
+def argmax(g, input, dim, keepdim):
+    if symbolic_helper._is_none(dim):
+        flattened = symbolic_helper._reshape_helper(
+            g, input, g.op("Constant", value_t=torch.tensor([-1]))
+        )
+        return g.op(
+            "ArgMax", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False
+        )
+    else:
+        dim = symbolic_helper._parse_arg(dim, "i")
+        keepdim = symbolic_helper._parse_arg(keepdim, "i")
+        return g.op(
+            "ArgMax", input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False
+        )
 
 
-@symbolic_helper.parse_args("v", "v", "i")
-def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
-    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
+def argmin(g, input, dim, keepdim):
+    if symbolic_helper._is_none(dim):
+        flattened = symbolic_helper._reshape_helper(
+            g, input, g.op("Constant", value_t=torch.tensor([-1]))
+        )
+        return g.op(
+            "ArgMin", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False
+        )
+    else:
+        dim = symbolic_helper._parse_arg(dim, "i")
+        keepdim = symbolic_helper._parse_arg(keepdim, "i")
+        return g.op(
+            "ArgMin", input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False
+        )
 
 
 def pow(g, self, exponent):
