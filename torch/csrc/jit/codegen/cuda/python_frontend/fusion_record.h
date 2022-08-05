@@ -48,8 +48,8 @@ struct RecordFunctor {
   virtual ~RecordFunctor() = default;
 
   //! The base class is placing the type, outputs, and args hashed as follows:
-  //! | 63 - 56 | 55 - 48 | 47 ----------- 32 | 32 -------------------------  0 |
-  //! | Type    | Outputs | Args              | Child Class Specified           |
+  //! | 63 - 56 | 55 - 48 | 47 ----------- 32 | 32 ------------------------  0 |
+  //! | Type    | Outputs | Args              | Child Class Specified          |
   virtual size_t hash() const {
     size_t arg_hash = 0;
     for (auto arg : args_) {
@@ -663,7 +663,7 @@ struct ScalarRecord : RecordFunctor {
 };
 
 //! Specialized Record Functor for recording FusionDefinition Start.
-//! There should only ever be one instance of this Record in the 
+//! There should only ever be one instance of this Record in the
 //! Fusion Cache.
 
 struct StartRecord : RecordFunctor {

@@ -12,7 +12,7 @@ namespace nvfuser {
 struct RecordFunctor;
 
 struct FusionCacheEntry {
-  FusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
   FusionCacheEntry();
 
   std::shared_ptr<RecordFunctor> record;
@@ -26,8 +26,8 @@ struct FusionCacheEntry {
 class FusionManager {
  public:
   FusionManager();
- 
-  //! Copy and Assignment of the FusionManager is not supported 
+
+  //! Copy and Assignment of the FusionManager is not supported
   FusionManager(const FusionManager&) = delete;
   FusionManager& operator=(const FusionManager&) = delete;
 
@@ -35,11 +35,12 @@ class FusionManager {
   void printIr() const;
   void printKernel() const;
 
-  c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(RecordFunctor* rec) const;
-  void createFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
-  void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
+      RecordFunctor* rec) const;
+  void createFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
+  void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
   void resetFusionCachePtr();
-  void traverseFusionCache(std::shared_ptr<RecordFunctor> &rec);
+  void traverseFusionCache(std::shared_ptr<RecordFunctor>& rec);
 
  private:
   NvfFusionExecutorCache* fusionExecutorCachePtr() const;

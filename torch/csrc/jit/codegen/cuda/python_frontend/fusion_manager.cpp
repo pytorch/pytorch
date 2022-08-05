@@ -5,22 +5,25 @@
 
 namespace nvfuser {
 
-FusionCacheEntry::FusionCacheEntry(std::shared_ptr<RecordFunctor> &rec) :
-  record(rec),
-  record_hash_map(),
-  is_terminal(false),
-  fusion_executor_cache(nullptr) {}
-FusionCacheEntry::FusionCacheEntry() :
-  record(std::make_shared<RecordFunctor>(new EndRecord)),
-  record_hash_map(),
-  is_terminal(true),
-  fusion_executor_cache(std::make_unique<NvfFusionExecutorCache>(std::make_unique<NvfFusion>())) {}
+FusionCacheEntry::FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec)
+    : record(rec),
+      record_hash_map(),
+      is_terminal(false),
+      fusion_executor_cache(nullptr) {}
+FusionCacheEntry::FusionCacheEntry()
+    : record(std::make_shared<RecordFunctor>(new EndRecord)),
+      record_hash_map(),
+      is_terminal(true),
+      fusion_executor_cache(std::make_unique<NvfFusionExecutorCache>(
+          std::make_unique<NvfFusion>())) {}
 
-FusionManager::FusionManager() :
-  fusion_cache_start_(std::make_unique<FusionCacheEntry>(std::make_shared<RecordFunctor>(new StartRecord()))),
-  fusion_cache_ptr_(fusion_cache_start_.get()) {}
-  
-std::vector<at::Tensor> FusionManager::execute(const at::ArrayRef<c10::IValue>& inputs) {
+FusionManager::FusionManager()
+    : fusion_cache_start_(std::make_unique<FusionCacheEntry>(
+          std::make_shared<RecordFunctor>(new StartRecord()))),
+      fusion_cache_ptr_(fusion_cache_start_.get()) {}
+
+std::vector<at::Tensor> FusionManager::execute(
+    const at::ArrayRef<c10::IValue>& inputs) {
   return fusionExecutorCachePtr()->runFusionWithInputs(inputs);
 }
 void FusionManager::printIr() const {
@@ -30,7 +33,8 @@ void FusionManager::printKernel() const {
   fusionPtr()->printKernel();
 }
 
-c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(RecordFunctor* rec) const {
+c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
+    RecordFunctor* rec) const {
   auto cache_entry = fusion_cache_ptr_->record_hash_map.find(rec);
   if (cache_entry == std::end(fusion_cache_ptr_->record_hash_map)) {
     return c10::nullopt;
@@ -38,16 +42,20 @@ c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(RecordFun
     return c10::optional<FusionCacheEntry*>(cache_entry->second.get());
   }
 }
-void FusionManager::createFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec) {
-  fusion_cache_ptr_->record_hash_map[rec.get()] = std::make_unique<FusionCacheEntry>(rec);
+void FusionManager::createFusionCacheEntry(
+    std::shared_ptr<RecordFunctor>& rec) {
+  fusion_cache_ptr_->record_hash_map[rec.get()] =
+      std::make_unique<FusionCacheEntry>(rec);
 }
-void FusionManager::createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec) {
-  fusion_cache_ptr_->record_hash_map[rec.get()] = std::make_unique<FusionCacheEntry>();
+void FusionManager::createTerminalFusionCacheEntry(
+    std::shared_ptr<RecordFunctor>& rec) {
+  fusion_cache_ptr_->record_hash_map[rec.get()] =
+      std::make_unique<FusionCacheEntry>();
 }
 void FusionManager::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
 }
-void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor> &rec) {
+void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
   fusion_cache_ptr_ = fusion_cache_ptr_->record_hash_map[rec.get()].get();
 }
 
