@@ -16,6 +16,7 @@
 #else
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_compressed_to_batched_compressed_indices_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/add_native.h>
@@ -114,6 +115,49 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   row1.copy_(*col_indices.expect_contiguous());
   convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename input_t, typename output_t>
+__global__ void compressed_to_batched_compressed_indices_cuda_kernel(
+    output_t* batched_out,
+    const input_t* compressed_in,
+    const int64_t n_batch,
+    const int64_t ncomp_per_batch) {
+  int64_t b = blockDim.x * blockIdx.x + threadIdx.x;
+  const int64_t batch_length = ncomp_per_batch + 1;
+  if (b < n_batch) {
+    const auto c0 = b * ncomp_per_batch;
+    //Subtract the first cindx value from each within the bath to get the batched_cindx value.
+    const auto batch_delta = compressed_in[c0];
+    const auto b0 = b * batch_length;
+    for (int64_t i = 0; i < batch_length; ++i) {
+      batched_out[b0 + i] =
+          static_cast<output_t>(compressed_in[c0 + i] - batch_delta);
+    }
+  }
+}
+
+template <typename input_t, typename output_t>
+void compressed_to_batched_compressed_indices_cuda(
+    const Tensor& batched_out,
+    const Tensor& compressed_in,
+    int64_t n_batch) {
+  auto compressed_ = compressed_in.expect_contiguous();
+  TORCH_INTERNAL_ASSERT(batched_out.is_contiguous());
+  input_t* compressed_data_in = compressed_->data_ptr<input_t>();
+  output_t* batched_data_out = batched_out.data_ptr<output_t>();
+  const auto ncomp_per_batch = (compressed_in.size(-1) - 1) / n_batch;
+
+  // Run n_batch threads...
+  int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t BLOCKS = (n_batch + THREADS) / THREADS;
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+  compressed_to_batched_compressed_indices_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(
+      batched_data_out,
+      compressed_data_in,
+      n_batch,
+      ncomp_per_batch);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -296,6 +340,30 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
     });
   }
 }
+
+TORCH_IMPL_FUNC(_compressed_to_batched_compressed_indices_structured_cuda)
+(const Tensor& compressed_indices,
+ const int64_t n_batch,
+ const bool out_int32,
+ const Tensor& result) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        compressed_indices.scalar_type(),
+        "compressed_to_batched_compressed_indices_cuda",
+        [&] {
+          compressed_to_batched_compressed_indices_cuda<scalar_t, int32_t>(
+              result, compressed_indices, n_batch);
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        compressed_indices.scalar_type(),
+        "compressed_to_batched_compressed_indices_cuda",
+        [&] {
+          compressed_to_batched_compressed_indices_cuda<scalar_t, int64_t>(
+              result, compressed_indices, n_batch);
+        });
+  }
+ }
 
   /*
     Reductions on sparse CSR tensors using masked semantics.
