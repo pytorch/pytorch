@@ -210,7 +210,7 @@ class FxNetAccFusionsFinder:
 
 
 @compatibility(is_backward_compatible=False)
-def legalize_graph(gm: torch.fx.GraphModule):
+def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Replace the graph of the given GraphModule with one that contains the same nodes as the
     original, but in topologically sorted order.
@@ -221,17 +221,23 @@ def legalize_graph(gm: torch.fx.GraphModule):
     Arguments:
         gm: The graph module to topologically sort. It is modified in-place.
 
+    Returns:
+        The graph module in-place sorted
     """
     indeg = {node: 0 for node in gm.graph.nodes}
     new_graph = torch.fx.Graph()
+    # Track how many unfulfilled dependencies each node has
     for node in gm.graph.nodes:
         for user in node.users:
             indeg[user] += 1
     queue: collections.deque = collections.deque()
+    # Add all nodes with no dependencies to the queue
     for node in gm.graph.nodes:
         if indeg[node] == 0:
             queue.append(node)
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    # Pop nodes from the queue, and add nodes that have had all their
+    # dependencies fulfilled
     while len(queue) > 0:
         cur = queue.popleft()
         env[cur] = new_graph.node_copy(cur, lambda x: env[x])
@@ -239,6 +245,8 @@ def legalize_graph(gm: torch.fx.GraphModule):
             indeg[user] -= 1
             if indeg[user] == 0:
                 queue.append(user)
+    # If the new graph's size is not as large as the old one, then there must be
+    # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
         raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
     gm.graph = new_graph
