@@ -1228,12 +1228,43 @@ def merge(pr_num: int, repo: GitRepo,
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
+def get_msg_template(prefix, explaination):
+    return f"{prefix}. {explaination}"
+
+def get_flag_prefix(flag):
+    return f"The merge job was triggered with the {flag} flag."
+
+def get_flag_explaination_message(force, on_green, land_checks, has_trunk_label, has_ciflow_label):
+    if force:
+        return get_msg_template(get_flag_prefix("-f"),
+                                "This means your PR will be merged immediately, bypassing any checks")
+    elif on_green:
+        return get_msg_template(get_flag_prefix("-g"),
+                                "This means that your PR will be merged once all signals on your PR has passed.")
+    elif land_checks:
+        if has_trunk_label:
+            land_check_msg_suffix = f"have run since you have the {CIFLOW_TRUNK_LABEL}"
+        else:
+            land_check_msg_suffix = "and the land checks branch have run."
+        return get_msg_template(get_flag_prefix('-l'),
+                                "This means that your PR will be merged once all signals on your PR " +
+                                land_check_msg_suffix
+                                )
+    else:
+        if has_ciflow_label:
+            normal_msg_suffix = "Since your PR has a ciflow label, we will wait for all checks to be green on your PR."
+        else:
+            normal_msg_suffix = "Merge bot will wait for mandatory checks defined in the merge rules to be green before merging."
+        return get_msg_template("The merge job was triggered with no flags.", normal_msg_suffix)
+
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
     land_checks = args.land_checks and not has_label(pr.get_labels(), CIFLOW_TRUNK_LABEL)
+    on_green = args.on_green or has_label(pr.get_labels(), CIFLOW_LABEL)
 
     def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
         msg += f" due to {e}"
@@ -1250,7 +1281,7 @@ def main() -> None:
         traceback.print_exc()
     if not land_checks:
         msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
-        msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+        msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})."
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
@@ -1269,7 +1300,6 @@ def main() -> None:
         return
 
     try:
-        on_green = args.on_green or has_label(pr.get_labels(), CIFLOW_LABEL)
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               force=args.force,
