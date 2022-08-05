@@ -1,6 +1,6 @@
 import torch
 
-class LSTM(torch.nn.quantizable.LSTM):
+class LSTM(torch.ao.nn.quantizable.LSTM):
     r"""A quantized long short-term memory (LSTM).
 
     For the description and the argument types, please, refer to :class:`~torch.nn.LSTM`

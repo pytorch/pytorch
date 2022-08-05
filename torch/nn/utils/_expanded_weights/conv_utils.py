@@ -86,7 +86,7 @@ def conv_unfold_weight_grad_sample(input, grad_output, weight_shape, kernel_size
                          padding=(0, padding[0]),
                          stride=(1, stride[0])),
         lambda: F.unfold(input, kernel_size, dilation=dilation, padding=padding, stride=stride),
-        lambda: unfold3d(input, kernel_size, dilation, padding, stride)
+        lambda: unfold3d(input, kernel_size, padding, stride, dilation)
     )
 
     input = unfold_func()

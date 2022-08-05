@@ -7,5 +7,8 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate file under the `torch/ao/nn/qat/modules`,
 while adding an import statement here.
 """
+
+__all__ = ['Embedding', 'EmbeddingBag']
+
 from torch.ao.nn.qat.modules.embedding_ops import Embedding
 from torch.ao.nn.qat.modules.embedding_ops import EmbeddingBag
