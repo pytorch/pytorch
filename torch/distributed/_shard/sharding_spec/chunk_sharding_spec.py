@@ -116,9 +116,9 @@ class ChunkShardingSpec(ShardingSpec):
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
         """
         Args:
-            src_rank: Local rank relative to ``process_group``
+            src_rank: group rank relative to ``process_group``
 
-            N.B. If ``process_group`` is None, the ``src_rank`` is a global rank.
+            N.B. If ``process_group`` is None, ``src_rank`` is a global rank.
         """
         # relative imports to avoid circular dependency
         from torch.distributed._shard.sharded_tensor import (

@@ -301,9 +301,9 @@ def _warn_not_in_group(op_name):
     )
 
 
-def get_local_rank(group: ProcessGroup, global_rank: int) -> int:
+def get_group_rank(group: ProcessGroup, global_rank: int) -> int:
     """
-    Translate a global rank into a local rank.
+    Translate a global rank into a group rank.
 
     ``global_rank`` must be part of ``group`` otherwise this raises RuntimeError.
 
@@ -312,7 +312,7 @@ def get_local_rank(group: ProcessGroup, global_rank: int) -> int:
         global_rank (int): Global rank to query.
 
     Returns:
-        Local rank of ``global_rank`` relative to ``group``
+        Group rank of ``global_rank`` relative to ``group``
 
     N.B. calling this function on the default process group returns identity
     """
@@ -326,11 +326,11 @@ def get_local_rank(group: ProcessGroup, global_rank: int) -> int:
 
     return group_ranks[global_rank]
 
-def get_global_rank(group: ProcessGroup, local_rank: int) -> int:
+def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
     """
-    Translate a local rank into a global rank.
+    Translate a group rank into a global rank.
 
-    ``local_rank`` must be part of `group` otherwise this raises RuntimeError.
+    ``group_rank`` must be part of `group` otherwise this raises RuntimeError.
 
     Args:
         group (ProcessGroup): ProcessGroup to find the global rank from.
@@ -342,13 +342,13 @@ def get_global_rank(group: ProcessGroup, local_rank: int) -> int:
     N.B. calling this function on the default process group returns identity
     """
     if group is GroupMember.WORLD:
-        return local_rank
+        return group_rank
     if group not in _pg_group_ranks:
         raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
     for rank, grp_rank in _pg_group_ranks[group].items():
-        if grp_rank == local_rank:
+        if grp_rank == group_rank:
             return rank
-    raise RuntimeError(f"Global rank {local_rank} is not part of group {group}")
+    raise RuntimeError(f"Group rank {group_rank} is not part of group {group}")
 
 def get_global_ranks(group: ProcessGroup) -> Sequence[int]:
     """
@@ -929,7 +929,7 @@ def get_rank(group=None):
     if group is None or group is GroupMember.WORLD:
         return default_pg.rank()
 
-    return get_local_rank(group, default_pg.rank())
+    return get_group_rank(group, default_pg.rank())
 
 
 def get_world_size(group=None):
@@ -980,7 +980,7 @@ def isend(tensor, dst, group=None, tag=0):
         default_pg = _get_default_group()
         return default_pg.send([tensor], dst, tag)
     else:
-        group_dst_rank = get_local_rank(group, dst)
+        group_dst_rank = get_group_rank(group, dst)
         return group.send([tensor], group_dst_rank, tag)
 
 
@@ -1017,7 +1017,7 @@ def irecv(tensor, src=None, group=None, tag=0):
         if pg is GroupMember.WORLD:
             return pg.recv([tensor], src, tag)
         else:
-            group_src_rank = get_local_rank(pg, src)
+            group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
 
@@ -1042,7 +1042,7 @@ def send(tensor, dst, group=None, tag=0):
         default_pg = _get_default_group()
         default_pg.send([tensor], dst, tag).wait()
     else:
-        group_dst_rank = get_local_rank(group, dst)
+        group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
 
@@ -1085,7 +1085,7 @@ def recv(tensor, src=None, group=None, tag=0):
         if group is None or group is GroupMember.WORLD:
             pg.recv([tensor], src, tag).wait()
         else:
-            group_src_rank = get_local_rank(pg, src)
+            group_src_rank = get_group_rank(pg, src)
             pg.recv([tensor], group_src_rank, tag).wait()
         return src
 
@@ -1235,7 +1235,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
         default_pg = _get_default_group()
         work = default_pg.broadcast(tensor_list, opts)
     else:
-        group_src_rank = get_local_rank(group, src)
+        group_src_rank = get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.broadcast(tensor_list, opts)
     if async_op:
@@ -1277,7 +1277,7 @@ def broadcast(tensor, src, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.broadcast([tensor], opts)
     else:
-        group_src_rank = get_local_rank(group, src)
+        group_src_rank = get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.broadcast([tensor], opts)
     if async_op:
@@ -1516,7 +1516,7 @@ def reduce_multigpu(
         default_pg = _get_default_group()
         work = default_pg.reduce(tensor_list, opts)
     else:
-        group_dst_rank = get_local_rank(group, dst)
+        group_dst_rank = get_group_rank(group, dst)
         opts.rootRank = group_dst_rank
         work = group.reduce(tensor_list, opts)
 
@@ -1561,7 +1561,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.reduce([tensor], opts)
     else:
-        group_dst_rank = get_local_rank(group, dst)
+        group_dst_rank = get_group_rank(group, dst)
         opts.rootRank = group_dst_rank
         work = group.reduce([tensor], opts)
 
@@ -2340,7 +2340,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.gather(output_tensors, input_tensors, opts)
     else:
-        group_dst_rank = get_local_rank(group, dst)
+        group_dst_rank = get_group_rank(group, dst)
         opts.rootRank = group_dst_rank
         work = group.gather(output_tensors, input_tensors, opts)
 

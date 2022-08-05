@@ -236,7 +236,7 @@ class _OverlapInfo():
         self.params_per_rank: List[List[torch.Tensor]] = \
             [[] for _ in range(world_size)]
         self.offsets: Dict[int, int] = {}
-        # Local Ranks
+        # Group Ranks
         self.assigned_ranks_per_bucket: List[Set[int]] = []
         self.num_bucket_assignments: int = 0
         self.total_size: Optional[int] = None
@@ -851,8 +851,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 corresponding to the bucket to assign.
             bucket_offset (int): offset giving the index of the first element
                 in ``bucket_params`` in the bucket's full parameter list.
-            assigned_rank (int): local rank to assign to.
-            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of local ranks
+            assigned_rank (int): group rank to assign to.
+            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of group ranks
                 assigned to each bucket.
         """
         overlap_info = self._overlap_info
