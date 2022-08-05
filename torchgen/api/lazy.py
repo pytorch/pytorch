@@ -1,35 +1,36 @@
-from typing import Any, Dict, List, Union, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from torchgen.model import (
-    Type,
-    BaseTy,
-    BaseType,
-    OptionalType,
-    ListType,
-    OperatorName,
-    FunctionSchema,
-    Return,
-    TensorOptionsArguments,
-    Argument,
-)
 from torchgen.api.types import (
-    CType,
     BaseCppType,
     BaseCType,
-    OptionalCType,
-    NamedCType,
-    deviceT,
-    layoutT,
-    VectorCType,
     boolT,
-    longT,
+    CType,
+    deviceT,
     doubleT,
+    layoutT,
     ListCType,
-    stringT,
+    longT,
+    memoryFormatT,
+    NamedCType,
+    OptionalCType,
     scalarT,
     scalarTypeT,
-    memoryFormatT,
+    stringT,
     SymIntT,
+    VectorCType,
+)
+
+from torchgen.model import (
+    Argument,
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
+    OperatorName,
+    OptionalType,
+    Return,
+    TensorOptionsArguments,
+    Type,
 )
 
 

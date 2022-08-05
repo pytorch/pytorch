@@ -150,6 +150,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
 
+#ifdef USE_ROCM
+    // Keep track of backward pass for rocblas.
+    at::ROCmBackwardPassGuard in_backward;
+#endif
+
     auto step_callbacks =
         at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
     if (C10_UNLIKELY(step_callbacks.has_value())) {
@@ -186,11 +191,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// of the new input.
   uint32_t add_input_metadata(
       const at::TensorOptions& options,
-      at::IntArrayRef shape,
+      c10::SymIntArrayRef shape,
       bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
-    auto meta_shape = MetadataShape{c10::in_place_type<at::DimVector>, shape};
+    auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(options, meta_shape, is_tensor_subclass);
     return input_nr;
   }

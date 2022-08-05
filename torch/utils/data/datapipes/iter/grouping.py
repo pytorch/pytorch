@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 __all__ = [
@@ -215,7 +215,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        _check_lambda_fn(group_key_fn)
+        _check_unpickable_fn(group_key_fn)
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
@@ -290,6 +290,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -302,6 +304,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)
