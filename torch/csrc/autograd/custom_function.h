@@ -132,9 +132,9 @@ struct TORCH_API AutogradContext {
   const std::unordered_set<at::TensorImpl*>& get_non_differentiable() const;
 
   /// Expose the Node's `task_should_compute_output` method to the cpp
-  /// custom autograd Function.
-  bool task_should_compute_output(size_t output_edge_index) const;
-  bool task_should_compute_output(std::initializer_list<IndexRange> idxs) const;
+  /// custom autograd Function as `needs_input_grad`.
+  bool needs_input_grad(size_t output_edge_index) const;
+  bool needs_input_grad(std::initializer_list<IndexRange> idxs) const;
 
  private:
   std::unordered_set<at::TensorImpl*> non_differentiable_;

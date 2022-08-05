@@ -509,13 +509,13 @@ variable_list AutogradContext::get_saved_variables() const {
   return saved;
 }
 
-bool AutogradContext::task_should_compute_output(size_t output_edge_index) const {
+bool AutogradContext::needs_input_grad(size_t output_edge_index) const {
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);
   return ptr->task_should_compute_output(output_edge_index);
 }
 
-bool AutogradContext::task_should_compute_output(
+bool AutogradContext::needs_input_grad(
     std::initializer_list<IndexRange> idxs) const {
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);

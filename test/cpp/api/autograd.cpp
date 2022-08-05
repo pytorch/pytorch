@@ -283,11 +283,11 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
         Variable var1,
         Variable var2,
         int mul,
-        int expected_should_compute_idx,
-        int expected_should_not_compute_idx) {
+        int expected_needs_input_grad_idx,
+        int expected_not_needs_input_grad_idx) {
       // setup the expected should and should not compute idx
-      ctx->saved_data["should_idx"] = expected_should_compute_idx;
-      ctx->saved_data["should_not_idx"] = expected_should_not_compute_idx;
+      ctx->saved_data["needs_idx"] = expected_needs_input_grad_idx;
+      ctx->saved_data["not_needs_idx"] = expected_not_needs_input_grad_idx;
 
       ctx->saved_data["mul"] = mul;
       ctx->save_for_backward({var1, var2});
@@ -297,12 +297,12 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
     static variable_list backward(
         AutogradContext* ctx,
         variable_list grad_output) {
-      // Test `task_should_compute_output` method is working correctly.
+      // Test `needs_input_grad` method is working correctly.
       // We have to test this within the backward function.
-      int should_idx = ctx->saved_data["should_idx"].toInt();
-      int should_not_idx = ctx->saved_data["should_not_idx"].toInt();
-      EXPECT_TRUE(ctx->task_should_compute_output(should_idx));
-      EXPECT_FALSE(ctx->task_should_compute_output(should_not_idx));
+      int needs_idx = ctx->saved_data["needs_idx"].toInt();
+      int not_needs_idx = ctx->saved_data["not_needs_idx"].toInt();
+      EXPECT_TRUE(ctx->needs_input_grad(needs_idx));
+      EXPECT_FALSE(ctx->needs_input_grad(not_needs_idx));
 
       int mul = ctx->saved_data["mul"].toInt();
       auto saved = ctx->get_saved_variables();
@@ -310,10 +310,10 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
       auto var2 = saved[1];
 
       Variable grad_var1, grad_var2;
-      if (ctx->task_should_compute_output(0)) {
+      if (ctx->needs_input_grad(0)) {
         grad_var1 = grad_output[0] + grad_output[0] * var2;
       }
-      if (ctx->task_should_compute_output(1)) {
+      if (ctx->needs_input_grad(1)) {
         grad_var2 = grad_output[0] * mul + grad_output[0] * var1;
       }
       variable_list output = {
@@ -337,8 +337,8 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
       x,
       y,
       2,
-      /* expected_should_compute_idx= */ 0,
-      /* expected_should_not_compute_idx= */ 1);
+      /* expected_needs_input_grad_idx= */ 0,
+      /* expected_not_needs_input_grad_idx= */ 1);
   auto grad_x = torch::autograd::grad({out}, {x}, {go})[0];
   ASSERT_VARIABLE_EQ(grad_x, y + torch::ones({5, 5}));
 
@@ -347,8 +347,8 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
       x,
       y,
       2,
-      /* expected_should_compute_idx= */ 1,
-      /* expected_should_not_compute_idx= */ 0);
+      /* expected_needs_input_grad_idx= */ 1,
+      /* expected_not_needs_input_grad_idx= */ 0);
   auto grad_y = torch::autograd::grad({out}, {y}, {go})[0];
   ASSERT_VARIABLE_EQ(grad_y, x + torch::ones({5, 5}) * 2);
 }
