@@ -378,7 +378,6 @@ void GraphTaskGuard::restore_current_graph_task() {
 // during node evaluation, see `Node.task_should_compute_output()` function.
 const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info() {
-  TORCH_INTERNAL_ASSERT(current_graph_task);
   return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
 }
 
