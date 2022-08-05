@@ -504,10 +504,13 @@ test_forward_backward_compatibility() {
   echo "::group::Installing Torch From Base Commit"
   pip install -r requirements.txt
   # TODO: in a few weeks, once most commits adopt .ci over .jenkins, remove the fallback
-  CI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-  ls "$CI_DIR" || CI_DIR=".jenkins/pytorch"
-  # shellcheck source=./common-build.sh
-  source "$CI_DIR/common-build.sh"
+  COMMON_BUILD_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  if [[ -f "$COMMON_BUILD_SCRIPT" ]]; then
+    source $COMMON_BUILD_SCRIPT
+  else
+    # shellcheck source=./common-build.sh
+    source ".jenkins/pytorch/common-build.sh"
+  fi
   python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
