@@ -4321,6 +4321,33 @@ def error_inputs_hstack_dstack_vstack(op, device):
     # empty tensor list
     yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
 
+def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
+    # Note: we don't do any tests where we unbind along 0-length dims
+    # because in that case unbind returns and empty tuple, and that breaks
+    # some asumptions in some backward tests in test_ops.py
+    shape_dims = (((S,), 0),
+                  ((S, S), 0),
+                  ((S, S), 1),
+                  ((S, S), -1),
+                  ((S, 0, S), 0),
+                  ((S, S, S), 1),
+                  )
+    for shape, dim in shape_dims:
+        yield SampleInput(make_tensor(shape, dtype=dtype, device=device,
+                                      requires_grad=requires_grad),
+                          args=(dim,))
+
+def error_inputs_unbind(op_info, device):
+    make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
+    yield ErrorInput(SampleInput(make_arg(()), args=(0,)), error_type=IndexError,
+                     error_regex="dimension specified as 0 but tensor has no dimensions")
+    yield ErrorInput(SampleInput(make_arg((2,)), args=(2,)), error_type=IndexError,
+                     error_regex="Dimension out of range")
+
+def reference_unbind(t, dim):
+    """A numpy implementation of torch.unbind"""
+    return tuple(s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
+
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
@@ -8058,6 +8085,9 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
                       args=(torch.randn(S, S, device=device) > 0, 10),
                       broadcasts_input=True)
 
+    if torch.device(device).type == 'cuda':
+        # `self` and `mask` on CUDA but `value` is a CPU scalar tensor.
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, torch.randn(())))
 
 def error_inputs_masked_fill(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -8071,6 +8101,13 @@ def error_inputs_masked_fill(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.ones(2, dtype=torch.long, device=device),
                                  args=(make_arg(()) > 0, torch.tensor(1j, device=device))),
                      error_regex=r"value cannot be converted to type .* without overflow")
+
+    if torch.device(device).type == 'cuda':
+        # `self` and `mask` on CPU but `value` is a CUDA scalar tensor.
+        yield ErrorInput(SampleInput(torch.randn((S, S), device='cpu'),
+                                     args=(torch.randn(S, S, device='cpu') > 0,
+                                           torch.randn((), device='cuda'))),
+                         error_regex=r"to be on same device")
 
 
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
@@ -17892,6 +17929,16 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
+    OpInfo('unbind',
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+           ref=reference_unbind,
+           sample_inputs_func=sample_inputs_unbind,
+           error_inputs_func=error_inputs_unbind,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_gradgrad=True,
+           supports_out=False,
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -19266,9 +19313,6 @@ op_db: List[OpInfo] = [
         skips=(
             # FIXME: cannot specify keepdim without dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: dim=None not supported
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
@@ -19297,9 +19341,6 @@ op_db: List[OpInfo] = [
         skips=(
             # FIXME: cannot specify keepdim without dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: dim=None not supported
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
@@ -20808,6 +20849,18 @@ python_ref_db = [
         validate_view_consistency=False,
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="variadic_tensors",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.meshgrid",
+        torch_opinfo_name="meshgrid",
+        torch_opinfo_variant_name="list_of_tensors",
+        supports_nvfuser=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
@@ -21822,6 +21875,11 @@ python_ref_db = [
         torch_opinfo_name="unflatten",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.unbind",
+        torch_opinfo_name="unbind",
+        supports_nvfuser=False,
+    ),
     #
     # Reduction Reference OpInfos
     #
@@ -22008,8 +22066,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # Fixme: should not compare results of empty_like
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # FIXME: should not compare results of empty_like
+            DecorateInfo(unittest.skip("Can't check result for empty_like"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
@@ -22038,8 +22096,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # Fixme: should not compare results of empty_like
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # FIXME: should not compare results of empty_like
+            DecorateInfo(unittest.skip("Can't check result for new_empty"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
