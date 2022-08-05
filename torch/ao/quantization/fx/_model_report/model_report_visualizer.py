@@ -559,7 +559,6 @@ class ModelReportVisualizer:
         x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
 
         # plot based on whether data is per channel or not
-        fig = plt.figure()
         ax = plt.subplot()
         ax.set_ylabel(feature_filter)
         ax.set_title(feature_filter + " Plot")
@@ -568,10 +567,14 @@ class ModelReportVisualizer:
         if data_per_channel:
             ax.set_xlabel("First idx of module")
             # set the legend as well
-            # plot a seperate line for each channel
-            for index, channel_info in enumerate(y_data):
-                ax.plot(x_data, channel_info, label="Channel {}".format(index))
+            # plot a single line that is average of the channel values
+            num_modules = len(y_data[0])  # all y_data have same length, so get num modules
+            num_channels = len(y_data)  # we want num channels to be able to calculate average later
 
+            avg_vals = [sum(y_data[:][index]) / num_channels for index in range(num_modules)]
+
+            # plot the three things we measured
+            ax.plot(x_data, avg_vals, label="Average Value Across {} Channels".format(num_channels))
             ax.legend(loc='upper right')
         else:
             ax.set_xlabel("idx")
