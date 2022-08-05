@@ -50,7 +50,14 @@ TorchName = Literal[
 
 
 class JitScalarType(enum.IntEnum):
-    """Scalar types defined in torch."""
+    """Scalar types defined in torch.
+
+    Use ``JitScalarType`` to convert from torch and JIT scalar types to ONNX scalar types.
+
+    Examples::
+        >>> JitScalarType.from_name("Float").onnx_type()
+        TensorProtoDataType.FLOAT
+    """
 
     # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
     UINT8 = 0
