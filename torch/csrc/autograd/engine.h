@@ -14,6 +14,8 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <deque>
 #include <exception>
 #include <functional>
@@ -391,7 +393,7 @@ struct TORCH_API Engine {
 
   // Ensures device_ready_queues_ are initialized only once
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::once_flag start_device_threads_flag_;
+  c10::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after
   // initialization
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

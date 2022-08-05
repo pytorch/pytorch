@@ -98,7 +98,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     const int N = Y.size_to_dim(canonical_axis);
     const int D = Y.size_from_dim(canonical_axis);
 
-    CHECK_EQ(Y.sizes(), dY.sizes());
+    TORCH_CHECK_EQ(Y.sizes(), dY.sizes());
     auto* dX = Output(0, Y.sizes(), at::dtype<T>());
     auto* dX_data = dX->template mutable_data<T>();
     if (N == 0 || D == 0) {

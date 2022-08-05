@@ -11,6 +11,13 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -65,9 +72,6 @@ jobs:
           # Unlike other gradle jobs, it's not worth building libtorch in a separate CI job and share via docker, because:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
-
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
-          time docker pull "${DOCKER_IMAGE}" >/dev/null
 
           export BUILD_LITE_INTERPRETER
           BUILD_LITE_INTERPRETER="1"

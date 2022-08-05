@@ -60,32 +60,6 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 
 namespace at { namespace native {
 
-Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::empty_like(input);
-  if (!log_target) {
-    TensorIterator iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(target)
-        .add_input(grad)
-        .build();
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "kl_div_backward_cuda", [&]() {
-      scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
-      gpu_kernel(iter,
-        [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
-          return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
-        });
-    });
-  }
-  else {
-    grad_input = -at::exp(target) * grad;
-    if (reduction == at::Reduction::Mean) {
-      grad_input /= input.numel();
-    }
-  }
-
-  return grad_input;
-}
-
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

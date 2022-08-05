@@ -9,167 +9,217 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Layout::Factory::Factory(const GPU& gpu)
-  : device_(gpu.device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
+//
+// ShaderSource
+//
+
+ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
+    : type(ShaderSource::Type::GLSL),
+      src_code{
+          .glsl =
+              {
+                  glsl_src,
+                  0u,
+              },
+      },
+      kernel_name{std::move(name)} {}
+
+ShaderSource::ShaderSource(
+    std::string name,
+    const uint32_t* const spirv_bin,
+    const uint32_t size,
+    const std::vector<VkDescriptorType>& layout)
+    : type(Type::SPIRV),
+      src_code{
+          .spirv =
+              {
+                  spirv_bin,
+                  size,
+              },
+      },
+      kernel_name{std::move(name)},
+      kernel_layout{layout} {}
+
+bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
+  if (_1.type != _2.type) {
+    return false;
+  }
+
+  if (_1.type == ShaderSource::Type::SPIRV) {
+    return (
+        _1.src_code.spirv.bin == _2.src_code.spirv.bin &&
+        _1.src_code.spirv.size == _2.src_code.spirv.size);
+  } else {
+    return (_1.src_code.glsl.src == _2.src_code.glsl.src);
+  }
 }
 
-Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
-    const Descriptor& descriptor) const {
+//
+// ShaderLayout
+//
+
+ShaderLayout::ShaderLayout(
+    const VkDevice device,
+    const ShaderLayout::Signature& signature)
+    : device_(device), handle_{VK_NULL_HANDLE} {
   c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
 
-  uint32_t binding = 0u;
-  for (const VkDescriptorType type : descriptor.signature) {
+  uint32_t binding_num = 0u;
+  for (const VkDescriptorType type : signature) {
     bindings.push_back({
-      binding++,
-      type,
-      1u,
-      VK_SHADER_STAGE_COMPUTE_BIT,
-      nullptr,
+        binding_num++, // binding
+        type, // descriptorType
+        1u, // descriptorCount
+        VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
+        nullptr, // pImmutableSamplers
     });
   }
 
   const VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    nullptr,
-    0u,
-    static_cast<uint32_t>(bindings.size()),
-    bindings.data(),
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      static_cast<uint32_t>(bindings.size()), // bindingCount
+      bindings.data(), // pBindings
   };
 
-  VkDescriptorSetLayout descriptor_set_layout{};
   VK_CHECK(vkCreateDescriptorSetLayout(
-      device_,
-      &descriptor_set_layout_create_info,
-      nullptr,
-      &descriptor_set_layout));
-
-  TORCH_CHECK(
-      descriptor_set_layout,
-      "Invalid Vulkan descriptor set layout!");
-
-  return Handle{
-    descriptor_set_layout,
-    Deleter(device_),
-  };
+      device_, &descriptor_set_layout_create_info, nullptr, &handle_));
 }
 
-Shader::Layout::Cache::Cache(Factory factory)
-  : cache_(std::move(factory)) {
+ShaderLayout::ShaderLayout(ShaderLayout&& other) noexcept
+    : device_(other.device_), handle_(other.handle_) {
+  other.handle_ = VK_NULL_HANDLE;
 }
 
-void Shader::Layout::Cache::purge() {
-  cache_.purge();
+ShaderLayout::~ShaderLayout() {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+    return;
+  }
+  vkDestroyDescriptorSetLayout(device_, handle_, nullptr);
+  handle_ = VK_NULL_HANDLE;
 }
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
+void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept {
+  VkDevice tmp_device = lhs.device_;
+  VkDescriptorSetLayout tmp_handle = lhs.handle_;
 
-struct Shader::Factory::Compiler final {
-  shaderc::Compiler context;
-  shaderc::CompileOptions options;
+  lhs.device_ = rhs.device_;
+  lhs.handle_ = rhs.handle_;
 
-  Compiler() {
-    options.SetNanClamp(/*enable =*/ true);
-    options.SetSourceLanguage(shaderc_source_language_glsl);
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
-    options.SetWarningsAsErrors();
-  #ifdef DEBUG
-    options.SetGenerateDebugInfo();
-  #endif /* DEBUG */
-    options.SetOptimizationLevel(shaderc_optimization_level_zero);
-  }
-
-  std::vector<uint32_t> compile(const char* const source) const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        source,
-        "Invalid shader source code!");
-
-    const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
-        source,
-        ::strlen(source),
-        shaderc_compute_shader,
-        "vulkan_shader.comp",
-        options);
-
-    const shaderc_compilation_status status = result.GetCompilationStatus();
-    TORCH_INTERNAL_ASSERT(
-        shaderc_compilation_status_success == status,
-        "Shader compilation error: ",
-        result.GetErrorMessage());
-
-    return std::vector<uint32_t>(result.cbegin(), result.cend());
-  }
-};
-
-#else
-
-struct Shader::Factory::Compiler final {
-  std::vector<uint32_t> compile(const char* const /* source */) const {
-    return std::vector<uint32_t>{};
-  }
-};
-
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
-
-Shader::Factory::Factory(const GPU& gpu)
- : device_(gpu.device),
-   compiler_(new Compiler) {
+  rhs.device_ = tmp_device;
+  rhs.handle_ = tmp_handle;
 }
 
-// std::unique_ptr requires its template parameter to be fully defined.
-// For that reason pimpl through unique_ptr requires the definition of
-// the [default] constructor and move assignment operator to appear after
-// impl is fully defined.
+//
+// ShaderModule
+//
 
-Shader::Factory::Factory(Factory&&) = default;
-Shader::Factory& Shader::Factory::Factory::operator=(Factory&&) = default;
-Shader::Factory::~Factory() = default;
-
-typename Shader::Factory::Handle Shader::Factory::operator()(
-    const Descriptor& descriptor) const {
-  std::vector<uint32_t> binary;
-
-  const uint32_t* code = nullptr;
-  uint32_t size = 0u;
-
-  if (Descriptor::Type::Source == descriptor.type) {
-    binary = compiler_->compile(descriptor.shader.source.glsl);
-    code = binary.data();
-    size = sizeof(uint32_t) * static_cast<uint32_t>(binary.size());
-  }
-  else if (Descriptor::Type::Binary == descriptor.type) {
-    code = descriptor.shader.binary.spirv;
-    size = descriptor.shader.binary.size;
-  }
-  else {
-    TORCH_INTERNAL_ASSERT(false, "Invalid descriptor type!");
-  }
+ShaderModule::ShaderModule(const VkDevice device, const ShaderSource& source)
+    : device_(device), handle_{VK_NULL_HANDLE} {
+  const uint32_t* code = source.src_code.spirv.bin;
+  uint32_t size = source.src_code.spirv.size;
 
   const VkShaderModuleCreateInfo shader_module_create_info{
-    VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-    nullptr,
-    0u,
-    size,
-    code,
+      VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      size, // codeSize
+      code, // pCode
   };
 
-  VkShaderModule shader_module{};
   VK_CHECK(vkCreateShaderModule(
-      device_,
-      &shader_module_create_info,
-      nullptr,
-      &shader_module));
+      device_, &shader_module_create_info, nullptr, &handle_));
+}
 
-  TORCH_CHECK(
-      shader_module,
-      "Invalid Vulkan shader module!");
+ShaderModule::ShaderModule(ShaderModule&& other) noexcept
+    : device_(other.device_), handle_(other.handle_) {
+  other.handle_ = VK_NULL_HANDLE;
+}
 
-  return Handle{
-    shader_module,
-    Deleter(device_),
-  };
+ShaderModule::~ShaderModule() {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+    return;
+  }
+  vkDestroyShaderModule(device_, handle_, nullptr);
+  handle_ = VK_NULL_HANDLE;
+}
+
+void swap(ShaderModule& lhs, ShaderModule& rhs) noexcept {
+  VkDevice tmp_device = lhs.device_;
+  VkShaderModule tmp_handle = lhs.handle_;
+
+  lhs.device_ = rhs.device_;
+  lhs.handle_ = rhs.handle_;
+
+  rhs.device_ = tmp_device;
+  rhs.handle_ = tmp_handle;
+}
+
+//
+// ShaderLayoutCache
+//
+
+ShaderLayoutCache::ShaderLayoutCache(const VkDevice device)
+    : cache_mutex_{}, device_(device), cache_{} {}
+
+ShaderLayoutCache::ShaderLayoutCache(ShaderLayoutCache&& other) noexcept
+    : cache_mutex_{}, device_(other.device_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
+}
+
+ShaderLayoutCache::~ShaderLayoutCache() {
+  purge();
+}
+
+VkDescriptorSetLayout ShaderLayoutCache::retrieve(
+    const ShaderLayoutCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
+  auto it = cache_.find(key);
+  if C10_UNLIKELY (cache_.cend() == it) {
+    it = cache_.insert({key, ShaderLayoutCache::Value(device_, key)}).first;
+  }
+
+  return it->second.handle();
+}
+
+void ShaderLayoutCache::purge() {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+  cache_.clear();
+}
+
+//
+// ShaderCache
+//
+
+ShaderCache::ShaderCache(const VkDevice device)
+    : cache_mutex_{}, device_(device), cache_{} {}
+
+ShaderCache::ShaderCache(ShaderCache&& other) noexcept
+    : cache_mutex_{}, device_(other.device_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
+}
+
+ShaderCache::~ShaderCache() {
+  purge();
+}
+
+VkShaderModule ShaderCache::retrieve(const ShaderCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
+  auto it = cache_.find(key);
+  if C10_UNLIKELY (cache_.cend() == it) {
+    it = cache_.insert({key, ShaderCache::Value(device_, key)}).first;
+  }
+
+  return it->second.handle();
+}
+
+void ShaderCache::purge() {
+  cache_.clear();
 }
 
 } // namespace api

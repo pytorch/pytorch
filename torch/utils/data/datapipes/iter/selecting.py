@@ -3,7 +3,12 @@ from typing import Callable, Iterator, Optional, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn, _deprecation_warning
+from torch.utils.data.datapipes.utils.common import (
+    _check_unpickable_fn,
+    _deprecation_warning,
+    StreamWrapper,
+)
+
 
 __all__ = ["FilterIterDataPipe", ]
 
@@ -48,7 +53,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
 
-        _check_lambda_fn(filter_fn)
+        _check_unpickable_fn(filter_fn)
         self.filter_fn = filter_fn  # type: ignore[assignment]
 
         if drop_empty_batches is None:
@@ -78,6 +83,8 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             filtered = self._returnIfTrue(data)
             if self._isNonEmpty(filtered):
                 yield filtered
+            else:
+                StreamWrapper.close_streams(data)
 
     def _returnIfTrue(self, data):
         condition = self._apply_filter_fn(data)

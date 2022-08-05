@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -17,8 +17,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import _patch_torch, symbolic_helper  # noqa: F401
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -56,271 +55,273 @@ from torch.onnx._globals import GLOBALS
 #
 
 __all__ = [
-    "unused",
-    "reshape",
-    "reshape_as",
-    "add",
-    "sub",
-    "rsub",
-    "mul",
-    "div",
-    "addcmul",
-    "floor_divide",
-    "floordiv",
-    "true_divide",
-    "reciprocal",
-    "cat",
-    "stack",
-    "mm",
-    "bmm",
-    "matmul",
-    "addmm",
-    "neg",
-    "sqrt",
-    "rsqrt",
-    "tanh",
-    "sin",
-    "cos",
-    "tan",
-    "asin",
+    "abs",
     "acos",
-    "atan",
-    "sigmoid",
-    "sign",
-    "overload_by_arg_count",
-    "sum",
-    "mean",
-    "prod",
-    "cumsum",
-    "t",
-    "expand",
-    "expand_as",
-    "embedding",
-    "embedding_bag",
-    "size",
-    "transpose",
-    "permute",
-    "view",
-    "view_as",
-    "unsafe_chunk",
-    "split",
-    "unsafe_split",
-    "split_with_sizes",
-    "unsafe_split_with_sizes",
-    "unbind",
-    "select",
-    "square",
-    "squeeze",
-    "prelu",
-    "silu",
-    "mish",
-    "op_with_optional_float_cast",
-    "relu",
-    "relu6",
-    "ceil",
-    "floor",
-    "threshold",
-    "leaky_relu",
-    "glu",
-    "softmax",
-    "softplus",
-    "get_pool_ceil_padding",
-    "max_pool1d",
-    "max_pool2d",
-    "max_pool3d",
-    "max_pool1d_with_indices",
-    "max_pool2d_with_indices",
-    "max_pool3d_with_indices",
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
     "adaptive_max_pool1d",
     "adaptive_max_pool2d",
     "adaptive_max_pool3d",
-    "constant_pad_nd",
-    "reflection_pad",
-    "replication_pad",
-    "reflection_pad1d",
-    "reflection_pad2d",
-    "reflection_pad3d",
-    "replication_pad1d",
-    "replication_pad2d",
-    "replication_pad3d",
-    "pad",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_linear1d",
-    "upsample_bilinear2d",
-    "upsample_trilinear3d",
-    "bitwise_not",
-    "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_cast_to_and_from",
-    "wrap_logical_op_with_negation",
-    "eq",
-    "ne",
-    "gt",
-    "gt_impl",
-    "lt",
-    "lt_impl",
-    "ge",
-    "le",
-    "logical_and",
-    "logical_or",
-    "logical_xor",
-    "where",
-    "log_softmax",
-    "conv1d",
-    "conv2d",
-    "conv3d",
-    "conv_transpose1d",
-    "conv_transpose2d",
-    "conv_transpose3d",
-    "batch_norm",
-    "layer_norm",
-    "instance_norm",
-    "unfold",
-    "elu",
-    "selu",
-    "index_select",
-    "index_put",
-    "index_fill",
-    "index_copy",
-    "bucketize",
-    "type_as",
-    "cosine_similarity",
-    "pairwise_distance",
-    "clone",
-    "abs",
-    "log",
-    "log1p",
-    "log10",
-    "pow",
-    "clamp",
-    "clamp_min",
-    "clamp_max",
-    "max",
-    "maximum",
-    "min",
-    "minimum",
+    "add",
+    "addcmul",
+    "addmm",
+    "alias",
+    "alpha_dropout_",
+    "alpha_dropout",
     "amax",
     "amin",
     "aminmax",
-    "exp",
-    "dropout",
-    "feature_dropout",
-    "alpha_dropout",
-    "feature_alpha_dropout",
-    "dropout_",
-    "feature_dropout_",
-    "alpha_dropout_",
-    "feature_alpha_dropout_",
-    "norm",
-    "conv_tbc",
-    "empty",
-    "empty_like",
-    "new_empty",
-    "scalar_tensor",
-    "tensor",
-    "as_tensor",
-    "zeros",
-    "zeros_like",
-    "new_zeros",
-    "ones",
-    "ones_like",
-    "new_ones",
-    "full",
-    "full_like",
-    "new_full",
-    "eye",
-    "slice",
-    "hardtanh",
-    "hardswish",
-    "hardsigmoid",
-    "tanhshrink",
-    "hardshrink",
-    "softshrink",
-    "alias",
-    "unsqueeze",
-    "sort",
-    "numel",
-    "topk",
-    "to",
-    "repeat",
-    "repeat_interleave",
-    "pixel_shuffle",
-    "pixel_unshuffle",
-    "lstm",
-    "lstm_cell",
-    "gru",
-    "rnn_tanh",
-    "rnn_relu",
-    "detach",
-    "contiguous",
-    "randn",
-    "rand",
-    "randn_like",
-    "rand_like",
-    "rrelu",
-    "bernoulli",
-    "log_sigmoid",
-    "erf",
-    "flatten",
-    "nonzero",
-    "nonzero_numpy",
-    "isnan",
-    "narrow",
+    "arange",
     "argmax",
     "argmin",
-    "scatter",
-    "scatter_add",
-    "log2",
-    "is_floating_point",
-    "one_hot",
+    "as_strided",
+    "as_tensor",
+    "asin",
+    "atan",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "baddbmm",
+    "batch_norm",
+    "bernoulli",
+    "bitwise_not",
+    "bmm",
+    "broadcast_tensors",
+    "bucketize",
+    "cat",
+    "cdist",
+    "ceil",
+    "clamp_max",
+    "clamp_min",
+    "clamp",
+    "clone",
+    "constant_pad_nd",
+    "contiguous",
+    "convolution",
+    "conv_tbc",
+    "conv_transpose1d",
+    "conv_transpose2d",
+    "conv_transpose3d",
+    "conv1d",
+    "conv2d",
+    "conv3d",
+    "cos",
+    "cosine_similarity",
+    "cross",
+    "cumsum",
+    "detach",
+    "dim",
+    "div",
+    "dot",
+    "dropout_",
+    "dropout",
+    "elu",
+    "embedding_bag",
+    "embedding",
+    "empty_like",
+    "empty",
+    "eq",
+    "erf",
+    "exp",
+    "expand_as",
+    "expand",
+    "eye",
+    "feature_alpha_dropout_",
+    "feature_alpha_dropout",
+    "feature_dropout_",
+    "feature_dropout",
+    "fill",
+    "flatten",
+    "floor_divide",
+    "floor",
+    "floordiv",
+    "frobenius_norm",
+    "full_like",
+    "full",
     "gather",
-    "std",
-    "var",
-    "var_mean",
-    "std_mean",
-    "logsumexp",
-    "arange",
-    "linspace",
-    "lift",
-    "masked_fill",
+    "ge",
+    "gelu",
+    "get_pool_ceil_padding",
+    "glu",
+    "group_norm",
+    "gru",
+    "gt_impl",
+    "gt",
+    "hann_window",
+    "hardshrink",
+    "hardsigmoid",
+    "hardswish",
+    "hardtanh",
+    "index_add",
+    "index_copy",
+    "index_fill",
+    "index_put",
+    "index_select",
     "index",
+    "instance_norm",
+    "is_floating_point",
+    "isnan",
+    "item",
+    "kl_div",
+    "layer_norm",
+    "le",
+    "leaky_relu",
+    "lerp",
+    "lift",
+    "linalg_cross",
+    "linalg_matrix_norm",
     "linalg_norm",
     "linalg_vector_norm",
-    "linalg_matrix_norm",
-    "linalg_cross",
-    "frobenius_norm",
-    "multinomial",
-    "baddbmm",
-    "meshgrid",
-    "remainder",
-    "gelu",
-    "group_norm",
-    "dim",
-    "item",
-    "take",
-    "kl_div",
-    "as_strided",
     "linear",
-    "hann_window",
-    "mv",
-    "dot",
+    "linspace",
+    "log_sigmoid",
+    "log_softmax",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "logsumexp",
+    "lstm_cell",
+    "lstm",
+    "lt_impl",
+    "lt",
+    "masked_fill",
+    "matmul",
+    "max_pool1d_with_indices",
+    "max_pool1d",
+    "max_pool2d_with_indices",
+    "max_pool2d",
+    "max_pool3d_with_indices",
+    "max_pool3d",
+    "max",
+    "maximum",
+    "mean",
+    "meshgrid",
+    "min",
+    "minimum",
+    "mish",
+    "mm",
     "movedim",
-    "fill",
-    "index_add",
-    "roll",
-    "cross",
-    "cdist",
-    "lerp",
-    "broadcast_tensors",
-    "Prim",
+    "mul",
+    "multinomial",
+    "mv",
+    "narrow",
+    "native_layer_norm",
+    "ne",
+    "neg",
+    "new_empty",
+    "new_full",
+    "new_ones",
+    "new_zeros",
+    "nonzero_numpy",
+    "nonzero",
+    "norm",
+    "numel",
+    "numpy_T",
+    "one_hot",
+    "ones_like",
+    "ones",
     "Onnx",
+    "op_with_optional_float_cast",
+    "overload_by_arg_count",
+    "pad",
+    "pairwise_distance",
+    "permute",
+    "pixel_shuffle",
+    "pixel_unshuffle",
+    "pow",
+    "prelu",
+    "Prim",
+    "prod",
+    "rand_like",
+    "rand",
+    "randn_like",
+    "randn",
+    "reciprocal",
+    "reflection_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "relu",
+    "relu6",
+    "remainder",
+    "repeat_interleave",
+    "repeat",
+    "replication_pad",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "reshape_as",
+    "reshape",
+    "rnn_relu",
+    "rnn_tanh",
+    "roll",
+    "rrelu",
+    "rsqrt",
+    "rsub",
+    "scalar_tensor",
+    "scatter_add",
+    "scatter",
+    "select",
+    "selu",
+    "sigmoid",
+    "sign",
+    "silu",
+    "sin",
+    "size",
+    "slice",
+    "softmax",
+    "softplus",
+    "softshrink",
+    "sort",
+    "split_with_sizes",
+    "split",
+    "sqrt",
+    "square",
+    "squeeze",
+    "stack",
+    "std_mean",
+    "std",
+    "sub",
+    "sum",
+    "t",
+    "take",
+    "tan",
+    "tanh",
+    "tanhshrink",
+    "tensor",
+    "threshold",
+    "to",
+    "topk",
+    "transpose",
+    "true_divide",
+    "type_as",
+    "unbind",
+    "unfold",
+    "unsafe_chunk",
+    "unsafe_split_with_sizes",
+    "unsafe_split",
+    "unsqueeze",
+    "unused",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+    "var_mean",
+    "var",
+    "view_as",
+    "view",
+    "where",
+    "wrap_logical_op_with_cast_to",
+    "wrap_logical_op_with_negation",
+    "zeros_like",
+    "zeros",
 ]
 
 # used to represent "missing" optional inputs
@@ -354,17 +355,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("add", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("sub", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
@@ -373,7 +371,11 @@ def rsub(g, self, other, alpha=None):
 
 
 def mul(g, self, other):
-    return g.op("Mul", self, other)
+    if symbolic_helper._is_bool(self) and symbolic_helper._is_bool(other):
+        # ONNX Mul doesn't support Boolean, so use And as an equivalent operator.
+        return g.op("And", self, other)
+    else:
+        return g.op("Mul", self, other)
 
 
 def div(g, self, other, *args):
@@ -766,6 +768,12 @@ def _standard_gamma(g, self, generator):
 
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
+
+
+def numpy_T(g, input):
+    ndim = symbolic_helper._get_tensor_rank(input)
+    perm = list(reversed(range(0, ndim)))
+    return g.op("Transpose", input, perm_i=perm)
 
 
 def expand(g, self, size, implicit):
@@ -1387,15 +1395,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -1403,8 +1412,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
-        if ceil_mode:
-            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        adjusted_padding = padding
         if count_include_pad:
             input = g.op(
                 "Pad",
@@ -1413,17 +1421,20 @@ def _avg_pool(name, tuple_fn):
                 mode_s="constant",
                 value_f=0.0,
             )
-            padding = (0,) * len(padding)
+            adjusted_padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            adjusted_padding = adjusted_padding + tuple(
+                a + b for (a, b) in zip(padding_ceil, adjusted_padding)
+            )
         else:
-            padding = padding * 2
+            adjusted_padding = adjusted_padding * 2
         output = g.op(
             "AveragePool",
             input,
             kernel_shape_i=tuple_fn(kernel_size),
             strides_i=tuple_fn(stride),
-            pads_i=padding,
+            pads_i=adjusted_padding,
         )
         return output
 
@@ -1687,25 +1698,8 @@ def bitwise_not(g, inp):
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
-            return g.op(
-                "Cast",
-                fn(g, input, other),
-                to_i=symbolic_helper.cast_pytorch_to_onnx[to_type],
-            )
-
-        return wrap_with_cast
-
-    return decorator
-
-
-def wrap_logical_op_with_cast_to_and_from(to_type):
-    def decorator(fn):
-        def wrap_with_cast(g, input, other):
             to_cast_func = globals()[f"_cast_{to_type}"]
-            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
-            return from_cast_func(
-                g, to_cast_func(g, input, False), to_cast_func(g, other, False)
-            )
+            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 
         return wrap_with_cast
 
@@ -1815,17 +1809,17 @@ def __xor_(g, input, other):
         )
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_and(g, input, other):
     return g.op("And", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_or(g, input, other):
     return g.op("Or", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_xor(g, input, other):
     return g.op("Xor", input, other)
 
@@ -1925,6 +1919,13 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    return log_softmax(g, input, dim)
+
+
 @symbolic_helper.parse_args(
     "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
 )
@@ -1990,6 +1991,37 @@ def _convolution(
         return g.op("Add", n, bias)
     else:
         return n
+
+
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
+def convolution(
+    g,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+):
+    return _convolution(
+        g,
+        input,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
@@ -2173,8 +2205,16 @@ def batch_norm(
         return res
 
 
-@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
-def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+def _layer_norm_returns_normalized_input_mean_rstd(
+    g,
+    input: _C.Value,
+    normalized_shape: Sequence[int],
+    weight: _C.Value,
+    bias: _C.Value,
+    eps: float,
+    cudnn_enable: bool,
+    return_mean_rstd: bool,
+) -> Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
@@ -2185,7 +2225,6 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
             eps_f=eps,
             cudnn_enable_i=cudnn_enable,
         )
-
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
@@ -2197,14 +2236,33 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     denominator = sqrt(g, add(g, variance, eps_cst))
 
-    layer_norm = g.op("Div", numerator, denominator)
+    normalized = g.op("Div", numerator, denominator)
 
     if not (weight is None or symbolic_helper._is_none(weight)):
-        layer_norm = mul(g, layer_norm, weight)
+        normalized = mul(g, normalized, weight)
     if not (bias is None or symbolic_helper._is_none(bias)):
-        layer_norm = add(g, layer_norm, bias)
+        normalized = add(g, normalized, bias)
 
-    return layer_norm
+    if return_mean_rstd:
+        # rdenominator = 1 / sqrt(variance + eps)
+        rdenominator = reciprocal(g, denominator)
+        return normalized, mean, rdenominator
+    return normalized, None, None
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f")
+def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
+    return _layer_norm_returns_normalized_input_mean_rstd(
+        g, input, normalized_shape, weight, bias, eps, False, True
+    )
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
+        g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
+    )
+    return normalized
 
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
@@ -2776,7 +2834,8 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()
+            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             dtype = symbolic_helper.scalar_type_to_onnx.index(
                 symbolic_helper.cast_pytorch_to_onnx[dtype]
             )
@@ -3072,27 +3131,71 @@ def tanhshrink(g, self):
 
 @symbolic_helper.parse_args("v", "f")
 def hardshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
-    return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
+    return g.op(
+        "Where",
+        cond,
+        self,
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
+    )
 
 
 @symbolic_helper.parse_args("v", "f")
 def softshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
         "Where",
         gt_cond,
         sub(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
     lt_out = g.op(
         "Where",
         lt_cond,
         add(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     return add(g, gt_out, lt_out)
 

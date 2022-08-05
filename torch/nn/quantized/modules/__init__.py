@@ -5,7 +5,7 @@ Note::
     Please, use `torch.ao.nn.quantized` instead.
 """
 
-from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention
+from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention, PReLU
 from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d
 from torch.ao.nn.quantized.modules.conv import Conv1d, Conv2d, Conv3d
 from torch.ao.nn.quantized.modules.conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
@@ -23,14 +23,16 @@ from torch.ao.nn.quantized.modules import Quantize, DeQuantize
 # to import the files directly,
 # s.a. `from torch.nn.quantized.modules.conv import ...`.
 # No need to add them to the `__all__`.
-from . import activation
-from . import batchnorm
-from . import conv
-from . import dropout
-from . import embedding_ops
-from . import functional_modules
-from . import linear
-from . import normalization
+from torch.ao.nn.quantized.modules import activation
+from torch.ao.nn.quantized.modules import batchnorm
+from torch.ao.nn.quantized.modules import conv
+from torch.ao.nn.quantized.modules import dropout
+from torch.ao.nn.quantized.modules import embedding_ops
+from torch.ao.nn.quantized.modules import functional_modules
+from torch.ao.nn.quantized.modules import linear
+from torch.ao.nn.quantized.modules import normalization
+from torch.ao.nn.quantized.modules import rnn
+from torch.ao.nn.quantized.modules import utils
 
 __all__ = [
     'BatchNorm2d',
@@ -61,6 +63,7 @@ __all__ = [
     'Sigmoid',
     'Softmax',
     'Dropout',
+    'PReLU',
     # Wrapper modules
     'FloatFunctional',
     'FXFloatFunctional',
