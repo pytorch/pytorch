@@ -940,7 +940,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
                         c10::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (M > 0) {
+  if (M > 0 && N > 0) {
     LayerNormBackwardKernelImpl(
         dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
   }

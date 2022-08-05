@@ -19,9 +19,9 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         output, mean, rstd = forward_helper(torch.native_layer_norm, expanded_args, expanded_kwargs)
         ctx.args = expanded_args
 
-        if input.requires_grad or isinstance(ExpandedWeight, expanded_kwargs['weight']):
+        if input.requires_grad or isinstance(expanded_kwargs['weight'], ExpandedWeight):
             ctx.weight = expanded_kwargs['weight']
-        if input.requires_grad or isinstance(ExpandedWeight, expanded_kwargs['bias']):
+        if input.requires_grad or isinstance(expanded_kwargs['bias'], ExpandedWeight):
             ctx.bias = expanded_kwargs['bias']
         ctx.eps = expanded_kwargs['eps']
         ctx.mean, ctx.rstd = mean, rstd

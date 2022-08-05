@@ -1,4 +1,4 @@
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Callable, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
@@ -48,7 +48,7 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        _check_lambda_fn(fn)
+        _check_unpickable_fn(fn)
         self.fn = fn  # type: ignore[assignment]
 
     def __len__(self) -> int:

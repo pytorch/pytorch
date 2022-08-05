@@ -17,6 +17,7 @@ runs:
       run: |
         retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
         # ignore output since only exit code is used for conditional
-        if docker inspect --type=image "${DOCKER_IMAGE}" >/dev/null 2>/dev/null; then
+        # only pull docker image if it's not available locally
+        if ! docker inspect --type=image "${DOCKER_IMAGE}" >/dev/null 2>/dev/null; then
           retry docker pull "${DOCKER_IMAGE}"
         fi

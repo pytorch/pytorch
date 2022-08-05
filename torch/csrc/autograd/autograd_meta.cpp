@@ -83,14 +83,35 @@ using at::Tensor;
 // the base if needed.
 
 namespace {
-// Check if two Tensor have the same storage offset, sizes and strides
+
+// Enforcing that the metadata between the primal and tangent are same has two
+// goals:
+// - When properties of the primal are checked in composite op's to determine
+//   control flow, the code path decided upon is also reasonable for the tangent
+// - Make sure that when the same as_strided is applied to both primal and
+//   and tangent, it behaves similarly.
+//
+// We do that by checking:
+//   1) the storages have same properties: size and conj/neg-ness
+//   2) the same indices refer to the same elements in storage
+//      (we are more strict than necessary here to satisfy the goal 1)
 bool has_same_meta(const Variable& base, const Variable& other) {
   if (!base.defined() || !other.defined()) {
     return false;
   }
-  if (base.storage_offset() != other.storage_offset()) {
+  // 1) The storages have the same properties
+  if (!at::_has_same_storage_numel(base, other)) {
     return false;
   }
+  if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
+    return false;
+  }
+
+  // Technically dim and size belong as part of (2), so we shouldn't really care
+  // if a zero-numel tensor violates these. But since these properties
+  // (unlike offset and strides) often determine control flow in composite ops
+  // it is useful to enforce that they match for primal and tangent here so
+  // nothing funny happens later (See goal 1).
   if (base.dim() != other.dim()) {
     return false;
   }
@@ -98,16 +119,23 @@ bool has_same_meta(const Variable& base, const Variable& other) {
     if (base.sizes()[i] != other.sizes()[i]) {
       return false;
     }
+  }
+
+  // The check below will always be vacuously true for 0-element tensors
+  if (base.numel() == 0 && other.numel() == 0) {
+    return true;
+  }
+
+  // 2) The same indices refer to the same elements in storage
+  if (base.storage_offset() != other.storage_offset()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(base.dim())) {
     if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1 &&
         base.sizes()[i] != 0) {
       return false;
     }
-  }
-  if (!at::_has_same_storage_numel(base, other)) {
-    return false;
-  }
-  if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
-    return false;
   }
   return true;
 }

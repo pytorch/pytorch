@@ -96,6 +96,11 @@ class Transform(object):
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_inv"] = None
+        return state
+
     @property
     def event_dim(self):
         if self.domain.event_dim == self.codomain.event_dim:
@@ -974,6 +979,7 @@ class CatTransform(Transform):
     in a way compatible with :func:`torch.cat`.
 
     Example::
+
        x0 = torch.cat([torch.range(1, 10), torch.range(1, 10)], dim=0)
        x = torch.cat([x0, x0], dim=0)
        t0 = CatTransform([ExpTransform(), identity_transform], dim=0, lengths=[10, 10])
@@ -1076,6 +1082,7 @@ class StackTransform(Transform):
     in a way compatible with :func:`torch.stack`.
 
     Example::
+
        x = torch.stack([torch.range(1, 10), torch.range(1, 10)], dim=1)
        t = StackTransform([ExpTransform(), identity_transform], dim=1)
        y = t(x)

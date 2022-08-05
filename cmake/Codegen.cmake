@@ -118,6 +118,10 @@ if(INTERN_BUILD_ATEN_OPS)
         --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
         --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
         )
+    if(SELECTED_OP_LIST)
+      list(APPEND GEN_UNBOXING_COMMAND
+              --TEST_ONLY_op_registration_allowlist_yaml_path "${SELECTED_OP_LIST}")
+    endif()
     set("GEN_UNBOXING_COMMAND_sources"
         ${GEN_UNBOXING_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
