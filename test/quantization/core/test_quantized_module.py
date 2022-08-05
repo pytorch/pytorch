@@ -1011,6 +1011,30 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
+    def test_prelu(self):
+        x = torch.randn((4, 4, 4, 4), dtype=torch.float)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+
+        # num_parameters = 1
+        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=1)
+        w = torch.randn(1, dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
+        prelu_module.set_weight(qw)
+        qy = prelu_module(qx)
+        qy_ref = torch.prelu(qx, qw)
+
+        self.assertEqual(qy_ref, qy,
+                         msg="PReLU module API failed")
+
+        # num_parameters = num_channels
+        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=4)
+        w = torch.randn(4, dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
+        prelu_module.set_weight(qw)
+        qy = prelu_module(qx)
+        qy_ref = torch.prelu(qx, qw)
+        self.assertEqual(qy_ref, qy,
+                         msg="PReLU module API failed")
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):

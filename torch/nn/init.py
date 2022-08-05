@@ -246,7 +246,7 @@ def dirac_(tensor, groups=1):
 
     Args:
         tensor: a {3, 4, 5}-dimensional `torch.Tensor`
-        groups (optional): number of groups in the conv layer (default: 1)
+        groups (int, optional): number of groups in the conv layer (default: 1)
     Examples:
         >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)

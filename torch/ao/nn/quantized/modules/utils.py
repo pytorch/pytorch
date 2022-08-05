@@ -1,6 +1,6 @@
 import abc
 import torch
-from itertools import repeat
+import itertools
 import collections
 from torch.nn.modules.module import _addindent
 
@@ -38,7 +38,7 @@ def _ntuple_from_first(n):
             if len(x) == n:
                 break
             x = x[0]
-        return tuple(repeat(x, n))
+        return tuple(itertools.repeat(x, n))
     return parse
 
 def hide_packed_params_repr(self, params):

@@ -2,16 +2,17 @@
 # Owner(s): ["module: unknown"]
 
 import logging
-import random
 import torch
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
-from torch.ao.sparsity import BaseDataSparsifier, DataNormSparsifier
+
 from typing import Tuple
 from torch import nn
 import itertools
 import math
 import copy
+
+from torch.ao.sparsity._experimental.data_sparsifier import BaseDataSparsifier, DataNormSparsifier
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -41,6 +42,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         self.check_add_data(data_list, data_with_config, defaults)
         self.check_step(data_list, data_with_config, defaults)
         self.check_state_dict(data_list, data_with_config, defaults)
+        self.check_memory_reference(data_list, data_with_config, defaults)
 
     @staticmethod
     def _get_name_data_config(some_data, defaults=None):
@@ -135,15 +137,22 @@ class _BaseDataSparsiferTestCase(TestCase):
         sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
         all_data = data_list + data_with_config
         for some_data in all_data:
-            name1, data1, _ = self._get_name_data_config(some_data)
+            name1, data1, config = self._get_name_data_config(some_data, defaults=defaults)
             data1 = sparsifier._extract_weight(data1)
+            data1_old = copy.deepcopy(data1)
             assert torch.all(data1 == sparsifier.get_data(name=name1))
-            # get some other data at random and with the same name
-            rand_idx = random.randint(0, len(all_data) - 1)
-            _, data2, _ = self._get_name_data_config(all_data[rand_idx])
-            data2 = sparsifier._extract_weight(data2)
+
+            sparsifier.step()
+            mask = sparsifier.get_mask(name1)
+
+            data2 = torch.randn(data1.shape)  # add another data with the same shape as original data
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
+
+            assert torch.all(sparsifier.get_mask(name1) == mask)  # mask should not change
+            assert torch.all(data1_old == data1)
+
+            assert sparsifier.data_groups[name1] == config  # if replaced old_config should match new config
 
     def check_state_dict(self, data_list, data_with_config, defaults, **kwargs):
         sparsifier1 = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
@@ -160,13 +169,15 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.state) == len(sparsifier2.state)
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
-        for name in sparsifier1.state.keys():
+        state1 = state_dict1['state']
+        for name in state1.keys():
             # compare mask
             assert name in sparsifier2.state
             assert 'mask' in sparsifier2.state[name]
             assert 'mask' in sparsifier1.state[name]
-            mask1, mask2 = sparsifier1.state[name]['mask'], sparsifier2.state[name]['mask']
-            assert torch.all(mask1 == mask2)
+            mask1, mask2 = state1[name]['mask'], sparsifier2.state[name]['mask']
+            assert mask1.is_sparse and not mask2.is_sparse
+            assert torch.all(mask1.to_dense() == mask2)  # mask1 is stored as sparse coo now
 
             # compare data_groups
             dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
@@ -183,6 +194,26 @@ class _BaseDataSparsiferTestCase(TestCase):
                 assert hasattr(param1, 'mask')
                 assert hasattr(param2, 'mask')
                 self.assertEqual(param1.__dict__, param2.__dict__)
+
+    def check_memory_reference(self, data_list, data_with_config, defaults, **kwargs):
+        """Checks if the data is truly "attached" to the sparsifier. Meaning, when the
+        data is changed outside of the sparsifier, the changes must be reflected on the data
+        inside the data sparsifier as well.
+        This makes sure that the sparsifier is holding the memory reference of the data and
+        not copies.
+
+        This test modifies the data and asserts that data in the sparsifier is changed as well
+        """
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        all_data = data_list + data_with_config
+        for some_data in all_data:
+            name, data, _ = self._get_name_data_config(some_data)
+            weight = sparsifier._extract_weight(data)
+            weight.data = weight + torch.randn(*weight.shape)
+            contained_data = sparsifier.get_data(name=name)
+            assert id(weight.data) == id(contained_data.data)
+            assert torch.all(contained_data == weight)
+
 
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
@@ -204,6 +235,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
         self.check_step(data_list, data_with_config, defaults, norm_type=norm_type)
         self.check_step_2_of_4(norm_type=norm_type)
         self.check_sparsity_level(data_list, data_with_config, defaults, norm_type=norm_type)
+        self.check_memory_reference(data_list, data_with_config, defaults, **kwargs)
 
     @staticmethod
     def _get_bounds_on_actual_sparsity(config, tensor_shape):
@@ -226,7 +258,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             return (1.0, 1.0)
         else:
             # min value assumes zeros_per_block is 1
-            min_values_sparsified = number_blocks * sparsity_level
+            min_values_sparsified = round(number_blocks * sparsity_level)
             # max value assumes actual zeros_per_block
             max_values_sparsified = min_values_sparsified * min(values_per_block, zeros_per_block)
             lower_bound = min_values_sparsified / (height * width)
@@ -400,8 +432,8 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         Once the above is done, create an instance of _NormDataSparsifierTestRunner and call run_tests()
     """
     def test_tensors(self):
-        tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
-        tensor4, tensor5 = torch.randn(10, 10), torch.randn(4, 4)
+        tensor1, tensor2, tensor3 = torch.randn(1, 10), torch.randn(4, 4), torch.randn(1, 5)
+        tensor4, tensor5 = torch.randn(1, 2), torch.randn(4, 4)
         data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('tensor3', tensor3)]
         defaults = {'sparsity_level': 0.5, 'sparse_block_shape': (1, 4), 'zeros_per_block': 4}
 
@@ -421,7 +453,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
                             data_with_config=data_with_config, norm_type='L2')
 
     def test_nn_parameters(self):
-        param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
+        param1, param2, param3 = nn.Parameter(torch.randn(1, 8)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
         param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(torch.randn(4, 4))
         data_list = [('param1', param1), ('param2', param2), ('param3', param3)]
         defaults = {'sparsity_level': 0.5, 'sparse_block_shape': (1, 4), 'zeros_per_block': 4}

@@ -972,6 +972,40 @@ TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
       tv1->axis(1)->toString());
 }
 
+TEST_F(NVFuserTest, FusionExpandRepro_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> input_shape1{4, 1, 1};
+  const std::vector<int64_t> input_shape2{4, 3, 2};
+
+  auto tv0 = makeConcreteTensor({-1, 1, 1});
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(3);
+  fusion.addInput(tv1);
+
+  auto tv2 = expand_as(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape1, options);
+  at::Tensor at_y = at::randn(input_shape2, options);
+  std::vector<IValue> aten_inputs = {at_x, at_y};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  LaunchParams l_params;
+  auto outputs = fe.runFusion(aten_inputs, {}, l_params, 0);
+
+  auto out = at_x.expand_as(at_y);
+
+  testValidate(&fusion, outputs, aten_inputs, {out}, __LINE__, __FILE__);
+
+  // second run to verify cached output allocation
+  outputs = fe.runFusion(aten_inputs, {}, l_params, 0);
+  testValidate(&fusion, outputs, aten_inputs, {out}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
