@@ -1173,6 +1173,7 @@ class TestProfiler(TestCase):
             if e.name in ("aten::mm", "aten::addmm"):
                 # intentionally vague tests to protect against possible future changes
                 # of mm to addmm or other impl, or changin internal order of args
+                print(e)
                 self.assertTrue(len(e.input_shapes) > 0)
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 

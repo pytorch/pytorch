@@ -47,14 +47,10 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 }
 
 void InputOutputEncoder::push(const at::Tensor& t) {
-  if (t.defined()) {
+  if (t.defined() && !t.is_nested()) { //TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    c10::IntArrayRef sizes;
-    int64_t dim = 0;
-    if (!t.is_nested()) {
-      sizes = t.sizes();
-      dim = sizes.size();
-    }
+    auto sizes = t.sizes();
+    auto dim = sizes.size();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
