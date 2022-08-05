@@ -209,6 +209,21 @@ class ProcessGroup:
         op=ReduceOp.SUM,
     ) -> Work: ...
     @overload
+    def _reduce(
+        self,
+        output_tensors: List[Tensor],
+        input_tensors: List[Tensor],
+        opts=ReduceOptions(),
+    ) -> Work: ...
+    @overload
+    def _reduce(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        root: int,
+        op=ReduceOp.SUM,
+    ) -> Work: ...
+    @overload
     def allgather(
         self,
         output_tensors: List[List[Tensor]],

@@ -412,6 +412,48 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test__reduce_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_id = self.rank_to_GPU[self.rank][0]
+
+        def _reduce(ys, xs, rootRank, rootTensor, op=None):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            if op:
+                opts.reduceOp = op
+            work = pg._reduce(ys, xs, opts)
+            work.wait()
+
+        # for every root tensor
+        for rt in range(self.world_size):
+            output_tensors = [torch.tensor([0]).cuda(local_device_id)]
+            input_tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+
+            _reduce(output_tensors, input_tensors, rt, 0)
+
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            if self.rank == rt:
+                self.assertEqualIgnoreType(
+                    torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
+                    output_tensors[0],
+                )
+            else:
+                self.assertEqualIgnoreType(
+                    torch.tensor([0]),
+                    output_tensors[0],
+                )
+
+
+            for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Cannot use " + str(op) + " with NCCL"
+                ):
+                    _reduce(output_tensors, input_tensors, self.rank, rt, op)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())

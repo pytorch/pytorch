@@ -73,6 +73,24 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_(
           std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> _reduce_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  return process_group->_reduce(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      ReduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<ProcessGroup::Work> gather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -161,6 +179,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
+  m.def(
+      "_reduce_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _reduce_));
   m.def(
       "gather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
@@ -273,6 +294,31 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce(
                            int64_t)>();
   return op.call(
       tensors,
+      process_group,
+      static_cast<uint64_t>(opts.reduceOp),
+      opts.rootRank,
+      opts.rootTensor,
+      opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> _reduce(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const ReduceOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::_reduce_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const std::vector<at::Tensor>&,
+                           const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t,
+                           int64_t,
+                           int64_t)>();
+  return op.call(
+      output_tensors,
+      input_tensors,
       process_group,
       static_cast<uint64_t>(opts.reduceOp),
       opts.rootRank,

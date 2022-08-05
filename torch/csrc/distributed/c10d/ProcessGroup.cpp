@@ -16,6 +16,8 @@ std::string opTypeToString(OpType opType) {
       return "ALLREDUCE_COALESCED";
     case OpType::REDUCE:
       return "REDUCE";
+    case OpType::_REDUCE:
+      return "_REDUCE";
     case OpType::ALLGATHER:
       return "ALLGATHER";
     case OpType::_ALLGATHER_BASE:
