@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Pattern, Tuple
+from typing import List, Pattern, Tuple, Optional
 
 from trymerge import BOT_COMMANDS_WIKI, GitHubPR, gh_post_pr_comment
 
@@ -19,7 +19,6 @@ class TryMergeExplainer(object):
     pr: GitHubPR
     org: str
     project: str
-    commit: str
 
     has_trunk_label: bool
     has_ciflow_label: bool
@@ -32,7 +31,6 @@ class TryMergeExplainer(object):
         pr: GitHubPR,
         org: str,
         project: str,
-        commit: str,
     ):
         self.force = force
         self.on_green = on_green
@@ -40,7 +38,6 @@ class TryMergeExplainer(object):
         self.pr = pr
         self.org = org
         self.project = project
-        self.commit = commit
 
     def get_flags(self) -> Tuple[bool, bool]:
         self.has_trunk_label = has_label(self.pr.get_labels(), CIFLOW_TRUNK_LABEL)
@@ -60,11 +57,11 @@ class TryMergeExplainer(object):
         else:
             return "out a "
 
-    def _get_land_check_progress(self) -> str:
-        if self.commit != None:
+    def _get_land_check_progress(self, commit: Optional[str]) -> str:
+        if commit is not None:
             return (
                 f" and [land check]({BOT_COMMANDS_WIKI}) "
-                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{self.commit})"
+                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})"
             )
         else:
             return ""
@@ -75,7 +72,7 @@ class TryMergeExplainer(object):
                 "This means your PR will be merged immediately, bypassing any checks."
             )
         elif self.on_green:
-            return "This means that your PR will be merged once all signals on your PR has passed."
+            return "This means that your PR will be merged once all signals have passed."
         elif self.land_checks:
             if self.has_trunk_label:
                 land_check_msg_suffix = (
@@ -92,14 +89,13 @@ class TryMergeExplainer(object):
 
         else:
             if self.has_ciflow_label:
-                normal_msg_suffix = "Since your PR has a ciflow label, we will wait for all checks to be green on your PR."
+                return "Since your PR has a ciflow label, we will wait for all checks to be."
             else:
-                normal_msg_suffix = "Merge bot will wait for mandatory checks defined in the merge rules to be green before merging."
-            return "The merge job was triggered with no flags." + normal_msg_suffix
+                return "This means only we will only wait for mandatory checks to be green."
 
-    def print_merge_message(self, dry_run: bool) -> None:
-        message_prefix = f"@pytorchbot successfully started a merge job."
-        progress_links = f"Check the current status [here]({os.getenv('GH_RUN_URL')}){self._get_land_check_progress()}."
+    def print_merge_message(self, commit: Optional[str], dry_run: bool) -> None:
+        message_prefix = "@pytorchbot successfully started a merge job."
+        progress_links = f"Check the current status [here]({os.getenv('GH_RUN_URL')}){self._get_land_check_progress(commit)}."
         flag_message = f"The merge job was triggered with{self._get_flag_msg()} flag."
         explaination_message = self._get_flag_explaination_message()
 

@@ -1195,15 +1195,15 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
+    explainer = TryMergeExplainer(force, on_green, land_checks, pr, org, project)
+    on_green, land_checks = explainer.get_flags()
 
     check_for_sev(org, project, force)
 
     if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
-    explainer = TryMergeExplainer(force, on_green, land_checks, pr, org, project, land_check_commit)
-    on_green, land_checks = explainer.get_flags()
-    explainer.print_merge_message(dry_run)
+    explainer.print_merge_message(land_check_commit, dry_run)
 
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
