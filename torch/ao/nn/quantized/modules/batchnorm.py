@@ -1,6 +1,5 @@
 import torch
 import torch.nn.intrinsic as nni
-from torch import Tensor
 
 class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
@@ -60,7 +59,7 @@ class BatchNorm2d(_BatchNorm):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         # disabling this since this is not symbolically traceable
         # self._check_input_dim(input)
         return torch.ops.quantized.batch_norm2d(
@@ -90,7 +89,7 @@ class BatchNorm3d(_BatchNorm):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         # disabling this since this is not symbolically traceable
         # self._check_input_dim(input)
         return torch.ops.quantized.batch_norm3d(

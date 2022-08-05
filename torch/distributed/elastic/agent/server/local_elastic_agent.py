@@ -28,6 +28,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 log = get_logger()
 
+__all__ = ['LocalElasticAgent']
 
 class LocalElasticAgent(SimpleElasticAgent):
     """

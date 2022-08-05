@@ -12,6 +12,7 @@
 
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <iostream>
 
