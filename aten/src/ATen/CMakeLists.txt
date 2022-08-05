@@ -415,39 +415,15 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
-  if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-      ${CUDA_LIBRARIES}
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
-      )
-   if(NOT BUILD_LAZY_CUDA_LINALG)
-     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
-       )
-   endif()
-  else()
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-      ${CUDA_LIBRARIES}
-      ${CUDA_cusparse_LIBRARY}
-      ${CUDA_curand_LIBRARY}
-      )
-   if(NOT BUILD_LAZY_CUDA_LINALG)
-     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_cusolver_LIBRARY}
-     )
-   endif()
+  list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      torch::cudart
+      caffe2::cusparse
+      caffe2::curand
+      caffe2::cufft
+  )
+  if(NOT BUILD_LAZY_CUDA_LINALG)
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS caffe2::cusolver)
   endif()
-
-  if(CAFFE2_USE_CUDNN)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
-  endif()
-  if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
-  endif($ENV{ATEN_STATIC_CUDA})
 endif()
 
 
