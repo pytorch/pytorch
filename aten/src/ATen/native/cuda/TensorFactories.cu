@@ -81,7 +81,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
 }
 
 Tensor empty_strided_symint_cuda(SymIntArrayRef size, SymIntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  return at::detail::empty_strided_symint_cuda(c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  return at::native::empty_strided_cuda(c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
