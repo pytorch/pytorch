@@ -12188,7 +12188,7 @@ Otherwise, the sample variance is calculated, without any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
