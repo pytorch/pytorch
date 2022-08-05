@@ -4,17 +4,16 @@
 
 namespace nvfuser {
 
-FusionDefinition::FusionDefinition(FusionOwner* fusion_owner)
-    : fusion_owner_(fusion_owner),
-      prev_fusion_(nullptr),
+FusionDefinition::FusionDefinition(std::shared_ptr<FusionManager> &fusion_manager)
+    : fusion_manager_(fusion_manager),
       recording_(),
       recording_state_(),
       fusion_state_(),
       ops(this) {}
 
 FusionDefinition* FusionDefinition::enter() {
-  prev_fusion_ = NvfFusionGuard::getCurFusion();
-  NvfFusionGuard::setCurFusion(fusionPtr());
+  //prev_fusion_ = NvfFusionGuard::getCurFusion();
+  //NvfFusionGuard::setCurFusion(fusionPtr());
   return this;
 }
 void FusionDefinition::exit() {
@@ -24,8 +23,8 @@ void FusionDefinition::exit() {
     (*functor)(*this);
   }
 
-  NvfFusionGuard::setCurFusion(prev_fusion_);
-  prev_fusion_ = nullptr;
+  //NvfFusionGuard::setCurFusion(prev_fusion_);
+  //prev_fusion_ = nullptr;
 }
 
 Scalar* FusionDefinition::defineScalar() {
@@ -43,10 +42,10 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
 }
 
 void FusionDefinition::addInput(NvfVal* input) {
-  fusionPtr()->addInput(input);
+  fusion_manager_->fusionPtr()->addInput(input);
 }
 void FusionDefinition::addOutput(NvfVal* output) {
-  fusionPtr()->addOutput(output);
+  fusion_manager_->fusionPtr()->addOutput(output);
 }
 
 NvfVal* FusionDefinition::getFusionState(size_t index) const {
@@ -54,10 +53,6 @@ NvfVal* FusionDefinition::getFusionState(size_t index) const {
 }
 void FusionDefinition::setFusionState(size_t index, NvfVal* val) {
   fusion_state_.at(index) = val;
-}
-
-NvfFusion* FusionDefinition::fusionPtr() {
-  return fusion_owner_->fusionPtr();
 }
 
 } // namespace nvfuser

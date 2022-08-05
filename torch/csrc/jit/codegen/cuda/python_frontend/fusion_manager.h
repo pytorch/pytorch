@@ -34,6 +34,7 @@ class FusionManager {
   std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
   void printIr() const;
   void printKernel() const;
+  NvfFusion* fusionPtr() const;
 
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
       RecordFunctor* rec) const;
@@ -44,7 +45,6 @@ class FusionManager {
 
  private:
   NvfFusionExecutorCache* fusionExecutorCachePtr() const;
-  NvfFusion* fusionPtr() const;
 
   //! The fusion cache is implemented as a prefix tree of entries containing
   //! a Record representing a Fusion Definition line entry.

@@ -1,10 +1,9 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_owner.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
 
 //! nvFuser Fusion IR Types
 using NvfDataType = torch::jit::fuser::cuda::DataType;
 using NvfFusion = torch::jit::fuser::cuda::Fusion;
-using NvfFusionExecutorCache = torch::jit::fuser::cuda::FusionExecutorCache;
 using NvfFusionGuard = torch::jit::fuser::cuda::FusionGuard;
 using NvfIrBuilder = torch::jit::fuser::cuda::IrBuilder;
 using NvfTensorView = torch::jit::fuser::cuda::TensorView;
@@ -14,7 +13,6 @@ using NvfVal = torch::jit::fuser::cuda::Val;
 namespace nvfuser {
 
 struct RecordFunctor;
-struct FusionManager;
 
 //! The State, child classes Tensor and Scalar, and the StateType enum
 //! are used to define state objects to encapsulate the recording of state
@@ -69,7 +67,7 @@ struct Scalar : State {
 //!   help(FusionDefinition.Operators)
 class FusionDefinition {
  public:
-  FusionDefinition(FusionOwner* fusion_owner);
+  FusionDefinition(std::shared_ptr<FusionManager> &fusion_manager);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -107,15 +105,7 @@ class FusionDefinition {
   //! Sets a Fusion IR Tensor/Scalar object
   void setFusionState(size_t index, NvfVal* val);
 
-  //! A pointer to the nvFuser Fusion IR Oject
-  NvfFusion* fusionPtr();
-
  private:
-  // \todo These items will be replaced by a FusionManager instead of a cache
-  // for an individual fusion object
-  FusionOwner* fusion_owner_;
-  NvfFusion* prev_fusion_;
-
   std::shared_ptr<FusionManager> fusion_manager_;
 
   //! A vector of record operations in the FusionDefintion
