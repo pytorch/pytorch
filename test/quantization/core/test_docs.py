@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
-import unittest
 from pathlib import Path
 
 import torch
@@ -11,7 +10,6 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
-from torch.testing._internal.common_utils import IS_ARM64
 
 
 class TestQuantizationDocs(QuantizationTestCase):
@@ -108,21 +106,18 @@ class TestQuantizationDocs(QuantizationTestCase):
             expr = compile(code, "test", "exec")
             exec(expr, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_ptdq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTDQ API Example::"
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_ptsq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTSQ API Example::"
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_qat(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "QAT API Example::"
@@ -136,7 +131,6 @@ class TestQuantizationDocs(QuantizationTestCase):
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_fx(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "FXPTQ API Example::"
@@ -147,7 +141,6 @@ class TestQuantizationDocs(QuantizationTestCase):
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_custom(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"
