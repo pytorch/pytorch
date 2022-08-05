@@ -4033,19 +4033,6 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
         yield SampleInput(make_arg(shape))
 
 
-def sample_inputs_assert_all_true(op_info, device, dtype, requires_grad=False, **kwargs):
-    make_arg = partial(torch.ones, device=device, dtype=dtype, requires_grad=requires_grad)
-    yield SampleInput(make_arg(S, S), args=("Error Message",))
-
-
-def error_inputs_assert_all_true(op, device):
-    err_msg = "Found a non-true value"
-    yield ErrorInput(SampleInput(torch.zeros(S, device=device), args=(err_msg,)), error_regex=err_msg)
-    t = torch.ones(S, device=device)
-    t[0] = 0
-    yield ErrorInput(SampleInput(t, args=(err_msg,)), error_regex=err_msg)
-
-
 def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 

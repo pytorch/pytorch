@@ -1678,7 +1678,6 @@ fake_skips = (
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
-    "assert_all_true",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
 )
 
 fake_autocast_device_skips = defaultdict(dict)

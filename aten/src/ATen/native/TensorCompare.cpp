@@ -742,15 +742,5 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-// [Note] assert_all_true
-// For a TensorSubclass, calling `item` in an CompositeImplicit Op
-// may not make sense (eg. what does `item` do on BatchTensor?)
-// However a common anti-pattern used in such ops is
-// `TORCH_CHECK(t.all().item<bool>, err_msg)`, which is not Composite Compliant
-// To mitigate that, one should use `assert_all_true(t.imag, err_msg)`.
-void assert_all_true(const Tensor& self, const c10::string_view msg) {
-  TORCH_CHECK(self.all().item<bool>(), msg);
-}
-
 } // namespace native
 } // namespace at
