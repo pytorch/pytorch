@@ -7,8 +7,6 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <numeric>
-#include <ATen/core/ATen_fwd.h>
 
 namespace at {
 namespace native {
@@ -871,67 +869,6 @@ Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
 }
 
 namespace {
-template <typename index_t, typename scalar_t>
-void convert_bsc_to_csc_cpu_kernel(
-    const int64_t n_brow,
-    const int64_t n_bcol,
-    const int64_t nr_p_b,
-    const int64_t nc_p_b,
-    const int64_t nnz,
-    const index_t* block_ccol_inds,
-    const index_t* block_row_inds,
-    const scalar_t* block_data,
-    index_t* ccol_inds,
-    index_t* row_inds,
-    scalar_t* data) {
-  // n ele per block
-  const auto nele_p_b = nr_p_b * nc_p_b;
-  // last element is nnz
-  ccol_inds[n_bcol * nc_p_b] = nnz;
-
-  // parallelize over block-column
-  at::parallel_for(
-      0,
-      n_bcol,
-      at::internal::GRAIN_SIZE,
-      [&](const int64_t start, const int64_t stop) {
-        for (index_t b_col = start; b_col < stop; ++b_col) {
-          // num blocks in this column
-          const index_t bcol_size =
-              block_ccol_inds[b_col + 1] - block_ccol_inds[b_col];
-
-          // size of column in csc
-          const index_t col_size = nr_p_b * bcol_size;
-
-          // loop over cols inside the block
-          for (index_t c = 0; c < nc_p_b; ++c) {
-            // csc col number
-            const index_t col = nc_p_b * b_col + c;
-            // number of elements in the csc col
-            ccol_inds[col] = block_ccol_inds[b_col] * nele_p_b + c * col_size;
-            // loop block index inside col
-            for (index_t b_i = 0; b_i < bcol_size; ++b_i) {
-              const index_t block_index = block_ccol_inds[b_col] + b_i;
-              // block row number
-              const index_t brow = block_row_inds[block_index];
-              // loop over rows inside block
-              for (index_t r = 0; r < nr_p_b; ++r) {
-                // block data is row major contiguous
-                const index_t b_data_index =
-                    nele_p_b * block_index + nc_p_b * r + c;
-                // CSR row index
-                const index_t row = nr_p_b * brow + r;
-                // csr data index
-                const index_t data_ind = ccol_inds[col] + b_i * nr_p_b + r;
-                row_inds[data_ind] = row;
-                data[data_ind] = block_data[b_data_index];
-              }
-            }
-          }
-        }
-      });
-}
-
 template <typename input_t, typename output_t>
 void convert_indices_from_coo_to_csr_cpu(
     const Tensor& result,
@@ -992,47 +929,6 @@ void convert_indices_from_csr_to_coo_cpu(
       });
 }
 } // namespace
-
-TORCH_IMPL_FUNC(_convert_bsc_to_csc_structured_cpu)
-(const Tensor& block_ccol_indices,
- const Tensor& block_row_indices,
- const Tensor& block_values,
- const int64_t n_batch,
- const int64_t n_block_row,
- const int64_t n_block_col,
- const Tensor& ccol_indices,
- const Tensor& row_indices,
- const Tensor& values) {
-  const int64_t n_row_per_block = block_values.size(-2);
-  const int64_t n_col_per_block = block_values.size(-1);
-  const int64_t nnz = row_indices.size(-1);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      at::ScalarType::BFloat16,
-      at::ScalarType::Half,
-      at::ScalarType::Bool,
-      at::ScalarType::ComplexHalf,
-      values.scalar_type(),
-      "convert_bsc_to_csc_cpu",
-      [&] {
-        AT_DISPATCH_INDEX_TYPES(
-            ccol_indices.scalar_type(), "convert_bsc_to_csc_cpu", [&] {
-              for (auto batch : c10::irange(n_batch)) {
-                convert_bsc_to_csc_cpu_kernel(
-                    n_block_row,
-                    n_block_col,
-                    n_row_per_block,
-                    n_col_per_block,
-                    nnz,
-                    block_ccol_indices[batch].data_ptr<index_t>(),
-                    block_row_indices[batch].data_ptr<index_t>(),
-                    block_values[batch].data_ptr<scalar_t>(),
-                    ccol_indices[batch].data_ptr<index_t>(),
-                    row_indices[batch].data_ptr<index_t>(),
-                    values[batch].data_ptr<scalar_t>());
-              }
-            });
-      });
-}
 
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
 (const Tensor& input,
@@ -1300,59 +1196,6 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
         self.ccol_indices(),
         self.row_indices(),
         self.values(),
-        self.sizes(),
-        self.scalar_type(),
-        c10::kSparseCsc,
-        self.device());
-  }
-  if (self.layout() == kSparseBsc) {
-    auto n_batch_dim = self.ccol_indices().dim() - 1;
-    auto n_dense_dim = self.values().dim() - n_batch_dim - 3;
-    TORCH_CHECK(
-        n_dense_dim == 0,
-        "Conversion from BSC to CSC does not currently support dense dimensions.");
-    auto self_ccol_indices = self.ccol_indices();
-    auto self_row_indices = self.row_indices();
-    auto self_values = self.values();
-    if (n_batch_dim == 0) {
-      self_ccol_indices.unsqueeze_(0);
-      self_row_indices.unsqueeze_(0);
-      self_values.unsqueeze_(0);
-    } else if (n_batch_dim > 1) {
-      self_ccol_indices = self_ccol_indices.flatten(0, n_batch_dim - 1);
-      self_row_indices = self_row_indices.flatten(0, n_batch_dim - 1);
-      self_values = self_values.flatten(0, n_batch_dim - 1);
-    }
-    // Else already single batch dim
-    Tensor result_ccol_indices;
-    Tensor result_row_indices;
-    Tensor result_values;
-
-    std::tie(result_ccol_indices, result_row_indices, result_values) =
-        at::_convert_bsc_to_csc(
-            self_ccol_indices,
-            self_row_indices,
-            self_values,
-            self_ccol_indices.size(0),
-            self.size(-2) / self_values.size(-2),
-            self.size(-1) / self_values.size(-1));
-
-    if (n_batch_dim == 0) {
-      result_ccol_indices.squeeze_(0);
-      result_row_indices.squeeze_(0);
-      result_values.squeeze_(0);
-    } else if (n_batch_dim > 1) {
-      auto batch_shape = self.sizes().slice(0, n_batch_dim);
-      result_ccol_indices = result_ccol_indices.unflatten(0, batch_shape);
-      result_row_indices = result_row_indices.unflatten(0, batch_shape);
-      result_values = result_values.unflatten(0, batch_shape);
-    }
-    // Else already single batch dim
-
-    return at::native::_sparse_csc_tensor_unsafe(
-        result_ccol_indices,
-        result_row_indices,
-        result_values,
         self.sizes(),
         self.scalar_type(),
         c10::kSparseCsc,
