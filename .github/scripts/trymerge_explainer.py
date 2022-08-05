@@ -63,7 +63,7 @@ class TryMergeExplainer(object):
         elif self.land_checks:
             return " the land check (-l)"
         else:
-            return "out a "
+            return "out a"
 
     def _get_land_check_progress(self, commit: Optional[str]) -> str:
         if commit is not None:
