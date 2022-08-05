@@ -145,7 +145,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   virtual SymIntNode wrap(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap")(num);
-    return std::make_shared<PythonSymIntNodeImpl>(r);
+    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
   }
 
   virtual bool bool_() override {
@@ -166,11 +166,11 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   virtual SymIntNode dispatch_common_(
       const char* fname,
       const SymIntNode& other) {
-    auto pother = std::dynamic_pointer_cast<PythonSymIntNodeImpl>(other);
+    auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return std::make_shared<PythonSymIntNodeImpl>(r);
+    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
   }
 
   virtual SymIntNode add(const SymIntNode& other) override {
@@ -185,7 +185,11 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__, other);
   }
 
-  virtual SymIntNode div(const SymIntNode& other) override {
+  virtual SymIntNode truediv(const SymIntNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymIntNode floordiv(const SymIntNode& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
@@ -1182,12 +1186,12 @@ void initJITBindings(PyObject* module) {
       .def_static(
           "new_symint",
           [](py::object obj) -> c10::SymIntNode {
-            return std::make_shared<PythonSymIntNodeImpl>(obj);
+            return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
           })
       .def(
           "get_pyobj",
           [](c10::SymIntNode a) -> py::object {
-            if (auto psn = std::dynamic_pointer_cast<PythonSymIntNodeImpl>(a)) {
+            if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
               return py::reinterpret_borrow<py::object>(psn->getPyObj());
             }
             return py::none();
@@ -1223,10 +1227,28 @@ void initJITBindings(PyObject* module) {
             return a->mul(snb);
           })
       .def(
-          "__div__",
+          "__truediv__",
           [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
             auto snb = toSymIntNode(a, b);
-            return a->div(snb);
+            return a->truediv(snb);
+          })
+      .def(
+          "__rtruediv__",
+          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+            auto snb = toSymIntNode(a, b);
+            return snb->truediv(a);
+          })
+      .def(
+          "__floordiv__",
+          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+            auto snb = toSymIntNode(a, b);
+            return a->floordiv(snb);
+          })
+      .def(
+          "__rfloordiv__",
+          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+            auto snb = toSymIntNode(a, b);
+            return snb->floordiv(a);
           })
       .def(
           "__mod__",
@@ -1555,6 +1577,7 @@ void initJITBindings(PyObject* module) {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = symbol.is_prims() ||
+              symbol.is_nvprims() ||
               (symbol.is_aten() &&
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
           for (const auto& op : operations) {
@@ -1599,6 +1622,7 @@ void initJITBindings(PyObject* module) {
           }
 
           bool allow_numbers_as_tensors = symbol.is_prims() ||
+              symbol.is_nvprims() ||
               (symbol.is_aten() &&
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 

@@ -1091,19 +1091,19 @@ Tensor zeros(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  auto result = at::empty(size, options);
-  return result.zero_();
+  return at::zeros_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
 }
 
-Tensor zeros_symint(c10::SymIntArrayRef size,
+Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty_symint(size, options);
+  return result.zero_();
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
