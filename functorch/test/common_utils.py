@@ -191,9 +191,25 @@ def generate_vmap_inputs(args, kwargs, is_batch_norm_and_training=False, batch_s
     return get_exhaustive_batched_inputs(args, kwargs, batch_size)
 
 
+def clone_if_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x.clone()
+    return x
+
+
 def compute_quantities_for_vmap_test(
-        op, batched_args, kwarg_values, in_dims,
-        out_dim=0, batch_size=2, compute_loop_out=True):
+        op, orig_batched_args, orig_kwarg_values, in_dims,
+        out_dim=0, batch_size=2, compute_loop_out=True,
+        clone_inputs=False):
+
+    def maybe_clone_inputs():
+        if clone_inputs:
+            batched_args = pytree.tree_map(clone_if_tensor, orig_batched_args)
+            kwarg_values = pytree.tree_map(clone_if_tensor, orig_kwarg_values)
+            return batched_args, kwarg_values
+        return orig_batched_args, orig_kwarg_values
+
+    batched_args, kwarg_values = maybe_clone_inputs()
     if compute_loop_out:
         loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
     else:
@@ -204,6 +220,7 @@ def compute_quantities_for_vmap_test(
     #     return op(a)
     # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
     # print(in_dims, [arg.shape for arg in batched_args], kwarg_values)
+    batched_args, kwarg_values = maybe_clone_inputs()
     batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
     yield (loop_out, batched_out)
 
@@ -223,6 +240,7 @@ def compute_quantities_for_vmap_test(
 
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
+    batched_args, kwarg_values = maybe_clone_inputs()
     output = vmap(vmap(f, inner_in_dims), outer_in_dims)(dummy, *batched_args, **kwarg_values)
     yield (expected, output)
 
