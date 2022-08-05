@@ -252,6 +252,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(pad);
   OP_DECOMPOSE(_pad_circular);
+  OP_DECOMPOSE(t_);
+  OP_DECOMPOSE(swapdims_);
+  OP_DECOMPOSE(swapaxes_);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);
