@@ -799,7 +799,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }

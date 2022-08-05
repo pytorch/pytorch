@@ -1,4 +1,5 @@
 #if defined(USE_CUDA)
+#include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -25418,6 +25419,79 @@ TEST_F(NVFuserTest, FusionPrint_CUDA) {
         __LINE__,
         __FILE__);
   }
+}
+
+TEST_F(NVFuserTest, FusionCheckedSymbolicShape_CUDA) {
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor a = at::randn({123, 456}, options);
+  at::Tensor b = at::randn({123, 456}, options);
+  at::Tensor c = at::randn({321, 654}, options);
+
+  using return_t =
+      std::pair<std::unique_ptr<FusionExecutorCache>, std::vector<at::Tensor>>;
+  auto matched_add = [](at::Tensor a, at::Tensor b) -> return_t {
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
+
+    Val* s1 = IrBuilder::create<Int>();
+    Val* s2 = IrBuilder::create<Int>();
+    auto builder = TensorViewBuilder().shape(std::vector<Val*>{s1, s2});
+    TensorView* tv0 = builder.build();
+    TensorView* tv1 = builder.build();
+
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
+
+    auto tv2 = add(tv0, tv1);
+
+    fusion->addOutput(tv2);
+
+    auto executor_cache =
+        std::make_unique<FusionExecutorCache>(std::move(fusion));
+    auto cg_outputs = executor_cache->runFusionWithInputs({a, b});
+    return {std::move(executor_cache), std::move(cg_outputs)};
+  };
+
+  {
+    auto ret1 = matched_add(a, b);
+    testValidate(
+        ret1.first->fusion(), ret1.second, {a, b}, {a + b}, __LINE__, __FILE__);
+  }
+
+  {
+    EXPECT_THAT(
+        [&]() { matched_add(a, c); },
+        ::testing::ThrowsMessage<c10::Error>(
+            ::testing::HasSubstr("Attempting to bind")));
+  }
+}
+
+TEST_F(NVFuserTest, FusionSizeDependentData_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  Val* s1 = IrBuilder::create<Int>();
+  auto builder = TensorViewBuilder().shape(std::vector<Val*>{s1});
+  TensorView* tv0 = builder.build();
+
+  fusion->addInput(tv0);
+
+  auto tv1 = add(tv0, s1);
+
+  fusion->addOutput(tv1);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor a = at::zeros({123}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({a});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {a}, {a + 123}, __LINE__, __FILE__);
 }
 
 } // namespace jit

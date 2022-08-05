@@ -1193,7 +1193,29 @@ TensorViewBuilder& TensorViewBuilder::contiguity(std::vector<bool> contiguity) {
   return *this;
 }
 
-TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
+TensorViewBuilder& TensorViewBuilder::shape(const std::vector<int64_t>& shape) {
+  TORCH_CHECK(shape_.empty(), "Attempting to reset shape");
+  if (!shape.empty()) {
+    TORCH_CHECK(ndims_ == 0 || ndims_ == shape.size());
+    ndims_ = shape.size();
+  }
+  shape_.clear();
+  shape_.reserve(shape.size());
+  for (int64_t i : shape) {
+    if (i == -1) {
+      shape_.emplace_back(IrBuilder::create<Int>());
+    } else {
+      TORCH_CHECK(
+          i >= 0,
+          "Invalid extent value. ",
+          "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
+      shape_.emplace_back(IrBuilder::create<Int>(i));
+    }
+  }
+  return *this;
+}
+
+TensorViewBuilder& TensorViewBuilder::shape(std::vector<Val*> shape) {
   TORCH_CHECK(shape_.empty(), "Attempting to reset shape");
   if (!shape.empty()) {
     TORCH_CHECK(ndims_ == 0 || ndims_ == shape.size());
@@ -1207,17 +1229,13 @@ TensorView* TensorViewBuilder::build() const {
   // Build the domain
   std::vector<IterDomain*> domain(ndims_, nullptr);
   for (const auto i : c10::irange(ndims_)) {
-    if (shape_.empty() || shape_[i] == -1) {
+    if (shape_.empty()) {
       domain[i] =
           IterDomainBuilder(
               FusionGuard::getCurFusion()->zeroVal(), IrBuilder::create<Int>())
               .build();
     } else {
-      TORCH_CHECK(
-          shape_[i] >= 0,
-          "Invalid extent value. ",
-          "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
-      if (shape_[i] == 1) {
+      if (shape_[i]->isOneInt()) {
         // If size is known to be 1, assume it needs to be broadcasted.
         domain[i] = IterDomainBuilder(
                         FusionGuard::getCurFusion()->zeroVal(),
@@ -1225,10 +1243,9 @@ TensorView* TensorViewBuilder::build() const {
                         .iter_type(IterType::Broadcast)
                         .build();
       } else {
-        domain[i] = IterDomainBuilder(
-                        FusionGuard::getCurFusion()->zeroVal(),
-                        IrBuilder::create<Int>(shape_[i]))
-                        .build();
+        domain[i] =
+            IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), shape_[i])
+                .build();
       }
     }
   }

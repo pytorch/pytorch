@@ -572,7 +572,8 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   TensorViewBuilder& contiguity(std::vector<bool> contiguity);
 
   //! Set the shape (default 0 dimensional, ie. scalar)
-  TensorViewBuilder& shape(std::vector<int64_t> shape);
+  TensorViewBuilder& shape(std::vector<Val*> shape);
+  TensorViewBuilder& shape(const std::vector<int64_t>& shape);
 
   //! Creates a new TensorView with the specified options
   TensorView* build() const;
@@ -581,7 +582,7 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   size_t ndims_ = 0;
   DataType dtype_ = DataType::Float;
   std::vector<bool> contiguity_;
-  std::vector<int64_t> shape_;
+  std::vector<Val*> shape_;
 };
 
 } // namespace cuda
