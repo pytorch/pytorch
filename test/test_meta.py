@@ -464,7 +464,6 @@ meta_function_expected_failures = {
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
-    torch.assert_all_true: {b8, u8, i8, i16, i32, i64, bf16, f16, f32, f64, c64, c128}
 }
 
 """
@@ -636,8 +635,6 @@ aten = torch.ops.aten
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
-    # assert_all_true : NotImplementedError: 'aten::_local_scalar_dense'
-    aten.assert_all_true.default: {b8, u8, i8, i16, i32, i64, f16, bf16, f32, f64, c64, c128},
     aten._fft_c2c.out : {f16, c64, i8, f64, c128, i32, i64, f32, c32, b8, i16, u8},
     aten._fft_r2c.out : {f16, i8, f64, i32, i64, f32, b8, i16, u8},
     aten.cholesky.default : {c64, c128, f64, f32},

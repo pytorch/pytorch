@@ -226,8 +226,9 @@ Tensor quantile_compute(
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
   if (self.device().is_cpu()) {
-    auto q_in_range = q.ge(0).logical_and_(q.le(1));
-    at::assert_all_true(q_in_range, "quantile() q values must be in the range [0, 1]");
+    auto all_q_in_range = q.ge(0).logical_and_(q.le(1)).all();
+    TORCH_CHECK(at::equal(all_q_in_range, all_q_in_range.new_ones({})),
+                "quantile() q values must be in the range [0, 1]");
   }
 
   // Flatten input if no dim provided else move dim to reduce as last dimension.

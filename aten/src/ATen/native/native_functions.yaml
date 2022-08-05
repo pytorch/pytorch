@@ -62,12 +62,6 @@
   manual_cpp_binding: True
   variants: method
 
-# See "[Note] assert_all_true"
-- func: assert_all_true(Tensor self, str msg) -> ()
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: assert_all_true
-
 # Returns the output index of this variable from the forward operation that
 # produced it.  Conversely, it returns the input index of the gradient `Node` to
 # which this `Variable` is connected (because in the gradient computation,

@@ -369,7 +369,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch._assert_async: lambda input: -1,
         torch.arcsin: lambda input, out=None: -1,
         torch.asinh: lambda input, out=None: -1,
-        torch.assert_all_true: lambda input, err_msg: -1,
         torch.arcsinh: lambda input, out=None: -1,
         torch.atan: lambda input, out=None: -1,
         torch.arctan: lambda input, out=None: -1,

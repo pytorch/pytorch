@@ -20450,19 +20450,6 @@ op_db: List[OpInfo] = [
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
-    OpInfo(
-        'assert_all_true',
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        supports_out=False,
-        supports_autograd=False,
-        sample_inputs_func=sample_inputs_assert_all_true,
-        error_inputs_func=error_inputs_assert_all_true,
-        skips=(
-            # AssertionError: None mismatch: None is not ()
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
-        )
-    ),
 ]
 
 # NOTE [Python References]
