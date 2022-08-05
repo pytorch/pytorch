@@ -183,7 +183,7 @@ class GraphTaskGuard {
   std::shared_ptr<GraphTask> last_graph_task_;
 };
 
-const std::unordered_map<Node*, GraphTask::ExecInfo>*
+TORCH_API const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
