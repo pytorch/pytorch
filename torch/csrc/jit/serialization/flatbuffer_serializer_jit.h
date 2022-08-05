@@ -1,4 +1,5 @@
-#pragma once
+#include <flatbuffers/flatbuffers.h>
+#include <torch/csrc/jit/serialization/import.h>
 
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 
@@ -10,7 +11,7 @@ TORCH_API void save_jit_module(
     const std::string& filename,
     const ExtraFilesMap& extra_files = ExtraFilesMap());
 
-TORCH_API DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
+TORCH_API flatbuffers::DetachedBuffer save_jit_module_to_bytes(
     const Module& module,
     const ExtraFilesMap& extra_files = ExtraFilesMap());
 

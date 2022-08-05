@@ -96,6 +96,10 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
+inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
 std::vector<at::Tensor> NestedTensor_unbind(
     const at::Tensor& self,
     int64_t dim) {
@@ -115,15 +119,14 @@ std::vector<at::Tensor> NestedTensor_unbind(
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   const std::vector<int64_t>& offsets = self_ptr->get_offsets();
-  for (const int64_t i: c10::irange(ntensors)){
+  for (int64_t i = 0; i < ntensors; i++) {
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets[i]);
   }
   return result_tensors;
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
-  at::relu_(buffer);
+  at::relu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()));
   return self;
 }
 
@@ -132,8 +135,7 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
-  at::gelu_(buffer, approximate);
+  at::gelu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()), approximate);
   return self;
 }
 

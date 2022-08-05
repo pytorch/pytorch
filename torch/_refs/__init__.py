@@ -644,6 +644,7 @@ def logsumexp(
 )
 def nan_to_num(
     a: TensorLikeType,
+    *,
     nan: Optional[NumberType] = 0.0,
     posinf: Optional[NumberType] = None,
     neginf: Optional[NumberType] = None,
@@ -1920,9 +1921,9 @@ def mean(
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
-    *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
+    *,
     correction: Optional[int] = None,
 ):
     s = std(a, dim, unbiased, keepdim, correction=correction)
@@ -1954,7 +1955,6 @@ def addr(
     self: TensorLikeType,
     vec1: TensorLikeType,
     vec2: TensorLikeType,
-    *,
     beta: NumberType = 1,
     alpha: NumberType = 1,
 ) -> TensorLikeType:
