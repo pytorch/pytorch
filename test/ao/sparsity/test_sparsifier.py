@@ -258,7 +258,8 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.prepare(model, config=[{'tensor_fqn': 'linear.weight'}])
         sparsifier.step()
         # make sure the sparsity level is approximately 50%
-        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+        mask = model.linear.parametrizations['weight'][0].mask.to(torch.float)  # mean works on float only
+        self.assertAlmostEqual(mask.mean().item(), 0.5, places=2)
         # Make sure each block has exactly 50% zeros
         module = sparsifier.groups[0]['module']
         mask = module.parametrizations['weight'][0].mask
@@ -359,7 +360,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
     def test_step(self):
         model = Model()
         sparsifier = NearlyDiagonalSparsifier(nearliness=1)
-        sparsifier.prepare(model, config=[model.linear])
+        sparsifier.prepare(model, config=[{'tensor_fqn': 'linear.weight'}])
 
         for g in sparsifier.groups:
             # Before step
@@ -428,7 +429,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             width, height = layer.weight.shape
             model.add_module(layer_name, layer)
             config = {
-                'module_fqn': layer_name,
+                'tensor_fqn': layer_name + ".weight",
                 'nearliness': nearliness
             }
 

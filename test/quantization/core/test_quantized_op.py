@@ -21,7 +21,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfSlowGradcheckEnv
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
@@ -130,6 +130,7 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
+@skipIfSlowGradcheckEnv
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -468,6 +469,40 @@ class TestQuantizedOps(TestCase):
                 qY_hat = op(qX)
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                                  msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
+
+    """Tests the correctness of the quantized::prelu op."""
+    def test_qprelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        num_params = (0, 1)  # 0: num_parameter = num_channels
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, num_params, dtypes, memory_formats)
+        for shape, num_param, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+            num_parameter = 1 if num_param == 1 or len(shape) == 1 else shape[1]
+            W = torch.randn(num_parameter)
+            W, w_scale, w_zero_point = \
+                torch.randn(num_parameter), 0.2, 0
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+            qW = torch.quantize_per_tensor(W, scale=w_scale, zero_point=w_zero_point,
+                                           dtype=torch_type)
+            dqW = qW.dequantize()
+
+            op = torch.nn.functional.prelu
+            qop = torch.ops.quantized.prelu
+            dqY = op(dqX, dqW)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = qop(qX, qW, scale, zero_point)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.prelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -2144,21 +2179,24 @@ class TestQuantizedOps(TestCase):
             torch.testing.assert_close(out.dequantize(), ref.dequantize())
             self.assertNotEqual(out.stride(), sorted(out.stride()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
-                                              min_side=1, max_side=4),
-                       qparams=hu.qparams()),
-           dim=st.integers(-1, 5))
     @override_qengines
-    def test_mean(self, X, dim):
-        X, (scale, zero_point, torch_type) = X
-        assume(dim < X.ndim)
-        qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
-
-        Y = torch.mean(qX.dequantize(), dim)
-        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
-        qY = torch.mean(qX, dim)
-
-        self.assertEqual(Y, qY.dequantize())
+    def test_mean(self):
+        scale_list = (1, 0.25)
+        zero_point_list = (0, 2)
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4), (4, 4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        dims = ((), (-1,), (0,), (1,), (2,), (3,), (0, 1), (1, 2), (3, 4))
+        test_cases = itertools.product(scale_list, zero_point_list, shapes, dtypes, dims)
+        op = torch.mean
+        for scale, zp, shape, dtype, dim in test_cases:
+            if not all([d < len(shape) for d in dim]):
+                continue
+            X = torch.randn(*shape) * 10
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
+            Y = op(qX.dequantize(), dim)
+            Y = torch.quantize_per_tensor(Y, scale, zp, dtype).dequantize()
+            qY = op(qX, dim)
+            self.assertEqual(Y, qY.dequantize())
 
     @skipIfNoQNNPACK
     @given(keep=st.booleans())
@@ -2176,6 +2214,28 @@ class TestQuantizedOps(TestCase):
             YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
             MQ = XQ.mean((2, 3), keepdim=keep)
             self.assertTrue(torch.equal(MQ, YQ))
+
+    @override_qengines
+    def test_std(self):
+        scale_list = (1, 0.25)
+        zero_point_list = (0, 2)
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4), (4, 4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        dims = ((), (-1,), (0,), (1,), (2,), (3,), (0, 1), (1, 2), (3, 4))
+        unbiased_list = (True, False)
+        keep_dim_list = (True, False)
+        test_cases = itertools.product(scale_list, zero_point_list, shapes,
+                                       dtypes, dims, unbiased_list, keep_dim_list)
+        op = torch.std
+        for scale, zp, shape, dtype, dim, unbiased, keep_dim in test_cases:
+            if not all([d < len(shape) for d in dim]):
+                continue
+            X = torch.randn(*shape) * 10
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
+            Y = op(qX.dequantize(), dim, unbiased, keep_dim)
+            Y = torch.quantize_per_tensor(Y, scale, zp, dtype).dequantize()
+            qY = op(qX, dim, unbiased, keep_dim)
+            self.assertEqual(Y, qY.dequantize())
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -2252,9 +2312,9 @@ class TestQuantizedOps(TestCase):
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
         batches_list = (1, 7)
-        num_groups_list = (1, 2)
-        channels_per_groups = (1, 2)
-        elements_per_channels = (8, 17)
+        num_groups_list = (1, 4)
+        channels_per_groups = (1, 36, 72)
+        elements_per_channels = (8, 128, 1024)
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
@@ -2319,7 +2379,7 @@ class TestQuantizedOps(TestCase):
                         ch_end = ch_start + channels_per_group
                         group_vals = dqX[batch_idx][ch_start:ch_end]
                         assume(
-                            float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.01
+                            float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.001
                             or group_vals.numel() < 5)
 
                 qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
@@ -2706,15 +2766,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.LSTM: torch.nn.quantizable.LSTM
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
-            }
-        }
-
         x = np.random.randn(seq_len, batch_size, input_size)
         scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype)
         x = torch.from_numpy(x).to(torch.float)
@@ -2748,18 +2799,18 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(
-                    lstm, prepare_custom_config_dict=custom_module_config)
+                lstm_prepared = torch.ao.quantization.prepare(lstm)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
+                assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
 
                 # Calibrate
                 y = lstm_prepared(x)
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(
-                    lstm_prepared, convert_custom_config_dict=custom_module_config)
+                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
+                assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2818,15 +2869,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
-            }
-        }
-
         for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
             fp_data = [
                 torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
@@ -2866,7 +2908,7 @@ class TestQuantizedOps(TestCase):
                     else:
                         mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     mha_prepared = torch.ao.quantization.prepare(
-                        mha, prepare_custom_config_dict=custom_module_config)
+                        mha)
 
                     # Calibrate
                     y = mha_prepared(*fp_data)
@@ -2876,9 +2918,7 @@ class TestQuantizedOps(TestCase):
                     self.assertEqual(y_ref[1], y[1])  # Weight
 
                     # Quantize
-                    mha_quantized = torch.ao.quantization.convert(
-                        mha_prepared,
-                        convert_custom_config_dict=custom_module_config)
+                    mha_quantized = torch.ao.quantization.convert(mha_prepared)
                     qy = mha_quantized(*q_data)
 
                     # Reference result
@@ -3745,10 +3785,10 @@ class TestQuantizedLinear(TestCase):
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
-    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
-                                      num_batches, data_type=np.float32):
-        weights = torch.from_numpy((np.random.random_sample((
-            num_batches, num_embeddings, embedding_dim)).squeeze() + 1).astype(data_type))
+
+    def _test_embedding_bag_unpack_impl(self, pack_fn, unpack_fn, bit_rate, optimized_qparams, weights):
+        data_type = weights.dtype
+
         qtype = torch.quint8
         if bit_rate == 8:
             w_packed = pack_fn(weights)
@@ -3756,13 +3796,13 @@ class TestQuantizedEmbeddingOps(TestCase):
             w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
         w_unpacked = unpack_fn(w_packed)
 
-        if (bit_rate == 8 or bit_rate == 4) and data_type != np.float16:
+        if (bit_rate == 8 or bit_rate == 4) and data_type != torch.float16:
             # torch.quantize_per_channel does not support float16 yet.
 
             obs_weights = weights
             # Combine 3D embeddings (e.g. stacked combination of embeddings)
             # in a dimension orthogonal to channels.
-            if(num_batches > 1):
+            if (len(obs_weights.shape) > 2):
                 stacked_shape = list(weights.size())
                 stacked_shape[1] *= stacked_shape[0]
                 obs_weights = weights.reshape(stacked_shape[1:])
@@ -3786,13 +3826,13 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         # compare against C2 to ensure numerical equivalency.
         from caffe2.python import core, workspace
-        conversion_op = "FloatToFused8BitRowwiseQuantized" if data_type == np.float32 else "HalfFloatToFused8BitRowwiseQuantized"
+        conversion_op = "FloatToFused8BitRowwiseQuantized" if data_type == torch.float32 else "HalfFloatToFused8BitRowwiseQuantized"
         reverse_conversion_op = None
         if bit_rate == 4:
-            conversion_op = "FloatToFused4BitRowwiseQuantized" if data_type == np.float32 else "HalfToFused4BitRowwiseQuantized"
+            conversion_op = "FloatToFused4BitRowwiseQuantized" if data_type == torch.float32 else "HalfToFused4BitRowwiseQuantized"
             reverse_conversion_op = "Fused4BitRowwiseQuantizedToFloat"
         elif bit_rate == 2:
-            conversion_op = "FloatToFused2BitRowwiseQuantized" if data_type == np.float32 else "HalfToFused2BitRowwiseQuantized"
+            conversion_op = "FloatToFused2BitRowwiseQuantized" if data_type == torch.float32 else "HalfToFused2BitRowwiseQuantized"
             reverse_conversion_op = "Fused2BitRowwiseQuantizedToFloat"
 
         def get_c2_weights(weights, engine_str):
@@ -3822,12 +3862,34 @@ class TestQuantizedEmbeddingOps(TestCase):
             engine = "GREEDY"
         else:
             engine = ""
-        w_packed_c2, w_unpacked_c2 = get_c2_weights(weights, engine)
+
+        # C2 quantization needs the memory format of Tensor to be `continuous`, otherwise it will
+        # throw exceptions. torch.clone() will make the memory format to be `continuous`
+        c2_copy = torch.clone(weights)
+        w_packed_c2, w_unpacked_c2 = get_c2_weights(c2_copy, engine)
 
         # Compare packed weights against C2.
         np.testing.assert_allclose(w_packed.numpy(), w_packed_c2.numpy(), atol=1e-6, rtol=1e-6)
         # Compare unpacked weights against C2
         np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
+
+
+    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate,
+                                      optimized_qparams, num_batches, data_type=np.float32):
+
+        # when num_batches = 1, it will create a 2D tensor
+        unsplit_weight = torch.from_numpy((np.random.random_sample((
+            num_batches, num_embeddings, embedding_dim)).squeeze() + 1).astype(np.float32))
+
+        # test unsplit weight (memory format is `contiguous`)
+        self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, unsplit_weight)
+
+        # test split weights (memory format is not `contiguous`)
+        split_dim = len(unsplit_weight.shape) - 2
+        split_weights = torch.split(unsplit_weight, 1, dim=split_dim)
+        for weight in split_weights:
+            self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, weight)
+
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
     @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
@@ -3852,6 +3914,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 
+        # 4bit and 2bit quantization right now only works for 2D Tensor so we set the num_batches to 1
         self._test_embedding_bag_unpack_fn(
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1, data_type=data_type)
 
@@ -3865,6 +3928,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
 
+        # 4bit and 2bit quantization right now only works for 2D Tensor so we set the num_batches to 1
         self._test_embedding_bag_unpack_fn(
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams, 1, data_type=data_type)
 

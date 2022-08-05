@@ -222,8 +222,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
 
-  // Only meaningful on non-leaf variables (must be false otherwise)
-  bool retains_grad_;
+  // Only meaningful on non-leaf variables (must be -1 otherwise)
+  // The value of retains_grad_ indicates the index of it in cpp_hooks_list_
+  // A value of -1 indicates that the tensor does not retain grad
+  int64_t retains_grad_;
 
   bool is_view_;
 
@@ -281,7 +283,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       Edge gradient_edge = Edge()) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
-    retains_grad_ = false;
+    retains_grad_ = -1;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
 
