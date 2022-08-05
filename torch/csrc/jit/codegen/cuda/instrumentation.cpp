@@ -1,3 +1,4 @@
+#ifdef USE_CUDA
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
 #include <c10/macros/Export.h>
@@ -74,3 +75,5 @@ void Trace::logEvent(char ph, const char* name, char sep) {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
+#endif // USE_CUDA

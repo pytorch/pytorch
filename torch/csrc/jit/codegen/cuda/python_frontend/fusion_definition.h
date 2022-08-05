@@ -107,6 +107,8 @@ class FusionDefinition {
   void setFusionState(size_t index, NvfVal* val);
 
  private:
+  void buildFusionIr();
+
   FusionManager* fusion_manager_;
 
   std::shared_ptr<RecordFunctor> end_record_;
