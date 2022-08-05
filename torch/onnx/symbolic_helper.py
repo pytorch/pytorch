@@ -400,7 +400,7 @@ def _is_scalar_list(x):
     return (
         _is_list(x)
         and _type_utils.valid_torch_name(element_type)
-        and _type_utils.ScalarType.from_name(element_type).onnx_compatible()
+        and _type_utils.JitScalarType.from_name(element_type).onnx_compatible()
     )
 
 
@@ -533,12 +533,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
-def _is_in_type_group(value, scalar_types: Set[_type_utils.ScalarType]) -> bool:
+def _is_in_type_group(value, scalar_types: Set[_type_utils.JitScalarType]) -> bool:
     """Helper function for determining if a value is in a scalar type group."""
     if value is None:
         return False
     if isinstance(value, torch.Tensor):
-        return _type_utils.ScalarType.from_dtype(value.dtype) in scalar_types
+        return _type_utils.JitScalarType.from_dtype(value.dtype) in scalar_types
     scalar_type = value.type().scalarType()
     if scalar_type is None:
         warnings.warn(
@@ -546,7 +546,7 @@ def _is_in_type_group(value, scalar_types: Set[_type_utils.ScalarType]) -> bool:
         )
         return False
     try:
-        return _type_utils.ScalarType.from_name(scalar_type) in scalar_types
+        return _type_utils.JitScalarType.from_name(scalar_type) in scalar_types
     except ValueError:
         # scalar_type is not a known ScalarType
         return False
@@ -556,16 +556,16 @@ def _is_fp(value) -> bool:
     return _is_in_type_group(
         value,
         {
-            _type_utils.ScalarType.FLOAT,
-            _type_utils.ScalarType.DOUBLE,
-            _type_utils.ScalarType.HALF,
-            _type_utils.ScalarType.BFLOAT16,
+            _type_utils.JitScalarType.FLOAT,
+            _type_utils.JitScalarType.DOUBLE,
+            _type_utils.JitScalarType.HALF,
+            _type_utils.JitScalarType.BFLOAT16,
         },
     )
 
 
 def _is_bool(value) -> bool:
-    return _is_in_type_group(value, {_type_utils.ScalarType.BOOL})
+    return _is_in_type_group(value, {_type_utils.JitScalarType.BOOL})
 
 
 def _generate_wrapped_number(g, scalar):
@@ -1011,7 +1011,10 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
 def _arange_cast_helper(
     g, end, start=None, step=None, dtype=None
 ) -> Tuple[
-    _type_utils.ScalarType, Optional[_C.Value], Optional[_C.Value], Optional[_C.Value]
+    _type_utils.JitScalarType,
+    Optional[_C.Value],
+    Optional[_C.Value],
+    Optional[_C.Value],
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
@@ -1030,13 +1033,15 @@ def _arange_cast_helper(
     # Otherwise, the dtype is inferred to be torch.int64.
     if dtype is None or (_is_value(dtype) and _is_none(dtype)):
         if _is_all_integral([start, end, step]):
-            scalar_type = _type_utils.ScalarType.INT64
+            scalar_type = _type_utils.JitScalarType.INT64
         else:
-            scalar_type = _type_utils.ScalarType.from_dtype(torch.get_default_dtype())
+            scalar_type = _type_utils.JitScalarType.from_dtype(
+                torch.get_default_dtype()
+            )
     else:
         assert isinstance(dtype, int)
         # TODO(justinchuby): Check if dtype is indeed a int.
-        scalar_type = _type_utils.ScalarType(dtype)
+        scalar_type = _type_utils.JitScalarType(dtype)
 
     start = g.op("Cast", start, to_i=scalar_type.onnx_type()) if start else None
     end = g.op("Cast", end, to_i=scalar_type.onnx_type()) if end else None
@@ -1119,7 +1124,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=_type_utils.ScalarType.from_name(input.type().scalarType()).dtype(),
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
@@ -1129,7 +1136,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=_type_utils.ScalarType.from_name(input.type().scalarType()).dtype(),
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
@@ -1264,7 +1273,7 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
-    input_qdtype = _type_utils.ScalarType.from_name(tensor.type().scalarType())
+    input_qdtype = _type_utils.JitScalarType.from_name(tensor.type().scalarType())
     if qdtype is None:
         if input_qdtype is not None:
             qdtype = input_qdtype.onnx_type()

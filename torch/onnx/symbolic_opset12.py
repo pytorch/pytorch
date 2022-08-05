@@ -64,7 +64,7 @@ def outer(g, input, other):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.ScalarType.from_name(
+            to_i=_type_utils.JitScalarType.from_name(
                 input.type().scalarType()
             ).onnx_type(),
         )

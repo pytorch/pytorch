@@ -490,7 +490,7 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     # TODO(justinchuby): Extract all the cast ops into a helper function.
     zero_point = g.op(
-        "Cast", zero_point, to_i=_type_utils.ScalarType(dtype).onnx_type()
+        "Cast", zero_point, to_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
@@ -506,7 +506,7 @@ def nan_to_num(g, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = _type_utils.ScalarType.from_name(input.type().scalarType()).dtype()
+    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)

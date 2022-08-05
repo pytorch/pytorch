@@ -74,7 +74,7 @@ def scatter_add(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.ScalarType.from_name(
+                to_i=_type_utils.JitScalarType.from_name(
                     self.type().scalarType()
                 ).onnx_type(),
             )

@@ -269,14 +269,14 @@ def flatten(g, input, start_dim, end_dim):
 
 def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
-        scalar_type = _type_utils.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        scalar_type = _type_utils.ScalarType(dtype)
+        scalar_type = _type_utils.JitScalarType(dtype)
     if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",
             sizes,
-            dtype_i=_type_utils.ScalarType.FLOAT.onnx_type(),
+            dtype_i=_type_utils.JitScalarType.FLOAT.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )

@@ -49,7 +49,7 @@ TorchName = Literal[
 ]
 
 
-class ScalarType(enum.IntEnum):
+class JitScalarType(enum.IntEnum):
     """Scalar types defined in torch."""
 
     # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
@@ -72,7 +72,9 @@ class ScalarType(enum.IntEnum):
     UNDEFINED = enum.auto()  # 16
 
     @classmethod
-    def from_name(cls, name: Union[ScalarName, TorchName, Optional[str]]) -> ScalarType:
+    def from_name(
+        cls, name: Union[ScalarName, TorchName, Optional[str]]
+    ) -> JitScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType.
 
         Args:
@@ -94,7 +96,7 @@ class ScalarType(enum.IntEnum):
         raise ValueError(f"Unknown torch or scalar type: '{name}'")
 
     @classmethod
-    def from_dtype(cls, dtype: torch.dtype) -> ScalarType:
+    def from_dtype(cls, dtype: torch.dtype) -> JitScalarType:
         """Convert a torch dtype to ScalarType."""
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise ValueError(f"Unknown dtype: {dtype}")
@@ -122,8 +124,8 @@ class ScalarType(enum.IntEnum):
         """Return whether this ScalarType is compatible with ONNX."""
         return (
             self in _SCALAR_TYPE_TO_ONNX
-            and self != ScalarType.UNDEFINED
-            and self != ScalarType.COMPLEX32
+            and self != JitScalarType.UNDEFINED
+            and self != JitScalarType.COMPLEX32
         )
 
 
@@ -138,92 +140,92 @@ def valid_torch_name(torch_name: Union[TorchName, str]) -> bool:
 
 
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
-_SCALAR_TYPE_TO_NAME: Dict[ScalarType, ScalarName] = {
-    ScalarType.BOOL: "Bool",
-    ScalarType.UINT8: "Byte",
-    ScalarType.INT8: "Char",
-    ScalarType.INT16: "Short",
-    ScalarType.INT: "Int",
-    ScalarType.INT64: "Long",
-    ScalarType.HALF: "Half",
-    ScalarType.FLOAT: "Float",
-    ScalarType.DOUBLE: "Double",
-    ScalarType.COMPLEX32: "ComplexHalf",
-    ScalarType.COMPLEX64: "ComplexFloat",
-    ScalarType.COMPLEX128: "ComplexDouble",
-    ScalarType.QINT8: "QInt8",
-    ScalarType.QUINT8: "QUInt8",
-    ScalarType.QINT32: "QInt32",
-    ScalarType.BFLOAT16: "BFloat16",
-    ScalarType.UNDEFINED: "Undefined",
+_SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
+    JitScalarType.BOOL: "Bool",
+    JitScalarType.UINT8: "Byte",
+    JitScalarType.INT8: "Char",
+    JitScalarType.INT16: "Short",
+    JitScalarType.INT: "Int",
+    JitScalarType.INT64: "Long",
+    JitScalarType.HALF: "Half",
+    JitScalarType.FLOAT: "Float",
+    JitScalarType.DOUBLE: "Double",
+    JitScalarType.COMPLEX32: "ComplexHalf",
+    JitScalarType.COMPLEX64: "ComplexFloat",
+    JitScalarType.COMPLEX128: "ComplexDouble",
+    JitScalarType.QINT8: "QInt8",
+    JitScalarType.QUINT8: "QUInt8",
+    JitScalarType.QINT32: "QInt32",
+    JitScalarType.BFLOAT16: "BFloat16",
+    JitScalarType.UNDEFINED: "Undefined",
 }
 
-_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = {
+_SCALAR_NAME_TO_TYPE: Dict[ScalarName, JitScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_NAME.items()
 }
 
-_SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
-    ScalarType.BOOL: "bool",
-    ScalarType.UINT8: "uint8_t",
-    ScalarType.INT8: "int8_t",
-    ScalarType.INT16: "int16_t",
-    ScalarType.INT: "int",
-    ScalarType.INT64: "int64_t",
-    ScalarType.HALF: "half",
-    ScalarType.FLOAT: "float",
-    ScalarType.DOUBLE: "double",
-    ScalarType.COMPLEX32: "complex32",
-    ScalarType.COMPLEX64: "complex64",
-    ScalarType.COMPLEX128: "complex128",
-    ScalarType.QINT8: "qint8",
-    ScalarType.QUINT8: "quint8",
-    ScalarType.QINT32: "qint32",
-    ScalarType.BFLOAT16: "bfloat16",
+_SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
+    JitScalarType.BOOL: "bool",
+    JitScalarType.UINT8: "uint8_t",
+    JitScalarType.INT8: "int8_t",
+    JitScalarType.INT16: "int16_t",
+    JitScalarType.INT: "int",
+    JitScalarType.INT64: "int64_t",
+    JitScalarType.HALF: "half",
+    JitScalarType.FLOAT: "float",
+    JitScalarType.DOUBLE: "double",
+    JitScalarType.COMPLEX32: "complex32",
+    JitScalarType.COMPLEX64: "complex64",
+    JitScalarType.COMPLEX128: "complex128",
+    JitScalarType.QINT8: "qint8",
+    JitScalarType.QUINT8: "quint8",
+    JitScalarType.QINT32: "qint32",
+    JitScalarType.BFLOAT16: "bfloat16",
 }
 
-_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {
+_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()
 }
 
 _SCALAR_TYPE_TO_ONNX = {
-    ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
-    ScalarType.UINT8: _C_onnx.TensorProtoDataType.UINT8,
-    ScalarType.INT8: _C_onnx.TensorProtoDataType.INT8,
-    ScalarType.INT16: _C_onnx.TensorProtoDataType.INT16,
-    ScalarType.INT: _C_onnx.TensorProtoDataType.INT32,
-    ScalarType.INT64: _C_onnx.TensorProtoDataType.INT64,
-    ScalarType.HALF: _C_onnx.TensorProtoDataType.FLOAT16,
-    ScalarType.FLOAT: _C_onnx.TensorProtoDataType.FLOAT,
-    ScalarType.DOUBLE: _C_onnx.TensorProtoDataType.DOUBLE,
-    ScalarType.COMPLEX64: _C_onnx.TensorProtoDataType.COMPLEX64,
-    ScalarType.COMPLEX128: _C_onnx.TensorProtoDataType.COMPLEX128,
-    ScalarType.BFLOAT16: _C_onnx.TensorProtoDataType.BFLOAT16,
-    ScalarType.UNDEFINED: _C_onnx.TensorProtoDataType.UNDEFINED,
-    ScalarType.COMPLEX32: _C_onnx.TensorProtoDataType.UNDEFINED,
-    ScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
-    ScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
-    ScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
+    JitScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
+    JitScalarType.UINT8: _C_onnx.TensorProtoDataType.UINT8,
+    JitScalarType.INT8: _C_onnx.TensorProtoDataType.INT8,
+    JitScalarType.INT16: _C_onnx.TensorProtoDataType.INT16,
+    JitScalarType.INT: _C_onnx.TensorProtoDataType.INT32,
+    JitScalarType.INT64: _C_onnx.TensorProtoDataType.INT64,
+    JitScalarType.HALF: _C_onnx.TensorProtoDataType.FLOAT16,
+    JitScalarType.FLOAT: _C_onnx.TensorProtoDataType.FLOAT,
+    JitScalarType.DOUBLE: _C_onnx.TensorProtoDataType.DOUBLE,
+    JitScalarType.COMPLEX64: _C_onnx.TensorProtoDataType.COMPLEX64,
+    JitScalarType.COMPLEX128: _C_onnx.TensorProtoDataType.COMPLEX128,
+    JitScalarType.BFLOAT16: _C_onnx.TensorProtoDataType.BFLOAT16,
+    JitScalarType.UNDEFINED: _C_onnx.TensorProtoDataType.UNDEFINED,
+    JitScalarType.COMPLEX32: _C_onnx.TensorProtoDataType.UNDEFINED,
+    JitScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
+    JitScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
+    JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
 }
 
 # source of truth is
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
 _SCALAR_TYPE_TO_DTYPE = {
-    ScalarType.BOOL: torch.bool,
-    ScalarType.UINT8: torch.uint8,
-    ScalarType.INT8: torch.int8,
-    ScalarType.INT16: torch.short,
-    ScalarType.INT: torch.int,
-    ScalarType.INT64: torch.int64,
-    ScalarType.HALF: torch.half,
-    ScalarType.FLOAT: torch.float,
-    ScalarType.DOUBLE: torch.double,
-    ScalarType.COMPLEX32: torch.complex32,
-    ScalarType.COMPLEX64: torch.complex64,
-    ScalarType.COMPLEX128: torch.complex128,
-    ScalarType.QINT8: torch.qint8,
-    ScalarType.QUINT8: torch.quint8,
-    ScalarType.QINT32: torch.qint32,
-    ScalarType.BFLOAT16: torch.bfloat16,
+    JitScalarType.BOOL: torch.bool,
+    JitScalarType.UINT8: torch.uint8,
+    JitScalarType.INT8: torch.int8,
+    JitScalarType.INT16: torch.short,
+    JitScalarType.INT: torch.int,
+    JitScalarType.INT64: torch.int64,
+    JitScalarType.HALF: torch.half,
+    JitScalarType.FLOAT: torch.float,
+    JitScalarType.DOUBLE: torch.double,
+    JitScalarType.COMPLEX32: torch.complex32,
+    JitScalarType.COMPLEX64: torch.complex64,
+    JitScalarType.COMPLEX128: torch.complex128,
+    JitScalarType.QINT8: torch.qint8,
+    JitScalarType.QUINT8: torch.quint8,
+    JitScalarType.QINT32: torch.qint32,
+    JitScalarType.BFLOAT16: torch.bfloat16,
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
