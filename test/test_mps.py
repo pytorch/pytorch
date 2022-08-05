@@ -1096,6 +1096,31 @@ class TestMPS(TestCase):
                         helper((N, C_out, H, W), (C_out, C_in, kH, kW), bias_shape=(C_in), stride=stride,
                                padding=padding, output_padding=output_padding, dilation=dilation)
 
+    def test_conv1d_channels_last(self):
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.arange((128 * 176), dtype=torch.float32)
+        a_cpu = a_cpu.view(128, 176, 1).permute(0, 2, 1)
+        out_cpu = model_cpu(a_cpu)  # pass
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        torch.testing.assert_allclose(out_cpu.shape, out_mps.shape)
+        torch.testing.assert_allclose(out_cpu, out_mps.cpu())
+
+    def test_conv1d_contiguous(self):
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.ones(128, 1, 176)
+        out_cpu = model_cpu(a_cpu)
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        torch.testing.assert_allclose(out_cpu.shape, out_mps.shape)
+        torch.testing.assert_allclose(out_cpu, out_mps.cpu())
+
     # Test sigmoid
     def test_sigmoid(self):
         def helper(shape):
