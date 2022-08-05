@@ -5,7 +5,7 @@ from ._symbolic_trace import symbolic_trace
 from ._compatibility import compatibility
 
 import copy
-from typing import Callable, Dict, List, Optional, Set, NamedTuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
 __all__ = ['Match', 'replace_pattern']
