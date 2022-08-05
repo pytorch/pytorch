@@ -294,7 +294,7 @@ class parametrize(_TestParametrizer):
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
         arg_values (iterable): Iterable of arg values (e.g. range(10)) or
             tuples of arg values (e.g. [(1, 2), (3, 4)]).
-        name_fn (callable): Optional function that takes in parameters and returns subtest name.
+        name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
         self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
@@ -712,8 +712,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_filename = sanitize_test_filename(test_filename)
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
+        build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
         if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
-            "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
+            "cuda" in build_environment and "linux" in build_environment
         ):
             # exclude linux cuda tests because we run into memory issues when running in parallel
             import pytest
@@ -725,9 +726,12 @@ def run_tests(argv=UNITTEST_ARGS):
             pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
             print(f'Test results will be stored in {pytest_report_path}')
             # mac slower on 4 proc than 3
-            num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            num_procs = 3 if "macos" in build_environment else 4
+            # f = failed
+            # E = error
+            # X = unexpected success
             exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
-                                    '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
+                                    '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
             # exitcode of 5 means no tests were found, which happens since some test configs don't
@@ -754,6 +758,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
+IS_ARM64 = platform.machine() == 'arm64'
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -828,7 +833,7 @@ TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
 
-TEST_LIBROSA = _check_module_exists('librosa')
+TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
@@ -2365,7 +2370,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage._TypedStorage,
+                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
