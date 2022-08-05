@@ -4136,6 +4136,9 @@ def rand_like(
 
 @symbolic_helper.parse_args("v", "f", "f", "i", "none")
 def rrelu(g, input, lower, upper, training, generator):
+    if not training:
+        slope = (upper + lower) / 2.0
+        return g.op("LeakyRelu", input, alpha_f=slope)
     p = g.op("RandomUniformLike", input, high_f=upper, low_f=lower)
     return g.op("PRelu", input, p)
 
@@ -4251,28 +4254,14 @@ def narrow(g, input, dim, start, length):
     )
 
 
-def argmax(g, input, dim, keepdim):
-    if symbolic_helper._is_none(dim):
-        flattened = symbolic_helper._reshape_helper(
-            g, input, g.op("Constant", value_t=torch.tensor([-1]))
-        )
-        return g.op("ArgMax", flattened, axis_i=0, keepdims_i=False)
-    else:
-        dim = symbolic_helper._parse_arg(dim, "i")
-        keepdim = symbolic_helper._parse_arg(keepdim, "i")
-        return g.op("ArgMax", input, axis_i=dim, keepdims_i=keepdim)
+@symbolic_helper.parse_args("v", "v", "i")
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
-def argmin(g, input, dim, keepdim):
-    if symbolic_helper._is_none(dim):
-        flattened = symbolic_helper._reshape_helper(
-            g, input, g.op("Constant", value_t=torch.tensor([-1]))
-        )
-        return g.op("ArgMin", flattened, axis_i=0, keepdims_i=False)
-    else:
-        dim = symbolic_helper._parse_arg(dim, "i")
-        keepdim = symbolic_helper._parse_arg(keepdim, "i")
-        return g.op("ArgMin", input, axis_i=dim, keepdims_i=keepdim)
+@symbolic_helper.parse_args("v", "v", "i")
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
