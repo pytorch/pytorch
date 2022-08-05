@@ -37,6 +37,8 @@ from common_utils import (
     tol1,
     opsToleranceOverride,
     is_batch_norm_training,
+    generate_vmap_inputs,
+    compute_quantities_for_vmap_test,
 )
 import types
 from collections import namedtuple
@@ -3094,24 +3096,26 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 class TestVmapOperatorsOpInfo(TestCase):
 
+    def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False):
+        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+            if check_shape_only:
+                self.assertEqual(vmap_out.shape, loop_out.shape)
+                continue
+            self.assertEqual(vmap_out, loop_out)
+
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule):
         def test():
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             aliases = (op.op,) + op.aliases
-            for sample_input, func in itertools.product(sample_inputs_itr, aliases):
-                arg_values = (sample_input.input,) + sample_input.args
-                kwarg_values = sample_input.kwargs
-                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-
-                generator = get_fallback_and_vmap_exhaustive(
-                    func, arg_values, kwarg_values,
-                    is_batch_norm_and_training=is_batch_norm_and_training)
-                for loop_out, batched_out in generator:
-                    # empty_like and new_empty produce garbage values so we just check the shapes.
-                    if op.name == 'empty_like' or op.name == 'new_empty':
-                        self.assertEqual(loop_out.shape, batched_out.shape)
-                        continue
-                    self.assertEqual(loop_out, batched_out)
+            check_shape_only = op.name in ('empty_like', 'new_empty')
+            for sample_input in sample_inputs_itr:
+                args = (sample_input.input,) + sample_input.args
+                kwargs = sample_input.kwargs
+                is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
+                for args, in_dims, _ in generate_vmap_inputs(
+                        args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
+                    for func in aliases:
+                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only)
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
