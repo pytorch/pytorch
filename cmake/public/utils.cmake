@@ -570,3 +570,18 @@ function(torch_update_find_cuda_flags)
                     "    CUDA_NVCC_FLAGS_MINSIZEREL     = ${FLAGS_MINSIZEREL}")
   endif()
 endfunction()
+
+##############################################################################
+# CHeck if given flag is supported and append it to provided outputvar
+# Also define HAS_UPPER_CASE_FLAG_NAME variable
+# Usage:
+#   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
+function(append_cxx_flag_if_supported flag outputvar)
+    string(TOUPPER "HAS${flag}" FLAG_NAME)
+    string(REGEX REPLACE "[=-]" "_" FLAG_NAME "${FLAG_NAME}")
+    check_cxx_compiler_flag("${flag}" ${FLAG_NAME})
+    if(${FLAG_NAME})
+        string(APPEND ${outputvar} " ${flag}")
+        set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+    endif()
+endfunction()
