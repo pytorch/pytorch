@@ -140,7 +140,7 @@ This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](h
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
 
-Please note: final release tag ```v1.12.0``` is added only after the release is alive. 
+Please note: final release tag ```v1.12.0``` is added only after the release is alive.
 
 ### Release Candidate Storage
 
