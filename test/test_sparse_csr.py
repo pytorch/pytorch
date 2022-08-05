@@ -913,78 +913,95 @@ class TestSparseCSR(TestCase):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
         a.to_sparse_csr().to_sparse_csr()
 
+    @all_sparse_compressed_layouts()
+    @parametrize("index_dtype", [torch.int32, torch.int64])
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_sparse_csr_select(self, device, dtype):
-        batch_shape = (2, 3)
-        crow_indices = torch.tensor([0, 2, 4], device=device).repeat(6, 1).reshape(*batch_shape, -1)
-        col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
-        values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
-        sparse = torch.sparse_csr_tensor(crow_indices,
-                                         col_indices,
-                                         values,
-                                         size=(*batch_shape, 2, 10),
-                                         dtype=dtype,
-                                         device=device)
+    def test_select(self, device, dtype, index_dtype, layout):
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_bsr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+            torch.sparse_bsc: torch.Tensor.ccol_indices,
+        }[layout]
+
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_bsr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+            torch.sparse_bsc: torch.Tensor.row_indices,
+        }[layout]
+        create_tensor_mth = {
+            torch.sparse_csr: torch.sparse_csr_tensor,
+            torch.sparse_bsr: torch.sparse_bsr_tensor,
+            torch.sparse_csc: torch.sparse_csc_tensor,
+            torch.sparse_bsc: torch.sparse_bsc_tensor,
+        }[layout]
+
+        shape = (2, 3, 6, 10)
+        nnz = 6
+        blocksize = (2, 2) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+        sparse = self.genSparseCompressedTensor(
+            shape, nnz, device=device, layout=layout, dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+        comp_indices = compressed_indices_mth(sparse)
+        plain_indices = plain_indices_mth(sparse)
+        values = sparse.values()
 
         # select from batch dimensions
         sparse_selected12 = sparse.select(1, 2)
-        expected_sparse_selected12 = torch.sparse_csr_tensor(crow_indices.select(1, 2).contiguous(),
-                                                             col_indices.select(1, 2).contiguous(),
-                                                             values.select(1, 2).contiguous(),
-                                                             size=(2, 2, 10),
-                                                             dtype=dtype,
-                                                             device=device)
+        expected_sparse_selected12 = create_tensor_mth(comp_indices.select(1, 2).contiguous(),
+                                                       plain_indices.select(1, 2).contiguous(),
+                                                       values.select(1, 2).contiguous(),
+                                                       size=(2, 6, 10),
+                                                       dtype=dtype,
+                                                       device=device)
         self.assertEqual(expected_sparse_selected12, sparse_selected12)
 
-        # select from rows or columns
+        # Select from dense dimensions
+        sparse_hybrid = self.genSparseCompressedTensor(shape + (4, 2),
+                                                       nnz,
+                                                       device=device,
+                                                       layout=layout,
+                                                       dtype=dtype,
+                                                       index_dtype=index_dtype,
+                                                       blocksize=blocksize,
+                                                       dense_dims=2)
+        sparse_hybrid_dense_selected = sparse_hybrid.select(4, 1)
+        expected_sparse_hybrid_dense_selected = sparse_hybrid.values().select(-2, 1)
+        self.assertEqual(expected_sparse_hybrid_dense_selected, sparse_hybrid_dense_selected)
+
+
+
+        # selecting rows/col with batch dims not allowed
         sparse_non_batched = sparse[0, 0]
-        for selects_args in [(0, 0), (1, 1)]:
-            sparse_selected = sparse_non_batched.select(*selects_args)
-            dense_selected = sparse_non_batched.to_dense().select(*selects_args)
-            self.assertEqual(dense_selected, sparse_selected)
+        # select from sparse dimensions if layout supports is
+        if layout in {torch.sparse_csr, torch.sparse_csc}:
 
-        # index a single element
-        self.assertEqual(sparse[0, 0, 0, 0], sparse.to_dense()[0, 0, 0, 0])
+            for select_args in [(0, 0), (1, 1)]:
+                sparse_selected = sparse_non_batched.select(*select_args)
+                dense_selected = sparse_non_batched.to_dense().select(*select_args)
+                self.assertEqual(dense_selected, sparse_selected)
 
-        # selecting from rows or columns for batched CSR is not yet implemented
-        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
-            sparse.select(-2, 0)
+            self.assertEqual(sparse[0, 0, 0, 0], sparse.to_dense()[0, 0, 0, 0])
+            # assigning to sparse through indexing is disabled, not tested generally because only layouts supporting
+            # sparse dim select will get far enough to test
+            with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
+                sparse[0, 0, 0, 0] = 99.0
 
-        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
-            sparse.select(-1, 0)
+            # select from sparse dimensions without removing batch dims, not tested generally because only layouts
+            # supporting sparse dim select will get far enough
+            msg = "selecting rows or columns is not implemented for batched sparse compressed tensors."
+            with self.assertRaisesRegex(RuntimeError, msg):
+                sparse.select(-2, 0)
 
-        # assigning to sparse trhough indexing is disabled
-        with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
-            sparse[0, 0, 0, 0] = 99.0
-
-    @parametrize("index_dtype", [torch.int32, torch.int64])
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_sparse_bsr_select(self, device, dtype, index_dtype):
-        shape = (3, 6, 10)
-        nnz = 6
-        sparse = self.genSparseBSRTensor(shape, (2, 2), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-
-        # select from batch dimensions
-        sparse_selected02 = sparse.select(0, 2)
-        expected_sparse_selected02 = torch.sparse_bsr_tensor(sparse.crow_indices().select(0, 2).contiguous(),
-                                                             sparse.col_indices().select(0, 2).contiguous(),
-                                                             sparse.values().select(0, 2).contiguous(),
-                                                             size=(6, 10),
-                                                             dtype=dtype,
-                                                             device=device)
-        self.assertEqual(expected_sparse_selected02, sparse_selected02)
-
-        msg = "selecting non-batch dimensions is currently only supported for CSR tensors"
-        # selecting from rows or columns for batched CSR is not yet implemented
-        with self.assertRaisesRegex(RuntimeError, msg):
-            sparse.select(-2, 0)
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            sparse.select(-1, 0)
-
-        # assigning to sparse via indexing is disabled
-        with self.assertRaisesRegex(RuntimeError, msg):
-            sparse[0, 0, 0] = 99.0
+            with self.assertRaisesRegex(RuntimeError, msg):
+                sparse.select(-1, 0)
+        # ensure raises if layout does not support
+        else:
+            msg = (
+                "selecting non-batch dimensions is currently only supported for non-blocked sparse "
+                "compressed layouts tensors.")
+            with self.assertRaisesRegex(RuntimeError, msg):
+                sparse_non_batched.select(0, 0)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
