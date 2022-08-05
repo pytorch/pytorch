@@ -72,6 +72,7 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
+    'floordiv': lambda a, b: sympy.floor(a / b),
 }
 
 magic_methods = {
