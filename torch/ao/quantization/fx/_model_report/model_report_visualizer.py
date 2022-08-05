@@ -482,23 +482,29 @@ class ModelReportVisualizer:
         x_data: List = []
         y_data: List[List] = []
         # the feature will either be a tensor feature or channel feature
-        if is_valid_per_tensor_plot or is_valid_per_channel_plot:
-            # extra setup for y_data if per channel
-            if is_valid_per_channel_plot:
-                # gather the x_data and multiple y_data
-                # calculate the number of channels
-                num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
-                for channel in range(num_channels):
-                    y_data.append([])  # seperate data list per channel
+        if is_valid_per_tensor_plot:
+            for table_row_num, row in enumerate(table):
+                # get x_value to append
+                x_val_to_append = table_row_num
+                # the index of the feature will the 0 + num non feature columns
+                tensor_feature_index = feature_column_offset
+                row_value = row[tensor_feature_index]
+                if not type(row_value) == str:
+                    x_data.append(x_val_to_append)
+                    y_data.append(row_value)
+        elif is_valid_per_channel_plot:
+            # gather the x_data and multiple y_data
+            # calculate the number of channels
+            num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
+            for channel in range(num_channels):
+                y_data.append([])  # seperate data list per channel
 
             for table_row_num, row in enumerate(table):
                 # get x_value to append
                 x_val_to_append = table_row_num
-                current_channel: int = -1  # set current channel to be used if per channel
-                if is_valid_per_channel_plot:
-                    current_channel = row[self.CHANNEL_NUM_INDEX]  # intially chose current channel
-                    new_module_index: int = table_row_num // num_channels
-                    x_val_to_append = new_module_index
+                current_channel = row[self.CHANNEL_NUM_INDEX]  # intially chose current channel
+                new_module_index: int = table_row_num // num_channels
+                x_val_to_append = new_module_index
 
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
@@ -507,11 +513,9 @@ class ModelReportVisualizer:
                     # only append if new index we are appending
                     if len(x_data) == 0 or x_data[-1] != x_val_to_append:
                         x_data.append(x_val_to_append)
-                    # how we append y value depends on if per tensor or not
-                    if is_valid_per_channel_plot:
-                        y_data[current_channel].append(row_value)
-                    else:
-                        y_data.append(row_value)
+
+                    # append value for that channel
+                    y_data[current_channel].append(row_value)
         else:
             # more than one feature was chosen
             error_str = "Make sure to pick only a single feature with your filter to plot a graph."
@@ -525,6 +529,12 @@ class ModelReportVisualizer:
     def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
         Takes in a feature and optional module_filter and plots of the desired data.
+
+        For per channel features, it averages the value across the channels and plots a point
+        per module. The reason for this is that for models with hundreds of channels, it can
+        be hard to diffrentiate one channel line from another, and so the point of generating
+        a single average point per module is to give a sense of general trends that encourage
+        further deep dives.
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
