@@ -8695,6 +8695,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 3, 53)
         self.run_test(M(), (x))
 
+    def test_rrelu_eval(self):
+        x = torch.tensor([0.5, -0.5])
+        self.run_test(torch.nn.RReLU(0.1, 0.3).eval(), x)
+
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
             def __init__(self):

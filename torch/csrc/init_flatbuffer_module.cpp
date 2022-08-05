@@ -9,6 +9,7 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <Python.h> // NOLINT
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -95,8 +96,8 @@ extern "C"
         auto detached_buffer =
             torch::jit::save_mobile_module_to_bytes(module, _extra_files);
         return py::bytes(
-            reinterpret_cast<char*>(detached_buffer.data()),
-            detached_buffer.size());
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
       });
   pym.def(
       "_save_jit_module_to_bytes",
@@ -105,8 +106,8 @@ extern "C"
         auto detached_buffer =
             torch::jit::save_jit_module_to_bytes(module, _extra_files);
         return py::bytes(
-            reinterpret_cast<char*>(detached_buffer.data()),
-            detached_buffer.size());
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
       });
   pym.def(
       "_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {
