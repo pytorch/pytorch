@@ -5,7 +5,11 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
-pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
+if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
+  pip install hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba==0.56.0" psutil "scipy==1.9.0"
+else
+  pip install hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
+fi
 
 # TODO move this to docker
 # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
@@ -32,14 +36,15 @@ if [ -z "${CI}" ]; then
   7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
 
-# Test that OpenMP is enabled
-pushd test
-if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
-  echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
-  exit 1
+# Test that OpenMP is enabled for non-arm64 build
+if [[ ${BUILD_ENVIRONMENT} != *arm64* ]]; then
+  pushd test
+  if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
+    echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
+    exit 1
+  fi
+  popd
 fi
-popd
-
 
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.

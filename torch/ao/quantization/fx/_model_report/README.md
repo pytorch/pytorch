@@ -21,10 +21,10 @@ This snippet should be ready to copy, paste, and use with the exception of a few
 
 ```python
 # prep model
-q_config_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping()
 model = Model() # TODO define model
 example_input = torch.randn((*args)) # TODO get example data for callibration
-prepared_model = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+prepared_model = quantize_fx.prepare_fx(model, qconfig_mapping, example_input)
 
 # create ModelReport instance and insert observers
 detector_set = set([DynamicStaticDetector()]) # TODO add all desired detectors
