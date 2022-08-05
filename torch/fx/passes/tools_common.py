@@ -227,11 +227,11 @@ def legalize_graph(gm: torch.fx.GraphModule):
     for node in gm.graph.nodes:
         for user in node.users:
             indeg[user] += 1
-    queue = collections.deque()
+    queue: collections.deque = collections.deque()
     for node in gm.graph.nodes:
         if indeg[node] == 0:
             queue.append(node)
-    env = {}
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
     while len(queue) > 0:
         cur = queue.popleft()
         env[cur] = new_graph.node_copy(cur, lambda x: env[x])
@@ -239,7 +239,7 @@ def legalize_graph(gm: torch.fx.GraphModule):
             indeg[user] -= 1
             if indeg[user] == 0:
                 queue.append(user)
-    if len(new_graph.nodes) < gm.graph.nodes:
-        raise RuntimeError("Input graph has cycles")
+    if len(new_graph.nodes) < len(gm.graph.nodes):
+        raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
     gm.graph = new_graph
     return gm
