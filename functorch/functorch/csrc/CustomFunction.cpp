@@ -193,7 +193,7 @@ variable_list GenericPythonBackward::apply(variable_list&& grads) {
     args.emplace_back(saved.unpack(shared_from_this()));
   }
 
-  if (should_compute_output({ tensors_ix })) {
+  if (task_should_compute_output({ tensors_ix })) {
     auto handle = backward_fn_->typed<custom_function_t>();
     auto grad_result = handle.call(args);
     grad_inputs = grad_result;

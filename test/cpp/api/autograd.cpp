@@ -297,12 +297,12 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
     static variable_list backward(
         AutogradContext* ctx,
         variable_list grad_output) {
-      // Test `should_compute_output` method is working correctly.
+      // Test `task_should_compute_output` method is working correctly.
       // We have to test this within the backward function.
       int should_idx = ctx->saved_data["should_idx"].toInt();
       int should_not_idx = ctx->saved_data["should_not_idx"].toInt();
-      EXPECT_TRUE(ctx->should_compute_output(should_idx));
-      EXPECT_FALSE(ctx->should_compute_output(should_not_idx));
+      EXPECT_TRUE(ctx->task_should_compute_output(should_idx));
+      EXPECT_FALSE(ctx->task_should_compute_output(should_not_idx));
 
       int mul = ctx->saved_data["mul"].toInt();
       auto saved = ctx->get_saved_variables();
@@ -310,10 +310,10 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
       auto var2 = saved[1];
 
       Variable grad_var1, grad_var2;
-      if (ctx->should_compute_output(0)) {
+      if (ctx->task_should_compute_output(0)) {
         grad_var1 = grad_output[0] + grad_output[0] * var2;
       }
-      if (ctx->should_compute_output(1)) {
+      if (ctx->task_should_compute_output(1)) {
         grad_var2 = grad_output[0] * mul + grad_output[0] * var1;
       }
       variable_list output = {

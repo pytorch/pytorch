@@ -22,10 +22,10 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
   variable_list grad_inputs(2);
   if (grad->defined()) {
-    if (should_compute_output(0)) {
+    if (task_should_compute_output(0)) {
       grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    if (should_compute_output(1)) {
+    if (task_should_compute_output(1)) {
       // Handle R->C copies without raising a warning
       const auto src_type = src_options.dtype().toScalarType();
       if (!c10::isComplexType(src_type) && grad->is_complex()) {
@@ -105,7 +105,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
 
   variable_list grad_inputs(num_outputs());
   for (const auto i : c10::irange(res.size())) {
-    if (should_compute_output(i)) {
+    if (task_should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
