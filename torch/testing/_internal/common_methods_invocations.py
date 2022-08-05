@@ -18955,7 +18955,7 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
         ref=_NOTHING,
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # lambda impl
