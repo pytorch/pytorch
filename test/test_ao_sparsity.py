@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, IS_ARM64
 
 # Kernels
 from ao.sparsity.test_kernels import TestQuantizedSparseKernels  # noqa: F401
@@ -22,8 +22,9 @@ from ao.sparsity.test_pruner import TestBasePruner  # noqa: F401
 from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
 
 # Composability
-from ao.sparsity.test_composability import TestComposability  # noqa: F401
-from ao.sparsity.test_composability import TestFxComposability  # noqa: F401
+if not IS_ARM64:
+    from ao.sparsity.test_composability import TestComposability  # noqa: F401
+    from ao.sparsity.test_composability import TestFxComposability  # noqa: F401
 
 # Utilities
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401

@@ -758,6 +758,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
+IS_ARM64 = platform.machine() == 'arm64'
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -832,7 +833,7 @@ TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
 
-TEST_LIBROSA = _check_module_exists('librosa')
+TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 

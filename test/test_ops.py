@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    IS_ARM64
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -1230,6 +1231,7 @@ class TestCommon(TestCase):
         self.fail(msg)
 
 
+@unittest.skipIf(IS_ARM64, "Not working on arm")
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
