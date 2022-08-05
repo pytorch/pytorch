@@ -38,6 +38,7 @@ class FusionManager {
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(RecordFunctor* rec) const;
   void createFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
   void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor> &rec);
+  void resetFusionCachePtr();
   void traverseFusionCache(std::shared_ptr<RecordFunctor> &rec);
 
  private:
