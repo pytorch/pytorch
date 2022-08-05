@@ -1,5 +1,6 @@
 import os
 import re
+from tkinter import OFF
 from typing import List, Pattern, Tuple, Optional
 
 
@@ -8,6 +9,8 @@ BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 
+OFFICE_HOURS_LINK = "https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours"
+CONTACT_US = f"If you have any questions or feedback, reach out to the [Pytorch DevX Team]({OFFICE_HOURS_LINK})!"
 
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
@@ -81,7 +84,7 @@ class TryMergeExplainer(object):
             )
         elif self.land_checks:
             if self.has_trunk_label:
-                land_check_msg_suffix = f"have run since you have added the {CIFLOW_TRUNK_LABEL} to your PR."
+                land_check_msg_suffix = f"have run since you have added the ciflow/trunk label to your PR."
             else:
                 land_check_msg_suffix = "and the land checks have run (ETA 4 Hours)."
             return (
@@ -104,15 +107,17 @@ class TryMergeExplainer(object):
         msg = message_prefix + " "
         msg += progress_links + "\n"
         msg += flag_message + " "
-        msg += explanation_message
+        msg += explanation_message + "\n"
+        msg += CONTACT_US
         return msg
 
 
 def get_revert_message(org: str, project: str, pr_num: int) -> str:
     msg = (
         "@pytorchbot successfully started a revert job."
-        + f"Check the current status [here]({os.getenv('GH_RUN_URL')})"
+        + f" Check the current status [here]({os.getenv('GH_RUN_URL')})\n"
     )
+    msg += CONTACT_US
     return msg
 
 def get_land_check_troubleshooting_message() -> str:
@@ -120,5 +125,6 @@ def get_land_check_troubleshooting_message() -> str:
         " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`"
         + ' (optionally with the "ciflow/trunk" to get land signals)'
         + ' or use `@pytorchbot merge -f "some reason here"`.'
-        + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI})."
+        + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}). \n"
+        + CONTACT_US
     )
