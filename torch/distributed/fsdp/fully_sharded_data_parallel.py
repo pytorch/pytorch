@@ -9,6 +9,9 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
+from torch.distributed._shard.sharding_spec import (
+    ChunkShardingSpec,
+)
 from typing import (
     Any,
     Callable,
@@ -52,7 +55,6 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -76,6 +78,9 @@ from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
     FlattenParamsWrapper,
+)
+from .shard_utils import (
+    _create_chunk_sharded_tensor
 )
 from .wrap import (
     ParamExecOrderWrapPolicy,
@@ -1954,6 +1959,7 @@ class FullyShardedDataParallel(nn.Module):
         # nn.Module.state_dict() will detach the parameter. Therefore, we need
         # to get flat_param from the FlattenParamsWrapper to get the metadata.
         flat_param = getattr(self._fsdp_wrapped_module, FLAT_PARAM, None)
+        assert flat_param is not None
         # Construct a ShardedTensor from the flat_param.
         full_numel = flat_param._unsharded_size.numel()
         shard_offset = flat_param.numel() * self.rank
@@ -1991,16 +1997,13 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                local_shard = param.chunk(self.world_size)[self.rank].clone()
-                offsets = [0 for _ in param.size()]
-                offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
-                local_shards = [
-                    Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
-                ]
-                fqn = f"{prefix}{fqn}"
-                state_dict[fqn] = init_from_local_shards(
-                    local_shards, param.size(), process_group=self.process_group
-                )  # type: ignore[assignment]
+                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                    tensor=param,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    device_per_node=torch.cuda.device_count(),
+                    pg=self.process_group
+                )
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
         return state_dict
 
