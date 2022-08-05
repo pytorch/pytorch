@@ -471,14 +471,6 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
     return _mul_dense_sparse_out(t_, src_, r_);
   }
 
-  // case mul(sparse, sparse) with a 0-dim input.
-  if (!src_.dim()) {
-    return _mul_sparse_sparse_zero_dim_out(src_, t_, r_);
-  }
-  if (!t_.dim()) {
-    return _mul_sparse_sparse_zero_dim_out(t_, src_, r_);
-  }
-
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
