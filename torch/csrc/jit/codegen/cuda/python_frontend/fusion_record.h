@@ -154,9 +154,9 @@ struct OpRecord : RecordFunctor {
   //! to a Fusion IR TensorView or leave it as a Fusion IR Val (Scalar).
   //!
   //! A deduced binary op could look like:
-  //!   OutType opFunc<std::tuple<NvfTensor*, NvfTensor*>, 0, 1>
+  //!   OutType opFunc<std::tuple<TensorView*, TensorView*>, 0, 1>
   //! A deduced ternary op could look like:
-  //!   OutTupe opFunc<std::tuple<NvfTensor*, NvfVal*, NvfVal*>, 0, 1, 2>
+  //!   OutTupe opFunc<std::tuple<TensorView*, Val*, Val*>, 0, 1, 2>
   template <class TupleType, std::size_t... Is>
   OutType opFunc(
       FusionDefinition& fd,
@@ -245,7 +245,7 @@ struct BroadcastOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0))->template as<NvfTensorView>();
+    auto arg = fd.getFusionState(args_.at(0))->template as<Nvf::TensorView>();
 
     const auto arg_ndims = arg->domain()->noReductions().size();
     TORCH_CHECK(
@@ -290,8 +290,8 @@ struct CastOpRecord : RecordFunctor {
   CastOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
-      std::function<OutType(NvfDataType, ArgType)> fusion_op,
-      NvfDataType dtype)
+      std::function<OutType(Nvf::DataType, ArgType)> fusion_op,
+      Nvf::DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -318,9 +318,10 @@ struct CastOpRecord : RecordFunctor {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
         result = result &&
-            (fusion_op_.template target<OutType (*)(NvfDataType, ArgType)>() ==
+            (fusion_op_
+                 .template target<OutType (*)(Nvf::DataType, ArgType)>() ==
              child_ptr->fusion_op_
-                 .template target<OutType (*)(NvfDataType, ArgType)>());
+                 .template target<OutType (*)(Nvf::DataType, ArgType)>());
         result = result && (dtype_ == child_ptr->dtype_);
       }
     }
@@ -335,9 +336,9 @@ struct CastOpRecord : RecordFunctor {
 
  private:
   //! nvFuser arith function signature
-  std::function<OutType(NvfDataType, ArgType)> fusion_op_;
+  std::function<OutType(Nvf::DataType, ArgType)> fusion_op_;
   //! Type to cast to.
-  NvfDataType dtype_;
+  Nvf::DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition constant state.
@@ -367,7 +368,7 @@ struct ConstantRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    NvfVal* output = NvfIrBuilder::create<ExprType>(value_);
+    Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs_.at(0), output);
   }
 
@@ -408,7 +409,7 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<size_t> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      NvfDataType _dtype)
+      Nvf::DataType _dtype)
       : RecordFunctor({}, std::move(_outputs), RecordType::InputTensor),
         symbolic_sizes_(std::move(_symbolic_sizes)),
         contiguous_info_(std::move(_contiguous_info)),
@@ -468,7 +469,7 @@ struct InputTensorRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto tv = NvfTensorViewBuilder()
+    auto tv = Nvf::TensorViewBuilder()
                   .ndims(symbolic_sizes_.size())
                   .contiguity(contiguous_info_)
                   .shape(symbolic_sizes_)
@@ -488,7 +489,7 @@ struct InputTensorRecord : RecordFunctor {
   //! with the dimension just to its right.
   std::vector<bool> contiguous_info_;
   //! Tensor data type.
-  NvfDataType dtype_;
+  Nvf::DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
@@ -520,8 +521,8 @@ struct OutputRecord : RecordFunctor {
     auto input = fd.getFusionState(args_.at(0));
 
     // With C++17, this statement should be "if constexpr"
-    if (std::is_same<OutputType, NvfTensorView>::value) {
-      fd.addOutput(input->template as<NvfTensorView>());
+    if (std::is_same<OutputType, Nvf::TensorView>::value) {
+      fd.addOutput(input->template as<Nvf::TensorView>());
     } else {
       fd.addOutput(input);
     }
@@ -534,12 +535,14 @@ struct ReductionOpRecord : RecordFunctor {
   ReductionOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
-      std::function<
-          NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>
-          fusion_op,
+      std::function<Nvf::TensorView*(
+          Nvf::TensorView*,
+          std::vector<int>&,
+          bool,
+          Nvf::DataType)> fusion_op,
       std::vector<int> axes,
       bool keep_dim,
-      NvfDataType dtype)
+      Nvf::DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -575,9 +578,11 @@ struct ReductionOpRecord : RecordFunctor {
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
         result = result &&
             (fusion_op_.template target<
-                 NvfTensorView* (*)(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>() ==
+                 Nvf::
+                     TensorView* (*)(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>() ==
              child_ptr->fusion_op_.template target<
-                 NvfTensorView* (*)(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>());
+                 Nvf::
+                     TensorView* (*)(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>());
         result = result && (keep_dim_ == child_ptr->keep_dim_);
         result = result && (dtype_ == child_ptr->dtype_);
         if (result) {
@@ -597,7 +602,7 @@ struct ReductionOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0))->template as<NvfTensorView>();
+    auto arg = fd.getFusionState(args_.at(0))->template as<Nvf::TensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs_.at(0), output);
   }
@@ -605,20 +610,21 @@ struct ReductionOpRecord : RecordFunctor {
  private:
   //! nvFuser arith function signature for a given reduction operation
   std::function<
-      NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>
+      Nvf::
+          TensorView*(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>
       fusion_op_;
   //! The tensor dimensions to reduce
   std::vector<int> axes_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
   //! The output data type.
-  NvfDataType dtype_;
+  Nvf::DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition input scalars.
 
 struct ScalarRecord : RecordFunctor {
-  ScalarRecord(std::vector<size_t> _outputs, NvfDataType dtype)
+  ScalarRecord(std::vector<size_t> _outputs, Nvf::DataType dtype)
       : RecordFunctor({}, std::move(_outputs), RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
@@ -641,15 +647,15 @@ struct ScalarRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    NvfVal* output = nullptr;
-    if (dtype_ == NvfDataType::Double) {
-      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Double>();
-    } else if (dtype_ == NvfDataType::ComplexDouble) {
-      output = NvfIrBuilder::create<torch::jit::fuser::cuda::ComplexDouble>();
-    } else if (dtype_ == NvfDataType::Bool) {
-      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Bool>();
-    } else if (dtype_ == NvfDataType::Int) {
-      output = NvfIrBuilder::create<torch::jit::fuser::cuda::Int>();
+    Nvf::Val* output = nullptr;
+    if (dtype_ == Nvf::DataType::Double) {
+      output = Nvf::IrBuilder::create<Nvf::Double>();
+    } else if (dtype_ == Nvf::DataType::ComplexDouble) {
+      output = Nvf::IrBuilder::create<Nvf::ComplexDouble>();
+    } else if (dtype_ == Nvf::DataType::Bool) {
+      output = Nvf::IrBuilder::create<Nvf::Bool>();
+    } else if (dtype_ == Nvf::DataType::Int) {
+      output = Nvf::IrBuilder::create<Nvf::Int>();
     } else {
       TORCH_CHECK(false, "Dtype is not supported:", dtype_);
     }
@@ -659,7 +665,7 @@ struct ScalarRecord : RecordFunctor {
 
  private:
   //! Scalar data type.
-  NvfDataType dtype_;
+  Nvf::DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition Start.
@@ -745,7 +751,7 @@ struct VarianceOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0))->as<NvfTensorView>();
+    auto arg = fd.getFusionState(args_.at(0))->as<Nvf::TensorView>();
     auto output =
         torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0), output);

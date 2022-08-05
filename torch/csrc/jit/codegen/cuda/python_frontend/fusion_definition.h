@@ -2,13 +2,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
-//! nvFuser Fusion IR Types
-using NvfDataType = torch::jit::fuser::cuda::DataType;
-using NvfFusionGuard = torch::jit::fuser::cuda::FusionGuard;
-using NvfIrBuilder = torch::jit::fuser::cuda::IrBuilder;
-using NvfTensorView = torch::jit::fuser::cuda::TensorView;
-using NvfTensorViewBuilder = torch::jit::fuser::cuda::TensorViewBuilder;
-using NvfVal = torch::jit::fuser::cuda::Val;
+//! nvFuser Fusion IR namespace abbreviation
+namespace Nvf = torch::jit::fuser::cuda;
 
 namespace nvfuser {
 
@@ -98,13 +93,13 @@ class FusionDefinition {
   //! nvFuser Fusion IR on a cache miss.
 
   //! Adds a Tensor/Scalar input to the Fusion object
-  void addInput(NvfVal* input);
+  void addInput(Nvf::Val* input);
   //! Adds a Tensor/Scalar output to the Fusion object
-  void addOutput(NvfVal* output);
+  void addOutput(Nvf::Val* output);
   //! Gets a Fusion IR Tensor/Scalar object
-  NvfVal* getFusionState(size_t index) const;
+  Nvf::Val* getFusionState(size_t index) const;
   //! Sets a Fusion IR Tensor/Scalar object
-  void setFusionState(size_t index, NvfVal* val);
+  void setFusionState(size_t index, Nvf::Val* val);
 
  private:
   void buildFusionIr();
@@ -120,7 +115,7 @@ class FusionDefinition {
 
   //! A vector of nvFuser Fusion IR TensorViews/Vals for building the Fusion
   //! IR graph.
-  std::vector<NvfVal*> fusion_state_;
+  std::vector<Nvf::Val*> fusion_state_;
 
  public:
   //! The Operators are not directly defined in this header.  They are defined

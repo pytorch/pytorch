@@ -23,17 +23,17 @@ void initNvFuserPythonBindings(PyObject* module) {
   auto nvfuser = m.def_submodule("_nvfuser");
 
   //! DataTypes supported by nvFuser in the FusionDefinition
-  py::enum_<NvfDataType>(nvfuser, "DataType")
-      .value("Double", NvfDataType::Double)
-      .value("Float", NvfDataType::Float)
-      .value("Half", NvfDataType::Half)
-      .value("Int", NvfDataType::Int)
-      .value("Int32", NvfDataType::Int32)
-      .value("Bool", NvfDataType::Bool)
-      .value("BFloat16", NvfDataType::BFloat16)
-      .value("ComplexFloat", NvfDataType::ComplexFloat)
-      .value("ComplexDouble", NvfDataType::ComplexDouble)
-      .value("Null", NvfDataType::Null);
+  py::enum_<Nvf::DataType>(nvfuser, "DataType")
+      .value("Double", Nvf::DataType::Double)
+      .value("Float", Nvf::DataType::Float)
+      .value("Half", Nvf::DataType::Half)
+      .value("Int", Nvf::DataType::Int)
+      .value("Int32", Nvf::DataType::Int32)
+      .value("Bool", Nvf::DataType::Bool)
+      .value("BFloat16", Nvf::DataType::BFloat16)
+      .value("ComplexFloat", Nvf::DataType::ComplexFloat)
+      .value("ComplexDouble", Nvf::DataType::ComplexDouble)
+      .value("Null", Nvf::DataType::Null);
 
   //! Binding an object that owns a FusionExecutorCache instance and provides
   //! an interface
@@ -82,19 +82,19 @@ void initNvFuserPythonBindings(PyObject* module) {
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
             self.defineRecord(
-                new nvfuser::OutputRecord<NvfVal>({output->index}));
+                new nvfuser::OutputRecord<Nvf::Val>({output->index}));
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
             self.defineRecord(
-                new nvfuser::OutputRecord<NvfTensorView>({output->index}));
+                new nvfuser::OutputRecord<Nvf::TensorView>({output->index}));
           })
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              size_t ndims,
-             NvfDataType dtype = NvfDataType::Float) -> nvfuser::Tensor* {
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
             std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);
             ;
             std::vector<bool> contig_info(ndims, false);
@@ -109,14 +109,14 @@ void initNvFuserPythonBindings(PyObject* module) {
             return out;
           },
           py::arg("ndims"),
-          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
+          py::arg("dtype") = Nvf::DataType::Float,
           py::return_value_policy::reference)
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
-             NvfDataType dtype = NvfDataType::Float) -> nvfuser::Tensor* {
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -164,16 +164,14 @@ void initNvFuserPythonBindings(PyObject* module) {
           },
           py::arg("sizes"),
           py::arg("strides"),
-          py::arg("dtype") = NvfDataType::Float,
+          py::arg("dtype") = Nvf::DataType::Float,
           py::return_value_policy::reference)
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(
-                new nvfuser::
-                    ConstantRecord<torch::jit::fuser::cuda::Double, double>(
-                        {out->index}, val));
+            self.defineRecord(new nvfuser::ConstantRecord<Nvf::Double, double>(
+                {out->index}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -182,9 +180,10 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              c10::complex<double> val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(new nvfuser::ConstantRecord<
-                              torch::jit::fuser::cuda::ComplexDouble,
-                              c10::complex<double>>({out->index}, val));
+            self.defineRecord(
+                new nvfuser::
+                    ConstantRecord<Nvf::ComplexDouble, c10::complex<double>>(
+                        {out->index}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -192,10 +191,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(
-                new nvfuser::
-                    ConstantRecord<torch::jit::fuser::cuda::Bool, bool>(
-                        {out->index}, val));
+            self.defineRecord(new nvfuser::ConstantRecord<Nvf::Bool, bool>(
+                {out->index}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -203,23 +200,20 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(
-                new nvfuser::
-                    ConstantRecord<torch::jit::fuser::cuda::Int, int64_t>(
-                        {out->index}, val));
+            self.defineRecord(new nvfuser::ConstantRecord<Nvf::Int, int64_t>(
+                {out->index}, val));
             return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_scalar",
           [](nvfuser::FusionDefinition& self,
-             NvfDataType dtype = torch::jit::fuser::cuda::DataType::Double)
-              -> nvfuser::Scalar* {
+             Nvf::DataType dtype = Nvf::DataType::Double) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ScalarRecord({out->index}, dtype));
             return out;
           },
-          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Double,
+          py::arg("dtype") = Nvf::DataType::Double,
           py::return_value_policy::reference);
 
   //! The Operators class is a nested class of FusionDefinition to allow the
@@ -243,11 +237,11 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* input) -> nvfuser::Tensor* {                    \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
         self.fusion_definition->defineRecord(                             \
-            new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*>(        \
+            new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>(    \
                 {input->index},                                           \
                 {output->index},                                          \
-                static_cast<NvfTensorView* (*)(NvfTensorView*)>(          \
-                    torch::jit::fuser::cuda::op_name)));                  \
+                static_cast<Nvf::TensorView* (*)(Nvf::TensorView*)>(      \
+                    Nvf::op_name)));                                      \
         return output;                                                    \
       },                                                                  \
       py::return_value_policy::reference);                                \
@@ -257,11 +251,10 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* input) -> nvfuser::Scalar* {                    \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar(); \
         self.fusion_definition->defineRecord(                             \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*>(                      \
+            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(                  \
                 {input->index},                                           \
                 {output->index},                                          \
-                static_cast<NvfVal* (*)(NvfVal*)>(                        \
-                    torch::jit::fuser::cuda::op_name)));                  \
+                static_cast<Nvf::Val* (*)(Nvf::Val*)>(Nvf::op_name)));    \
         return output;                                                    \
       },                                                                  \
       py::return_value_policy::reference);
@@ -311,68 +304,73 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("imag", imag)
 #undef NVFUSER_PYTHON_BINDING_UNARY_OP
 
-#define NVFUSER_PYTHON_BINDING_BINARY_OP(op_str, op_name)                    \
-  nvf_ops.def(                                                               \
-      op_str,                                                                \
-      [](nvfuser::FusionDefinition::Operators& self,                         \
-         nvfuser::Tensor* arg1,                                              \
-         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                        \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<          \
-                                             NvfTensorView*,                 \
-                                             NvfTensorView*,                 \
-                                             NvfTensorView*>(                \
-            {arg1->index, arg2->index},                                      \
-            {output->index},                                                 \
-            static_cast<NvfTensorView* (*)(NvfTensorView*, NvfTensorView*)>( \
-                torch::jit::fuser::cuda::op_name)));                         \
-        return output;                                                       \
-      },                                                                     \
-      py::return_value_policy::reference);                                   \
-  nvf_ops.def(                                                               \
-      op_str,                                                                \
-      [](nvfuser::FusionDefinition::Operators& self,                         \
-         nvfuser::Tensor* arg1,                                              \
-         nvfuser::Scalar* arg2) -> nvfuser::Tensor* {                        \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
-        self.fusion_definition->defineRecord(                                \
-            new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*>(  \
-                {arg1->index, arg2->index},                                  \
-                {output->index},                                             \
-                static_cast<NvfTensorView* (*)(NvfTensorView*, NvfVal*)>(    \
-                    torch::jit::fuser::cuda::op_name)));                     \
-        return output;                                                       \
-      },                                                                     \
-      py::return_value_policy::reference);                                   \
-  nvf_ops.def(                                                               \
-      op_str,                                                                \
-      [](nvfuser::FusionDefinition::Operators& self,                         \
-         nvfuser::Scalar* arg1,                                              \
-         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                        \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
-        self.fusion_definition->defineRecord(                                \
-            new nvfuser::OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*>(  \
-                {arg1->index, arg2->index},                                  \
-                {output->index},                                             \
-                static_cast<NvfTensorView* (*)(NvfVal*, NvfTensorView*)>(    \
-                    torch::jit::fuser::cuda::op_name)));                     \
-        return output;                                                       \
-      },                                                                     \
-      py::return_value_policy::reference);                                   \
-  nvf_ops.def(                                                               \
-      op_str,                                                                \
-      [](nvfuser::FusionDefinition::Operators& self,                         \
-         nvfuser::Scalar* arg1,                                              \
-         nvfuser::Scalar* arg2) -> nvfuser::Scalar* {                        \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();    \
-        self.fusion_definition->defineRecord(                                \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*>(                \
-                {arg1->index, arg2->index},                                  \
-                {output->index},                                             \
-                static_cast<NvfVal* (*)(NvfVal*, NvfVal*)>(                  \
-                    torch::jit::fuser::cuda::op_name)));                     \
-        return output;                                                       \
-      },                                                                     \
+#define NVFUSER_PYTHON_BINDING_BINARY_OP(op_str, op_name)                   \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Tensor* arg1,                                             \
+         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
+                                             Nvf::TensorView*,              \
+                                             Nvf::TensorView*,              \
+                                             Nvf::TensorView*>(             \
+            {arg1->index, arg2->index},                                     \
+            {output->index},                                                \
+            static_cast<                                                    \
+                Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*)>(  \
+                Nvf::op_name)));                                            \
+        return output;                                                      \
+      },                                                                    \
+      py::return_value_policy::reference);                                  \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Tensor* arg1,                                             \
+         nvfuser::Scalar* arg2) -> nvfuser::Tensor* {                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
+                                             Nvf::TensorView*,              \
+                                             Nvf::TensorView*,              \
+                                             Nvf::Val*>(                    \
+            {arg1->index, arg2->index},                                     \
+            {output->index},                                                \
+            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>( \
+                Nvf::op_name)));                                            \
+        return output;                                                      \
+      },                                                                    \
+      py::return_value_policy::reference);                                  \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Scalar* arg1,                                             \
+         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
+                                             Nvf::TensorView*,              \
+                                             Nvf::Val*,                     \
+                                             Nvf::TensorView*>(             \
+            {arg1->index, arg2->index},                                     \
+            {output->index},                                                \
+            static_cast<Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*)>( \
+                Nvf::op_name)));                                            \
+        return output;                                                      \
+      },                                                                    \
+      py::return_value_policy::reference);                                  \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Scalar* arg1,                                             \
+         nvfuser::Scalar* arg2) -> nvfuser::Scalar* {                       \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
+        self.fusion_definition->defineRecord(                               \
+            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*>(         \
+                {arg1->index, arg2->index},                                 \
+                {output->index},                                            \
+                static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*)>(           \
+                    Nvf::op_name)));                                        \
+        return output;                                                      \
+      },                                                                    \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_BINARY_OP("add", add)
@@ -397,85 +395,68 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_right_shift", bitwise_left_shift)
 #undef NVFUSER_PYTHON_BINDING_BINARY_OP
 
-#define NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP(op_str, op_name)           \
-  nvf_ops.def(                                                                 \
-      op_str,                                                                  \
-      [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Tensor* arg1,                                                \
-         nvfuser::Tensor* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<            \
-                                             NvfTensorView*,                   \
-                                             NvfTensorView*,                   \
-                                             NvfTensorView*,                   \
-                                             NvfVal*>(                         \
-            {arg1->index, arg2->index, arg3->index},                           \
-            {output->index},                                                   \
-            static_cast<                                                       \
-                NvfTensorView* (*)(NvfTensorView*, NvfTensorView*, NvfVal*)>(  \
-                torch::jit::fuser::cuda::op_name)));                           \
-        return output;                                                         \
-      },                                                                       \
-      py::return_value_policy::reference);                                     \
-  nvf_ops.def(                                                                 \
-      op_str,                                                                  \
-      [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Tensor* arg1,                                                \
-         nvfuser::Scalar* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
-        self.fusion_definition->defineRecord(                                  \
-            new nvfuser::                                                      \
-                OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(    \
-                    {arg1->index, arg2->index, arg3->index},                   \
-                    {output->index},                                           \
-                    static_cast<                                               \
-                        NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfVal*)>( \
-                        torch::jit::fuser::cuda::op_name)));                   \
-        return output;                                                         \
-      },                                                                       \
-      py::return_value_policy::reference);                                     \
-  nvf_ops.def(                                                                 \
-      op_str,                                                                  \
-      [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Scalar* arg1,                                                \
-         nvfuser::Tensor* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
-        self.fusion_definition->defineRecord(                                  \
-            new nvfuser::                                                      \
-                OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*>(    \
-                    {arg1->index, arg2->index, arg3->index},                   \
-                    {output->index},                                           \
-                    static_cast<                                               \
-                        NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfVal*)>( \
-                        torch::jit::fuser::cuda::op_name)));                   \
-        return output;                                                         \
-      },                                                                       \
-      py::return_value_policy::reference);                                     \
-  nvf_ops.def(                                                                 \
-      op_str,                                                                  \
-      [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Scalar* arg1,                                                \
-         nvfuser::Scalar* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
-        self.fusion_definition->defineRecord(                                  \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(         \
-                {arg1->index, arg2->index, arg3->index},                       \
-                {output->index},                                               \
-                static_cast<NvfVal* (*)(NvfVal*, NvfVal*, NvfVal*)>(           \
-                    torch::jit::fuser::cuda::op_name)));                       \
-        return output;                                                         \
-      },                                                                       \
-      py::return_value_policy::reference);
-
-  NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("add_alpha", add_alpha)
-  NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("sub_alpha", sub_alpha)
-#undef NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP
-
-#define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                           \
+#define NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP(op_str, op_name)                 \
+  nvf_ops.def(                                                                       \
+      op_str,                                                                        \
+      [](nvfuser::FusionDefinition::Operators& self,                                 \
+         nvfuser::Tensor* arg1,                                                      \
+         nvfuser::Tensor* arg2,                                                      \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::Val*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                 \
+            {output->index},                                                         \
+            static_cast<                                                             \
+                Nvf::                                                                \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>( \
+                Nvf::op_name)));                                                     \
+        return output;                                                               \
+      },                                                                             \
+      py::return_value_policy::reference);                                           \
+  nvf_ops.def(                                                                       \
+      op_str,                                                                        \
+      [](nvfuser::FusionDefinition::Operators& self,                                 \
+         nvfuser::Tensor* arg1,                                                      \
+         nvfuser::Scalar* arg2,                                                      \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::Val*,                              \
+                                             Nvf::Val*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                 \
+            {output->index},                                                         \
+            static_cast<                                                             \
+                Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(       \
+                Nvf::op_name)));                                                     \
+        return output;                                                               \
+      },                                                                             \
+      py::return_value_policy::reference);                                           \
+  nvf_ops.def(                                                                       \
+      op_str,                                                                        \
+      [](nvfuser::FusionDefinition::Operators& self,                                 \
+         nvfuser::Scalar* arg1,                                                      \
+         nvfuser::Tensor* arg2,                                                      \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::Val*,                              \
+                                             Nvf::TensorView*,                       \
+                                             Nvf::Val*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                 \
+            {output->index},                                                         \
+            static_cast<                                                             \
+                Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(       \
+                Nvf::op_name)));                                                     \
+        return output;                                                               \
+      },                                                                             \
+      py::return_value_policy::reference);                                           \
   nvf_ops.def(                                                                       \
       op_str,                                                                        \
       [](nvfuser::FusionDefinition::Operators& self,                                 \
@@ -484,147 +465,179 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();            \
         self.fusion_definition->defineRecord(                                        \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(               \
+            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(       \
                 {arg1->index, arg2->index, arg3->index},                             \
                 {output->index},                                                     \
-                static_cast<NvfVal* (*)(NvfVal*, NvfVal*, NvfVal*)>(                 \
-                    torch::jit::fuser::cuda::op_name)));                             \
+                static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(         \
+                    Nvf::op_name)));                                                 \
         return output;                                                               \
       },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*>(                        \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
-            static_cast<                                                             \
-                NvfTensorView* (*)(NvfTensorView*, NvfTensorView*, NvfTensorView*)>( \
-                torch::jit::fuser::cuda::op_name)));                                 \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*,                         \
-                                             NvfVal*>(                               \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
-            static_cast<                                                             \
-                NvfTensorView* (*)(NvfTensorView*, NvfTensorView*, NvfVal*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                 \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Scalar* arg2,                                                      \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*,                         \
-                                             NvfVal*,                                \
-                                             NvfTensorView*>(                        \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
-            static_cast<                                                             \
-                NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfTensorView*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                 \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Scalar* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             NvfTensorView*,                         \
-                                             NvfVal*,                                \
-                                             NvfTensorView*,                         \
-                                             NvfTensorView*>(                        \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
-            static_cast<                                                             \
-                NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfTensorView*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                 \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Scalar* arg1,                                                      \
-         nvfuser::Scalar* arg2,                                                      \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(                                        \
-            new nvfuser::                                                            \
-                OpRecord<NvfTensorView*, NvfVal*, NvfVal*, NvfTensorView*>(          \
-                    {arg1->index, arg2->index, arg3->index},                         \
-                    {output->index},                                                 \
-                    static_cast<                                                     \
-                        NvfTensorView* (*)(NvfVal*, NvfVal*, NvfTensorView*)>(       \
-                        torch::jit::fuser::cuda::op_name)));                         \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Scalar* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(                                        \
-            new nvfuser::                                                            \
-                OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(          \
-                    {arg1->index, arg2->index, arg3->index},                         \
-                    {output->index},                                                 \
-                    static_cast<                                                     \
-                        NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfVal*)>(       \
-                        torch::jit::fuser::cuda::op_name)));                         \
-        return output;                                                               \
-      },                                                                             \
-      py::return_value_policy::reference);                                           \
-  nvf_ops.def(                                                                       \
-      op_str,                                                                        \
-      [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Scalar* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(                                        \
-            new nvfuser::                                                            \
-                OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*>(          \
-                    {arg1->index, arg2->index, arg3->index},                         \
-                    {output->index},                                                 \
-                    static_cast<                                                     \
-                        NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfVal*)>(       \
-                        torch::jit::fuser::cuda::op_name)));                         \
-        return output;                                                               \
-      },                                                                             \
+      py::return_value_policy::reference);
+
+  NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("add_alpha", add_alpha)
+  NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("sub_alpha", sub_alpha)
+#undef NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP
+
+#define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Scalar* arg1,                                                             \
+         nvfuser::Scalar* arg2,                                                             \
+         nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                       \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                   \
+        self.fusion_definition->defineRecord(                                               \
+            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(              \
+                {arg1->index, arg2->index, arg3->index},                                    \
+                {output->index},                                                            \
+                static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                \
+                    Nvf::op_name)));                                                        \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Tensor* arg1,                                                             \
+         nvfuser::Tensor* arg2,                                                             \
+         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::                                                                       \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::TensorView*)>( \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Tensor* arg1,                                                             \
+         nvfuser::Tensor* arg2,                                                             \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*>(                                    \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::                                                                       \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>(        \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Tensor* arg1,                                                             \
+         nvfuser::Scalar* arg2,                                                             \
+         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*,                                     \
+                                             Nvf::TensorView*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::                                                                       \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::TensorView*)>(        \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Scalar* arg1,                                                             \
+         nvfuser::Tensor* arg2,                                                             \
+         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*,                                     \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::                                                                       \
+                    TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::TensorView*)>(        \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Scalar* arg1,                                                             \
+         nvfuser::Scalar* arg2,                                                             \
+         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*,                                     \
+                                             Nvf::Val*,                                     \
+                                             Nvf::TensorView*>(                             \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*)>(              \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Tensor* arg1,                                                             \
+         nvfuser::Scalar* arg2,                                                             \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*,                                     \
+                                             Nvf::Val*>(                                    \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(              \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
+      py::return_value_policy::reference);                                                  \
+  nvf_ops.def(                                                                              \
+      op_str,                                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                                        \
+         nvfuser::Scalar* arg1,                                                             \
+         nvfuser::Tensor* arg2,                                                             \
+         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*,                                     \
+                                             Nvf::TensorView*,                              \
+                                             Nvf::Val*>(                                    \
+            {arg1->index, arg2->index, arg3->index},                                        \
+            {output->index},                                                                \
+            static_cast<                                                                    \
+                Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(              \
+                Nvf::op_name)));                                                            \
+        return output;                                                                      \
+      },                                                                                    \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_TERNARY_OP("lerp", lerp)
@@ -640,11 +653,11 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
         self.fusion_definition->defineRecord(                                  \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(         \
+            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>( \
                 {arg1->index, arg2->index, arg3->index},                       \
                 {output->index},                                               \
-                static_cast<NvfVal* (*)(NvfVal*, NvfVal*, NvfVal*)>(           \
-                    torch::jit::fuser::cuda::op_name)));                       \
+                static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(   \
+                    Nvf::op_name)));                                           \
         return output;                                                         \
       },                                                                       \
       py::return_value_policy::reference);                                     \
@@ -655,14 +668,16 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
-        self.fusion_definition->defineRecord(                                  \
-            new nvfuser::                                                      \
-                OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(    \
-                    {arg1->index, arg2->index, arg3->index},                   \
-                    {output->index},                                           \
-                    static_cast<                                               \
-                        NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfVal*)>( \
-                        torch::jit::fuser::cuda::op_name)));                   \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<            \
+                                             Nvf::TensorView*,                 \
+                                             Nvf::TensorView*,                 \
+                                             Nvf::Val*,                        \
+                                             Nvf::Val*>(                       \
+            {arg1->index, arg2->index, arg3->index},                           \
+            {output->index},                                                   \
+            static_cast<                                                       \
+                Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>( \
+                Nvf::op_name)));                                               \
         return output;                                                         \
       },                                                                       \
       py::return_value_policy::reference);
@@ -671,179 +686,189 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_THRESHOLD_LIKE_OP("threshold", threshold)
 #undef NVFUSER_PYTHON_BINDING_THRESHOLD_LIKE_OP
 
-#define NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP(op_str, op_name)                         \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Scalar* arg1,                                                               \
-         nvfuser::Scalar* arg2,                                                               \
-         nvfuser::Scalar* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Scalar* {                                         \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                     \
-        self.fusion_definition->defineRecord(                                                 \
-            new nvfuser::                                                                     \
-                OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*, NvfVal*>(                        \
-                    {arg1->index, arg2->index, arg3->index, arg4->index},                     \
-                    {output->index},                                                          \
-                    static_cast<                                                              \
-                        NvfVal* (*)(NvfVal*, NvfVal*, NvfVal*, NvfVal*)>(                     \
-                        torch::jit::fuser::cuda::op_name)));                                  \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Tensor* arg1,                                                               \
-         nvfuser::Tensor* arg2,                                                               \
-         nvfuser::Tensor* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*>(                                 \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfTensorView*, NvfTensorView*, NvfTensorView*, NvfVal*)>( \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Tensor* arg1,                                                               \
-         nvfuser::Tensor* arg2,                                                               \
-         nvfuser::Scalar* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Tensor* arg1,                                                               \
-         nvfuser::Scalar* arg2,                                                               \
-         nvfuser::Tensor* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Scalar* arg1,                                                               \
-         nvfuser::Tensor* arg2,                                                               \
-         nvfuser::Tensor* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfTensorView*, NvfVal*)>(        \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Scalar* arg1,                                                               \
-         nvfuser::Scalar* arg2,                                                               \
-         nvfuser::Tensor* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfVal*,                                         \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfVal*, NvfVal*, NvfTensorView*, NvfVal*)>(               \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Tensor* arg1,                                                               \
-         nvfuser::Scalar* arg2,                                                               \
-         nvfuser::Scalar* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfVal*,                                         \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfTensorView*, NvfVal*, NvfVal*, NvfVal*)>(               \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
-      py::return_value_policy::reference);                                                    \
-  nvf_ops.def(                                                                                \
-      op_str,                                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                                          \
-         nvfuser::Scalar* arg1,                                                               \
-         nvfuser::Tensor* arg2,                                                               \
-         nvfuser::Scalar* arg3,                                                               \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfTensorView*,                                  \
-                                             NvfVal*,                                         \
-                                             NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
-            {output->index},                                                                  \
-            static_cast<                                                                      \
-                NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfVal*, NvfVal*)>(               \
-                torch::jit::fuser::cuda::op_name)));                                          \
-        return output;                                                                        \
-      },                                                                                      \
+#define NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP(op_str, op_name)                                  \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Scalar* arg1,                                                                        \
+         nvfuser::Scalar* arg2,                                                                        \
+         nvfuser::Scalar* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Scalar* {                                                  \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                            \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Tensor* arg1,                                                                        \
+         nvfuser::Tensor* arg2,                                                                        \
+         nvfuser::Tensor* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*>(                                        \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>( \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Tensor* arg1,                                                                        \
+         nvfuser::Tensor* arg2,                                                                        \
+         nvfuser::Scalar* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(        \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Tensor* arg1,                                                                        \
+         nvfuser::Scalar* arg2,                                                                        \
+         nvfuser::Tensor* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(        \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Scalar* arg1,                                                                        \
+         nvfuser::Tensor* arg2,                                                                        \
+         nvfuser::Tensor* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>(        \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Scalar* arg1,                                                                        \
+         nvfuser::Scalar* arg2,                                                                        \
+         nvfuser::Tensor* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*,                                                \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(               \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Tensor* arg1,                                                                        \
+         nvfuser::Scalar* arg2,                                                                        \
+         nvfuser::Scalar* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(               \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
+      py::return_value_policy::reference);                                                             \
+  nvf_ops.def(                                                                                         \
+      op_str,                                                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                                                   \
+         nvfuser::Scalar* arg1,                                                                        \
+         nvfuser::Tensor* arg2,                                                                        \
+         nvfuser::Scalar* arg3,                                                                        \
+         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::TensorView*,                                         \
+                                             Nvf::Val*,                                                \
+                                             Nvf::Val*>(                                               \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
+            {output->index},                                                                           \
+            static_cast<                                                                               \
+                Nvf::                                                                                  \
+                    TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(               \
+                Nvf::op_name)));                                                                       \
+        return output;                                                                                 \
+      },                                                                                               \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP("addcmul", addcmul)
@@ -856,12 +881,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg,                                               \
          const std::vector<int>& axes,                                       \
          bool keep_dim,                                                      \
-         NvfDataType dtype) -> nvfuser::Tensor* {                            \
+         Nvf::DataType dtype) -> nvfuser::Tensor* {                          \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
         self.fusion_definition->defineRecord(new nvfuser::ReductionOpRecord( \
             {arg->index},                                                    \
             {output->index},                                                 \
-            torch::jit::fuser::cuda::op_name,                                \
+            Nvf::op_name,                                                    \
             axes,                                                            \
             keep_dim,                                                        \
             dtype));                                                         \
@@ -870,7 +895,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),                                                        \
       py::arg("axes"),                                                       \
       py::arg("keep_dim"),                                                   \
-      py::arg("dtype") = torch::jit::fuser::cuda::DataType::Null,            \
+      py::arg("dtype") = Nvf::DataType::Null,                                \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)
@@ -878,38 +903,39 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("min", min)
 #undef NVFUSER_PYTHON_BINDING_REDUCTION_OP
 
-#define NVFUSER_PYTHON_BINDING_CAST_OP(op_str, op_name)                       \
-  nvf_ops.def(                                                                \
-      op_str,                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                          \
-         nvfuser::Tensor* arg,                                                \
-         NvfDataType dtype) -> nvfuser::Tensor* {                             \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();     \
-        self.fusion_definition->defineRecord(                                 \
-            new nvfuser::CastOpRecord<NvfTensorView*, NvfTensorView*>(        \
-                {arg->index},                                                 \
-                {output->index},                                              \
-                static_cast<NvfTensorView* (*)(NvfDataType, NvfTensorView*)>( \
-                    torch::jit::fuser::cuda::op_name),                        \
-                dtype));                                                      \
-        return output;                                                        \
-      },                                                                      \
-      py::return_value_policy::reference);                                    \
-  nvf_ops.def(                                                                \
-      op_str,                                                                 \
-      [](nvfuser::FusionDefinition::Operators& self,                          \
-         nvfuser::Scalar* arg,                                                \
-         NvfDataType dtype) -> nvfuser::Scalar* {                             \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();     \
-        self.fusion_definition->defineRecord(                                 \
-            new nvfuser::CastOpRecord<NvfVal*, NvfVal*>(                      \
-                {arg->index},                                                 \
-                {output->index},                                              \
-                static_cast<NvfVal* (*)(NvfDataType, NvfVal*)>(               \
-                    torch::jit::fuser::cuda::op_name),                        \
-                dtype));                                                      \
-        return output;                                                        \
-      },                                                                      \
+#define NVFUSER_PYTHON_BINDING_CAST_OP(op_str, op_name)                     \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Tensor* arg,                                              \
+         Nvf::DataType dtype) -> nvfuser::Tensor* {                         \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
+        self.fusion_definition->defineRecord(                               \
+            new nvfuser::CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(  \
+                {arg->index},                                               \
+                {output->index},                                            \
+                static_cast<                                                \
+                    Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>( \
+                    Nvf::op_name),                                          \
+                dtype));                                                    \
+        return output;                                                      \
+      },                                                                    \
+      py::return_value_policy::reference);                                  \
+  nvf_ops.def(                                                              \
+      op_str,                                                               \
+      [](nvfuser::FusionDefinition::Operators& self,                        \
+         nvfuser::Scalar* arg,                                              \
+         Nvf::DataType dtype) -> nvfuser::Scalar* {                         \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
+        self.fusion_definition->defineRecord(                               \
+            new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(                \
+                {arg->index},                                               \
+                {output->index},                                            \
+                static_cast<Nvf::Val* (*)(Nvf::DataType, Nvf::Val*)>(       \
+                    Nvf::op_name),                                          \
+                dtype));                                                    \
+        return output;                                                      \
+      },                                                                    \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_CAST_OP("cast", castOp)

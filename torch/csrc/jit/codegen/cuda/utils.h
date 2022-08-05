@@ -42,8 +42,9 @@ enum class DebugDumpOption {
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions, //!< Dump known parallel dimensions
   Halo, //! Halo information of tensors
-  PerfDebugVerbose //! When running kernels, print verbose information
-                   //! associated with what's running
+  PerfDebugVerbose, //! When running kernels, print verbose information
+                    //! associated with what's running
+  PythonFrontend //! Python Frontend debug information.
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

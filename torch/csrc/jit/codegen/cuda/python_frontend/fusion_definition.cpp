@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 // Require namespace for perf scope instrumentation
 using namespace torch::jit::fuser::cuda::inst;
@@ -18,13 +19,13 @@ FusionDefinition::FusionDefinition(FusionManager* fusion_manager)
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  NvfFusionGuard::setCurFusion(fusion_manager_->fusionPtr());
+  Nvf::FusionGuard::setCurFusion(fusion_manager_->fusionPtr());
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
     (*functor)(*this);
   }
-  NvfFusionGuard::setCurFusion(nullptr);
+  Nvf::FusionGuard::setCurFusion(nullptr);
 }
 
 FusionDefinition* FusionDefinition::enter() {
@@ -63,25 +64,31 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(record);
   if (cache_entry.has_value()) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+      std::cout << "\nFusionDefinition: Record hit in Fusion Cache.\n";
+    }
     recording_.emplace_back(cache_entry.value()->record);
   } else {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+      std::cout << "\nFusionDefinition: Record mised in Fusion Cache.\n";
+    }
     recording_.emplace_back(record);
     fusion_manager_->createFusionCacheEntry(recording_.back());
   }
   fusion_manager_->traverseFusionCache(recording_.back());
 }
 
-void FusionDefinition::addInput(NvfVal* input) {
+void FusionDefinition::addInput(Nvf::Val* input) {
   fusion_manager_->fusionPtr()->addInput(input);
 }
-void FusionDefinition::addOutput(NvfVal* output) {
+void FusionDefinition::addOutput(Nvf::Val* output) {
   fusion_manager_->fusionPtr()->addOutput(output);
 }
 
-NvfVal* FusionDefinition::getFusionState(size_t index) const {
+Nvf::Val* FusionDefinition::getFusionState(size_t index) const {
   return fusion_state_.at(index);
 }
-void FusionDefinition::setFusionState(size_t index, NvfVal* val) {
+void FusionDefinition::setFusionState(size_t index, Nvf::Val* val) {
   fusion_state_.at(index) = val;
 }
 

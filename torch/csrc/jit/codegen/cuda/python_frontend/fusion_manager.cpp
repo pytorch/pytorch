@@ -13,8 +13,8 @@ FusionCacheEntry::FusionCacheEntry()
     : record(new EndRecord()),
       record_hash_map(),
       is_terminal(true),
-      fusion_executor_cache(std::make_unique<NvfFusionExecutorCache>(
-          std::make_unique<NvfFusion>())) {}
+      fusion_executor_cache(std::make_unique<Nvf::FusionExecutorCache>(
+          std::make_unique<Nvf::Fusion>())) {}
 
 FusionManager::FusionManager()
     : start_record_(new StartRecord()),
@@ -58,11 +58,11 @@ void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
   fusion_cache_ptr_ = fusion_cache_ptr_->record_hash_map[rec.get()].get();
 }
 
-NvfFusionExecutorCache* FusionManager::fusionExecutorCachePtr() const {
+Nvf::FusionExecutorCache* FusionManager::fusionExecutorCachePtr() const {
   //! \todo add pointer checks
   return fusion_cache_ptr_->fusion_executor_cache.get();
 }
-NvfFusion* FusionManager::fusionPtr() const {
+Nvf::Fusion* FusionManager::fusionPtr() const {
   //! \todo add pointer checks
   return fusionExecutorCachePtr()->fusion();
 }
