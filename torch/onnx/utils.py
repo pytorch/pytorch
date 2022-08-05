@@ -1781,7 +1781,10 @@ def _run_symbolic_function(
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k) for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
