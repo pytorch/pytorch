@@ -30,7 +30,7 @@ using opmath_type = typename OpMathType<T>::type;
 
 namespace {
 
-c10::ScalarType toOpMathType(const c10::ScalarType type) {
+inline c10::ScalarType toOpMathType(const c10::ScalarType type) {
   switch (type) {
 #define DEFINE_CASE(scalar_t, TypeNum) \
   case ScalarType::TypeNum:            \

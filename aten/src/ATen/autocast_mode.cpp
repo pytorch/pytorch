@@ -455,7 +455,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
   // KERNEL(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
   KERNEL(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, OptionalIntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
@@ -483,11 +483,15 @@ TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
+
 TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   // lower_precision_fp cast policy
   KERNEL_CPU(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL_CPU(ADD_NS(conv1d), "conv1d.padding", Tensor (const Tensor&, const Tensor&, const c10::optional<Tensor>&, IntArrayRef, c10::string_view, IntArrayRef, int64_t groups), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL_CPU(ADD_NS(conv2d), "conv2d.padding", Tensor (const Tensor&, const Tensor&, const c10::optional<Tensor>&, IntArrayRef, c10::string_view, IntArrayRef, int64_t groups), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL_CPU(ADD_NS(conv3d), "conv3d.padding", Tensor (const Tensor&, const Tensor&, const c10::optional<Tensor>&, IntArrayRef, c10::string_view, IntArrayRef, int64_t groups), lower_precision_fp)
   KERNEL_CPU(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL_CPU(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL_CPU(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
