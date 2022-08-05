@@ -769,14 +769,14 @@ using namespace nvfuser;
 
 template <>
 struct hash<RecordFunctor*> {
-  size_t operator()(const RecordFunctor*& p) const {
+  size_t operator()(const RecordFunctor* p) const {
     return p->hash();
   }
 };
 template <>
 struct equal_to<RecordFunctor*>
     : public binary_function<RecordFunctor*, RecordFunctor*, bool> {
-  bool operator()(const RecordFunctor*& p, const RecordFunctor*& q) const {
+  bool operator()(const RecordFunctor* p, const RecordFunctor* q) const {
     return p->operator==(*q);
   }
 };
