@@ -628,6 +628,7 @@ class TestOptim(TestCase):
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
