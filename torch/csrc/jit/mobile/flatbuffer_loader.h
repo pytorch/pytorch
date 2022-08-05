@@ -1,10 +1,10 @@
 #pragma once
 
 #include <istream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <memory>
 
 #include <ATen/core/ivalue.h>
 #include <c10/core/Device.h>
