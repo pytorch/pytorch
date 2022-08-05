@@ -385,7 +385,7 @@ set_property(
     TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cusparse.
+# cusparse
 add_library(caffe2::cusparse INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
@@ -396,6 +396,20 @@ else()
     set_property(
         TARGET caffe2::cusparse PROPERTY INTERFACE_LINK_LIBRARIES
         ${CUDA_cusparse_LIBRARY})
+endif()
+
+# cusolver
+add_library(caffe2::cusolver INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    set_property(
+        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a"
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a"
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+else()
+    set_property(
+        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_cusolver_LIBRARY})
 endif()
 set_property(
     TARGET caffe2::cusparse PROPERTY INTERFACE_INCLUDE_DIRECTORIES
