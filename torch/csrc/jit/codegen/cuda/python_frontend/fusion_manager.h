@@ -49,6 +49,7 @@ class FusionManager {
 
   //! The fusion cache is implemented as a prefix tree of entries containing
   //! a Record representing a Fusion Definition line entry.
+  std::shared_ptr<RecordFunctor> start_record_;
   std::unique_ptr<FusionCacheEntry> fusion_cache_start_;
   FusionCacheEntry* fusion_cache_ptr_;
 };

@@ -11,15 +11,15 @@ FusionCacheEntry::FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec)
       is_terminal(false),
       fusion_executor_cache(nullptr) {}
 FusionCacheEntry::FusionCacheEntry()
-    : record(std::make_shared<RecordFunctor>(new EndRecord)),
+    : record(new EndRecord()),
       record_hash_map(),
       is_terminal(true),
       fusion_executor_cache(std::make_unique<NvfFusionExecutorCache>(
           std::make_unique<NvfFusion>())) {}
 
 FusionManager::FusionManager()
-    : fusion_cache_start_(std::make_unique<FusionCacheEntry>(
-          std::make_shared<RecordFunctor>(new StartRecord()))),
+    : start_record_(new StartRecord()),
+      fusion_cache_start_(new FusionCacheEntry(start_record_)),
       fusion_cache_ptr_(fusion_cache_start_.get()) {}
 
 std::vector<at::Tensor> FusionManager::execute(

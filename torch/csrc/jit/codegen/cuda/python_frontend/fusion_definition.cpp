@@ -6,7 +6,7 @@ namespace nvfuser {
 
 FusionDefinition::FusionDefinition(FusionManager* fusion_manager)
     : fusion_manager_(fusion_manager),
-      end_record_(std::make_shared<RecordFunctor>(EndRecord())),
+      end_record_(new EndRecord()),
       recording_(),
       recording_state_(),
       fusion_state_(),
