@@ -1162,6 +1162,22 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+    def test_nested_tensor_with_shapes(self):
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        inp = torch.nested_tensor([a, b])
+        with torch.profiler.profile(record_shapes=True) as prof:
+            torch.nn.functional.linear(inp, c, None)
+        for e in prof.events():
+            if e.name in ("aten::mm", "aten::addmm"):
+                # intentionally vague tests to protect against possible future changes
+                # of mm to addmm or other impl, or changing internal order of args
+                self.assertTrue(len(e.input_shapes) > 0)
+                self.assertTrue(len(e.input_shapes[0]) > 0)
+
+
+
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1566,7 +1582,8 @@ aten::mm""")
             (1, lambda: torch.randn((100, 100)).cuda()),
             (1, lambda: torch.full((100, 100), 10).cuda()),
             (0, lambda: torch.rand((100, 100)).to(dtype=torch.float16)),
-            (0, lambda: torch.ones((100, 100)).to(dtype=torch.float16)),
+            (0, lambda: torch.rand((100, 100)).half()),
+            (0, lambda: torch.rand((100, 100), device="cuda").half()),
         )
         num_matched = []
         for _, fn in cases:
