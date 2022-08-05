@@ -1027,7 +1027,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
       dilation,
       /* transposed = */ false,
       /* quantized = */ false,
-      /* output_padding_arg = */ {},
+      /* output_padding_arg = */ {0},
       groups,
       output_min,
       output_max));
@@ -1403,7 +1403,7 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
       std::move(padding),
       std::move(dilation),
       /* transposed = */ false,
-      /* output_padding = */ {},
+      /* output_padding = */ {0},
       groups,
       output_min,
       output_max));
