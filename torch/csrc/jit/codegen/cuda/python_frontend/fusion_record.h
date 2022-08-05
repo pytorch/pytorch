@@ -90,7 +90,7 @@ struct RecordFunctor {
 
   //! Abstraction for an operation to build this record's nvFuser Fusion IR
   //! piece if the recording has a cache miss.
-  virtual void operator()(FusionDefinition& fd) = 0;
+  virtual void operator()(FusionDefinition& fd) {}
 
  protected:
   //! Inputs that are indices into the FusionDefinition's Recorded State.

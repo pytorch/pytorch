@@ -1,9 +1,9 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
 //! nvFuser Fusion IR Types
 using NvfDataType = torch::jit::fuser::cuda::DataType;
-using NvfFusion = torch::jit::fuser::cuda::Fusion;
 using NvfFusionGuard = torch::jit::fuser::cuda::FusionGuard;
 using NvfIrBuilder = torch::jit::fuser::cuda::IrBuilder;
 using NvfTensorView = torch::jit::fuser::cuda::TensorView;
@@ -13,6 +13,7 @@ using NvfVal = torch::jit::fuser::cuda::Val;
 namespace nvfuser {
 
 struct RecordFunctor;
+struct FusionManager;
 
 //! The State, child classes Tensor and Scalar, and the StateType enum
 //! are used to define state objects to encapsulate the recording of state

@@ -2,6 +2,7 @@
 #include <memory>
 
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
 //! nvFuser Fusion IR Types
 using NvfFusionExecutorCache = torch::jit::fuser::cuda::FusionExecutorCache;
