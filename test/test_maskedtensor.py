@@ -4,18 +4,16 @@ import torch
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, make_tensor, parametrize, instantiate_parametrized_tests,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    ops,
-)
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
 )
 
-from torch._masked import _combine_input_and_mask
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 from torch.masked.maskedtensor import masked_tensor
-from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
+from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS
+
+from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS
+
 
 def _compare_mt_t(mt_result, t_result):
     mask = mt_result.masked_mask
@@ -27,7 +25,6 @@ def _compare_mt_t(mt_result, t_result):
     a = mt_result_data.detach().masked_fill_(~mask, 0)
     b = t_result.detach().masked_fill_(~mask, 0)
     assert _tensors_match(a, b, exact=False)
-
 
 def _compare_mts(mt1, mt2):
     assert mt1.masked_data.layout == mt2.masked_data.layout
@@ -145,7 +142,85 @@ class TestUnary(TestCase):
         t_result = fn(*t_args, **kwargs)
         _compare_mt_t(mt_result, t_result)
 
+class TestBinary(TestCase):
+    def _get_test_data(self, fn_name):
+        if fn_name[-1] == "_":
+            fn_name = fn_name[:-1]
+        data0 = torch.randn(10, 10)
+        data1 = torch.randn(10, 10)
+        mask = torch.rand(10, 10) > 0.5
+        if fn_name in ["bitwise_and", "bitwise_or", "bitwise_xor"]:
+            data0 = data0.mul(128).to(torch.int8)
+            data1 = data1.mul(128).to(torch.int8)
+        if fn_name in ["bitwise_left_shift", "bitwise_right_shift"]:
+            data0 = data0.to(torch.int64)
+            data1 = data1.to(torch.int64)
+        return data0, data1, mask
+
+    def _get_sample_kwargs(self, fn_name):
+        if fn_name[-1] == "_":
+            fn_name = fn_name[:-1]
+        kwargs = {}
+        return kwargs
+
+    def _yield_sample_args(self, fn_name, data0, data1, mask):
+        if fn_name[-1] == "_":
+            fn_name = fn_name[:-1]
+        mt0 = masked_tensor(data0, mask)
+        mt1 = masked_tensor(data1, mask)
+
+        t_args = [data0, data1]
+        mt_args = [mt0, mt1]
+        yield t_args, mt_args
+
+        t_args = [data0, data1]
+        mt_args = [mt0, data1]
+        yield t_args, mt_args
+
+    @parametrize("fn", NATIVE_BINARY_FNS)
+    def test_binary(self, fn):
+        torch.random.manual_seed(0)
+        fn_name = fn.__name__
+        data0, data1, mask = self._get_test_data(fn_name)
+        kwargs = self._get_sample_kwargs(fn_name)
+
+        for (t_args, mt_args) in self._yield_sample_args(fn_name, data0, data1, mask):
+            mt_result = fn(*mt_args, **kwargs)
+            t_result = fn(*t_args, **kwargs)
+            _compare_mt_t(mt_result, t_result)
+
+    @parametrize("fn", NATIVE_INPLACE_BINARY_FNS)
+    def test_inplace_binary(self, fn):
+        torch.random.manual_seed(0)
+        fn_name = fn.__name__
+        data0, data1, mask = self._get_test_data(fn_name)
+        kwargs = self._get_sample_kwargs(fn_name)
+
+        for (t_args, mt_args) in self._yield_sample_args(fn_name, data0, data1, mask):
+            mt_result = fn(*mt_args, **kwargs)
+            t_result = fn(*t_args, **kwargs)
+            _compare_mt_t(mt_result, t_result)
+
+    @parametrize("fn_name", ["add", "add_"])
+    def test_masks_match(self, fn_name):
+        torch.random.manual_seed(0)
+        fn = getattr(torch.ops.aten, fn_name)
+        data0, data1, mask = self._get_test_data(fn_name)
+        mask0 = mask
+        mask1 = torch.rand(mask.size()) > 0.5
+        mt0 = masked_tensor(data0, mask0)
+        mt1 = masked_tensor(data1, mask1)
+        try:
+            fn(mt0, mt1)
+            raise AssertionError()
+        except ValueError as e:
+            assert (
+                "Input masks must match. If you need support for this, please open an issue on Github."
+                == str(e)
+            )
+
 instantiate_parametrized_tests(TestUnary)
+instantiate_parametrized_tests(TestBinary)
 
 if __name__ == '__main__':
     run_tests()
