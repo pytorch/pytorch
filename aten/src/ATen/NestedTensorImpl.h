@@ -13,6 +13,15 @@ namespace native {
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
+      int64_t buffer_size,
+      Storage storage,
+      c10::DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      at::Tensor nested_size_tensor,
+      at::Tensor nested_stride_tensor,
+      std::vector<int64_t> offsets);
+
+  explicit NestedTensorImpl(
       at::Tensor buffer,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,

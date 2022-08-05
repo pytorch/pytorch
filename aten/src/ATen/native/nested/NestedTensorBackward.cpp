@@ -92,10 +92,6 @@ Tensor nested_softmax_backward(
   Tensor grad_output =
       wrap_buffer(at::empty_like(output_buffer), output_sizemat.clone());
 
-  // split buffer into original tensors
-  std::vector<int64_t> offsets = NestedTensor_get_offsets(output_ptr);
-  std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(output_ptr);
-
   // Unbind nt into individual tensor slices for calculating the derivative
   std::vector<Tensor> grad_output_unbind{grad_output.unbind()},
       grad_unbind{grad.unbind()}, output_unbind{output.unbind()};
