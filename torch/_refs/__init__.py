@@ -636,7 +636,7 @@ def logsumexp(
     return result
 
 
-@register_decomposition(torch.ops.aten.nan_to_num)
+@register_decomposition(torch.ops.aten.nan_to_num, disable_meta=True)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
