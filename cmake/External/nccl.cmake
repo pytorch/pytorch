@@ -41,8 +41,8 @@ if(NOT __NCCL_INCLUDED)
 
     # Detect objcopy version
     execute_process(COMMAND "${CMAKE_OBJCOPY}" "--version" OUTPUT_VARIABLE OBJCOPY_VERSION_STR)
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
 
     if((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
       message(WARNING "Enabling NCCL library slimming")
@@ -53,7 +53,9 @@ if(NOT __NCCL_INCLUDED)
         COMMAND cd objects
         COMMAND "${CMAKE_AR}" x "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
         COMMAND for obj in all_gather_* all_reduce_* broadcast_* reduce_*.o$<SEMICOLON> do "${CMAKE_OBJCOPY}" --remove-relocations .nvFatBinSegment --remove-section __nv_relfatbin $$obj$<SEMICOLON> done
-       COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
+        COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
+        COMMAND "${CMAKE_AR}" xN 1 "${__NCCL_BUILD_DIR}/lib/libnccl_static.a" net.o
+        COMMAND "${CMAKE_AR}" q "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" net.o
         COMMAND cd -
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${__NCCL_BUILD_DIR}/objects"
         WORKING_DIRECTORY "${__NCCL_BUILD_DIR}"
