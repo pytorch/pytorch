@@ -277,7 +277,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .value("Backend", EventType::Backend)
         .value("Allocation", EventType::Allocation)
         .value("PyCall", EventType::PyCall)
-        .value("PyCCall", EventType::PyCCall);
+        .value("PyCCall", EventType::PyCCall)
+        .value("Kineto", EventType::Kineto);
     py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
         .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
         .def_readonly(
@@ -310,6 +311,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("function_name", [](const PyFrameState& s) {
           return s.funcname_.str();
         });
+    py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
