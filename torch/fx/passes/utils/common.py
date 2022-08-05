@@ -2,11 +2,10 @@ from torch.nn import Module
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
-from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.fx._compatibility import compatibility
 
 
-__all__ = ['HolderModule', 'lift_subgraph_as_module', 'compare_graphs']
+__all__ = ['HolderModule', 'lift_subgraph_as_module']
 
 @compatibility(is_backward_compatible=False)
 class HolderModule(Module):
@@ -66,18 +65,3 @@ def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 
         setattr(curr, leaf_node_name, leaf_node)
 
     return GraphModule(submodule, subgraph, class_name)
-
-
-@compatibility(is_backward_compatible=False)
-def compare_graphs(left: Graph, right: Graph) -> bool:
-    """
-    Return True if two graphs are identical, i.e they
-        - have the same number of outputs in the same order
-        - have the same number of inputs in the same order
-        - have the same set of nodes, and identical connectivity
-    """
-
-    matcher = SubgraphMatcher(left, match_output=True, match_placeholder=True)
-    matches = matcher.match(right)
-
-    return len(matches) > 0
