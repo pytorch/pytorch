@@ -601,7 +601,7 @@ class PredicateChcker : public IterVisitor {
   }
 
   void handle(GroupedReductionOp* grouped_rop) final {
-    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    for (const auto i : c10::irange(grouped_rop->numExprs())) {
       auto input = grouped_rop->input(i)->as<TensorView>();
       auto input_def = input->definition();
       // When input_def is null, input must be an input to the fusion,

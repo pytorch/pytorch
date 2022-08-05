@@ -39,7 +39,9 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
-#ifdef HAVE_AVX512_CPU_DEFINITION
+    // AVX512 can be slower then AVX2, so lets keep it as opt-in
+    // see https://github.com/pytorch/pytorch/issues/80252
+#if defined(HAVE_AVX512_CPU_DEFINITION) && false
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
     // versions 9 & beyond. So, we want to ensure that only releases built with
     // supported compilers on supported hardware return CPU Capability AVX512,
@@ -119,6 +121,12 @@ void* DispatchStubImpl::get_call_ptr(
     case DeviceType::HIP:
       TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
       return hip_dispatch_ptr;
+
+#if defined(USE_MPS)
+    case DeviceType::MPS:
+      TORCH_INTERNAL_ASSERT(mps_dispatch_ptr, "DispatchStub: missing MPS kernel");
+      return mps_dispatch_ptr;
+#endif
 
     default:
       AT_ERROR("DispatchStub: unsupported device type", device_type);

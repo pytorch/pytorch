@@ -105,22 +105,28 @@ inline Variable valueToTensor(
   }
   at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
+  Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackLong(value)), options, device);
+    scalar = Scalar(THPUtils_unpackLong(value));
+  } else if (PyFloat_Check(value)) {
+    scalar = Scalar(THPUtils_unpackDouble(value));
+  } else if (PyComplex_Check(value)) {
+    scalar = Scalar(THPUtils_unpackComplexDouble(value));
+  } else {
+    throw TypeError(
+        "can't assign a %s to a %s",
+        Py_TYPE(value)->tp_name,
+        torch::utils::options_to_string(options).c_str());
   }
-  if (PyFloat_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackDouble(value)), options, device);
+  // lift_fresh is supposed to be used in situations where you are guaranteed to
+  // get a plain Tensor which is not true for cpu device but not for non cpu
+  // device
+  if (device == at::kCPU) {
+    return at::lift_fresh(
+        at::indexing::scalarToTensor(scalar, options, device));
+  } else {
+    return at::indexing::scalarToTensor(scalar, options, device);
   }
-  if (PyComplex_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackComplexDouble(value)), options, device);
-  }
-  throw TypeError(
-      "can't assign a %s to a %s",
-      Py_TYPE(value)->tp_name,
-      torch::utils::options_to_string(options).c_str());
 }
 
 static inline void checkUnpackSlice(

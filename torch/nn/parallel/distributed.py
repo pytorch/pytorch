@@ -39,6 +39,7 @@ from ..modules import Module
 from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
+__all__ = ['DistributedDataParallel']
 
 logger = logging.getLogger(__name__)
 
@@ -1323,7 +1324,7 @@ class DistributedDataParallel(Module, Joinable):
                                 _BufferCommHookLocation.POST_FORWARD means that the
                                 hook will run _after_ the forward pass.
 
-                hook (callable): Callable with the following signature:
+                hook (Callable): Callable with the following signature:
                              ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
                 NOTE: To maximize performance, users can return a
@@ -1363,7 +1364,7 @@ class DistributedDataParallel(Module, Joinable):
 
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Callable with the following signature:
+            hook (Callable): Callable with the following signature:
                              ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
                              This function is called once the bucket is ready. The
