@@ -97,7 +97,6 @@ struct AddKinetoMetadata {
       addMetadata("Input type", dtypesToStr(dtypes));
     }
 
-
     // add information about an associated forward op, if a sequence number
     // is available (e.g. during training)
     if (op_event.sequence_number_ >= 0) {
