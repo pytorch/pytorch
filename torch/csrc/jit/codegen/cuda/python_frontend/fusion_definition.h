@@ -67,7 +67,7 @@ struct Scalar : State {
 //!   help(FusionDefinition.Operators)
 class FusionDefinition {
  public:
-  FusionDefinition(std::shared_ptr<FusionManager> &fusion_manager);
+  FusionDefinition(FusionManager* fusion_manager);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -106,7 +106,9 @@ class FusionDefinition {
   void setFusionState(size_t index, NvfVal* val);
 
  private:
-  std::shared_ptr<FusionManager> fusion_manager_;
+  FusionManager* fusion_manager_;
+
+  std::shared_ptr<RecordFunctor> end_record_;
 
   //! A vector of record operations in the FusionDefintion
   std::vector<std::shared_ptr<RecordFunctor>> recording_;

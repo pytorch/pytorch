@@ -4,27 +4,34 @@
 
 namespace nvfuser {
 
-FusionDefinition::FusionDefinition(std::shared_ptr<FusionManager> &fusion_manager)
+FusionDefinition::FusionDefinition(FusionManager* fusion_manager)
     : fusion_manager_(fusion_manager),
+      end_record_(std::make_shared<RecordFunctor>(new EndRecord())),
       recording_(),
       recording_state_(),
       fusion_state_(),
       ops(this) {}
 
 FusionDefinition* FusionDefinition::enter() {
-  //prev_fusion_ = NvfFusionGuard::getCurFusion();
-  //NvfFusionGuard::setCurFusion(fusionPtr());
+  fusion_manager_->resetFusionCachePtr();
   return this;
 }
 void FusionDefinition::exit() {
-  fusion_state_.resize(recording_state_.size(), nullptr);
-  for (auto& record : recording_) {
-    auto functor = record.get();
-    (*functor)(*this);
-  }
+  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_.get());
+  if (!cache_entry.has_value()) {
+    fusion_manager_->createTerminalFusionCacheEntry(end_record_);
+    fusion_manager_->traverseFusionCache(end_record_);
 
-  //NvfFusionGuard::setCurFusion(prev_fusion_);
-  //prev_fusion_ = nullptr;
+    NvfFusionGuard::setCurFusion(fusion_manager_->fusionPtr());
+    fusion_state_.resize(recording_state_.size(), nullptr);
+    for (auto& record : recording_) {
+      auto functor = record.get();
+      (*functor)(*this);
+    }
+    NvfFusionGuard::setCurFusion(nullptr);
+  } else {
+    fusion_manager_->traverseFusionCache(end_record_);
+  }
 }
 
 Scalar* FusionDefinition::defineScalar() {
@@ -38,7 +45,14 @@ Tensor* FusionDefinition::defineTensor() {
   return out;
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
-  recording_.emplace_back(record);
+  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(record);
+  if (cache_entry.has_value()) {
+    recording_.emplace_back(cache_entry.value()->record);
+  } else {
+    recording_.emplace_back(record);
+    fusion_manager_->createFusionCacheEntry(recording_.back());
+  }
+  fusion_manager_->traverseFusionCache(recording_.back());
 }
 
 void FusionDefinition::addInput(NvfVal* input) {

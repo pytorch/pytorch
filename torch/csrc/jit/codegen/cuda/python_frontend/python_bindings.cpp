@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -38,11 +39,11 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! an interface
   //! \todo This object will be removed when a FusionManager is added
   //! containing a cache.
-  py::class_<nvfuser::FusionOwner> fusion(nvfuser, "Fusion");
+  py::class_<nvfuser::FusionManager> fusion(nvfuser, "FusionManager");
   fusion.def(py::init<>())
       .def(
           "execute",
-          [](nvfuser::FusionOwner& self, const py::iterable& iter) {
+          [](nvfuser::FusionManager& self, const py::iterable& iter) {
             std::vector<IValue> inputs;
             for (py::handle obj : iter) {
               inputs.push_back(toIValue(obj, c10::AnyType::get()));
@@ -50,8 +51,8 @@ void initNvFuserPythonBindings(PyObject* module) {
             return self.execute(inputs);
           },
           py::return_value_policy::reference)
-      .def("print_ir", [](nvfuser::FusionOwner& self) { self.printIr(); })
-      .def("print_kernel", [](nvfuser::FusionOwner& self) {
+      .def("print_ir", [](nvfuser::FusionManager& self) { self.printIr(); })
+      .def("print_kernel", [](nvfuser::FusionManager& self) {
         self.printKernel();
       });
 
@@ -64,7 +65,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! define the set the operations and connections between operations for
   //! nvFuser to create.
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
-  fusion_def.def(py::init<nvfuser::FusionOwner*>())
+  fusion_def.def(py::init<nvfuser::FusionManager*>())
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",
