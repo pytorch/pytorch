@@ -798,7 +798,18 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   const auto apply_op = [&](const Tensor& d_filtered) -> Tensor& {
     const auto res_indices = s_indices.clone();
-    const auto res_values = op(d_filtered, s_values);
+    // to(res.scalar_type) is only performed when both d and s are 0-dim.
+    // This insures right type promotions with the following rules:
+    // op(0-dim, 0-dim).dtype == <common dtype>
+    // op(0-dim, ge-1-dim).dtype == <ge-1-dim>.dtype,
+    // where ge-1-dim is a tensor with dim >= 1.
+    // We do not cast if op is performed in-place.
+    // The cast is required if s is 0-dim non-coalesced tensor and d is 0-dim.
+    // This is because s.values is at least 1D, so
+    // op(s.values, d).dtype == s.values.dtype, but we want
+    // op(s.values, d).dtype == <common dtype>.
+    const auto values = op(d_filtered, s_values);
+    const auto res_values = is_same_tensor(s_, res) ? values : values.to(res.scalar_type());
     get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
     get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
@@ -914,6 +925,46 @@ Tensor& _mul_dense_sparse_out(const Tensor& d, const Tensor& s, Tensor& res) {
   });
 }
 
+Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& other, Tensor& r) {
+  const auto is_wrapped_scalar = [](const Tensor& s) -> bool {
+    return !s.dim() && s.is_coalesced();
+  };
+
+  const auto extract_vals_from_wrapped_scalar = [](const Tensor& s) -> Tensor {
+    const auto vals = s._values().squeeze(0);
+    // if squeeze does not kill the dim, it means that
+    // vals is empty with shape [0]. In such a case we
+    // return a 0-dim empty tensor to avoid broadcasting
+    // issues in intersection_binary_op_sparse_dense_out
+    // when the sparse argument is actually 0-dim.
+    if (vals.dim()) {
+      return at::empty({}, vals.options());
+    }
+    return vals;
+  };
+
+  // The code dispatches to mul(dense, sparse), and the goal
+  // is to delay calling into coalesce when converting one of
+  // the sparse arguments to dense if possible.
+  // This is possible when there is a 0-dim coalesced argument.
+
+  // if is_wrapped_scalar(zero_dim)
+  if (zero_dim.is_coalesced()) {
+    const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim);
+    return _mul_dense_sparse_out(scalar_val, other, r);
+  }
+  // Here zero_dim is not a wrapped scalar, so we test other.
+  if (is_wrapped_scalar(other)) {
+    const auto scalar_val = extract_vals_from_wrapped_scalar(other);
+    return _mul_dense_sparse_out(scalar_val, zero_dim, r);
+  }
+  // Neither of inputs is a wrapped scalar, but zero_dim
+  // is at least 0-dim, so we coalesce it to convert to
+  // a scalar.
+  const auto scalar_val = extract_vals_from_wrapped_scalar(zero_dim.coalesce());
+  return _mul_dense_sparse_out(scalar_val, other, r);
+}
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -926,6 +977,14 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   // case mul(dense, sparse)
   if (!t_.is_sparse()) {
     return _mul_dense_sparse_out(t_, src_, r);
+  }
+
+  // case mul(sparse, sparse) with a 0-dim input.
+  if (!src_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(src_, t_, r);
+  }
+  if (!t_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(t_, src_, r);
   }
 
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
