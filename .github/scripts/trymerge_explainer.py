@@ -62,16 +62,17 @@ class TryMergeExplainer(object):
     def _get_land_check_progress(self, commit: Optional[str]) -> str:
         if commit is not None:
             return (
-                f" and [land check]({BOT_COMMANDS_WIKI}) "
-                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})"
+                f" and land check "
+                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})."
+                + f"\n For other forms of merge, please refer to our [wiki]({BOT_COMMANDS_WIKI})."
             )
         else:
             return ""
 
-    def _get_flag_explaination_message(self) -> str:
+    def _get_flag_explanation_message(self) -> str:
         if self.force:
             return (
-                "This means your PR will be merged immediately, bypassing any checks."
+                "This means your PR will be merged immediately, bypassing any CI signals."
             )
         elif self.on_green:
             return (
@@ -80,11 +81,11 @@ class TryMergeExplainer(object):
         elif self.land_checks:
             if self.has_trunk_label:
                 land_check_msg_suffix = (
-                    f"have run since you have the {CIFLOW_TRUNK_LABEL}."
+                    f"have run since you have added the {CIFLOW_TRUNK_LABEL} to your PR."
                 )
             else:
                 land_check_msg_suffix = (
-                    "and the land checks branch have run (ETA 4 Hours)."
+                    "and the land checks have run (ETA 4 Hours)."
                 )
             return (
                 "This means that your PR will be merged once all signals on your PR "
@@ -93,7 +94,7 @@ class TryMergeExplainer(object):
 
         else:
             if self.has_ciflow_label:
-                return "Since your PR has a ciflow label, we will wait for all checks to be."
+                return "Since your PR has a ciflow label, we will wait for all checks to be green."
             else:
                 return "This means only we will only wait for mandatory checks to be green."
 
@@ -101,7 +102,7 @@ class TryMergeExplainer(object):
         message_prefix = "@pytorchbot successfully started a merge job."
         progress_links = f"Check the current status [here]({os.getenv('GH_RUN_URL')}){self._get_land_check_progress(commit)}."
         flag_message = f"The merge job was triggered with{self._get_flag_msg()} flag."
-        explaination_message = self._get_flag_explaination_message()
+        explanation_message = self._get_flag_explaination_message()
 
         msg = message_prefix + " "
         msg += progress_links + "\n"
