@@ -202,9 +202,15 @@
   result: auto_element_wise
 
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad)
-  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t + maybe_multiply(other_t, alpha)
+  dispatch:
+    Default:
+      self: handle_r_to_c(self.scalar_type(), grad)
+      other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
+      result: self_t + maybe_multiply(other_t, alpha)
+    AutogradNestedTensor:
+      self: grad.add(self)
+      other: grad.add(other)
+      output_differentiability: [False]
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)

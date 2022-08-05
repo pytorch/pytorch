@@ -1241,6 +1241,7 @@ class TestNestedTensorAutograd(TestCase):
         nt_2 = self._create_nested_tensor_from_mask()
 
         nt_1.requires_grad_()
+        nt_2.requires_grad_()
         c = nt_1 + nt_2
 
         assert nt_1.requires_grad
@@ -1250,7 +1251,9 @@ class TestNestedTensorAutograd(TestCase):
 
         #  Grad check doesn't work with nested yet.
         # d/dnt_1 (nt + nt_1) = 1*grad_output
-        self.nt_equal(nt_1.grad, grad_output)
+        # Check that bogus gradient grad.add(self)registered with AutogradNestedTensor in derivatives.yaml works
+        self.nt_equal(nt_1.grad, grad_output + nt_1)
+        self.nt_equal(nt_2.grad, grad_output + nt_2)
 
     # Test Factory Functions
     def test_nested_tensor_to_padded_tensor(self):
