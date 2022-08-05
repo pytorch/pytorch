@@ -1,5 +1,7 @@
 import copy
 import logging
+import time
+import numpy as np
 
 import torch
 import torch.fx as fx
@@ -368,28 +370,45 @@ def benchmark_GPU_time(f, inp, list_inp, itr = 5):
         list_inp(bool): if True, profile f(*inp), otherwise f(inp)
         itr(int): The number of iterations to run, default to 5
     """
+    timings = np.zeros((itr, 1), np.float64)
+    memories = np.zeros((itr, 1), np.float64)
     if list_inp:
         with torch.no_grad():
             for _ in range(5):
                 f(*inp)
                 torch.cuda.synchronize()
-            with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                for _ in range(itr):
-                    f(*inp)
-                    torch.cuda.synchronize()
-        return get_cuda_time(prof.key_averages()) / itr
+            
+            for rep in range(itr):
+                torch.cuda.reset_peak_memory_stats()
+                t0 = time.perf_counter()
+                f(*inp)
+                torch.cuda.synchronize()
+                t1 = time.perf_counter()
+                peak_mem = torch.cuda.max_memory_allocated() /1e9
+                timings[rep, 0] = t1 - t0
+                memories[rep, 0] = peak_mem    
+        median = np.median(timings, axis=0)
+        memory_median = np.median(memories, axis=0)
+        return median[0], memory_median[0]
 
     with torch.no_grad():
         for _ in range(5):
             f(inp)
             torch.cuda.synchronize()
-        with profile(activities=[ProfilerActivity.CUDA]) as prof:
-            for _ in range(itr):
-                f(inp)
-                torch.cuda.synchronize()
-
-        # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
-        return get_cuda_time(prof.key_averages()) / itr
+        for rep in range(itr):
+            torch.cuda.reset_peak_memory_stats()
+            t0 = time.perf_counter()
+            f(inp)
+            torch.cuda.synchronize()
+            t1 = time.perf_counter()
+            peak_mem = torch.cuda.max_memory_allocated() /1e9
+            timings[rep, 0] = t1 - t0
+            memories[rep, 0] = peak_mem    
+        median = np.median(timings, axis=0)
+        memory_median = np.median(memories, axis=0)
+        return median[0], memory_median[0]
+    
+    
 
 
 def profile_scripted_graph(traced_graph, inp, list_inp, itr = 5):
@@ -446,10 +465,11 @@ def profile_fused_graph(fused_graph, inp, list_inp, overload_dict = None, itr = 
     fused_graph.recompile()
     if num_fusion_group == 0: # no fused group
         script_f = ts_compile(fused_graph, 0)#torch.jit.script(fused_graph)
-        return benchmark_GPU_time(script_f, inp, list_inp, itr = itr), 0
+        avg_cuda_time_g, memory = benchmark_GPU_time(script_f, inp, list_inp, itr = itr)
+        return avg_cuda_time_g, num_fusion_group, memory
 
-    avg_cuda_time_g = benchmark_GPU_time(fused_graph, inp, list_inp, itr = itr)
-    return avg_cuda_time_g, num_fusion_group
+    avg_cuda_time_g, memory = benchmark_GPU_time(fused_graph, inp, list_inp, itr = itr)
+    return avg_cuda_time_g, num_fusion_group, memory
 
 
 def profile_graph(name, traced_graph, inp, eager_inp=False):
@@ -545,11 +565,11 @@ def profile_model(name, model, inputs):
     traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
     traced_graph_copy = copy.deepcopy(traced_graph)
     
-    eager_time = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
+    eager_time, eager_memory = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
 
     arg_list, spec  = pytree.tree_flatten([params, inputs])
     script_f = ts_compile(traced_graph, 0)
-    avg_cuda_time_f = benchmark_GPU_time(script_f, arg_list, True)# profile_scripted_graph(traced_graph, inp, True)
+    avg_cuda_time_f = 0 #benchmark_GPU_time(script_f, arg_list, True)# profile_scripted_graph(traced_graph, inp, True)
 
     traced_graph = traced_graph_copy
     traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
@@ -560,16 +580,16 @@ def profile_model(name, model, inputs):
     csed_graph_copy = copy.deepcopy(csed_graph)
     
     fused_graph = get_fused_graph(csed_graph)
-    avg_cuda_time_g, num_fusion_group = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
+    avg_cuda_time_g, num_fusion_group, fused_memory = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
 
     stat = {}
     fused_graph = rematerialize_stat(csed_graph_copy, stat)
     num_remat_group = stat["num_group_remat"]
     memory_reduced = stat["memory_reduced"]
     num_node_pairs = stat["num_node_pairs"]
-    avg_cuda_time_h, _ = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
+    avg_cuda_time_h, _, remat_memory = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
 
-    print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}", flush=True)
+    print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
 
 
 

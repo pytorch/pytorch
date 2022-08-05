@@ -3,56 +3,40 @@ import os
 import gc
 import importlib
 
-SKIP = {
-    # non-deterministic output / cant check correctness
-    "pyhpc_turbulent_kinetic_energy",
-    # https://github.com/pytorch/torchdynamo/issues/101
-    "detectron2_maskrcnn",
-    # https://github.com/pytorch/torchdynamo/issues/145
-    "fambench_xlmr",
-    "speech_transformer",
-    "fastNLP_Bert",
-    # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
-    "tacotron2",
-    "vision_maskrcnn",
-}
+SKIP = {}
 
-# Additional models that are skipped in training
-SKIP_TRAIN = {
-    # not designed for training
-    "pyhpc_equation_of_state",
-    "pyhpc_isoneutral_mixing",
-    # Unusual training setup
-    "opacus_cifar10",
-    "maml",
-}
-
-# Some models have bad train dataset. We read eval dataset.
-# yolov3 - seems to have different number of inputs between eval and train
-# timm_efficientdet - loader only exists for eval mode.
-ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
-
-# These models support only train mode. So accuracy checking can't be done in
-# eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
-
-
-# Some models have large dataset that doesn't fit in memory. Lower the batch
-# size to test the accuracy.
-USE_SMALL_BATCH_SIZE = {
-    "demucs": 4,
-    "densenet121": 4,
-    "hf_Reformer": 4,
-    "timm_efficientdet": 1,
-    'timm_nfnet': 64,
+EXPERIMENT_BATCH_SIZES = {
+    "BERT_pytorch":128,
+    "LearningToPaint":1024,
+    "alexnet":1024,
+    "dcgan":1024,
+    "densenet121":64,
+    "hf_Albert":16,
+    "hf_Bart":8, #16
+    "hf_Bert":16,
+    "hf_GPT2":8, #16
+    "hf_T5":4,
+    "mnasnet1_0":256,
+    "mobilenet_v2":128,
+    "mobilenet_v3_large":256,
+    "nvidia_deeprecommender":1024,
+    "pytorch_unet":4,#8
+    "resnet18":512,
+    "resnet50":128,
+    "resnext50_32x4d":128,
+    "shufflenet_v2_x1_0":256, #512
+    "squeezenet1_1":256, #512
+    "timm_efficientnet":128,
+    "timm_regnet":64,
+    "timm_resnest":128, #256
+    "timm_vision_transformer":256,
+    "timm_vovnet":128,
+    "vgg16":128, #256
 }
 
 
 def iter_model_names(args):
     from torchbenchmark import _list_model_paths
-
-    if args.training:
-        SKIP.update(SKIP_TRAIN)
 
     for model_path in _list_model_paths():
         model_name = os.path.basename(model_path)
@@ -66,15 +50,18 @@ def iter_model_names(args):
         yield model_name
 
 def load_model(device, model_name, is_training, use_eval_mode):
+    if model_name not in EXPERIMENT_BATCH_SIZES:
+        raise NotImplementedError("not a model in experiment")
+
     module = importlib.import_module(f"torchbenchmark.models.{model_name}")
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    batch_size = None
-    if is_training and model_name in USE_SMALL_BATCH_SIZE:
-        batch_size = USE_SMALL_BATCH_SIZE[model_name]
+    # if is_training and model_name in USE_SMALL_BATCH_SIZE:
+    #     batch_size = USE_SMALL_BATCH_SIZE[model_name]
+    batch_size = EXPERIMENT_BATCH_SIZES[model_name]
 
-    if is_training and model_name not in ONLY_EVAL_DATASET:
+    if is_training:
         benchmark = benchmark_cls(
             test="train", device=device, jit=False, batch_size=batch_size
         )
@@ -85,7 +72,7 @@ def load_model(device, model_name, is_training, use_eval_mode):
     model, example_inputs = benchmark.get_module()
 
     # Models that must be in train mode while training
-    if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
+    if is_training and (not use_eval_mode):
         model.train()
     else:
         model.eval()
