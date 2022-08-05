@@ -155,8 +155,8 @@ void reduction_out_mps
     IntArrayRef dim = opt_dim.value();
     for(int i = 0; i < dim.size(); i++) {
       auto wrap_dim = maybe_wrap_dim(dim[i], input_dim);
-      TORCH_CHECK(wrap_dim < input_dim || (wrap_dim == 0 && input_dim == 0),
-      func_name+": reduction dim must be in the range of input shape")
+      TORCH_CHECK(wrap_dim == 0 || wrap_dim < input_dim,
+      func_name+": reduction dim must be in the range of input shape");
     }
   }
 

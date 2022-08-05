@@ -33,7 +33,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "gather(): self and output must have the same scalar type");
-  TORCH_CHECK(dim >= 0 && dim < self.dim(),
+  TORCH_CHECK(dim == 0 || dim < self.dim(),
               "gather(): Indexing dim ", dim, " is out of bounds of tensor");
 
 
@@ -170,7 +170,7 @@ void scatter_mps_general
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == output.scalar_type() && output.scalar_type() == src.scalar_type(),
               "scatter(): self, src and output must have the same scalar type");
-  TORCH_CHECK(dim >= 0 && dim < self.dim(),
+  TORCH_CHECK(dim == 0 || dim < self.dim(),
               "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
 
 
