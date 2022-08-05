@@ -190,3 +190,9 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
+      - name: Dump Simulator Tests On a Failure
+        if: |
+          failure() && inputs.ios-platform == 'SIMULATOR'
+        run: |
+          echo "Simulator Tests Logs:"
+          cat /Users/runner/Library/Logs/scan/*.log
