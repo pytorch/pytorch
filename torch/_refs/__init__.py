@@ -638,10 +638,6 @@ def logsumexp(
 
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def nan_to_num(
     a: TensorLikeType,
     nan: Optional[NumberType] = 0.0,
@@ -650,8 +646,11 @@ def nan_to_num(
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
-    if a.dtype == torch.bool:
+    if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return clone(a)
+
+    if nan is None:
+        nan = 0.0
 
     if posinf is None:
         posinf = prims.maximum_value(a.dtype)
