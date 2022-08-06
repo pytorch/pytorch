@@ -49,114 +49,6 @@ namespace autograd {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
 
-inline Tensor dispatch_arange(const Scalar& end, Tensor result) {
-  pybind11::gil_scoped_release no_gil;
-  return at::arange_out(result, end);
-}
-
-inline Tensor dispatch_arange(const Scalar& end, const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
-  pybind11::gil_scoped_release no_gil;
-  return torch::arange(end, options);
-}
-
-inline Tensor dispatch_arange(
-    const Scalar& start,
-    const Scalar& end,
-    const Scalar& step,
-    Tensor result) {
-  pybind11::gil_scoped_release no_gil;
-  return at::arange_out(result, start, end, step);
-}
-
-inline Tensor dispatch_arange(
-    const Scalar& start,
-    const Scalar& end,
-    const Scalar& step,
-    const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
-  pybind11::gil_scoped_release no_gil;
-  return torch::arange(start, end, step, options);
-}
-
-static PyObject* THPVariable_arange(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {
-          "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-          "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-      },
-      /*traceable=*/true);
-
-  ParsedArgs<9> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-
-  if (r.has_torch_function()) {
-    return handle_torch_function(
-        r, args, kwargs, THPVariableFunctionsModule, "torch");
-  }
-
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      auto end = r.scalar(0);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
-      const auto options = TensorOptions()
-                               .dtype(scalarType)
-                               .device(r.device(4))
-                               .layout(r.layout(3))
-                               .requires_grad(r.toBool(6))
-                               .pinned_memory(r.toBool(5));
-      return wrap(dispatch_arange(end, options));
-    } else {
-      TORCH_CHECK(
-          !r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(
-          r.tensor(1),
-          r.scalartype(2),
-          r.isNone(2),
-          r.layout(3),
-          r.device(4),
-          r.isNone(4));
-      return wrap(dispatch_arange(r.scalar(0), r.tensor(1))
-                      .set_requires_grad(r.toBool(6)));
-    }
-  } else if (r.idx == 1) {
-    if (r.isNone(3)) {
-      auto start = r.scalar(0);
-      auto end = r.scalar(1);
-      auto step = r.scalar(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
-      const auto options = TensorOptions()
-                               .dtype(scalarType)
-                               .device(r.device(6))
-                               .layout(r.layout(5))
-                               .requires_grad(r.toBool(8))
-                               .pinned_memory(r.toBool(7));
-      return wrap(dispatch_arange(start, end, step, options));
-    } else {
-      TORCH_CHECK(
-          !r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(
-          r.tensor(3),
-          r.scalartype(4),
-          r.isNone(4),
-          r.layout(5),
-          r.device(6),
-          r.isNone(6));
-      return wrap(
-          dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3))
-              .set_requires_grad(r.toBool(8)));
-    }
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 inline Tensor dispatch_range(
     const Scalar& start,
     const Scalar& end,
@@ -618,10 +510,6 @@ static PyObject* THPVariable__disable_functionalization(
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef torch_functions_manual[] = {
-    {"arange",
-     castPyCFunctionWithKeywords(THPVariable_arange),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
     {"asarray",
      castPyCFunctionWithKeywords(THPVariable_asarray),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
