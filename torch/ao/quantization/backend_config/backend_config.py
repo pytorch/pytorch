@@ -174,11 +174,8 @@ class BackendConfig:
             "name": the name of the target backend
             "configs": a list of dictionaries that each represents a `BackendPatternConfig`
         """
-        for dict_key in [NAME_DICT_KEY, CONFIGS_DICT_KEY]:
-            if dict_key not in backend_config_dict:
-                raise ValueError("backend_config_dict must contain '%s'" % dict_key)
-        conf = cls(backend_config_dict[NAME_DICT_KEY])
-        for d in backend_config_dict[CONFIGS_DICT_KEY]:
+        conf = cls(backend_config_dict.get(NAME_DICT_KEY, ""))
+        for d in backend_config_dict.get(CONFIGS_DICT_KEY, []):
             if isinstance(d, BackendPatternConfig):
                 conf.set_backend_pattern_config(d)
             elif isinstance(d, Dict):
