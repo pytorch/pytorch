@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 namespace nvfuser {
 
@@ -137,10 +138,22 @@ struct OpRecord : RecordFunctor {
         // Match the nvFuser arith function types
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+          std::cout << "\nOpRecord: Target Type [self: 0x" <<
+              fusion_op_.target_type().name() << "] [other: 0x" <<
+              child_ptr->fusion_op_.target_type().name() << "]\n";
+        }
         // Match the nvFuser arith function pointers
         result = result &&
-            (fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
-             child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
+            (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
+             *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
+        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+          std::cout << "\nOpRecord: Target  Ptr [self: 0x" <<
+              std::hex << *(fusion_op_.template target<OutType (*)(ArgTypes...)>())
+              << "] [other: 0x" <<
+              std::hex << *(child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>())
+              << "]\n";
+        }
       }
     }
     return result;
