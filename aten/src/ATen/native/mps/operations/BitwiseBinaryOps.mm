@@ -209,12 +209,12 @@ at::Tensor& _bitwise_op_out_mps (const at::Tensor& self, const at::Tensor& other
   at::Tensor output = output_;
   bool needs_output_copy = false;
 
-  if (!output_.is_contiguous()) {
-    output = output_.contiguous();
-    needs_output_copy = true;
-  }
   auto output_size = at::infer_size_dimvector(self.sizes(), other.sizes());
   at::native::resize_output(output, output_size);
+  if (!output.is_contiguous()) {
+    output = output.contiguous();
+    needs_output_copy = true;
+  }
   if (is_other_scalar && is_self_scalar) {
     if (op_name == "and") {
       output.fill_(c10::Scalar(self.item<int64_t>() & other.item<int64_t>()));
