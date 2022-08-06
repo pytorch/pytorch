@@ -688,6 +688,15 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
       [&](const auto&) -> out_t { return python_stack_; }));
 }
 
+const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e)
+          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
+      [](const ExtraFields<EventType::Backend>& e)
+          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
+      [](const auto&) -> const c10::ArrayRef<std::string> { return {}; }));
+}
+
 uint64_t KinetoEvent::durationUs() const {
   return (result_->endTimeNS() - result_->start_time_ns_) / 1000;
 }
@@ -775,7 +784,6 @@ TYPED_ATTR(TorchOp, hasTypes, !e.inputs_.dtypes_.empty())
 TYPED_ATTR(TorchOp, dtypes, e.inputs_.dtypes_)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
-TYPED_ATTR(TorchOp, moduleHierarchy, e.jit_modules_)
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
 TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
