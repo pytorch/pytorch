@@ -149,7 +149,7 @@ class TestFSDPMisc(FSDPTest):
             # any parameters.
             if len(fsdp_unit.params) > 0:
                 fsdp_param = fsdp_unit.params[0]
-            self.assertEqual(fsdp_param.device, cpu_device)
+                self.assertEqual(fsdp_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
