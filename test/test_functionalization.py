@@ -116,7 +116,7 @@ class TestFunctionalization(TestCase):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2])
@@ -131,7 +131,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
     view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2])
@@ -156,9 +156,9 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
-    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
@@ -170,9 +170,9 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
-    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
@@ -193,8 +193,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    empty_1 = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
@@ -207,8 +207,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    empty_1 = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
@@ -281,7 +281,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
     copy__default = torch.ops.aten.copy_.default(a_1, add_tensor);  a_1 = None
@@ -295,7 +295,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
     copy__default = torch.ops.aten.copy_.default(a_1, add_tensor);  a_1 = None
@@ -373,7 +373,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
     """)
@@ -384,7 +384,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
     """)
@@ -405,7 +405,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone_default = torch.ops.aten.clone.default(a_1)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(clone_default);  clone_default = None
     add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, ones);  diagonal_copy_default = ones = None
@@ -419,7 +419,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone_default = torch.ops.aten.clone.default(a_1)
     diagonal_default = torch.ops.aten.diagonal.default(clone_default);  clone_default = None
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, ones);  diagonal_default = ones = None
@@ -442,7 +442,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(a_1)
     add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, ones);  diagonal_copy_default = ones = None
     diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(a_1, add_tensor);  add_tensor = None
@@ -466,7 +466,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     split_copy_tensor = torch.ops.aten.split_copy.Tensor(a_1, 2)
     getitem = split_copy_tensor[0]
     getitem_1 = split_copy_tensor[1];  split_copy_tensor = None
@@ -497,7 +497,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose_copy_int = torch.ops.aten.transpose_copy.int(a_1, 1, 0)
     select_copy_int = torch.ops.aten.select_copy.int(transpose_copy_int, 0, 0);  transpose_copy_int = None
     add_tensor = torch.ops.aten.add.Tensor(select_copy_int, ones);  select_copy_int = ones = None
@@ -549,7 +549,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, 1);  view_copy_default = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, 2)
@@ -647,7 +647,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [8])
     _reshape_alias_copy_default = torch.ops.aten._reshape_alias_copy.default(view_copy_default, [2, 4], [4, 1]);  view_copy_default = None
@@ -685,7 +685,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view_default = torch.ops.aten.view.default(add_tensor, [8])
     _reshape_alias_default = torch.ops.aten._reshape_alias.default(view_default, [2, 4], [4, 1]);  view_default = None
@@ -730,7 +730,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
     view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2])
@@ -780,7 +780,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
@@ -793,7 +793,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
@@ -808,7 +808,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
@@ -821,7 +821,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
@@ -836,7 +836,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
@@ -849,7 +849,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
@@ -864,7 +864,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default, a_1);  diagonal_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
@@ -877,7 +877,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     copy_default = torch.ops.aten.copy_.default(diagonal_default, a_1)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, a_1);  a_1 = None
@@ -1114,7 +1114,7 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([10], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_copy_int = torch.ops.aten.select_copy.int(zeros, 0, 5)
     fill_scalar = torch.ops.aten.fill.Scalar(select_copy_int, 1);  select_copy_int = None
     select_scatter_default = torch.ops.aten.select_scatter.default(zeros, fill_scalar, 0, 5);  zeros = fill_scalar = None
@@ -1127,7 +1127,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([10], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_int = torch.ops.aten.select.int(zeros, 0, 5)
     fill_scalar = torch.ops.aten.fill_.Scalar(select_int, 1);  select_int = None
     return zeros
