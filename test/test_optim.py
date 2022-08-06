@@ -506,7 +506,12 @@ class TestOptim(TestCase):
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
+                    actual = mt_p_state[k]
+                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
+                    # `step` Tensor is 1D while usually it's 0D.
+                    if k == "step" and isinstance(actual, torch.Tensor) and actual.ndim == 1:
+                        actual = actual[0]
+                    self.assertEqual(st_p_state[k], actual, atol=5e-5, rtol=0)
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
