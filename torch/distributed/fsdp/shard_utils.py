@@ -17,7 +17,7 @@ from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardingSpec,
-	ShardMetadata,
+    ShardMetadata,
 )
 
 
@@ -198,8 +198,8 @@ def _gather_state_dict(
 
 def _create_chunk_sharded_tensor(
     tensor: torch.Tensor,
-	rank: int,
-	world_size: int,
+    rank: int,
+    world_size: int,
     device_per_node: int,
     pg: dist.ProcessGroup,
 ) -> ShardedTensor:
@@ -216,7 +216,7 @@ def _create_chunk_sharded_tensor(
     else:
         local_shards = []
 
-	# Create a ShardedTensor without invoking communnication.
+    # Create a ShardedTensor without invoking communnication.
     chunk_sizes = [list(chunk.size()) for chunk in chunks]
     _dim0_offsets = list(itertools.accumulate([chunk_size[0] for chunk_size in chunk_sizes]))
     _dim0_offsets = [0] + _dim0_offsets
@@ -244,6 +244,6 @@ def _create_chunk_sharded_tensor(
     )
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards,
-		sharded_tensor_metadata=sharded_tensor_metadata,
+        sharded_tensor_metadata=sharded_tensor_metadata,
         process_group=pg
     )
