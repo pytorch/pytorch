@@ -183,12 +183,13 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True):
+    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
         self.enable_nested_tensor = enable_nested_tensor
+        self.mask_check = mask_check
 
     def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -227,8 +228,9 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "enable_nested_tensor was not True"
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
-        elif (not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
-            why_not_sparsity_fast_path = "src and src_key_padding_mask was not left aligned"
+        elif (((not hasattr(self, "mask_check")) or self.mask_check)
+                and not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+            why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
         elif output.is_nested:
             why_not_sparsity_fast_path = "NestedTensor input is not supported"
         elif mask is not None:
@@ -261,7 +263,14 @@ class TransformerEncoder(Module):
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
                 convert_to_nested = True
-                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                # simplify on or after on 8/16/2022 to unconditionally call with mask_check=False
+                # we have established that either (1) the mask is OK with the check above,
+                # or (2) that we don't need a mask check with mask_check=False in the init
+                if not torch.jit.is_scripting():
+                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
+                else:
+                    # When scripting, make a simpler call until the FC bar passes on 8/16/2022
+                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
                 src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
