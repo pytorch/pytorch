@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FlatParameter
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy
+from torch.distributed.fsdp import ShardingStrategy, CPUOffload
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     transformer_auto_wrap_policy,
@@ -117,6 +117,39 @@ class TestFSDPMisc(FSDPTest):
                 fsdp_module.device_id,
                 torch.device("cuda", torch.cuda.current_device()),
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_id_cpu_offload(self):
+        """
+        Ensures that even if device_id is specified but we have
+        CPU offload, module is on CPU after init.
+        """
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        model = MyModel()
+
+        fsdp = FSDP(
+            model,
+            auto_wrap_policy=always_wrap_policy,
+            cpu_offload=CPUOffload(offload_params=True),
+            device_id=torch.cuda.current_device()
+        )
+
+        cpu_device = torch.device("cpu")
+
+        for fsdp_unit in FSDP.fsdp_modules(fsdp):
+            # This FSDP unit may not directly manage
+            # any parameters.
+            if len(fsdp_unit.params) > 0:
+                fsdp_param = fsdp_unit.params[0]
+                self.assertEqual(fsdp_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])

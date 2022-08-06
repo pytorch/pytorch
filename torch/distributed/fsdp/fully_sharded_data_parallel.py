@@ -1027,10 +1027,10 @@ class FullyShardedDataParallel(nn.Module):
 
     def _move_module_if_needed(self, module) -> None:
         """
-        Moves module appropriately depending on device_id and
-        whether module is on CPU. Returns a ``bool`` indicating
-        whether the module needs to be moved back to CPU before
-        returning to user.
+        Moves module if module is on CPU and device_id is specified.
+        If device_id is not specified and module is on CPU, we log a
+        warning to user mentioning to use ``device_id`` argument to speed
+        up initialization performance.
         """
         # Move module to device specified. Note that this is done prior to
         # setting compute_device to ensure that they align.
@@ -1051,7 +1051,11 @@ class FullyShardedDataParallel(nn.Module):
                 pass
 
             # For GPU modules, module device should match device_id.
-            if param is not None and param.device != self.device_id:
+            if (
+                param is not None
+                and not isinstance(param, FlatParameter)
+                and param.device != self.device_id
+            ):
                 raise RuntimeError(
                     f"Module on rank {self.rank} is given device_id argument "
                     f"{self.device_id}, but is on {param.device}. "
