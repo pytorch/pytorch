@@ -1,6 +1,6 @@
 import functools
 from collections import namedtuple
-
+import warnings
 from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict, List
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -12,6 +12,7 @@ from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 __all__ = [
     "CollatorIterDataPipe",
     "MapperIterDataPipe",
+    "DropperIterDataPipe",
 ]
 
 T_co = TypeVar("T_co", covariant=True)
@@ -227,3 +228,60 @@ class CollatorIterDataPipe(MapperIterDataPipe):
                 # TODO(VitalyFedyunin): Validate passed dictionary
                 collate_fn = functools.partial(_collate_helper, conversion)
                 super().__init__(datapipe, fn=collate_fn)
+
+@functional_datapipe('drop')
+class DropperIterDataPipe(IterDataPipe):
+    r"""
+    Drop columns/elements in input DataPipe via its indices (functional name: ``drop``).
+
+    Args:
+        datapipe: MapDataPipe with columns to be dropped
+        indices: a single column index to be dropped or a list of indices
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper, ZipperMapDataPipe
+        >>> dp1 = IterableWrapper(range(5))
+        >>> dp2 = IterableWrapper(range(10, 15))
+        >>> dp = dp1.zip(dp2)
+        >>> list(dp)
+        [(0, 10), (1, 11), (2, 12), (3, 13), (4, 14)]
+        >>> drop_dp = dp.drop(1)
+        >>> list(drop_dp)
+        [(0), (1), (2), (3), (4)]
+    """
+    datapipe: IterDataPipe
+
+    def __init__(self,
+                 datapipe: IterDataPipe,
+                 indices: Union[int, List],
+                 ) -> None:
+        super().__init__()
+        self.datapipe = datapipe
+        if isinstance(indices, list):
+            self.indices = set(indices)
+        else:
+            self.indices = {indices}
+
+    def __iter__(self) -> T_co:
+        for old_item in self.datapipe:
+            if isinstance(old_item, tuple):
+                new_item = tuple(x for i, x in enumerate(old_item) if i not in self.indices)
+            elif isinstance(old_item, list):
+                new_item = [x for i, x in enumerate(old_item) if i not in self.indices]
+            elif isinstance(old_item, dict):
+                new_item = {k: v for (k, v) in old_item.items() if k not in self.indices}    
+            else:
+                new_item = old_item
+                warnings.warn(
+                    "The next item was not an iterable and cannot be filtered, "
+                    "please be aware that no filter was done or new item created."
+                )
+
+            yield new_item
+
+    def __len__(self) -> int:
+        if isinstance(self.datapipe, Sized):
+            return len(self.datapipe)
+        raise TypeError(
+            "{} instance doesn't have valid length".format(type(self).__name__)
+        )
