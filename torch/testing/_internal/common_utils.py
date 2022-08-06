@@ -734,6 +734,7 @@ def run_tests(argv=UNITTEST_ARGS):
                                     '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
+            print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
             # exitcode of 5 means no tests were found, which happens since some test configs don't
             # run tests from certain files
             exit(0 if exit_code == 5 else exit_code)
