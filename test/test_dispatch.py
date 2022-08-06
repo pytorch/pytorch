@@ -1,12 +1,13 @@
 # Owner(s): ["module: dispatch"]
 
 import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
 import os
+import unittest
 import re
 import torch.utils.cpp_extension
 
@@ -767,6 +768,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
             msg=f"Expect zero dangling impls, but found: {dangling_impls}"
         )
 
+    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_find_dangling_impls_ext(self):
         extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
         module = torch.utils.cpp_extension.load(

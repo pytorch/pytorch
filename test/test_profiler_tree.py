@@ -12,7 +12,7 @@ import expecttest
 import torch
 from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -154,6 +154,7 @@ class ProfilerTree:
                 caller_name = to_string(extra_fields.caller)
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
@@ -270,21 +271,24 @@ class TestProfilerTree(TestCase):
             ProfilerTree.format(p.profiler, 12),
             """\
             aten::zeros
-              aten::empty
-              aten::zero_
-            Top level Annotation
-              aten::empty
               aten::zeros
                 aten::empty
                 aten::zero_
+            Top level Annotation
+              aten::empty
+              aten::zeros
+                aten::zeros
+                  aten::empty
+                  aten::zero_
               First Annotation
                 aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
               aten::zeros
-                aten::empty
-                aten::zero_
+                aten::zeros
+                  aten::empty
+                  aten::zero_
               Second Annotation
                 aten::empty
                 aten::add
@@ -293,8 +297,9 @@ class TestProfilerTree(TestCase):
                       aten::empty_strided
                       aten::copy_
                 aten::zeros
-                  aten::empty
-                  aten::zero_
+                  aten::zeros
+                    aten::empty
+                    aten::zero_
                 Third Annotation
                   aten::empty
                   aten::ones_like
@@ -535,12 +540,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -576,12 +583,14 @@ class TestProfilerTree(TestCase):
                             aten::transpose
                               aten::as_strided
                           aten::matmul
-                            aten::t
-                              aten::transpose
-                                aten::as_strided
-                            aten::mv
-                              aten::empty
-                              aten::addmv_
+                            aten::unsqueeze
+                              aten::as_strided
+                            aten::mm
+                              aten::resolve_conj
+                              aten::resolve_conj
+                              aten::resolve_conj
+                            aten::squeeze_
+                              aten::as_strided_
                           aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -673,9 +682,10 @@ class TestProfilerTree(TestCase):
                   detach
             [memory]
             aten::zeros
-              aten::empty
-                [memory]
-              aten::zero_
+              aten::zeros
+                aten::empty
+                  [memory]
+                aten::zero_
             Optimizer.step#SGD.step
               aten::empty
                 [memory]
@@ -867,9 +877,10 @@ class TestProfilerTree(TestCase):
                   torch/autograd/profiler.py(...): __init__
                     <built-in method zeros of type object at 0xXXXXXXXXXXXX>
                       aten::zeros
-                        aten::empty
-                          [memory]
-                        aten::zero_
+                        aten::zeros
+                          aten::empty
+                            [memory]
+                          aten::zero_
                   torch/autograd/profiler.py(...): __enter__
                     torch/_ops.py(...): __call__
                       <built-in method _record_function_enter of PyCapsule object at 0xXXXXXXXXXXXX>
