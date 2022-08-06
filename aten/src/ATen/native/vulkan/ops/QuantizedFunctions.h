@@ -54,6 +54,12 @@ Tensor conv2d(
     double out_scale,
     int64_t out_zero_point);
 
+Tensor quantized_upsample_nearest2d(
+    const Tensor& input_arg,
+    const IntArrayRef output_sizes,
+    const c10::optional<double> scales_h,
+    const c10::optional<double> scales_w);
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native

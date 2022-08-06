@@ -342,6 +342,11 @@
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
+- name: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
+  self: _NestedTensor_GeneralizedBMM(grad, mat2.transpose(-2, -1).conj())
+  mat2: _NestedTensor_GeneralizedBMM(self.transpose(-2, -1).conj(), grad)
+  result: _NestedTensor_GeneralizedBMM(self_t, mat2_p) + _NestedTensor_GeneralizedBMM(self_p, mat2_t)
+
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)
@@ -1038,7 +1043,7 @@
   self: grad.expand(self.sizes()) / self.numel()
   result: auto_linear
 
-- name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
   result: auto_linear
 
@@ -1337,6 +1342,10 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
+- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
+  self: _reshape_nested_backward(self, grad)
+  result: auto_linear
+
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
@@ -1520,6 +1529,10 @@
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes())
+  result: auto_linear
+
+- name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
   result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -1706,6 +1719,12 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: auto_linear
+
+- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  # TODO: add proper double backward for view.SymInt
+  # by SymIntizing `reshape`
+  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
@@ -2665,7 +2684,7 @@
 - name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
-- name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+- name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
   t: grad.to_padded_tensor(0, t.sizes())
   mask: non_differentiable
 
@@ -2761,17 +2780,6 @@
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
-
-# Empty factory functions have explicit non-differentiability so that they propagate the class
-# when used with a Tensor subclass together with __torch_dispatch__.
-# All the other factory functions are composite and call into one of these.
-- name: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
-
-- name: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
 
 - name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, *, int self_num_batch_dims=0) -> Tensor
   self: non_differentiable

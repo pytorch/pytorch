@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
@@ -99,10 +100,7 @@ inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
 // correct Autograd key which is AutogradNestedTensor
 c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
   c10::DispatchKeySet key_set =
-      (c10::DispatchKeySet(DispatchKey::NestedTensor) |
-       c10::DispatchKeySet(
-           buffer.is_cuda() ? BackendComponent::CUDABit
-                            : BackendComponent::CPUBit));
+      c10::DispatchKeySet(DispatchKey::NestedTensor) | c10::DispatchKeySet{buffer.key_set().highestBackendKey()};
 
   // Add AutogradNestedTensor specific keys
   key_set = key_set | inplace_or_view_ks | autograd_nested;
@@ -113,21 +111,28 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
-    const std::vector<int64_t>& offsets)
+    std::vector<int64_t> offsets)
     : TensorImpl(
+          Storage(buffer.storage()),
           generate_nested_key_set(buffer),
-          buffer.dtype(),
-          buffer.device()),
-      buffer_(std::move(buffer)),
+          buffer.dtype()),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_(offsets),
+      offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
+  auto buffer_size_vec{buffer.unsafeGetTensorImpl()->sizes()};
+  TORCH_INTERNAL_ASSERT(
+      buffer_size_vec.size() == 1,
+      "NestedTensorImpl buffer is required to be 1 dimensional but got a buffer with ",
+      buffer.dim(),
+      " dimensions.");
+  buffer_size_ = buffer_size_vec[0];
+
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
-  TORCH_INTERNAL_ASSERT(buffer_.is_cuda() || buffer_.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer_);
+  TORCH_INTERNAL_ASSERT(buffer.is_cuda() || buffer.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer.device());
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
@@ -187,6 +192,11 @@ int64_t NestedTensorImpl::numel_custom() const {
   return static_cast<int64_t>(num_elements);
 }
 
+
+c10::SymInt NestedTensorImpl::sym_numel_custom() const {
+  return NestedTensorImpl::numel_custom();
+}
+
 bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   TORCH_CHECK(false, "is_contiguous is disabled.");
 }
@@ -207,45 +217,6 @@ IntArrayRef NestedTensorImpl::strides_custom() const {
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
-}
-
-
-template <typename VariableVersion>
-c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
-    VariableVersion&& version_counter,
-    bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::forward<VariableVersion>(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
-  }
-  auto impl = c10::make_intrusive<NestedTensorImpl>(this -> buffer_, this -> nested_size_tensor_);
-  copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/std::forward<VariableVersion>(version_counter),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  return impl;
-}
-
-c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
-    const c10::VariableVersion& version_counter,
-    bool allow_tensor_metadata_change) const {
-  return shallow_copy_and_detach_core(
-      version_counter, allow_tensor_metadata_change);
-}
-
-c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
-    c10::VariableVersion&& version_counter,
-    bool allow_tensor_metadata_change) const {
-  return shallow_copy_and_detach_core(
-      std::move(version_counter), allow_tensor_metadata_change);
 }
 
 } // namespace native

@@ -13,7 +13,7 @@ aten = torch.ops.aten
 __all__ = ["has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv"]
 
 def has_symbolic_sizes_strides(elem):
-    return any([isinstance(i, torch._C.SymbolicIntNode) for i in elem.shape])
+    return any([isinstance(i, torch._C.SymIntNode) for i in elem.shape])
 
 def create_contiguous(shape):
     strides = [1]
@@ -21,10 +21,10 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-
 def is_symbolic_op(func):
-    return func in [aten.sym_size.default, aten.dim.default, aten.is_contiguous.default, aten.stride.default]
-
+    return func in [aten.sym_size.default, aten.dim.default,
+                    aten.is_contiguous.default, aten.stride.default, aten.sym_numel.default
+                    ]
 
 def handle_symbolic_op(func, args, kwargs):
     assert is_symbolic_op(func)
@@ -32,6 +32,11 @@ def handle_symbolic_op(func, args, kwargs):
         return None
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
+    if func == torch.ops.aten.sym_numel.default:
+        res = 1
+        for s in args[0].shape:
+            res = res * s
+        return res
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
@@ -72,6 +77,7 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
+    'floordiv': lambda a, b: sympy.floor(a / b),
 }
 
 magic_methods = {
@@ -93,7 +99,7 @@ for method, _func in magic_methods.items():
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
-    # this should be wrapped transparently into torch._C.SymbolicIntNode
+    # this should be wrapped transparently into torch._C.SymIntNode
     setattr(PySymInt, method_name, _create_magic_impl(_func))
 
 class ShapeEnv(object):
@@ -111,7 +117,7 @@ class ShapeEnv(object):
             return val
         sympy_expr = sympy.Symbol(name, positive=True)
         py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch._C.SymbolicIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         shape_env[sympy_expr] = val
         return cpp_sym_int
 
@@ -133,7 +139,7 @@ class ShapeEnv(object):
             if not isinstance(x, torch.Tensor):
                 return x
 
-            out_shape = [self.create_symint(f"s_{arg_cnt}^{idx}", sz, shape_env) for idx, sz in enumerate(x.shape)]
+            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz, shape_env) for idx, sz in enumerate(x.shape)]
             arg_cnt += 1
             return out_shape
         return list(map(create_shape, pytree.tree_flatten(args)[0]))

@@ -363,7 +363,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  if (!PyDict_Check(cuda_dict)) {
+  if (!PyDict_Check(cuda_dict.get())) {
     throw TypeError("`__cuda_array_interface__` must be a dict");
   }
 
