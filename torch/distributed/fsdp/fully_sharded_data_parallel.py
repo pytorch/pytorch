@@ -8,9 +8,6 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-)
 from typing import (
     Any,
     Callable,
