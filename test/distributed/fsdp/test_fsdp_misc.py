@@ -143,8 +143,12 @@ class TestFSDPMisc(FSDPTest):
         )
 
         cpu_device = torch.device("cpu")
+
         for fsdp_unit in FSDP.fsdp_modules(fsdp):
-            fsdp_param = next(fsdp_unit.parameters())
+            # This FSDP unit may not directly manage
+            # any parameters.
+            if len(fsdp_unit.params) > 0:
+                fsdp_param = fsdp_unit.params[0]
             self.assertEqual(fsdp_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
