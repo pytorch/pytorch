@@ -1778,7 +1778,7 @@ TORCH_CUDA_CU_API void orderTiledConcreteIdAsRoot(TensorView* tv) {
   //  neither an inner tile nor reduction/broadcast is found, and would
   //  not re-order any iterdomain beyond that point to keep the
   //  outer loop structure unchanged.
-  for (auto i = ndims - 1; i >= 0; i--) {
+  for (int64_t i = static_cast<int64_t>(ndims) - 1; i >= 0; i--) {
     auto leaf_id = tv->axis(i);
     if (leaf_id->isBroadcast() || leaf_id->isReduction()) {
       // Register this reduction or broadcast axis
