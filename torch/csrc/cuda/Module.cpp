@@ -534,12 +534,13 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
     py::gil_scoped_acquire acquire;
     auto r = std::make_unique<StackContext>();
-    PyThreadState* tstate = PyThreadState_GET();
-    PyFrameObject* f = tstate->frame;
+    PyFrameObject* f = PyEval_GetFrame();
+    Py_XINCREF(f);
     while (f) {
-      Py_XINCREF((PyObject*)f->f_code);
-      r->frames.emplace_back(Frame{f->f_code, f->f_lasti});
-      f = f->f_back;
+      r->frames.emplace_back(Frame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+      auto f_back = PyFrame_GetBack(f);
+      Py_XDECREF(f);
+      f = f_back;
     }
     return r;
   }
@@ -638,9 +639,14 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_enableMemoryHistory(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
   HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::setContextRecorder(StackContext::gather);
+    THPUtils_assert(
+      PyBool_Check(enabled),
+      "recordMemoryHistory expects a bool, "
+      "but got %s",
+      THPUtils_typename(enabled));
+  c10::cuda::CUDACachingAllocator::setContextRecorder(enabled == Py_True ? StackContext::gather : nullptr);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -901,9 +907,9 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
-    {"_cuda_enableMemoryHistory",
-     THCPModule_enableMemoryHistory,
-     METH_NOARGS,
+    {"_cuda_recordMemoryHistory",
+     THCPModule_recordMemoryHistory,
+     METH_O,
      nullptr},
 
     {"_cuda_cudaHostAllocator",

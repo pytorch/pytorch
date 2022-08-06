@@ -6,7 +6,7 @@ from typing import Any, Dict, Union, Tuple
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
 
-from .memory_viz import segments as _segments, memory as _memory
+from ._memory_viz import segments as _segments, memory as _memory
 
 from torch.types import Device
 from torch import _C
@@ -16,7 +16,7 @@ __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_proce
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info", "save_memory_usage", "save_segment_usage", "enable_memory_history", "snapshot"]
+           "mem_get_info"]
 
 def _host_allocator():
     _lazy_init()
@@ -595,21 +595,21 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
-def enable_memory_history(device: Union[Device, int] = None):
+def _record_memory_history(enabled: bool, device: Union[Device, int] = None):
     with torch.cuda.device(device):
-        _C._cuda_enableMemoryHistory()
+        _C._cuda_recordMemoryHistory(enabled)
 
-def snapshot(device: Union[Device, int] = None):
+def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):
         return _C._cuda_memorySnapshot()
 
-def save_segment_usage(filename='output.svg', snapshot=None):
+def _save_segment_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
         snapshot = memory_snapshot()
     with open(filename, 'w') as f:
         f.write(_segments(snapshot))
 
-def save_memory_usage(filename='output.svg', snapshot=None):
+def _save_memory_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
         snapshot = memory_snapshot()
     with open(filename, 'w') as f:

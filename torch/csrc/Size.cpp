@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Size.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>

@@ -548,17 +548,18 @@ class DeviceCachingAllocator {
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
-  CreateContextFn context_recorder_;
+  std::atomic<CreateContextFn> context_recorder_;
 
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
         small_blocks(BlockComparator, /*is_small=*/true) {
     stats.max_split_size = CachingAllocatorConfig::max_split_size();
+    context_recorder_.store(nullptr);
   }
 
   void setContextRecorder(CreateContextFn c) {
-    context_recorder_ = std::move(c);
+    context_recorder_.store(c);
   }
 
   // All public methods (except the above) acquire the allocator mutex.
@@ -567,8 +568,9 @@ class DeviceCachingAllocator {
   Block* malloc(int device, size_t orig_size, cudaStream_t stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
+    CreateContextFn context_recorder = context_recorder_.load();
     std::unique_ptr<Context> context =
-        context_recorder_ ? context_recorder_() : nullptr;
+        context_recorder? context_recorder() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -737,7 +739,7 @@ class DeviceCachingAllocator {
     block->allocated = true;
     if (context) {
       trimHistoryBefore(block, (char*)block->ptr + size);
-      block->history = std::unique_ptr<History>(new History{
+      block->history = std::make_unique<History>(History{
           block->ptr,
           orig_size,
           std::move(context),
@@ -1154,7 +1156,6 @@ class DeviceCachingAllocator {
       if (dst->prev) {
         dst->prev->next = dst;
       }
-
       if (!dst->history) {
         dst->history = std::move(src->history);
         dst->history_last = src->history_last;
@@ -1168,6 +1169,7 @@ class DeviceCachingAllocator {
       if (dst->next) {
         dst->next->prev = dst;
       }
+
       if (!dst->history) {
         dst->history = std::move(src->history);
         dst->history_last = src->history_last;

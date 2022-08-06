@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     fn_name = 'torch.cuda.memory_dbg.snapshot()'
     pickled = f'pickled memory statistics from {fn_name}'
-    parser = argparse.ArgumentParser(description='Visualize memory dumps produced by {fn_name}')
+    parser = argparse.ArgumentParser(description=f'Visualize memory dumps produced by {fn_name}')
     subparsers = parser.add_subparsers(dest='action')
 
     def _output(p):
