@@ -734,11 +734,8 @@ class PolynomialLR(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
 
-        if self.last_epoch == 0:
+        if self.last_epoch == 0 or self.last_epoch > self.total_iters:
             return [group["lr"] for group in self.optimizer.param_groups]
-
-        if self.last_epoch > self.total_iters:
-            return [0.0 for i in range(len(self.optimizer.param_groups))]
 
         decay_factor = ((1.0 - self.last_epoch / self.total_iters) / (1.0 - (self.last_epoch - 1) / self.total_iters)) ** self.power
         return [group["lr"] * decay_factor for group in self.optimizer.param_groups]
