@@ -53,9 +53,10 @@ endif()
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
+set(TEST_API_COMPILE_OPTIONS "")
 if(NOT MSVC)
-  target_compile_options(test_api PRIVATE -Wno-unused-variable)
-  target_compile_options(test_api PRIVATE -Wno-unused-local-typedefs)
+  append_cxx_flag_if_supported("-Wno-unused-variable" TEST_API_COMPILE_OPTIONS)
+  append_cxx_flag_if_supported("-Wno-unused-local-typedefs" TEST_API_COMPILE_OPTIONS)
 endif()
 
 if(USE_CUDA)
@@ -81,19 +82,16 @@ if(USE_OPENMP AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSI
 endif()
 
 if(NOT MSVC)
-  if(APPLE)
-    target_compile_options(test_api PRIVATE
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces)
-  else()
-    target_compile_options(test_api PRIVATE
-      # Considered to be flaky.  See the discussion at
-      # https://github.com/pytorch/pytorch/pull/9608
-      -Wno-maybe-uninitialized
-      # gcc gives nonsensical warnings about variadic.h
-      -Wno-unused-but-set-parameter)
-  endif()
+  # Clang has an unfixed bug leading to spurious missing braces
+  # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+  append_cxx_flag_if_supported("-Wno-missing-braces" TEST_API_COMPILE_OPTIONS)
+  # Considered to be flaky.  See the discussion at
+  # https://github.com/pytorch/pytorch/pull/9608
+  append_cxx_flag_if_supported("-Wno-maybe-uninitialized" TEST_API_COMPILE_OPTIONS)
+  # gcc gives nonsensical warnings about variadic.h
+  append_cxx_flag_if_supported("-Wno-unused-but-set-parameter" TEST_API_COMPILE_OPTIONS)
+  string(REPLACE " " ";" TEST_API_COMPILE_OPTIONS ${TEST_API_COMPILE_OPTIONS})
+  target_compile_options(test_api PRIVATE ${TEST_API_COMPILE_OPTIONS})
 endif()
 
 if(INSTALL_TEST)
