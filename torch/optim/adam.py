@@ -541,7 +541,7 @@ def _group_params_by_device_and_dtype(
         per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
         per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
         if max_exp_avg_sqs:
-            per_device_and_dtype_tensors[key][4].append(exp_avg_sqs[i])
+            per_device_and_dtype_tensors[key][4].append(max_exp_avg_sqs[i])
         per_device_and_dtype_tensors[key][5].append(step)
     return per_device_and_dtype_tensors
 
