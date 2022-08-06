@@ -1631,7 +1631,7 @@ class Type:
             return ListType(elem=Type.parse(m.group(1)), size=size)
 
         # '__torch__.torch.classes.' is the prefix for custom class
-        m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$")
+        m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$", t)
         if m is not None:
             return CustomClassType(t)
         try:
@@ -1734,7 +1734,7 @@ class CustomClassType(Type):
     class_name: str
 
     def __str__(self) -> str:
-        return class_name
+        return self.class_name
 
     def is_tensor_like(self) -> bool:
         """
