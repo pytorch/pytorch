@@ -801,7 +801,7 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
                 prepare_custom_config=None,
-                backend_config_dict=None):
+                backend_config=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -867,7 +867,7 @@ class QuantizationTestCase(TestCase):
                 model, qconfig_dict,
                 example_inputs=inputs,
                 prepare_custom_config=prepare_custom_config,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
