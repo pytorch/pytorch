@@ -428,7 +428,7 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4, min_lr=1e-6)],
+                [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
                 constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
@@ -611,7 +611,7 @@ class TestOptim(TestCase):
                 lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, maximize=maximize),
-                [lambda opt: PolynomialLR(opt, total_iters=4, min_lr=1e-6, power=0.9)],
+                [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
                 constructor_accepts_maximize=True
             )
             self._test_complex_2d(optimizer)
@@ -1369,24 +1369,6 @@ class TestLRScheduler(TestCase):
         scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters)
         self._test(scheduler, targets, epochs)
 
-    def test_poly_lr_min_lr(self):
-        def poly_lr(min_lr: float):
-            return [
-                (min_lr + (1.0 - x / total_iters) ** power * (0.5 - min_lr)) for x in range(total_iters)
-            ] + [min_lr] * (epochs - total_iters)
-
-        for param_group in self.opt.param_groups:
-            param_group['lr'] = 0.5
-
-        epochs = 10
-        power = 0.9
-        total_iters = 5
-        single_targets = poly_lr(min_lr=2e-4)
-        targets = [single_targets, poly_lr(min_lr=4e-4)]
-        scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters, min_lr=[2e-4, 4e-4])
-        self._test(scheduler, targets, epochs)
-
-
     def test_cos_anneal_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -1643,18 +1625,18 @@ class TestLRScheduler(TestCase):
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr5(self):
-        def poly_lr(min_lr: float):
+        def poly_lr(lr: float):
             return [
-                (min_lr + (1.0 - x / total_iters) ** power * (0.5 - min_lr)) for x in range(total_iters)
-            ] + [min_lr] * (epochs - total_iters)
+                (lr * ((1.0 - x / total_iters) ** power)) for x in range(total_iters)
+            ] + [0.0] * (epochs - total_iters)
 
         schedulers = [None] * 2
         epochs = 10
         power = 0.9
         total_iters = 5
         const_factor = 0.1
-        single_targets = [x * const_factor for x in poly_lr(min_lr=0)]
-        targets = [single_targets, [x * const_factor * epochs for x in poly_lr(min_lr=0)]]
+        single_targets = [x * const_factor for x in poly_lr(lr=0.05)]
+        targets = [single_targets, [x * const_factor for x in poly_lr(0.5)]]
         schedulers[0] = PolynomialLR(self.opt, power=power, total_iters=total_iters)
         schedulers[1] = ConstantLR(self.opt, factor=const_factor)
         scheduler = ChainedScheduler(schedulers)

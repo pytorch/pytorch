@@ -701,17 +701,13 @@ class SequentialLR(_LRScheduler):
 
 
 class PolynomialLR(_LRScheduler):
-    """Decays the learning rate of each parameter group using a polynomial function,
-    to reach a min_lr in the given total_iters. When last_epoch=-1, sets initial lr as lr.
-
+    """Decays the learning rate of each parameter group using a polynomial function
+    in the given total_iters. When last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
-        min_lr (float or list): A scalar or a list of scalars. A
-            lower bound on the learning rate of all param groups
-            or each group respectively. Default: 0.
-        power (int): The power of the polynomial. Default: ``1.0``.
+        power (int): The power of the polynomial. Default: 1.0.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
@@ -728,16 +724,9 @@ class PolynomialLR(_LRScheduler):
         >>>     validate(...)
         >>>     scheduler.step()
     """
-    def __init__(self, optimizer, total_iters=5, min_lr=0.0, power=1.0, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer, total_iters=5, power=1.0, last_epoch=-1, verbose=False):
         self.total_iters = total_iters
-        if isinstance(min_lr, (list, tuple)):
-            if len(min_lr) != len(optimizer.param_groups):
-                raise ValueError("expected {} min_lrs, got {}".format(len(optimizer.param_groups), len(min_lr)))
-            self.min_lrs = list(min_lr)
-        else:
-            self.min_lrs = [min_lr] * len(optimizer.param_groups)
         self.power = power
-
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
@@ -749,22 +738,15 @@ class PolynomialLR(_LRScheduler):
             return [group["lr"] for group in self.optimizer.param_groups]
 
         if self.last_epoch > self.total_iters:
-            return [self.min_lrs[i] for i in range(len(self.optimizer.param_groups))]
+            return [0.0 for i in range(len(self.optimizer.param_groups))]
 
-        return [
-            self.min_lrs[i]
-            + ((1.0 - self.last_epoch / self.total_iters) / (1.0 - (self.last_epoch - 1) / self.total_iters))
-            ** self.power
-            * (group["lr"] - self.min_lrs[i])
-            for i, group in enumerate(self.optimizer.param_groups)
-        ]
+        decay_factor = ((1.0 - self.last_epoch / self.total_iters) / (1.0 - (self.last_epoch - 1) / self.total_iters)) ** self.power
+        return [group["lr"] * decay_factor for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
         return [
             (
-                self.min_lrs[i]
-                + (1.0 - min(self.total_iters, self.last_epoch) / self.total_iters) ** self.power
-                * (base_lr - self.min_lrs[i])
+                base_lr * (1.0 - min(self.total_iters, self.last_epoch) / self.total_iters) ** self.power
             )
             for i, base_lr in enumerate(self.base_lrs)
         ]
