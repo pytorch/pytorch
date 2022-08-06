@@ -141,6 +141,11 @@ ScalarOnly and Generic must have same ufunc name""",
 cannot use CUDAFunctorOnSelf on non-binary function""",
         )
 
+    def test_parse_custom_class_type(self) -> None:
+        custom_class_name = "__torch__.torch.classes.namespace_foo.class_bar"
+        custom_class_type = Type.parse(custom_class_name)
+        self.assertTrue(isinstance(custom_class_type, CustomClassType))
+        self.assertEquals(custom_class_name, custom_class_type.class_name)
 
 if __name__ == "__main__":
     unittest.main()

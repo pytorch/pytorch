@@ -1629,6 +1629,11 @@ class Type:
         if m is not None:
             size = int(m.group(2)) if m.group(2) is not None else None
             return ListType(elem=Type.parse(m.group(1)), size=size)
+
+        # '__torch__.torch.classes.' is the prefix for custom class
+        m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$")
+        if m is not None:
+            return CustomClassType(t)
         try:
             return BaseType(BaseTy[t])
         except KeyError:
@@ -1723,6 +1728,31 @@ class OptionalType(Type):
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
 
+# A type representing a PyTorch custom class
+@dataclass(frozen=True)
+class CustomClassType(Type):
+    class_name: str
+
+    def __str__(self) -> str:
+        return class_name
+
+    def is_tensor_like(self) -> bool:
+        """
+        Assume a custom class is not a tensor.
+        """
+        return False
+
+    def is_nullable(self) -> bool:
+        """
+        Assume a custom class is not nullable.
+        """
+        return False
+
+    def symint_to_int(self) -> "Type":
+        return self
+
+    def is_like_like(self) -> Optional["ListType"]:
+        return None
 
 # List types specify that we may have multiples of an element.  We
 # also support explicit sizes on list types, but these have
