@@ -2343,6 +2343,14 @@ torch.cuda.synchronize()
                 self.assertEqual(param_control.grad, param_scaling.grad)
                 self.assertEqual(param_control, param_scaling)
 
+                state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
+
+                for k in state_control:
+                    actual = state_scaling[k]
+                    if k == "step":
+                        actual = actual.squeeze()
+                    self.assertEqual(state_control[k], actual, msg=k)
+
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
