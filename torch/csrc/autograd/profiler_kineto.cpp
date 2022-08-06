@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
@@ -14,6 +15,7 @@
 #include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
+#include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
 
@@ -71,15 +73,19 @@ struct EventFieldsVisitor {
       : kineto_activity_{result->kineto_activity_},
         kineto_event_{kineto_event},
         post_process_{post_process} {
+    c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
+      kineto_event.deviceIndex(_(result->kineto_info_).device);
+      kineto_event.deviceResourceId(_(result->kineto_info_).resource);
+    });
+
     pushPythonMetadata(result->parent_.lock());
-    c10::visit(*this, result->extra_fields_);
+    result->visit(*this);
     handleStack(result->parent_);
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
     handleJIT(op_event);
     kineto_event_.get()
-        .endThreadId(op_event.end_tid_)
         .scope((int8_t)op_event.scope_)
         .debugHandle(op_event.debug_handle_)
         .setAsync(op_event.is_async_);
@@ -119,7 +125,6 @@ struct EventFieldsVisitor {
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
     handleJIT(backend_event);
     kineto_event_.get()
-        .endThreadId(kineto_event_.get().startThreadId())
         .scope((int8_t)backend_event.scope_)
         .debugHandle(backend_event.debug_handle_)
         .backend(backend_event.backend_);
@@ -196,6 +201,14 @@ struct EventFieldsVisitor {
     addPythonAnnotations(py_call);
   }
 
+  void operator()(const ExtraFields<EventType::Kineto>& e) {
+    TORCH_INTERNAL_ASSERT(kineto_activity_ == nullptr);
+    const auto linked = e.linked_activity_.lock();
+    if (linked) {
+      kineto_event_.get().linkedCorrelationId(linked->correlationID());
+    }
+  }
+
   void pushPythonMetadata(std::shared_ptr<Result> parent) {
     auto push = [&](const auto& i) {
       c10::guts::if_constexpr<std::is_base_of<
@@ -207,7 +220,7 @@ struct EventFieldsVisitor {
     };
 
     while (parent != nullptr) {
-      c10::visit(push, parent->extra_fields_);
+      parent->visit(push);
       parent = parent->parent_.lock();
     }
   }
@@ -251,7 +264,7 @@ struct EventFieldsVisitor {
     std::string name_;
   };
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
   std::reference_wrapper<KinetoEvent> kineto_event_;
   std::reference_wrapper<const post_process_t> post_process_;
   std::vector<PythonMetadata> py_metadata_;
@@ -329,7 +342,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
-    materializeOpEvents(end_time);
+
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    auto converter = clock_converter_.makeConverter();
+    auto records_and_trace =
+        record_queue_.getRecords(converter, start_time_, end_time);
+
+    materializeOpEvents(records_and_trace.first);
 
     // finalizeCPUTrace(cpu_trace_.get());
 
@@ -342,23 +361,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             [](const auto& i) { return i.is_python_function_; }),
         kineto_events_.end());
 
-    if (config().state != ProfilerState::KINETO_ONDEMAND) {
-      auto trace = torch::profiler::impl::kineto::stopTrace();
-      TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
-      addTraceEvents(trace);
-      return std::make_unique<
-          torch::profiler::impl::kineto::ActivityTraceWrapper>(
-          std::move(trace));
-    } else {
-      return nullptr;
-    }
+    return std::move(records_and_trace.second);
   }
 
-  void materializeOpEvents(uint64_t end_time) {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    auto converter = clock_converter_.makeConverter();
-
-    for (auto& e : record_queue_.getRecords(converter, start_time_, end_time)) {
+  void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
+    for (auto& e : events) {
       if (e->parent_.expired()) {
         event_tree_.push_back(e);
       }
@@ -372,7 +379,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .durationUs((e->endTimeNS() - e->start_time_ns_) / 1000)
             .correlationId(e->correlationID())
             .deviceType(e->deviceType())
-            .startThreadId(e->start_tid_);
+            .startThreadId(e->start_tid_)
+            .endThreadId(e->endTID())
+            .activityType((uint8_t)e->kinetoType());
 
         EventFieldsVisitor set_fields_and_metadata(
             e, kineto_events_.back(), getEventPostProcessingCallback());
@@ -459,38 +468,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   }
 #endif // USE_KINETO
 
-  void addTraceEvents(
-      torch::profiler::impl::kineto::ActivityTraceWrapper& trace) {
-#ifdef USE_KINETO
-    const auto& events = *(trace.get()->activities());
-    for (const auto& ev_ptr : events) {
-      if (ev_ptr == nullptr) {
-        continue;
-      }
-      const auto& activity = *ev_ptr;
-      // These events are already processed
-      if (activity.type() != libkineto::ActivityType::CPU_OP &&
-          activity.type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
-          activity.type() != libkineto::ActivityType::USER_ANNOTATION &&
-          activity.type() != libkineto::ActivityType::PYTHON_FUNCTION) {
-        kineto_events_.emplace_back();
-        auto& kineto_event = kineto_events_.back();
-        kineto_event.name(activity.name())
-            .deviceIndex(activity.deviceId())
-            .deviceResourceId(activity.resourceId())
-            .startUs(activity.timestamp())
-            .durationUs(activity.duration())
-            .activityType((uint8_t)activity.type());
-        if (activity.linkedActivity()) {
-          kineto_event.linkedCorrelationId(
-              activity.linkedActivity()->correlationId());
-        }
-        kineto_event.deviceType(deviceTypeFromActivity(activity.type()));
-      }
-    }
-#endif // USE_KINETO
-  }
-
   uint64_t start_time_;
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
   torch::profiler::impl::RecordQueue record_queue_;
@@ -500,46 +477,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   post_process_t event_post_process_cb_;
 };
 
-class GlobalStateManager {
- public:
-  static GlobalStateManager& singleton() {
-    static GlobalStateManager singleton_;
-    return singleton_;
-  }
-
-  template <typename... Args>
-  static void init(Args... args) {
-    if (singleton().state_) {
-      LOG(WARNING) << "GlobalStatePtr already exists!";
-    } else {
-      singleton().state_ =
-          std::make_shared<KinetoThreadLocalState>(std::forward<Args>(args)...);
-    }
-  }
-
-  static auto* get() {
-    return singleton().state_.get();
-  }
-
-  static std::shared_ptr<c10::DebugInfoBase> pop() {
-    TORCH_INTERNAL_ASSERT(
-        singleton().state_ != nullptr,
-        "Global state ptr cannot be null before resetting");
-    auto out = singleton().state_;
-    singleton().state_.reset();
-    return out;
-  }
-
- private:
-  GlobalStateManager() = default;
-
-  std::shared_ptr<KinetoThreadLocalState> state_;
-};
+using KinetoTLSGlobalStateManager =
+    torch::profiler::impl::GlobalStateManager<KinetoThreadLocalState>;
 
 template <bool use_global>
 static KinetoThreadLocalState* getStatePtr() {
   return c10::guts::if_constexpr<use_global>(
-      [] { return GlobalStateManager::get(); },
+      [] { return KinetoTLSGlobalStateManager::get(); },
       [] { return KinetoThreadLocalState::getTLS(); });
 }
 
@@ -615,7 +559,7 @@ void reportBackendEventToActiveKinetoProfiler(
     const std::string& event_name,
     const std::string& backend_name) {
   TORCH_INTERNAL_ASSERT(
-      GlobalStateManager::get() == nullptr,
+      KinetoTLSGlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
 
   auto state_ptr = KinetoThreadLocalState::getTLS();
@@ -666,7 +610,7 @@ void enableProfilerWithEventPostProcess(
       config.state != ProfilerState::ITT,
       "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
-      GlobalStateManager::get() == nullptr,
+      KinetoTLSGlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
@@ -706,7 +650,7 @@ void enableProfiler(
   }
 
   if (config.state == ProfilerState::KINETO_ONDEMAND) {
-    GlobalStateManager::init(config, activities);
+    KinetoTLSGlobalStateManager::init(config, activities);
 
     TORCH_INTERNAL_ASSERT(
         activities.count(ActivityType::CPU),
@@ -718,9 +662,9 @@ void enableProfiler(
 std::unique_ptr<ProfilerResult> disableProfiler() {
   auto state_ptr = std::static_pointer_cast<
       torch::profiler::impl::ProfilerThreadLocalStateBase>(
-      GlobalStateManager::get() == nullptr
+      KinetoTLSGlobalStateManager::get() == nullptr
           ? c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE)
-          : GlobalStateManager::pop());
+          : KinetoTLSGlobalStateManager::pop());
 
   const auto& config = state_ptr->config();
   TORCH_CHECK(

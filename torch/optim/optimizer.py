@@ -272,7 +272,7 @@ class Optimizer(object):
         r"""Performs a single optimization step (parameter update).
 
         Args:
-            closure (callable): A closure that reevaluates the model and
+            closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
 
         .. note::

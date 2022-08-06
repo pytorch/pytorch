@@ -1760,7 +1760,8 @@ Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
@@ -1880,8 +1881,22 @@ Tensor _matmul_impl(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::Tensor unused;
-  auto result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  at::Tensor result, unused;
+  // Note [is_nested check]
+  // We have 2 choices to support nested tensor matmul:
+  // 1. intercept here by is_nested check
+  // 2. add nested tensor dispatch key
+  // Although 1. is gross, we still choose 1. because we hesitate about 2.:
+  // * We tried 2. for reshape and it caused a weird autograd bug
+  //   (see comment in reshape in TensorShape.cpp)
+  // * but 2. for linear works?
+  // TODO: use 2. after we make sure it is fine
+  if (tensor1.is_nested() || tensor2.is_nested()) {
+    result = at::_NestedTensor_GeneralizedBMM(tensor1, tensor2);
+  }
+  else {
+    result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
