@@ -73,9 +73,12 @@ class FakeTensorTest(TestCase):
     def test_nan_to_num(self):
         mode = FakeTensorMode(inner=None)
         with enable_torch_dispatch_mode(mode):
-            x = torch.rand([4])
-            y = torch.nan_to_num(x, nan=None)
-            z = torch.nan_to_num(x, 0.0)
+            for dtype in [torch.float16, torch.float32]:
+                x = torch.rand([4], dtype=dtype)
+                y = torch.nan_to_num(x, nan=None)
+                z = torch.nan_to_num(x, 0.0)
+                self.assertEqual(dtype, y.dtype)
+                self.assertEqual(dtype, z.dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_throw(self):
