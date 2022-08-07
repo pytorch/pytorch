@@ -48,7 +48,7 @@ devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-devel
 devel-image:
 	$(DOCKER_BUILD)
 
-.PHONY: devel-push 
+.PHONY: devel-push
 devel-push: BASE_IMAGE := $(BASE_DEVEL)
 devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-devel
 devel-push:
