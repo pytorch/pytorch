@@ -1555,6 +1555,7 @@ void initJITBindings(PyObject* module) {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = symbol.is_prims() ||
+              symbol.is_nvprims() ||
               (symbol.is_aten() &&
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
           for (const auto& op : operations) {
@@ -1599,6 +1600,7 @@ void initJITBindings(PyObject* module) {
           }
 
           bool allow_numbers_as_tensors = symbol.is_prims() ||
+              symbol.is_nvprims() ||
               (symbol.is_aten() &&
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 
