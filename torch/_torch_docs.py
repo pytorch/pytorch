@@ -2315,7 +2315,7 @@ add_docstr(
     r"""
 concatenate(tensors, axis=0, out=None) -> Tensor
 
-Alias of :func:`concatenate`.
+Alias of :func:`torch.cat`.
 """,
 )
 
