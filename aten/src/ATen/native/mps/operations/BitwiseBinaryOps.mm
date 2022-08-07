@@ -177,6 +177,7 @@ void handle_tensor_tensor_binary_op(const at::Tensor& self, const at::Tensor& ot
     [commandEncoder setBuffer:otherBuf offset:other.storage_offset()*other.itemsize() atIndex:3];
     dispatch1DJob(commandEncoder, cplState, length);
     [commandEncoder endEncoding];
+    stream->commit(true);
   });
 }
 
