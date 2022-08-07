@@ -55,3 +55,6 @@ input4 = torch.ones(2, 4, 8, device='cuda')
 
 for _ in range(5) :
     outputs = fmanager.execute([input3, input4, 2.0])
+
+print(outputs[0])
+print(outputs[1])

@@ -70,7 +70,7 @@ struct RecordFunctor {
   //! classes can utilize the check for the same args and outputs.
   virtual bool operator==(const RecordFunctor& other) const {
     auto result = (record_type_ == other.record_type_);
-    result = (args_.size() == other.args_.size()) &&
+    result = result && (args_.size() == other.args_.size()) &&
         (outputs_.size() == other.outputs_.size());
     if (result) {
       for (size_t i = 0; i < args_.size(); ++i) {

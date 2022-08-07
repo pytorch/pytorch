@@ -38,11 +38,17 @@ void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_.get());
   if (!cache_entry.has_value()) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+      std::cout << "\nFusionDefinition: Terminal Node not found.\n";
+    }
     fusion_manager_->createTerminalFusionCacheEntry(end_record_);
     fusion_manager_->traverseFusionCache(end_record_);
 
     buildFusionIr();
   } else {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+      std::cout << "\nFusionDefinition: Terminal Node found!\n";
+    }
     fusion_manager_->traverseFusionCache(end_record_);
   }
   Nvf::inst::Trace::instance()->endEvent(nullptr);
