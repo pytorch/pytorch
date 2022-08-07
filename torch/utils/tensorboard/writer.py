@@ -282,7 +282,7 @@ class SummaryWriter(object):
               contains names of the hyperparameters and all discrete values they can hold
             run_name (str): Name of the run, to be included as part of the logdir.
               If unspecified, will use current timestamp.
-            global_step (int): Current time step
+            global_step (int): Optional global step value to record with the summary.
 
         Examples::
 
