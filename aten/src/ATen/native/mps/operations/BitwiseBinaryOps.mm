@@ -143,6 +143,15 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
+void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length)
+{
+  uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::max(maxThreadsPerGroup, length), 1, 1);
+  [commandEncoder dispatchThreads:size
+            threadsPerThreadgroup:threadGroupSize];
+}
+
 void handle_tensor_tensor_binary_op(const at::Tensor& self, const at::Tensor& other, at::Tensor& output, const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
@@ -166,8 +175,7 @@ void handle_tensor_tensor_binary_op(const at::Tensor& self, const at::Tensor& ot
     [commandEncoder setBuffer:outBuf offset:output.storage_offset()*output.itemsize() atIndex:1];
     [commandEncoder setBuffer:selfBuf offset:self.storage_offset()*self.itemsize()  atIndex:2];
     [commandEncoder setBuffer:otherBuf offset:other.storage_offset()*other.itemsize() atIndex:3];
-    [commandEncoder dispatchThreadgroups:MTLSizeMake((length + 511) / 512, 1, 1)
-                    threadsPerThreadgroup:MTLSizeMake(512, 1, 1)];
+    dispatch1DJob(commandEncoder, cplState, length);
     [commandEncoder endEncoding];
   });
 }
