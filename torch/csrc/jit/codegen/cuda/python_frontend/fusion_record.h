@@ -42,9 +42,11 @@ struct RecordFunctor {
   RecordFunctor(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
+      std::string _name,
       RecordType _record_type)
       : args_(std::move(_args)),
         outputs_(std::move(_outputs)),
+        name_(_name),
         record_type_(_record_type) {}
   virtual ~RecordFunctor() = default;
 
@@ -98,6 +100,8 @@ struct RecordFunctor {
   std::vector<size_t> args_;
   //! Outputs that are indices into the FusionDefinition's Recorded State.
   std::vector<size_t> outputs_;
+  //! Record Name
+  std::string name_;
   //! Record Type of child class used for hashing
   RecordType record_type_;
 };
@@ -116,8 +120,9 @@ struct OpRecord : RecordFunctor {
   OpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
+      std::string _name,
       std::function<OutType(ArgTypes...)> fusion_op)
-      : RecordFunctor(std::move(_args), std::move(_outputs), RecordType::Op),
+      : RecordFunctor(std::move(_args), std::move(_outputs), _name, RecordType::Op),
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
 
@@ -139,7 +144,7 @@ struct OpRecord : RecordFunctor {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
         if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
-          std::cout << "\nOpRecord: Target Type [self: 0x" <<
+          std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x" <<
               fusion_op_.target_type().name() << "] [other: 0x" <<
               child_ptr->fusion_op_.target_type().name() << "]\n";
         }
@@ -148,10 +153,10 @@ struct OpRecord : RecordFunctor {
             (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
              *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
         if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
-          std::cout << "\nOpRecord: Target  Ptr [self: 0x" <<
-              std::hex << *(fusion_op_.template target<OutType (*)(ArgTypes...)>())
+          std::cout << "\nOpRecord: " << name_ << " Target  Ptr [self: 0x" <<
+              std::hex << (size_t) *fusion_op_.template target<OutType (*)(ArgTypes...)>()
               << "] [other: 0x" <<
-              std::hex << *(child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>())
+              std::hex << (size_t) *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>()
               << "]\n";
         }
       }
@@ -201,11 +206,13 @@ struct BroadcastOpRecord : RecordFunctor {
   BroadcastOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
+      std::string _name,
       std::vector<int64_t>& output_shape,
       std::vector<int64_t>& broadcast_dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
+            _name,
             RecordType::BroadcastOp),
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
@@ -303,11 +310,13 @@ struct CastOpRecord : RecordFunctor {
   CastOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
+      std::string _name,
       std::function<OutType(Nvf::DataType, ArgType)> fusion_op,
       Nvf::DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
+            _name,
             RecordType::CastOp),
         fusion_op_(fusion_op),
         dtype_(dtype) {}
@@ -359,7 +368,7 @@ struct CastOpRecord : RecordFunctor {
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
   ConstantRecord(std::vector<size_t> _outputs, ValueType val)
-      : RecordFunctor({}, std::move(_outputs), RecordType::Constant),
+      : RecordFunctor({}, std::move(_outputs), "scalar", RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
 
@@ -394,7 +403,7 @@ struct ConstantRecord : RecordFunctor {
 //! The accompanying Fusion Cache Entry holds a Fusion Object.
 
 struct EndRecord : RecordFunctor {
-  EndRecord() : RecordFunctor({}, {}, RecordType::End) {}
+  EndRecord() : RecordFunctor({}, {}, "end", RecordType::End) {}
   virtual ~EndRecord() = default;
 
   //! Child specific hash function in lower 32 bits.
@@ -423,7 +432,7 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
       Nvf::DataType _dtype)
-      : RecordFunctor({}, std::move(_outputs), RecordType::InputTensor),
+      : RecordFunctor({}, std::move(_outputs), "tensor", RecordType::InputTensor),
         symbolic_sizes_(std::move(_symbolic_sizes)),
         contiguous_info_(std::move(_contiguous_info)),
         dtype_(_dtype) {}
@@ -510,7 +519,7 @@ struct InputTensorRecord : RecordFunctor {
 template <class OutputType>
 struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<size_t> _args)
-      : RecordFunctor(std::move(_args), {}, RecordType::Output) {}
+      : RecordFunctor(std::move(_args), {}, "output", RecordType::Output) {}
   virtual ~OutputRecord() = default;
 
   //! Nothing extra necessary in hash
@@ -548,6 +557,7 @@ struct ReductionOpRecord : RecordFunctor {
   ReductionOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
+      std::string _name,
       std::function<Nvf::TensorView*(
           Nvf::TensorView*,
           std::vector<int>&,
@@ -559,6 +569,7 @@ struct ReductionOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
+            _name,
             RecordType::ReductionOp),
         fusion_op_(fusion_op),
         axes_(std::move(axes)),
@@ -638,7 +649,7 @@ struct ReductionOpRecord : RecordFunctor {
 
 struct ScalarRecord : RecordFunctor {
   ScalarRecord(std::vector<size_t> _outputs, Nvf::DataType dtype)
-      : RecordFunctor({}, std::move(_outputs), RecordType::Scalar),
+      : RecordFunctor({}, std::move(_outputs), "scalar", RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
 
@@ -686,7 +697,7 @@ struct ScalarRecord : RecordFunctor {
 //! Fusion Cache.
 
 struct StartRecord : RecordFunctor {
-  StartRecord() : RecordFunctor({}, {}, RecordType::Start) {}
+  StartRecord() : RecordFunctor({}, {}, "start", RecordType::Start) {}
   virtual ~StartRecord() = default;
 
   //! Child specific hash function in lower 32 bits.
@@ -719,6 +730,7 @@ struct VarianceOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
+            "var",
             RecordType::VarianceOp),
         axes_(axes),
         correction_(correction),

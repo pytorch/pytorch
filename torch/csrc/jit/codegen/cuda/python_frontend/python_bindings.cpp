@@ -240,6 +240,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>(    \
                 {input->index},                                           \
                 {output->index},                                          \
+                op_str,                                                   \
                 static_cast<Nvf::TensorView* (*)(Nvf::TensorView*)>(      \
                     Nvf::op_name)));                                      \
         return output;                                                    \
@@ -254,6 +255,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(                  \
                 {input->index},                                           \
                 {output->index},                                          \
+                op_str,                                                   \
                 static_cast<Nvf::Val* (*)(Nvf::Val*)>(Nvf::op_name)));    \
         return output;                                                    \
       },                                                                  \
@@ -317,6 +319,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(             \
             {arg1->index, arg2->index},                                     \
             {output->index},                                                \
+            op_str,                                                         \
             static_cast<                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*)>(  \
                 Nvf::op_name)));                                            \
@@ -335,6 +338,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                    \
             {arg1->index, arg2->index},                                     \
             {output->index},                                                \
+            op_str,                                                         \
             static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>( \
                 Nvf::op_name)));                                            \
         return output;                                                      \
@@ -352,6 +356,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(             \
             {arg1->index, arg2->index},                                     \
             {output->index},                                                \
+            op_str,                                                         \
             static_cast<Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*)>( \
                 Nvf::op_name)));                                            \
         return output;                                                      \
@@ -367,6 +372,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*>(         \
                 {arg1->index, arg2->index},                                 \
                 {output->index},                                            \
+                op_str,                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*)>(           \
                     Nvf::op_name)));                                        \
         return output;                                                      \
@@ -410,6 +416,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                             \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
+            op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::                                                                \
                     TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>( \
@@ -431,6 +438,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                             \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
+            op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(       \
                 Nvf::op_name)));                                                     \
@@ -451,6 +459,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                             \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
+            op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(       \
                 Nvf::op_name)));                                                     \
@@ -468,6 +477,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(       \
                 {arg1->index, arg2->index, arg3->index},                             \
                 {output->index},                                                     \
+                op_str,                                                              \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(         \
                     Nvf::op_name)));                                                 \
         return output;                                                               \
@@ -490,6 +500,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(              \
                 {arg1->index, arg2->index, arg3->index},                                    \
                 {output->index},                                                            \
+                op_str,                                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                \
                     Nvf::op_name)));                                                        \
         return output;                                                                      \
@@ -509,6 +520,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(                             \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
                     TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::TensorView*)>( \
@@ -530,6 +542,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                    \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
                     TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>(        \
@@ -551,6 +564,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(                             \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
                     TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::TensorView*)>(        \
@@ -572,6 +586,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(                             \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
                     TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::TensorView*)>(        \
@@ -593,6 +608,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(                             \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*)>(              \
                 Nvf::op_name)));                                                            \
@@ -613,6 +629,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                    \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(              \
                 Nvf::op_name)));                                                            \
@@ -633,6 +650,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                    \
             {arg1->index, arg2->index, arg3->index},                                        \
             {output->index},                                                                \
+            op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(              \
                 Nvf::op_name)));                                                            \
@@ -656,6 +674,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>( \
                 {arg1->index, arg2->index, arg3->index},                       \
                 {output->index},                                               \
+                op_str,                                                        \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(   \
                     Nvf::op_name)));                                           \
         return output;                                                         \
@@ -675,6 +694,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                       \
             {arg1->index, arg2->index, arg3->index},                           \
             {output->index},                                                   \
+            op_str,                                                            \
             static_cast<                                                       \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>( \
                 Nvf::op_name)));                                               \
@@ -703,6 +723,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                            \
                 Nvf::op_name)));                                                                       \
@@ -725,6 +746,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*>(                                        \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>( \
@@ -748,6 +770,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(        \
@@ -771,6 +794,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(        \
@@ -794,6 +818,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*)>(        \
@@ -817,6 +842,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(               \
@@ -840,6 +866,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(               \
@@ -863,6 +890,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*>(                                               \
             {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
             {output->index},                                                                           \
+            op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
                     TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(               \
@@ -886,6 +914,7 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::ReductionOpRecord( \
             {arg->index},                                                    \
             {output->index},                                                 \
+            op_str,                                                          \
             Nvf::op_name,                                                    \
             axes,                                                            \
             keep_dim,                                                        \
@@ -914,6 +943,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(  \
                 {arg->index},                                               \
                 {output->index},                                            \
+                op_str,                                                     \
                 static_cast<                                                \
                     Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>( \
                     Nvf::op_name),                                          \
@@ -931,6 +961,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(                \
                 {arg->index},                                               \
                 {output->index},                                            \
+                op_str,                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::DataType, Nvf::Val*)>(       \
                     Nvf::op_name),                                          \
                 dtype));                                                    \
@@ -966,7 +997,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::BroadcastOpRecord(
-            {arg->index}, {output->index}, output_shape, broadcast_dims));
+            {arg->index}, {output->index}, "broadcast_in_dim", output_shape, broadcast_dims));
         return output;
       },
       py::return_value_policy::reference);
