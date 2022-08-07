@@ -16681,7 +16681,7 @@ op_db: List[OpInfo] = [
             # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', 'ComplexFloat', and 'ComplexHalf'
-            DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive_nn_functional',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive',
                          device_type='cuda',
                          dtypes=(torch.chalf, torch.complex64, torch.complex128)),),
         supports_forward_ad=True,
