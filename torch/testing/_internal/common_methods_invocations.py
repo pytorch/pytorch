@@ -18808,13 +18808,20 @@ op_db: List[OpInfo] = [
             # hence, different values and this skip here
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
+                         device_type='cuda', dtypes=(torch.complex32,)),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
+                         device_type='cuda', dtypes=(torch.complex64,)),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
+                         device_type='cuda', dtypes=(torch.complex64,)),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', 'ComplexFloat', and 'ComplexHalf'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive_nn_functional',
+                         device_type='cuda',
+                         dtypes=(torch.chalf, torch.complex64, torch.complex128)),),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
