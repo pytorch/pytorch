@@ -631,4 +631,3 @@ Classes
     :template: classtemplate.rst
 
     SymbolicContext
-    JitScalarType
