@@ -1,8 +1,9 @@
 #pragma once
 
-#include <c10/macros/Export.h>
-
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+
+#include <c10/macros/Export.h>
 
 namespace torch {
 namespace jit {
@@ -44,6 +45,10 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
       IterDomain* broadcast_root_domain,
       IterDomain* concrete_root_domain);
 
+  bool insertRootDomainToConcreteDomainSet(
+      IterDomain* new_root_id,
+      std::unordered_set<IterDomain*>& id_set);
+
  private:
   //! Maps each root broadcast domain to its original root broadcast
   //! domains. Their can be multiple original domains due to, e.g.,
@@ -53,6 +58,8 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
   //! Map all broadcast domains to concrete root domains
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
       broadcast_to_concrete_map_;
+
+  std::unique_ptr<ExactRootDomainMap> exact_map_;
 };
 
 } // namespace cuda

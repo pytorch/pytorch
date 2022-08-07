@@ -7,8 +7,9 @@ import functools
 import pprint
 import pickle
 import collections
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -17,7 +18,7 @@ from torch.overrides import (
     is_tensor_method_or_property,
     TorchFunctionMode
 )
-from functools import partial
+from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
 
 Tensor = torch.Tensor
 
@@ -336,7 +337,7 @@ def generate_tensor_like_torch_implementations():
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
+        "torch.overrides.get_testing_overrides for this function or if a "
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
@@ -647,7 +648,11 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                elif t == 'Dimname':
+                    func_args.append("")
+                elif t == 'DimnameList':
+                    func_args.append([""])
+                elif t.startswith('int'):
                     func_args.append(0)
                 elif t in {'Stream'}:
                     func_args.append(torch.Stream())
@@ -1117,7 +1122,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
-@skipIfCrossRef
+@unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):
@@ -1125,7 +1130,7 @@ class TestTorchFunctionMode(TestCase):
                 return -1
         # NB: factory functions get overridden too!
         x = torch.randn(1)
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
             self.assertEqual(torch.split(None, [2]), -1)  # python side
@@ -1136,7 +1141,7 @@ class TestTorchFunctionMode(TestCase):
             def __torch_function__(self, *args, **kwargs):
                 return -1
 
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             self.assertEqual(torch.tensor([1]), -1)
             self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
             self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
@@ -1155,7 +1160,7 @@ class TestTorchFunctionMode(TestCase):
                 return -40
 
         x = SubTensor()
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             self.assertEqual(torch.neg(x), -40)
             self.assertEqual(torch.mean(x), -40)
             self.assertEqual(torch.mm(x, x), -40)
@@ -1167,45 +1172,13 @@ class TestTorchFunctionMode(TestCase):
                 return NotImplemented
 
         x = SubTensor()
-        with torch.overrides.push_torch_function_mode(MyMode):
+        with MyMode():
             self.assertEqual(torch.mean(x), 0)
             self.assertEqual(torch.mm(x, x), -1)
             self.assertEqual(bar(x), 1)
             self.assertRaisesRegex(
                 TypeError, r'SubTensor.+MyMode',
                 lambda: self.assertEqual(torch.max(x, x)))
-
-    def test_mode_stack(self):
-        logs = []
-
-        class Logger(TorchFunctionMode):
-            def __init__(self, name):
-                self.name = name
-
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                logs.append(self.name)
-                return func(*args, **kwargs)
-
-        x = torch.randn(1)
-        with torch.overrides.push_torch_function_mode(partial(Logger, "A")):
-            with torch.overrides.push_torch_function_mode(partial(Logger, "B")):
-                torch.mean(x)
-
-        self.assertEqual(logs, ["B", "A"])
-
-    def test_push_mode_instance_errors(self):
-        class A(TorchFunctionMode):
-            pass
-        with self.assertRaisesRegex(ValueError, 'instance of TorchFunctionMode'):
-            with torch.overrides.push_torch_function_mode(A()):
-                pass
-
-    def test_push_mode_returns_unrelated(self):
-        with self.assertRaisesRegex(ValueError, 'return a TorchFunctionMode'):
-            with torch.overrides.push_torch_function_mode(lambda *, inner: None):
-                pass
 
     def test_enable_torch_function_mode_trivial(self):
         class A(TorchFunctionMode):
@@ -1294,7 +1267,7 @@ class TestTorchFunctionMode(TestCase):
             with A("layer2"):
                 torch.empty([])
 
-        self.assertEquals(out, ["layer2", "layer1"])
+        self.assertEqual(out, ["layer2", "layer1"])
 
     def test_error_using_same_mode(self):
         class A(TorchFunctionMode):
@@ -1302,9 +1275,137 @@ class TestTorchFunctionMode(TestCase):
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
+
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchFunctionMode):
+            @classmethod
+            def __torch_function__(cls, func, _, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
+    def test_error_with_ancestor(self):
+        class A(TorchFunctionMode):
+            pass
+
+        with A() as x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        class A(TorchFunctionMode):
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with A().restore():
+                pass
+
+        x = A()
+        with A():
+            with x:
+                pass
+
+        with A():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+
+    def test_restore_ancestor_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        with x:
+            with y:
+                pass
+
+        z = A()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
+
+    def test_find_outermost_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        self.assertIsNone(find_outermost_mode([None, None]))
+
+        x = A()
+        y = A()
+        with x:
+            with y:
+                pass
+
+        self.assertEqual(find_outermost_mode([x, y]), y)
+
+        z = A()
+        with y.restore():
+            with z:
+                pass
+
+        self.assertEqual(find_outermost_mode([z, x]), z)
+        i = A()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
+        k = A()
+        with k:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
+            find_outermost_mode([k, x, y, z])
+
+    def test_all_same_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        self.assertTrue(all_same_mode([x, x, x]))
+        self.assertFalse(all_same_mode([x, None]))
+        self.assertFalse(all_same_mode([x, y]))
+
+    def test_all_same_mode_scope(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        z = A()
+        with x:
+            with y:
+                pass
+
+        with x.restore():
+            with z:
+                pass
+
+        i = A()
+
+        self.assertTrue(all_same_mode_scope([x, y], y))
+        self.assertTrue(all_same_mode_scope([x, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, z], y))
+        self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
+
+        no_ancestor = A()
+        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_reentrant_mode_idiom(self):
         log = []
@@ -1323,7 +1424,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = torch.randn(1)
         y = torch.randn(1)
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             torch.sub(x, y)
         # add hits the torch function again!
         self.assertEqual(log, [torch.sub, torch.add])
@@ -1342,7 +1443,7 @@ class TestTorchFunctionMode(TestCase):
                 called = True
                 return func(*args, **kwargs)
 
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             torch._C._nn._parse_to('cpu')
 
         self.assertTrue(called)
@@ -1363,7 +1464,7 @@ class TestTorchFunctionMode(TestCase):
                 called = True
                 return func(*args, **kwargs)
 
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             torch.distributions.Bernoulli(0.3)
 
         self.assertTrue(called)
@@ -1396,7 +1497,7 @@ class TestTorchFunctionMode(TestCase):
 
         b = B()
 
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             r = torch.neg(b)
 
         self.assertIs(type(r), B)
@@ -1404,13 +1505,46 @@ class TestTorchFunctionMode(TestCase):
 
         called = 0
 
-        with torch.overrides.push_torch_function_mode(A):
+        with A():
             r = bar(b)
 
         self.assertIs(type(r), B)
         self.assertEqual(called, 2)
 
+    def test_disable_subclass_not_mode(self):
+        called = False
 
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with A():
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertTrue(called)
+
+    def test_disable_enable_subclass(self):
+        called = False
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(5))
+        with torch._C.DisableTorchFunction():
+            g = torch._C._EnableTorchFunction()
+            try:
+                self.assertIsInstance(torch.sum(x), A)
+            finally:
+                del g
 
 
 if __name__ == '__main__':

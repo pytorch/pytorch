@@ -533,6 +533,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex
@@ -613,6 +614,10 @@ Utilities
     vmap
     _assert
 
+Operator Tags
+------------------------------------
+.. autoclass:: Tag
+    :members:
 
 .. Empty submodules added only for tracking.
 .. py:module:: torch.contrib

@@ -4,7 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
-from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
+from torch.ao.quantization.quant_type import QuantType
 from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
@@ -168,8 +168,7 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
         corresponding observed/quantized custom module class for input custom module instance
     """
     quant_type = get_quant_type(qconfig)
-    quant_type_str = quant_type_to_str(quant_type)
-    class_mapping = custom_module_class_mapping.get(quant_type_str, {})
+    class_mapping = custom_module_class_mapping.get(quant_type, {})
     assert type(custom_module) in class_mapping, "did not find corresponding observed " \
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
@@ -495,35 +494,29 @@ def get_fqn_to_example_inputs(
     root = model
     fqn_to_example_inputs = {}
 
-    class InterceptionModule(type(model)):  # type: ignore[misc]
-        def __call__(self, *args, **kwargs):
-            orig_module_call = torch.nn.Module.__call__
+    def _patched_module_call(self, *args, **kwargs):
+        submodule_example_inputs = list(args).copy()
+        normalized_kwargs = _normalize_kwargs(self.forward, kwargs)
+        # minus 1 to skipping counting `self`
+        num_args = _get_num_pos_args(self.forward) - 1
+        num_to_pop = num_args - len(submodule_example_inputs)
+        while num_to_pop and normalized_kwargs:
+            normalized_kwargs.popitem(last=False)
+            num_to_pop -= 1
+        submodule_example_inputs.extend(normalized_kwargs.values())
+        submodule_example_inputs_tuple = tuple(submodule_example_inputs)
+        fqn = _get_path_of_module(root, self)
+        if fqn is not None:
+            fqn_to_example_inputs[fqn] = submodule_example_inputs_tuple
+        return orig_module_call(self, *args, **kwargs)
 
-            def _patched_module_call(self, *args, **kwargs):
-                submodule_example_inputs = list(args).copy()
-                normalized_kwargs = _normalize_kwargs(self.forward, kwargs)
-                # minus 1 to skipping counting `self`
-                num_args = _get_num_pos_args(self.forward) - 1
-                num_to_pop = num_args - len(submodule_example_inputs)
-                while num_to_pop and normalized_kwargs:
-                    normalized_kwargs.popitem(last=False)
-                    num_to_pop -= 1
-                submodule_example_inputs.extend(normalized_kwargs.values())
-                submodule_example_inputs_tuple = tuple(submodule_example_inputs)
-                fqn = _get_path_of_module(root, self)
-                if fqn is not None:
-                    fqn_to_example_inputs[fqn] = submodule_example_inputs_tuple
-                return orig_module_call(self, *args, **kwargs)
-
-            torch.nn.Module.__call__ = _patched_module_call
-            super().__call__(*args, **kwargs)
-            torch.nn.Module.__call__ = orig_module_call
-
-    original_class = model.__class__
-    model.__class__ = InterceptionModule
-    model(*example_inputs)
-    model.__class__ = original_class
-
+    orig_module_call = torch.nn.Module.__call__
+    torch.nn.Module.__call__ = _patched_module_call
+    try:
+        model(*example_inputs)
+    finally:
+        # restore the module call even if there is an exception
+        torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
 
 

@@ -162,7 +162,7 @@ invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t stri
             std::index_sequence<INDEX...>) {
   (void)strides;
   (void)i;
-  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
+  return f(c10::load<typename traits::template arg<INDEX>::type>(data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>

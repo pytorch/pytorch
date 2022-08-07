@@ -34,7 +34,21 @@ void load_platform_library() {
 // Instead, delay all work until the explicit init call.
 void NnapiCompilation::init(
     at::Tensor serialized_model_tensor,
-    std::vector<at::Tensor> parameter_buffers) {
+    std::vector<at::Tensor> parameter_buffers
+) {
+  init2(
+    serialized_model_tensor,
+    std::move(parameter_buffers),
+    ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
+    false);
+}
+
+void NnapiCompilation::init2(
+    at::Tensor serialized_model_tensor,
+    std::vector<at::Tensor> parameter_buffers,
+    int64_t compilation_preference,
+    bool relax_f32_to_f16
+  ) {
   TORCH_CHECK(!model_, "Attempted to re-initialize NnapiCompilation.");
 
   load_platform_library();
@@ -82,13 +96,16 @@ void NnapiCompilation::init(
       nullptr);
   CAFFE_ENFORCE(load_result == 0);
 
+  if (relax_f32_to_f16) {
+    check_nnapi->Model_relaxComputationFloat32toFloat16(model_.get(), true);
+  }
   check_nnapi->Model_finish(model_.get());
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ANeuralNetworksCompilation* compilation;
   check_nnapi->Compilation_create(model_.get(), &compilation);
   // TODO: Make this configurable.
-  check_nnapi->Compilation_setPreference(compilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
+  check_nnapi->Compilation_setPreference(compilation, static_cast<int32_t>(compilation_preference));
   check_nnapi->Compilation_finish(compilation);
   compilation_.reset(compilation);
 }

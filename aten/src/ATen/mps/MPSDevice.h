@@ -58,7 +58,7 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 
-at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
+TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
 } // namespace mps
 } // namespace at

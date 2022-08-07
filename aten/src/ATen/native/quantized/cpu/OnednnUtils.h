@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED()
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 

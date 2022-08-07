@@ -68,7 +68,7 @@ if __name__ == '__main__':
                        'pin_memory': True,
                        'shuffle': True,
                        'batch_size': bsz}
-    train_kwargs.update(cuda_kwargs)
+        train_kwargs.update(cuda_kwargs)
 
     transform = transforms.Compose([
         transforms.ToTensor(),

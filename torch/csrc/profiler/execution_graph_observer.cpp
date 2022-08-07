@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+
 #include <processthreadsapi.h>
 #else
 #include <unistd.h>
@@ -244,6 +245,7 @@ void writeJsonNode(
     const uint64_t rf_id,
     const uint64_t parent,
     const uint64_t fw_parent,
+    const int64_t seq_id,
     const uint64_t scope,
     const uint64_t tid,
     const uint64_t fw_tid,
@@ -257,7 +259,7 @@ void writeJsonNode(
   out << fmt::format(
       R"JSON(
     {{
-      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
+      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "seq_id": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
       "inputs": {}, "input_shapes": {}, "input_types": {},
       "outputs": {}, "output_shapes": {}, "output_types": {}
     }})JSON",
@@ -266,6 +268,7 @@ void writeJsonNode(
       rf_id,
       parent,
       fw_parent,
+      seq_id,
       scope,
       tid,
       fw_tid,
@@ -321,6 +324,7 @@ void finalizeExecutionGraphOutput(ExecutionGraphObserver& ob) {
       0, // rf_id
       root_id, // parent is self
       0, // fw_parent
+      -1, // seq_id
       static_cast<std::underlying_type_t<RecordScope>>(RecordScope::USER_SCOPE),
       0, // tid
       0); // fw_tid
@@ -429,6 +433,7 @@ void recordOperatorStart(
           0, // rf_id
           root_id,
           0, // fw_parent
+          -1, // seq_id
           static_cast<std::underlying_type_t<RecordScope>>(
               RecordScope::USER_SCOPE),
           tid,
@@ -545,6 +550,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           fn.handle(),
           fc.parent_id,
           fc.fw_parent_id,
+          fn.seqNr(),
           static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
           fn.threadId(),
           fn.forwardThreadId(),

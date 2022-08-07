@@ -9,7 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cudnn/utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <torch/library.h>
 
 #include <tuple>

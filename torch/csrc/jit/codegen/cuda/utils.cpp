@@ -35,7 +35,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
-      {DebugDumpOption::PerfDebugVerbose, false}};
+      {DebugDumpOption::PerfDebugVerbose, false},
+      {DebugDumpOption::TransformPropagator, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -82,6 +83,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
+      } else if (token == "transform_propagator") {
+        options_map[DebugDumpOption::TransformPropagator] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -105,6 +108,7 @@ auto parseDebugDumpOptions() {
 
 auto parseDisableOptions() {
   std::unordered_map<DisableOption, bool> options_map = {
+      {DisableOption::ArchCheck, false},
       {DisableOption::Fallback, false},
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
@@ -117,9 +121,13 @@ auto parseDisableOptions() {
     while (!options_view.empty()) {
       const auto end_pos = options_view.find_first_of(',');
       const auto token = options_view.substr(0, end_pos);
-      if (token == "fallback") {
+      if (token == "arch_check") {
+        options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
+        TORCH_WARN(
+            "fmad is disabled for nvrtc, which could negatively affect performance. Try removing `fma` from env variable PYTORCH_NVFUSER_DISABLE for optimal performance.");
         options_map[DisableOption::Fma] = true;
       } else if (token == "index_hoist") {
         options_map[DisableOption::IndexHoist] = true;
@@ -135,8 +143,45 @@ auto parseDisableOptions() {
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfallback, fma, index_hoist, nvtx, predicate_elimination\n",
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n",
             "unroll_with_rng");
+      }
+      options_view = (end_pos != c10::string_view::npos)
+          ? options_view.substr(end_pos + 1)
+          : "";
+    }
+  }
+
+  return options_map;
+}
+
+auto parseEnableOptions() {
+  std::unordered_map<EnableOption, bool> options_map = {
+      {EnableOption::Complex, false},
+      {EnableOption::KernelProfile, false},
+      {EnableOption::LinearDecomposition, false},
+      {EnableOption::ConvDecomposition, false}};
+
+  if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
+    c10::string_view options_view(dump_options);
+    while (!options_view.empty()) {
+      const auto end_pos = options_view.find_first_of(',');
+      const auto token = options_view.substr(0, end_pos);
+      if (token == "complex") {
+        options_map[EnableOption::Complex] = true;
+      } else if (token == "kernel_profile") {
+        options_map[EnableOption::KernelProfile] = true;
+      } else if (token == "linear_decomposition") {
+        options_map[EnableOption::LinearDecomposition] = true;
+      } else if (token == "conv_decomposition") {
+        options_map[EnableOption::ConvDecomposition] = true;
+      } else {
+        TORCH_CHECK(
+            false,
+            "Invalid disable option: '",
+            token,
+            "'\nAvailable options:\n",
+            "\tcomplex, kernel_profile");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -237,6 +282,11 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
 
 bool isDisabled(DisableOption option) {
   const static auto options = parseDisableOptions();
+  return options.at(option);
+}
+
+bool isEnabled(EnableOption option) {
+  const static auto options = parseEnableOptions();
   return options.at(option);
 }
 

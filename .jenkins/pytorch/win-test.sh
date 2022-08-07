@@ -1,7 +1,5 @@
 #!/bin/bash
 set -ex
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -66,12 +64,15 @@ run_tests() {
         fi
     done
 
-    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
-    if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
+    if [[ "${TEST_CONFIG}" == *functorch* ]]; then
+        "$SCRIPT_HELPERS_DIR"/install_test_functorch.bat
+    elif [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
+        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then

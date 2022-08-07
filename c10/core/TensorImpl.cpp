@@ -69,8 +69,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-// some compiler does not generate the destructor correctly
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -150,6 +151,8 @@ TensorImpl::TensorImpl(
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
 
+  // XXX: if updating keyset logic here also update
+  // _change_backend_component_keys
   bool inference_mode = c10::InferenceMode::is_enabled();
 
   // TODO: be more explicit about the full key set at call sites so we
@@ -183,20 +186,43 @@ TensorImpl::TensorImpl(
   // Caffe2 operators create Storages with default devices.
 }
 
+void TensorImpl::_change_backend_component_keys(c10::Device device) {
+  BackendComponent new_backend = toBackendComponent(device.type());
+  BackendComponent old_backend = key_set_.highestBackendKey();
+
+  // following logic TensorImpl::TensorImpl, update the BackendComponent related
+  // keys to correspond to device
+
+  // TODO: Autocoast should be a per-backend functionality key, once that change
+  // is made this key swap will not be necessary.
+  auto key_set =
+      key_set_ - c10::getAutocastRelatedKeySetFromBackend(old_backend);
+  key_set = key_set | c10::getAutocastRelatedKeySetFromBackend(new_backend);
+
+  // See note [Removing keys from DispatchKeySet Only Affects Functionality
+  // Keys]
+  key_set = key_set.remove_backend(old_backend);
+  key_set_ = key_set | DispatchKeySet(new_backend);
+}
+
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
   bool reset_tensor = false;
+
+  TORCH_CHECK(!numel_.is_symbolic(), "CAFFE2 doesn't support SymInts");
+  int concrete_numel = numel_.as_int_unchecked();
   if (reserved_) {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
-    reset_tensor =
-        storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
+    reset_tensor = storage_.nbytes() <
+        (storage_offset_ + concrete_numel) * data_type_.itemsize();
   } else {
     reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize() ||
+            (storage_offset_ + concrete_numel) * data_type_.itemsize() ||
         !FLAGS_caffe2_keep_on_shrink ||
-        storage_.nbytes() - (storage_offset_ + numel_) * data_type_.itemsize() >
+        storage_.nbytes() -
+                (storage_offset_ + concrete_numel) * data_type_.itemsize() >
             static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
   }
 
@@ -330,6 +356,10 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  destroy_pyobj_if_needed();
+}
+
+void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
@@ -379,15 +409,25 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->sizes(this);
+  }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
+
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have sym sizes");
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_sizes(this);
+  }
+  return sym_sizes_default();
+}
+
+c10::SymInt TensorImpl::sym_numel_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_numel(this);
+  }
+  return sym_numel_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
@@ -399,19 +439,35 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->strides(this);
+  }
   TORCH_CHECK(
       false,
       "Tensors of type ",
       tensorimpl_type_name(),
       " do not have strides");
 }
+
 int64_t TensorImpl::dim_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->dim(this);
+  }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
+
 int64_t TensorImpl::numel_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
+}
+
+c10::Layout TensorImpl::layout_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->layout(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have layout");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -502,8 +558,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
+
+  // We currently don't support refresh_numel() and refresh_contiguous(). It's
+  // plausible that we could support it, but currently done to unblock.
+  if (!has_symbolic_sizes_strides()) {
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+  }
   return impl;
 }
 
@@ -536,6 +597,9 @@ void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
+  dest_impl->has_symbolic_sizes_strides_ =
+      src_impl->has_symbolic_sizes_strides_;
+
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
@@ -553,6 +617,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
@@ -571,7 +636,6 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
       (dest_impl->key_set_ & c10::python_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
 }
@@ -637,7 +701,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
           (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
-  auto oldSize = numel_;
+  auto oldSize = numel_.as_int_unchecked();
   Resize(newCapacity);
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
@@ -673,7 +737,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
       "Right now ReserveSpace is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "ReserveSpace() called on tensor with symbolic shape")
+      "ReserveSpace() called on tensor with symbolic shape");
 
   TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
@@ -705,7 +769,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
       "Right now Reshape is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "Reshape() called on tensor with symbolic shape")
+      "Reshape() called on tensor with symbolic shape");
 
   int64_t new_size = 1;
   for (auto d : dims) {
@@ -713,7 +777,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
     new_size *= d;
   }
   TORCH_CHECK(
-      new_size == numel_,
+      new_size == numel_.as_int_unchecked(),
       "New size and old size are not equal. You cannot use Reshape, "
       "but should use Resize."
       // TODO(jiayq): remove the following warning after pending diffs
@@ -727,7 +791,12 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
 
 void TensorImpl::FreeMemory() {
   // We'll detach from the old Storage and create a new one
-  storage_ = Storage::create_legacy(storage_.device());
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
+    storage_ = Storage::create_legacy(storage_.device());
+  } else {
+    storage_.reset_legacy();
+  }
   storage_offset_ = 0;
 }
 
@@ -770,8 +839,11 @@ void TensorImpl::ShareExternalPointer(
       data_type != ScalarType::Undefined,
       "To share with a raw external pointer you need to pass in an "
       "initialized data_type(TypeMeta).");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "ReserveSpace() called on tensor with symbolic shape");
   if (!size_bytes) {
-    size_bytes = numel_ * data_type.itemsize();
+    size_bytes = numel_.as_int_unchecked() * data_type.itemsize();
   }
   if (storage_.unique()) {
     storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
@@ -790,6 +862,15 @@ void TensorImpl::ShareExternalPointer(
     device_opt_ = storage_.device();
     storage_offset_ = 0;
   }
+}
+
+void TensorImpl::set_sym_sizes_and_strides(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
+  has_symbolic_sizes_strides_ = true;
+  sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
+  sizes_and_strides_.set_sizes(sizes);
+  sizes_and_strides_.set_strides(strides);
 }
 
 namespace impl {

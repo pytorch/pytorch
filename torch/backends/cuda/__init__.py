@@ -134,10 +134,14 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     * :func:`torch.linalg.cholesky_ex`
     * :func:`torch.cholesky_solve`
     * :func:`torch.cholesky_inverse`
-    * :func:`torch.lu`
+    * :func:`torch.linalg.lu_factor`
+    * :func:`torch.linalg.lu`
+    * :func:`torch.linalg.lu_solve`
     * :func:`torch.linalg.qr`
     * :func:`torch.linalg.eigh`
+    * :func:`torch.linalg.eighvals`
     * :func:`torch.linalg.svd`
+    * :func:`torch.linalg.svdvals`
     '''
 
     if backend is None:

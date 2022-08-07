@@ -1,5 +1,9 @@
 #pragma once
 
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
@@ -9,12 +13,14 @@
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #include <torch/custom_class.h>
 
-#include <string>
-#include <vector>
+/**
+ * Defines the public API for loading flatbuffer-serialized mobile modules.
+ */
 
 namespace torch {
 namespace jit {
 
+/// Maps file names to file contents.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 // On high level, to produce a Module from a file on disk, we need to go
@@ -27,6 +33,7 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // Under this context, the structure described in 2. is
 // mobile::serialization::Module
 
+/// DEPRECATED: Use a parse/load function below.
 // Parse a mobile::Module from flatbuffer's in-memory Module representation.
 // The caller is assumed to manage the lifetimes of Module.
 // This function does step 3 described above.
@@ -41,39 +48,92 @@ TORCH_API mobile::Module initialize_mobile_module(
     bool should_copy_tensor_memory = false);
 
 // Parse a mobile::Module from raw bytes.
-// ownership of data is shared to the returned Module.
-// (Feel free to pass in a unique_ptr too!)
-// This function does steps 2+3 described above
+//
+// This function does steps 2+3 described above.
+//
+// Does not take ownership of `data`; if you want it to take ownership, see the
+// shared_ptr overload of this function.
+//
+// If should_copy_tensor_memory is true, then the returned module will NOT have
+// refences to `data`, so `data` can be freed immediately.
+//
+// If should_copy_tensor_memory is false, then returned module will have tensors
+// that points inside of `data`; the caller will need to make sure that `data`
+// outlives the returned Module.
+TORCH_API mobile::Module parse_and_initialize_mobile_module(
+    void* data,
+    size_t size, // of `data`, in bytes.
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr,
+    bool should_copy_tensor_memory = false);
+
+// Parse a mobile::Module from raw bytes.
+//
+// This function does steps 2+3 described above.
+//
+// The returned Module holds a reference to `data`.
+//
+// If you do not want the Module to hold a reference to `data`, see the raw
+// pointer overload of this function.
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
-    size_t size,
-    c10::optional<at::Device> device = c10::nullopt);
+    size_t size, // of `data`, in bytes.
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
+
+// Parse a mobile::Module from raw bytes, also returning JIT-related metadata.
+//
+// This is the same as parse_and_initialize_mobile_module() except that it also
+// extracts JIT source files and constants. Can be used to construct a
+// jit::Module.
+TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
+    void* data,
+    size_t size, // of `data`, in bytes.
+    ExtraFilesMap& jit_sources,
+    std::vector<IValue>& jit_constants,
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
 
 // Load a mobile::Module from a filepath.
+//
 // This function does steps 1+2+3 described above.
-// We need to have this as a convienience because Python
-// API will need to wrap this. C++ clients should use one
-// versions above.
+//
+// We need to have this as a convienience because Python API will need to wrap
+// this. C++ clients should use one of the versions of
+// parse_and_initialize_mobile_module() so they can manage the raw data more
+// directly.
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt);
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
 
+/// DEPRECATED: Use the `extra_files` parameter of one of the parse/load
+/// functions above.
 TORCH_API void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files);
 
-TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
-    const char* filename);
-
-TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
-    std::istream& in);
-
 TORCH_API uint64_t get_bytecode_version(std::istream& in);
 TORCH_API uint64_t get_bytecode_version(const std::string& filename);
+TORCH_API uint64_t get_bytecode_version_from_bytes(char* flatbuffer_content);
 
 TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
     char* flatbuffer_content);
 
+// The methods below are less efficient because it need to read the stream in
+// its entirity to a buffer
+TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
+    std::istream& in,
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
+
+// This function will make the capabilities to load
+// Module as a flatbuffer file available for use by _load_for_mobile
+// and friends. This is NOT needed if using the other functions
+// in this file directly.
+TORCH_API bool register_flatbuffer_loader();
+
+/// DEPRECATED: Use one of the parse/load functions above.
 class TORCH_API FlatbufferLoader {
  public:
   FlatbufferLoader();
@@ -141,6 +201,9 @@ class TORCH_API FlatbufferLoader {
   IValue parseIValue(const mobile::serialization::IValue* ivalue);
   std::unique_ptr<mobile::Function> parseFunction(
       const mobile::serialization::Function* method);
+  void parseAndPopulate(
+      uint32_t i,
+      const mobile::serialization::IValue* ivalue);
 
   std::unordered_map<uint32_t, mobile::Function*> all_functions_;
   std::vector<ClassTypePtr> all_types_;
@@ -158,6 +221,8 @@ class TORCH_API FlatbufferLoader {
   bool module_parsed_ = false;
   bool should_copy_tensor_memory_ = false;
   bool should_load_operators_ = true;
+  // 0 -> mobile_ivalue_size_ elements are from the mobile module.
+  uint32_t mobile_ivalue_size_ = 0;
 };
 
 } // namespace jit

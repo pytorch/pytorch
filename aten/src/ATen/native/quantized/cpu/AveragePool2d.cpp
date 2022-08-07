@@ -361,7 +361,7 @@ Tensor avg_pool2d_quantized_cpu(
   Tensor output;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      input.scalar_type() == kQUInt8) {
+      input.scalar_type() == kQUInt8 && !ceil_mode) {
     return at::native::qnnp_avgpool_helper::qnnpack_avg_pool2d(
         input,
         kernel_size,
