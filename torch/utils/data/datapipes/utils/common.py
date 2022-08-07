@@ -25,6 +25,25 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     """
     Checks that function used in a map style datapipe works with the input column
 
+    This simply ensures that the number of keyword or positional arguments matches
+    the size of the input column. The function must not contain any non-default
+    keyword-only arguments.
+
+    Examples:
+        >>> def f(a, b, *, c=1):
+        >>>     return a + b + c
+        >>> def f_def(a, b=1, *, c=1):
+        >>>     return a + b + c
+        >>> assert validate_input_col(f, [1, 2])
+        >>> assert validate_input_col(f_def, 1)
+        >>> assert validate_input_col(f_def, [1, 2])
+
+    Notes:
+        If the function contains variable positional (`inspect.VAR_POSITIONAL`) arguments,
+        for example, f(a, *args), the validator will accept any size of input column
+        greater than or equal to the number of positional or keyword arguments.
+        (in this case, 1).
+
     Args:
         fn: The function to check.
         input_col: The input column to check.
@@ -83,7 +102,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                     f"but {input_col_size} are required."
                 )
 
-    if len(sig.parameters) < input_col_size:
+    else:
         if inspect.Parameter.VAR_POSITIONAL not in [p.kind for p in sig.parameters.values()]:
             raise ValueError(
                 f"The function {fn_name} takes {len(sig.parameters)} "
