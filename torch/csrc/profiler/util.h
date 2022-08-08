@@ -156,6 +156,42 @@ uint64_t TORCH_API computeFlops(
     const std::string& op_name,
     const std::unordered_map<std::string, c10::IValue>& extra_args);
 
+template <typename T>
+class GlobalStateManager {
+ public:
+  TORCH_API static GlobalStateManager& singleton() {
+    static GlobalStateManager singleton_;
+    return singleton_;
+  }
+
+  template <typename... Args>
+  static void init(Args... args) {
+    if (singleton().state_) {
+      LOG(WARNING) << "GlobalStatePtr already exists!";
+    } else {
+      singleton().state_ = std::make_shared<T>(std::forward<Args>(args)...);
+    }
+  }
+
+  static auto* get() {
+    return singleton().state_.get();
+  }
+
+  static std::shared_ptr<T> pop() {
+    TORCH_INTERNAL_ASSERT(
+        singleton().state_ != nullptr,
+        "Global state ptr cannot be null before resetting");
+    auto out = singleton().state_;
+    singleton().state_.reset();
+    return out;
+  }
+
+ private:
+  GlobalStateManager() = default;
+
+  std::shared_ptr<T> state_;
+};
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch

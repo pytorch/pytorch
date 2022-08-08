@@ -81,10 +81,6 @@ struct BatchedTensorImpl : public c10::TensorImpl {
   void _unsafe_set_level(int64_t level) {
     level_ = level;
   }
-  void unsafe_set_bdim(int64_t bdim) {
-    // NB: you MUST call refreshTensorMetadata after doing this.
-    bdim_ = bdim;
-  }
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
