@@ -51,7 +51,7 @@ _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 
-# This function directly adds derivative entries for {view}_copy variants of each view op.
+# This function directly adds per-dispatchkey derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
 # we generate them here instead of duplicating them in the yaml.
 # See Note [Codegen'd {view}_copy Operators]
@@ -134,13 +134,13 @@ def load_derivatives(
         # disambiguate them with a numeric suffix.
         op_counter = Counter[str]()
 
-        # FIXME: change infos to a Dict[Key] --> Dict[DifferentiabilityInfo]
-        # maybe could be List[DifferentiabilityInfo] and add key field to DifferentiabilityInfo
-        # or alternatively DifferentiabilityInfoWithKey
-        infos = dict()
+        # infos is a dict that maps FunctionSchema -> a dict of per dispatch key DifferentiabilityInfos
+        # this is useful because in tools/autograd/gen_autograd.py:match_differentiability_info
+        # we ultimately need to categorize the DifferentiabilityInfos by FunctionSchema
+        infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]] = dict()
         used_dispatch_keys: Set[str] = set()
         for defn_dict in definitions:
-            # key should perhaps be just the name and not the signature
+            # Ensure that the old derivatives.yaml schema with no dispatch key can be loaded.
             if "dispatch" not in defn_dict:
                 specification = defn_dict.pop("name")
                 defn_dict = {"name": specification, "dispatch": {"Default": defn_dict}}
@@ -155,6 +155,9 @@ def load_derivatives(
 
         add_view_copy_derivatives(infos, view_groups)
 
+        # cache both loaded infos as well a a set of all the dispatch_keys/aliases
+        # that appear in derivatives.yaml. used_dispatch_keys is useful for generating
+        # VariableType.cpp where we need a TORCH_LIBRARY_IMPL for every autograd dispatch key used
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos, used_dispatch_keys
 
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]

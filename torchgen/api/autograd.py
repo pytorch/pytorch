@@ -376,139 +376,134 @@ Attempted to convert a derivative formula for a mutable operator
             )
             continue
 
-        fw_derivative_dict = dict()
+        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = dict()
         for key, info in info_dict.items():
+            if not info.forward_derivatives:
+                fw_derivative_dict[key] = []
+                continue
+
+            forward_derivatives = info.forward_derivatives
+
             # For functions that have a single def for out-of-place and inplace (like abs())
-            if info.forward_derivatives:
-                forward_derivatives = info.forward_derivatives
+            if f.func.kind() == SchemaKind.inplace:
+                # For inplace functions there is a little bit of work to do:
+                #  1) Validate the formula and make sure the input that is modified in not used:
+                #    - If there is a formula for the inplace variant of the function (is_exact_match == True) then
+                #      we make sure that the original value of the input that is being modified inplace (self_p) is
+                #      not used in the formula. Note that the formula can use "original_self_p" here and that would
+                #      trigger a clone of the original input.
+                #    - If we are re-using the out of place formula (is_exact_match == False) then we replace every
+                #      occurrence of self_p and self_t by original_self_p and original_self_t. These will be
+                #      populated by cloned version of the original input (either the clone done by the backward AD
+                #      logic if self is also used in a backward formula or a special clone that we add).
+                #  2) At this point, there cannot be a self_p in the formula.
+                #  3) Change "result" into "self_p" as by design, in the inplace function codegen, the result is
+                #     simply called self (as it is modified inplace).
+                #  4) Update the required primals data in case it used to contain "result" but should now contain
+                #     "self"
+                #  5) If it is not an exact match, the user formula is not modifying the existing forward grad
+                #     inplace as it should. So add some code that makes sure that we do so if the forward grad
+                #     already exists.
 
-                if f.func.kind() == SchemaKind.inplace:
-                    # For inplace functions there is a little bit of work to do:
-                    #  1) Validate the formula and make sure the input that is modified in not used:
-                    #    - If there is a formula for the inplace variant of the function (is_exact_match == True) then
-                    #      we make sure that the original value of the input that is being modified inplace (self_p) is
-                    #      not used in the formula. Note that the formula can use "original_self_p" here and that would
-                    #      trigger a clone of the original input.
-                    #    - If we are re-using the out of place formula (is_exact_match == False) then we replace every
-                    #      occurrence of self_p and self_t by original_self_p and original_self_t. These will be
-                    #      populated by cloned version of the original input (either the clone done by the backward AD
-                    #      logic if self is also used in a backward formula or a special clone that we add).
-                    #  2) At this point, there cannot be a self_p in the formula.
-                    #  3) Change "result" into "self_p" as by design, in the inplace function codegen, the result is
-                    #     simply called self (as it is modified inplace).
-                    #  4) Update the required primals data in case it used to contain "result" but should now contain
-                    #     "self"
-                    #  5) If it is not an exact match, the user formula is not modifying the existing forward grad
-                    #     inplace as it should. So add some code that makes sure that we do so if the forward grad
-                    #     already exists.
+                assert (
+                    len(info.forward_derivatives) == 1
+                )  # Only single output inplace should exist
+                fw_info = info.forward_derivatives[0]
+                formula = fw_info.formula
 
-                    assert (
-                        len(info.forward_derivatives) == 1
-                    )  # Only single output inplace should exist
-                    fw_info = info.forward_derivatives[0]
-                    formula = fw_info.formula
-
-                    def replace_self_with_original_self(
-                        formula: str, postfix: str
-                    ) -> str:
-                        def repl(m: Match[str]) -> str:
-                            return f"{m.group(1)}original_self{postfix}{m.group(2)}"
-
-                        return re.sub(
-                            IDENT_REGEX.format(f"self{postfix}"), repl, formula
-                        )
-
-                    if re.search(IDENT_REGEX.format("self_p"), formula):
-                        if is_exact_match:
-                            # For manually defined formulas, don't allow the original value to be used
-                            raise RuntimeError(
-                                f'The formula for "{f.func.name}" is using the original value of self '
-                                "that is being modified inplace. This would lead to wrong forward gradients. "
-                                'Please use "result" in the formula only.'
-                            )
-                        else:
-                            # When the original formula is out of place, we save a clone of the primal
-                            # value to be able to access this value if needed
-                            # replace "self_p"/"self_t" from the formula by "original_self_p"/"original_self_t"
-                            formula = replace_self_with_original_self(formula, "_p")
-                            formula = replace_self_with_original_self(formula, "_t")
-
-                    # replace "result" from the formula by "self_p"
+                def replace_self_with_original_self(formula: str, postfix: str) -> str:
                     def repl(m: Match[str]) -> str:
-                        return f"{m.group(1)}self_p{m.group(2)}"
+                        return f"{m.group(1)}original_self{postfix}{m.group(2)}"
 
-                    formula = re.sub(IDENT_REGEX.format("result"), repl, formula)
+                    return re.sub(IDENT_REGEX.format(f"self{postfix}"), repl, formula)
 
-                    required_primals = fw_info.required_inputs_primal
-                    if re.search(IDENT_REGEX.format("self_p"), formula):
-                        required_primals = (
-                            required_primals + ("self",)
-                            if required_primals
-                            else ("self",)
+                if re.search(IDENT_REGEX.format("self_p"), formula):
+                    if is_exact_match:
+                        # For manually defined formulas, don't allow the original value to be used
+                        raise RuntimeError(
+                            f'The formula for "{f.func.name}" is using the original value of self '
+                            "that is being modified inplace. This would lead to wrong forward gradients. "
+                            'Please use "result" in the formula only.'
                         )
+                    else:
+                        # When the original formula is out of place, we save a clone of the primal
+                        # value to be able to access this value if needed
+                        # replace "self_p"/"self_t" from the formula by "original_self_p"/"original_self_t"
+                        formula = replace_self_with_original_self(formula, "_p")
+                        formula = replace_self_with_original_self(formula, "_t")
 
-                    if not is_exact_match:
-                        # NOTE [In-place forward AD formula Optimization]
-                        #
-                        # This optimization transforms the formula to directly do inplace, i.e.
-                        # instead of self_t.copy_(self_t.op()) we do self_t.op_() when the following are met:
-                        #
-                        # 1) the formula satisfies the pattern: "self_t.op(*args)"
-                        # 2) "op" in (1) needs to be the same as the op the derivative is for
-                        #
-                        # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
-                        # If there is a need, we can relax (2) to allow any op that has an in-place variant
-                        is_single_method_on_self_t = False
-                        match = re.fullmatch(r"self_t.([\w]*)\((.*)\)", formula)
-                        if match:
-                            op_name, between_parens = match.group(1), match.group(2)
+                # replace "result" from the formula by "self_p"
+                def repl(m: Match[str]) -> str:
+                    return f"{m.group(1)}self_p{m.group(2)}"
 
-                            # We want to...
-                            #   Match: self_t.op1(other_p.op2(arg))
-                            #   Avoid: self_t.op1(args) + self_t.op2(args)
-                            #   Avoid: self_t.op1(other_p.op2(arg)) + self_t.op2(args)
-                            def check_parens_nest_level_gt_zero(s: str) -> bool:
-                                level = 1
-                                for ch in s:
-                                    if ch == ")":
-                                        level -= 1
-                                        if level == 0:
-                                            return False
-                                    if ch == "(":
-                                        level += 1
-                                return True
+                formula = re.sub(IDENT_REGEX.format("result"), repl, formula)
 
-                            is_single_method_on_self_t = (
-                                check_parens_nest_level_gt_zero(between_parens)
-                            )
-                        directly_do_inplace = (
-                            is_single_method_on_self_t and op_name == info.name
-                        )
-
-                        if directly_do_inplace:
-                            formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
-                        else:
-                            # Make sure that the forward grad is modified inplace when the original formula
-                            # is out of place
-                            formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
-
-                    required_original_self_value = bool(
-                        re.search(IDENT_REGEX.format("original_self_p"), formula)
+                required_primals = fw_info.required_inputs_primal
+                if re.search(IDENT_REGEX.format("self_p"), formula):
+                    required_primals = (
+                        required_primals + ("self",) if required_primals else ("self",)
                     )
 
-                    forward_derivatives = [
-                        ForwardDerivative(
-                            formula=formula,
-                            var_names=("self",),
-                            var_types=fw_info.var_types,
-                            required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
-                            required_inputs_primal=required_primals,
-                            required_original_self_value=required_original_self_value,
-                            is_reusing_outplace_formula=not is_exact_match,
-                        ),
-                    ]
-            else:
-                forward_derivatives = []
+                if not is_exact_match:
+                    # NOTE [In-place forward AD formula Optimization]
+                    #
+                    # This optimization transforms the formula to directly do inplace, i.e.
+                    # instead of self_t.copy_(self_t.op()) we do self_t.op_() when the following are met:
+                    #
+                    # 1) the formula satisfies the pattern: "self_t.op(*args)"
+                    # 2) "op" in (1) needs to be the same as the op the derivative is for
+                    #
+                    # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
+                    # If there is a need, we can relax (2) to allow any op that has an in-place variant
+                    is_single_method_on_self_t = False
+                    match = re.fullmatch(r"self_t.([\w]*)\((.*)\)", formula)
+                    if match:
+                        op_name, between_parens = match.group(1), match.group(2)
+
+                        # We want to...
+                        #   Match: self_t.op1(other_p.op2(arg))
+                        #   Avoid: self_t.op1(args) + self_t.op2(args)
+                        #   Avoid: self_t.op1(other_p.op2(arg)) + self_t.op2(args)
+                        def check_parens_nest_level_gt_zero(s: str) -> bool:
+                            level = 1
+                            for ch in s:
+                                if ch == ")":
+                                    level -= 1
+                                    if level == 0:
+                                        return False
+                                if ch == "(":
+                                    level += 1
+                            return True
+
+                        is_single_method_on_self_t = check_parens_nest_level_gt_zero(
+                            between_parens
+                        )
+                    directly_do_inplace = (
+                        is_single_method_on_self_t and op_name == info.name
+                    )
+
+                    if directly_do_inplace:
+                        formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
+                    else:
+                        # Make sure that the forward grad is modified inplace when the original formula
+                        # is out of place
+                        formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
+
+                required_original_self_value = bool(
+                    re.search(IDENT_REGEX.format("original_self_p"), formula)
+                )
+
+                forward_derivatives = [
+                    ForwardDerivative(
+                        formula=formula,
+                        var_names=("self",),
+                        var_types=fw_info.var_types,
+                        required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
+                        required_inputs_primal=required_primals,
+                        required_original_self_value=required_original_self_value,
+                        is_reusing_outplace_formula=not is_exact_match,
+                    ),
+                ]
 
             fw_derivative_dict[key] = forward_derivatives
 
