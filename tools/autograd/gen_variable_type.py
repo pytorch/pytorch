@@ -730,7 +730,6 @@ def gen_variable_type(
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm1 = FileManager(
         install_dir=out + "/templates", template_dir=template_path, dry_run=False
@@ -748,7 +747,7 @@ def gen_variable_type(
         + [f"wrapper_registrations_{key}" for key in used_keys]
     )
 
-    def wrapper_registrations(used_keys):
+    def wrapper_registrations(used_keys: Set[str]) -> str:
         a = []
         for key in used_keys:
             dispatch_key = key
@@ -847,18 +846,18 @@ def gen_variable_type_func(
                 type_definition = METHOD_DEFINITION.substitute(
                     return_type=cpp.returns_type(f.func.returns).cpp_type(),
                     type_wrapper_name=type_wrapper_name(f, key=key),
-                    type_definition_body=emit_body(fn, key=key),
+                    type_definition_body=emit_body(fn, key),
                     formals=formals,
                 )
                 wrapper_registration = gen_wrapper_registration(f, key)
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key, _ in fn.info.items():                   
+                for key, _ in fn.info.items():
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(f.func.returns).cpp_type(),
-                        type_wrapper_name=type_wrapper_name(f, key=key),
-                        type_definition_body=emit_body(fn, key=key),
+                        type_wrapper_name=type_wrapper_name(f, key),
+                        type_definition_body=emit_body(fn, key),
                         formals=formals,
                     )
                     wrapper_registration = gen_wrapper_registration(f, key)
@@ -889,7 +888,7 @@ def emit_body(
 ) -> List[str]:
     assert dispatch_strategy(fn) == "use_derived"
     f = fn.func
-    info = fn.info[key] if fn.info else fn.info
+    info = fn.info[key] if fn.info else None
     fw_derivatives = fn.fw_derivatives.get(key, []) if fn.fw_derivatives else []
 
     name = cpp.name(f.func)

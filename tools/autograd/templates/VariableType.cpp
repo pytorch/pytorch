@@ -50,7 +50,6 @@ namespace {
 
 
 ${type_derived_method_definitions}
-
 }
 }
 
