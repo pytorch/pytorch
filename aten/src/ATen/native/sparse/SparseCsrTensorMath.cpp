@@ -139,7 +139,9 @@ TORCH_META_FUNC(_compressed_to_batched_compressed_indices)
  const bool out_int32) {
   TORCH_CHECK(
       compressed_indices.dim() == 1,
-      "Compressed indices is supposed to be a vector");
+      "Compressed indices is supposed to be 1D, got ",
+      compressed_indices.dim(),
+      "D.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = compressed_indices.options().dtype(scalar_type);
   // The compressed indices are nrow_b/ncol_b + 1, so the batched shape is
