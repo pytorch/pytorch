@@ -51,9 +51,9 @@ class TestNamedTupleAPI(TestCase):
                 ret = ret[1:-1].split(',')
                 for r in ret:
                     r = r.strip()
-                    self.assertEqual(len(r.split()), 1,
-                                 'only allowlisted operators are allowed to have named return type, got ' + name)
-
+                    self.assertEqual(len(r.split()), 1, 'only allowlisted '
+                                     'operators are allowed to have named '
+                                     'return type, got ' + name)
         self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
         Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
         could not be found. Do you forget to update test_namedtuple_return_api.py after renaming some
