@@ -1785,7 +1785,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer_mobile",
+            ":flatbuffers_serializer_mobile",
             ":mobile_bytecode",
             ":torch_core",
             ":torch_mobile_module",
@@ -1799,8 +1799,8 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer_mobile",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
         ],
     )
 
@@ -1809,7 +1809,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer_mobile",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 
