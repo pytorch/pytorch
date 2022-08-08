@@ -2011,6 +2011,7 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
     for shape in shapes:
         yield SampleInput(make_arg(shape))
 
+
 def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -2482,8 +2483,13 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d,)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
+
+def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, None)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
 
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -2503,8 +2509,11 @@ def error_inputs_ormqr(op_info, device, **kwargs):
 
 def error_inputs_diag(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
+                     error_regex="matrix or a vector expected")
+    zero_d = torch.randn(1, 1, 1, device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
+                     error_regex="matrix or a vector expected")
 
 def error_inputs_embedding(op_info, device, **kwargs):
     indices = torch.rand(2, 2, device=device).long()
@@ -10789,7 +10798,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           error_inputs_func=error_inputs_lstsq,
+           error_inputs_func=error_inputs_lstsq_grad_oriented,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_autograd=True,
@@ -11447,12 +11456,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -11465,12 +11468,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -14589,10 +14586,6 @@ op_db: List[OpInfo] = [
                skipCUDAIfNoMagma,
                skipCPUIfNoLapack,
            ],
-           skips=(
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            ),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
