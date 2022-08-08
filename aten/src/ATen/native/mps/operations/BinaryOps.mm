@@ -403,5 +403,6 @@ TORCH_IMPL_FUNC(logaddexp2_out_mps) (const Tensor& self, const Tensor& other, co
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
       }
 }
+
 } // namespace native
 } // namespace at
