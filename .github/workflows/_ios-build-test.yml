@@ -140,6 +140,7 @@ jobs:
           scripts/build_ios.sh
 
       - name: Run Build Test
+        timeout-minutes: 5
         run: |
           PROFILE=PyTorch_CI_2022
           # run the ruby build script
