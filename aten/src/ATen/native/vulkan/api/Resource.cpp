@@ -10,6 +10,20 @@ namespace api {
 // Utility Functions
 //
 
+/*
+ * This function is used to determine what image format to use for a given
+ * dtype.
+ *
+ * TODO: enable proper format selection between kFloat and kHalf.
+ *
+ * Context: due to limitations of the shader compilation system, at the moment
+ * it is not possible to support both 32 bit and 16 bit float formats since
+ * shaders will have to specify the format qualifier of texture inputs. Right
+ * now, shaders are compiled with either rgba16f or rgba32f qualifiers depending
+ * on whether USE_VULKAN_FP16_INFERENCE is set. Therefore, textures must be
+ * always created with the corresponding VkFormat. Consequently, kHalf tensors
+ * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
+ */
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -18,9 +32,31 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
 #else
       return VK_FORMAT_R32G32B32A32_SFLOAT;
 #endif /* USE_VULKAN_FP16_INFERENCE */
+    case c10::kQUInt8:
+      return VK_FORMAT_R8G8B8A8_UINT;
 
     default:
-      return VK_FORMAT_UNDEFINED;
+      TORCH_CHECK(
+          false, "Vulkan vk_format(): no corresponding format for dtype");
+  }
+}
+
+/*
+ * This function is used to map a texture format to a corresponding
+ * c10::ScalarType. It is primarily used to set the data type of a
+ * StorageBuffer object that will receive copied data from a texture.
+ */
+c10::ScalarType c10_scalartype(const VkFormat image_format) {
+  switch (image_format) {
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+      return c10::kFloat;
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+      return c10::kHalf;
+    case VK_FORMAT_R8G8B8A8_UINT:
+      return c10::kQUInt8;
+
+    default:
+      TORCH_CHECK(false, "vulkan c10_scalartype(): Unknown VkFormat.");
   }
 }
 
@@ -75,7 +111,7 @@ VulkanBuffer::VulkanBuffer(
 
   // TODO: enable creation with a custom pool
   VmaAllocationCreateInfo alloc_create_info{
-      VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT, // flags
+      memory_properties_.create_flags, // flags
       memory_properties_.memory_usage, // usage
       memory_properties_.required_mem_flags, // requiredFlags
       memory_properties_.preferred_mem_flags, // preferredFlags
@@ -134,7 +170,8 @@ MemoryMap::MemoryMap(const VulkanBuffer& buffer, const uint8_t access)
     : access_(access),
       allocator_(buffer.vma_allocator()),
       allocation_(buffer.allocation()),
-      data_(nullptr) {
+      data_(nullptr),
+      data_len_{buffer.mem_size()} {
   VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
 }
 
@@ -142,7 +179,8 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
     : access_(other.access_),
       allocator_(other.allocator_),
       allocation_(other.allocation_),
-      data_(other.data_) {
+      data_(other.data_),
+      data_len_{other.data_len_} {
   other.allocation_ = VK_NULL_HANDLE;
   other.data_ = nullptr;
 }
@@ -320,7 +358,7 @@ VulkanImage::VulkanImage(
 
   // TODO: enable creation with a custom pool
   const VmaAllocationCreateInfo alloc_create_info{
-      VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT, // flags
+      memory_properties_.create_flags, // flags
       memory_properties_.memory_usage, // usage
       memory_properties_.required_mem_flags, // requiredFlags
       memory_properties_.preferred_mem_flags, // preferredFlags
@@ -492,6 +530,10 @@ MemoryAllocator::MemoryAllocator(
       physical_device_(physical_device),
       device_(device),
       allocator_{VK_NULL_HANDLE} {
+  VmaVulkanFunctions vk_functions{};
+  vk_functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+  vk_functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
   const VmaAllocatorCreateInfo allocator_create_info{
       0u, // flags
       physical_device_, // physicalDevice
@@ -499,12 +541,11 @@ MemoryAllocator::MemoryAllocator(
       0u, // preferredLargeHeapBlockSize
       nullptr, // pAllocationCallbacks
       nullptr, // pDeviceMemoryCallbacks
-      1u, // frameinUseCount
       nullptr, // pHeapSizeLimit
-      nullptr, // pVulkanFunctions
-      nullptr, // pRecordSettings
+      &vk_functions, // pVulkanFunctions
       instance, // instance
       VK_API_VERSION_1_0, // vulkanApiVersion
+      nullptr, // pTypeExternalMemoryHandleTypes
   };
 
   VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator_));
@@ -528,10 +569,11 @@ MemoryAllocator::~MemoryAllocator() {
   vmaDestroyAllocator(allocator_);
 }
 
-VulkanImage MemoryAllocator::create_image3d_fp(
+VulkanImage MemoryAllocator::create_image3d(
     const VkExtent3D& extents,
     const VulkanImage::SamplerProperties& sampler_props,
     const VkSampler sampler,
+    const caffe2::TypeMeta dtype,
     bool allow_transfer) {
   VkImageUsageFlags usage =
       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
@@ -540,18 +582,15 @@ VulkanImage MemoryAllocator::create_image3d_fp(
         (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
   }
 
+  const VkFormat image_format = vk_format(dtype);
+
   const VulkanImage::MemoryProperties mem_props{
-      VMA_MEMORY_USAGE_GPU_ONLY,
+      DEFAULT_ALLOCATION_STRATEGY,
+      VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
       0u,
       0u,
       usage,
   };
-
-#ifdef USE_VULKAN_FP16_INFERENCE
-  const VkFormat image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-  const VkFormat image_format = VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* USE_VULKAN_FP16_INFERENCE */
 
   const VulkanImage::ImageProperties image_props{
       VK_IMAGE_TYPE_3D,
@@ -580,18 +619,28 @@ VulkanImage MemoryAllocator::create_image3d_fp(
 VulkanBuffer MemoryAllocator::create_storage_buffer(
     const VkDeviceSize size,
     const bool gpu_only) {
-  const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+  VmaAllocationCreateFlags create_flags = DEFAULT_ALLOCATION_STRATEGY;
+  if (!gpu_only) {
+    create_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+  }
 
   const VmaMemoryUsage vma_usage =
-      gpu_only ? VMA_MEMORY_USAGE_GPU_ONLY : VMA_MEMORY_USAGE_GPU_TO_CPU;
+      gpu_only ? VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE : VMA_MEMORY_USAGE_AUTO;
 
-  const VkMemoryPropertyFlags preferred_mem_props =
-      gpu_only ? 0u : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  const VkMemoryPropertyFlags required_mem_props =
+      gpu_only ? 0u : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+
+  const VkMemoryPropertyFlags preferred_mem_props = gpu_only
+      ? 0u
+      : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+          VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 
   const VulkanBuffer::MemoryProperties mem_props{
+      create_flags,
       vma_usage,
-      0u,
+      required_mem_props,
       preferred_mem_props,
       buffer_usage,
   };
@@ -601,7 +650,8 @@ VulkanBuffer MemoryAllocator::create_storage_buffer(
 
 VulkanBuffer MemoryAllocator::create_staging_buffer(const VkDeviceSize size) {
   const VulkanBuffer::MemoryProperties mem_props{
-      VMA_MEMORY_USAGE_CPU_COPY,
+      DEFAULT_ALLOCATION_STRATEGY,
+      VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
       0u,
       0u,
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -656,7 +706,18 @@ VulkanFence::~VulkanFence() {
 void VulkanFence::wait() {
   // if get_submit_handle() has not been called, then this will no-op
   if (waiting_) {
-    VK_CHECK(vkWaitForFences(device_, 1u, &handle_, VK_TRUE, UINT64_MAX));
+    VkResult fence_status = VK_NOT_READY;
+    // Run the wait in a loop to keep the CPU hot. A single call to
+    // vkWaitForFences with no timeout may cause the calling thread to be
+    // scheduled out.
+    do {
+      // The timeout (last) arg is in units of ns
+      fence_status = vkWaitForFences(device_, 1u, &handle_, VK_TRUE, 100000);
+
+      TORCH_CHECK(
+          fence_status != VK_ERROR_DEVICE_LOST,
+          "Vulkan Fence: Device lost while waiting for fence!");
+    } while (fence_status != VK_SUCCESS);
 
     VK_CHECK(vkResetFences(device_, 1u, &handle_));
 

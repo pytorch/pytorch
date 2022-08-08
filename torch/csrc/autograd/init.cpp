@@ -41,6 +41,17 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
+struct EnableTorchFunction {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+  }
+  ~EnableTorchFunction() {
+    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+  }
+  bool old_;
+};
+
 } // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
@@ -270,22 +281,52 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   {
+    using torch::profiler::impl::PyFrameState;
     using torch::profiler::impl::Result;
+    py::enum_<EventType>(m, "_EventType")
+        .value("TorchOp", EventType::TorchOp)
+        .value("Backend", EventType::Backend)
+        .value("Allocation", EventType::Allocation)
+        .value("PyCall", EventType::PyCall)
+        .value("PyCCall", EventType::PyCCall)
+        .value("Kineto", EventType::Kineto);
     py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
-        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_);
-
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
+        .def_readonly(
+            "allow_tf32_cublas",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
         .def_readonly("dtypes", &Inputs::dtypes_);
+
+    py::class_<TensorMetadata>(m, "_TensorMetadata")
+        .def_property_readonly("layout", [](const TensorMetadata& metadata) {
+          PyObject* layout_obj = torch::autograd::utils::wrap(metadata.layout_);
+          return py::reinterpret_borrow<py::object>(layout_obj);
+        });
 
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
-    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall");
-    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall");
+    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+        .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<PyFrameState>(m, "_PyFrameState")
+        .def_readonly("line_number", &PyFrameState::line_no_)
+        .def_property_readonly(
+            "file_name",
+            [](const PyFrameState& s) { return s.filename_.str(); })
+        .def_property_readonly("function_name", [](const PyFrameState& s) {
+          return s.funcname_.str();
+        });
+    py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
+        .def_property_readonly("tag", &Result::tag)
         .def_readonly("extra_fields", &Result::extra_fields_)
         .def_property_readonly(
             "id",
@@ -437,6 +478,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
+  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 

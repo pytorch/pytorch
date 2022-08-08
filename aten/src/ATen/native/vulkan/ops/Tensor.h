@@ -35,6 +35,12 @@ class vTensorStorage final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensorStorage(
+      api::Context* context,
+      IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -55,6 +61,9 @@ class vTensorStorage final {
   TensorOptions options_;
   c10::SmallVector<int64_t, 6u> sizes_;
   c10::SmallVector<int64_t, 6u> strides_;
+  bool is_quantized_{false};
+  double q_scale{1.0f};
+  int64_t q_zero_point{0u};
 
   // Image Texture
   mutable api::VulkanImage image_;
@@ -71,6 +80,11 @@ class vTensorStorage final {
 
   // Validation
   void verify() const;
+
+ public:
+  inline VkFormat texture_format() {
+    return image_.format();
+  }
 };
 
 class vTensor final {
@@ -82,6 +96,12 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensor(
+      api::Context* const context,
+      const IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
 
  private:
   // Even at the cost of a heap allocation plus the resulting negative impact
@@ -124,6 +144,13 @@ class vTensor final {
     return view_->extents_;
   }
 
+  /*
+   * Get a c10::ScalarType that corresponds to the image format of the texture
+   */
+  inline c10::ScalarType texture_dtype() const {
+    return api::c10_scalartype(view_->texture_format());
+  }
+
   inline const TensorOptions& options() const {
     return view_->options_;
   }
@@ -136,15 +163,37 @@ class vTensor final {
     return view_->strides_;
   }
 
+  inline bool is_quantized() const {
+    return view_->is_quantized_;
+  }
+
+  inline double get_scale() const {
+    return view_->q_scale;
+  }
+
+  inline int64_t get_zero_point() const {
+    return view_->q_zero_point;
+  }
+
   inline size_t nbytes() const {
     return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
         c10::multiply_integers(sizes());
   }
 
-  inline VkDeviceSize buffer_bytes() {
-    return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
-        view_->extents_.data[0u] * view_->extents_.data[1u] *
+  /*
+   * Number of "cells" in the image texture. 4 cells make up a texel.
+   */
+  inline VkDeviceSize numcells() {
+    return view_->extents_.data[0u] * view_->extents_.data[1u] *
         (4u * view_->extents_.data[2u]);
+  }
+
+  /*
+   * Number of bytes needed for a buffer to receive all data in the texture
+   */
+  inline VkDeviceSize buffer_bytes() {
+    return c10::elementSize(this->texture_dtype()) * view_->extents_.data[0u] *
+        view_->extents_.data[1u] * (4u * view_->extents_.data[2u]);
   }
 };
 
@@ -178,6 +227,16 @@ inline Tensor convert(const vTensor& tensor) {
       tensor.strides());
 }
 
+inline Tensor convert_quantized(const vTensor& tensor) {
+  TORCH_CHECK(tensor.is_quantized(), "Not a Quantized Tensor");
+  return at::detail::make_tensor<vTensorImpl>(
+      DispatchKeySet(DispatchKey::Vulkan),
+      tensor.options().dtype(),
+      at::Device(at::kVulkan),
+      tensor,
+      tensor.sizes(),
+      tensor.strides());
+}
 } // namespace ops
 } // namespace vulkan
 } // namespace native
