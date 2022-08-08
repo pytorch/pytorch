@@ -409,7 +409,10 @@ def _str_intern(inp, *, tensor_contents=None):
     )
     if self.is_sparse:
         suffixes.append("size=" + str(tuple(self.shape)))
-        suffixes.append("nnz=" + str(self._nnz()))
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        if not self.is_meta and not isinstance(self, FakeTensor):
+            suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append("dtype=" + str(self.dtype))
         if not custom_contents_provided:
