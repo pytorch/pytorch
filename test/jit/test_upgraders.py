@@ -4,7 +4,6 @@ import io
 import os
 import sys
 import torch
-import unittest
 import zipfile
 from torch.testing import FileCheck
 from typing import Union
