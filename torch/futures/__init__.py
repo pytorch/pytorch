@@ -73,6 +73,22 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().wait()
 
+    def wait_for(self, timeout=-1) -> bool:
+        r"""
+        Block until this ``Future`` resolves or the timeout expires.
+
+        Args:
+            timeout (int): timeout of this operation in milliseconds. Default
+            value of -1, meaning wait undefinitely.
+
+        This methods performs the same synchronization as ``wait``in the case
+        of success.
+
+        Returns:
+            True if waited successfully, false otherwise.
+        """
+        return super().wait_for(timeout)
+
     def value(self) -> T:
         r"""
         Obtain the value of an already-completed future.

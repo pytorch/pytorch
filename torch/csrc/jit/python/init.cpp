@@ -1874,6 +1874,11 @@ void initJITBindings(PyObject* module) {
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "wait_for",
+          &PythonFutureWrapper::wait_for,
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("timeout") = int64_t(-1))
+      .def(
           "then",
           &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>())
@@ -1993,9 +1998,20 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
-    return fut->wait();
-  });
+  m.def(
+      "wait",
+      [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+        return fut->wait();
+      },
+      py::arg("future"));
+
+  m.def(
+      "wait_for",
+      [](const std::shared_ptr<PythonFutureWrapper>& fut, int64_t timeout) {
+        return fut->wait_for(timeout);
+      },
+      py::arg("future"),
+      py::arg("timeout") = int64_t(-1));
 
   m.def(
       "_collect_all",

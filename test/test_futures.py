@@ -103,6 +103,23 @@ class TestFuture(TestCase):
 
         self.assertEqual(f.wait(), torch.ones(2, 2))
 
+    def test_wait_for(self) -> None:
+        f = Future[torch.Tensor]()
+        self.assertEqual(f.wait_for(0), False)
+        self.assertEqual(f.wait_for(10), False)
+
+        f.set_result(torch.ones(2, 2))
+        self.assertEqual(f.wait_for(0), True)
+        self.assertEqual(f.wait_for(10), True)
+        self.assertEqual(f.wait_for(), True)
+
+        ferr = Future[ValueError]()
+        ferr.set_exception(ValueError("error"))
+        self.assertEqual(ferr.wait_for(0), True)
+        self.assertEqual(ferr.wait_for(10), True)
+        self.assertEqual(ferr.wait_for(), True)
+
+
     def test_wait_multi_thread(self) -> None:
 
         def slow_set_future(fut, value):

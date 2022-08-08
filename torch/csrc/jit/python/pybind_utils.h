@@ -147,6 +147,20 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     return value();
   }
 
+  bool wait_for(int64_t timeout = -1) {
+    if (!fut->waitFor(timeout)) {
+      return false;
+    }
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut->value(), output);
+    }
+    return true;
+  }
+
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
   // (i.e., torch._C.Future) as the only argument. If the type mismatches, an
   // error will be thrown when waiting for the value of this returned Future.

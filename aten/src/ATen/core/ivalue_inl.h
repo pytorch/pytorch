@@ -4,6 +4,7 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <chrono>
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
@@ -813,6 +814,28 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     finished_cv_.wait(lock, [&]() -> bool { return completed_; });
     synchronizeWithCurrentStreams();
+  }
+
+  /**
+   * Wait on the future until it completes or the timeout passed. Timeout
+   * defined in milliseconds.
+   *
+   * Returns true if the future completed.
+   *
+   * If the ``timeout`` argument is negative, it waits indefinitely.
+   */
+  bool waitFor(int64_t timeout = -1) {
+    using namespace std::chrono_literals;
+    if (timeout < 0) {
+      wait();
+      return true;
+    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    bool result = finished_cv_.wait_for(lock, timeout * 1ms, [&]() -> bool { return completed_; });
+    if (result) {
+      synchronizeWithCurrentStreams();
+    }
+    return result;
   }
 
   /**
