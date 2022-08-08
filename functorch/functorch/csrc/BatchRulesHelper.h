@@ -17,7 +17,7 @@
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <functorch/csrc/Constants.h>
-#include <functorch/csrc/VmapGeneratedPlumbing.h>
+#include <ATen/VmapGeneratedPlumbing.h>
 
 namespace at { namespace functorch {
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
@@ -468,6 +468,8 @@ inline VmapDimVector range(int64_t start, int64_t stop) {
   }
   return dims;
 }
+std::tuple<Tensor, Tensor> _binary_pointwise_helper(
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
+    bool do_type_promotion=true);
 
 }}
-

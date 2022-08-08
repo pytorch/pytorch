@@ -62,6 +62,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -74,6 +75,7 @@ jobs:
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
+    if: ${{ false }}
     with:
       build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
@@ -120,7 +122,6 @@ jobs:
         ]}
 
   ios-12-5-1-x86-64:
-    if: false
     name: ios-12-5-1-x86-64
     uses: ./.github/workflows/_ios-build-test.yml
     with:
@@ -155,7 +156,9 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-12" },
           { config: "default", shard: 2, num_shards: 2, runner: "macos-12" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "macos-12" },
         ]}
+      arch: x86_64
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -180,16 +183,34 @@ jobs:
       xcode-version: "13.3.1"
       runner-type: macos-12-xl
       build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python_version: 3.9.12
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
-    name: macos-12-py3-arm64
-    uses: ./.github/workflows/_mac-test-arm64.yml
+    name: macos-12-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
+
+  macos-12-py3-arm64-test:
+    name: macos-12-py3-arm64
+    uses: ./.github/workflows/_mac-test.yml
+    needs: macos-12-py3-arm64-build
+    with:
+      build-environment: macos-12-py3-arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
+          { config: "default", shard: 2, num_shards: 2, runner: "macos-m1-12" },
+        ]}
+      arch: arm64
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   win-vs2019-cuda11_6-py3-build:
     name: win-vs2019-cuda11.6-py3
@@ -213,6 +234,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 

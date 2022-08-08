@@ -1,3 +1,5 @@
+# Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -322,7 +324,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
-        xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
         xfail('corrcoef'),

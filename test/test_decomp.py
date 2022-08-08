@@ -156,6 +156,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -239,10 +241,8 @@ def normalize_op_input_output2(
 def upcast_tensor(x, dtype=torch.float32):
     if isinstance(x, Tensor) and x.dtype.is_floating_point:
         return x.to(dtype=dtype)
-    elif (
-        isinstance(x, torch.dtype)
-        and x in [torch.float16, torch.bfloat16]
-    ):
+    elif (isinstance(x, torch.dtype)
+          and x in [torch.float16, torch.bfloat16, torch.float]):
         return dtype
     else:
         return x
@@ -271,6 +271,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "new_empty"),
     # decomp has problem even with opmath
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
@@ -278,7 +279,7 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
-
+    (None, None, "meshgrid"),
 }
 
 all_decomposed = set()
@@ -389,7 +390,10 @@ class TestDecomp(TestCase):
                 # Stuff we shouldn't bother testing
                 # (TODO: remove detach from the decomp table?)
                 if func not in decomposition_table or func in [
-                    torch.ops.aten.detach.default
+                    torch.ops.aten.detach.default,
+                    # non-deterministic ops
+                    torch.ops.aten.new_empty.default,
+                    torch.ops.aten.new_empty.SymInt
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 

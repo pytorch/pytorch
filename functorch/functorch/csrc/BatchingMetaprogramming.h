@@ -6,7 +6,7 @@
 
 #pragma once
 #include <ATen/Tensor.h>
-#include <functorch/csrc/VmapGeneratedPlumbing.h>
+#include <ATen/VmapGeneratedPlumbing.h>
 
 namespace at {
 namespace functorch {

@@ -29,6 +29,7 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensorcore.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/memory.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/swizzle.cu
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/UnpackRaw.cuh
 )

@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -551,6 +552,25 @@ class TestFX(JitTestCase):
             new_node = graph.node_copy(node)
             self.assertTrue(new_node.stack_trace is not None)
             assert 'test_fx.py' in new_node.stack_trace
+
+    def test_stack_traces_with_transformer(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        new_gm = Transformer(gm).transform()
+
+        # nodes after Transformer should still preserve the original node's stack trace
+        for node in new_gm.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_fx.py' in node.stack_trace
 
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -3282,6 +3302,7 @@ class TestFX(JitTestCase):
             .run(scripted.code)
 
     @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
     def test_assert(self):
         def f(x):
             assert x > 1
@@ -4019,7 +4040,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
@@ -4060,6 +4081,7 @@ TestFunctionalTracing.generate_tests()
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
+@skipIfSlowGradcheckEnv
 class TestVisionTracing(JitTestCase):
     def setUp(self):
         # Checking for mutable operations while tracing is feature flagged

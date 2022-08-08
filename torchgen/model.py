@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-from torchgen.utils import assert_never, NamespaceHelper
+from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -290,8 +290,8 @@ class ScalarType(Enum):
         return mb_r
 
     @staticmethod
-    def parse_set(values: str) -> Set["ScalarType"]:
-        dtypes: Set[ScalarType] = set()
+    def parse_set(values: str) -> OrderedSet["ScalarType"]:
+        dtypes: OrderedSet[ScalarType] = OrderedSet()
         for value in values.split(", "):
             if value in DTYPE_CLASSES:
                 dtypes.update(DTYPE_CLASSES[value])
@@ -300,18 +300,22 @@ class ScalarType(Enum):
         return dtypes
 
 
-DTYPE_CLASSES: Dict[str, Set[ScalarType]] = {}
+DTYPE_CLASSES: Dict[str, OrderedSet[ScalarType]] = {}
 # NB: Integral doesn't include boolean
-DTYPE_CLASSES["Integral"] = {
-    ScalarType.Byte,
-    ScalarType.Char,
-    ScalarType.Int,
-    ScalarType.Long,
-    ScalarType.Short,
-}
+DTYPE_CLASSES["Integral"] = OrderedSet(
+    [
+        ScalarType.Byte,
+        ScalarType.Char,
+        ScalarType.Int,
+        ScalarType.Long,
+        ScalarType.Short,
+    ]
+)
 # NB: Floating doesn't include low precision types
-DTYPE_CLASSES["Floating"] = {ScalarType.Float, ScalarType.Double}
-DTYPE_CLASSES["Complex"] = {ScalarType.ComplexFloat, ScalarType.ComplexDouble}
+DTYPE_CLASSES["Floating"] = OrderedSet([ScalarType.Float, ScalarType.Double])
+DTYPE_CLASSES["Complex"] = OrderedSet(
+    [ScalarType.ComplexFloat, ScalarType.ComplexDouble]
+)
 DTYPE_CLASSES["All"] = DTYPE_CLASSES["Integral"] | DTYPE_CLASSES["Floating"]
 DTYPE_CLASSES["AllAndComplex"] = DTYPE_CLASSES["All"] | DTYPE_CLASSES["Complex"]
 DTYPE_CLASSES["FloatingAndComplex"] = (
@@ -664,6 +668,21 @@ class NativeFunction:
                 "name, then delete the dispatch table"
             )
         elif not structured and structured_delegate is None:
+            name = str(func.name.name)
+            assert not (
+                name.startswith("new_")
+                or name.endswith("_like")
+                # TODO: maybe it's better to test the return
+                or (
+                    func.arguments.tensor_options
+                    and not func.arguments.has_tensor_arg()
+                )
+            ), (
+                f"expected {name} to have a CompositeExplicitAutograd "
+                "dispatch entry, but there was no dispatch table.  Factory functions "
+                "should not have implicit dispatch as they should not be decomposed "
+                "for __torch_dispatch__"
+            )
             dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
                 cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
@@ -791,6 +810,9 @@ class NativeFunction:
             backend_metadata,
         )
 
+    def symints_to_ints(self) -> "NativeFunction":
+        return dataclasses.replace(self, func=self.func.symints_to_ints())
+
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
         # at once
@@ -868,7 +890,10 @@ class NativeFunction:
         is_non_mutating_view = len(rets) > 0 and any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
-        is_inplace_view = "inplace_view" in self.tags
+        # See Note [resize_ in Functionalization] for more dtails
+        is_inplace_view = (
+            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+        )
         is_wildcard_view = any(
             inp.annotation is not None and inp.annotation.alias_set_after != ""
             for inp in self.func.schema_order_arguments()
@@ -1027,7 +1052,7 @@ class BackendMetadata:
 @dataclass(frozen=True)
 class UfuncInnerLoop:
     name: str
-    supported_dtypes: Set[ScalarType]
+    supported_dtypes: OrderedSet[ScalarType]
     # key is stored here because it affects the semantics of name,
     # so its helpful to have them together for further processing
     ufunc_key: UfuncKey
@@ -1037,7 +1062,7 @@ class UfuncInnerLoop:
         name, supported_dtypes_str = value.split(" ", 1)
         assert supported_dtypes_str[0] == "("
         assert supported_dtypes_str[-1] == ")"
-        supported_dtypes = set()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for k in supported_dtypes_str[1:-1].split(", "):
             supported_dtypes |= ScalarType.parse_set(k)
         return UfuncInnerLoop(
@@ -1097,7 +1122,7 @@ class BackendIndex:
         elif isinstance(g, NativeFunctionsGroup):
             f = self.primary(g)
         else:
-            assert_never(f)
+            assert_never(g)
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
@@ -1183,6 +1208,9 @@ class FunctionSchema:
         )
 
     decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
+
+    def symints_to_ints(self) -> "FunctionSchema":
+        return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
 
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
@@ -1486,11 +1514,6 @@ class FunctionSchema:
         returns = original_returns + returns_from_mutable_inputs
 
         args_sig = self.arguments.signature(strip_default=strip_default)
-        # See Note [arange.start_step schema]
-        if str(self.name) == "arange.start_step":
-            args_sig = Arguments.parse(
-                str(args_sig).replace("Scalar step", "Scalar step=1")
-            )
         # See Note [bernoulli.p schema]
         if str(self.name) == "bernoulli.p":
             args_sig = Arguments.parse(str(args_sig).replace("float p", "float p=0.5"))
@@ -1623,6 +1646,9 @@ class Type:
     def is_list_like(self) -> Optional["ListType"]:
         raise NotImplementedError
 
+    def symint_to_int(self) -> "Type":
+        raise NotImplementedError
+
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum(
@@ -1663,6 +1689,11 @@ class BaseType(Type):
     def is_nullable(self) -> bool:
         return False
 
+    def symint_to_int(self) -> "BaseType":
+        if self.name == BaseTy.SymInt:
+            return BaseType(BaseTy.int)
+        return self
+
     def is_list_like(self) -> Optional["ListType"]:
         return None
 
@@ -1680,6 +1711,9 @@ class OptionalType(Type):
 
     def is_nullable(self) -> bool:
         return True
+
+    def symint_to_int(self) -> "Type":
+        return dataclasses.replace(self, elem=self.elem.symint_to_int())
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1706,6 +1740,9 @@ class ListType(Type):
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
+
+    def symint_to_int(self) -> "ListType":
+        return ListType(self.elem.symint_to_int(), self.size)
 
     def is_list_like(self) -> Optional["ListType"]:
         return self
@@ -1779,6 +1816,9 @@ class Argument:
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
+
+    def symint_to_int(self) -> "Argument":
+        return dataclasses.replace(self, type=self.type.symint_to_int())
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -1968,6 +2008,40 @@ class Arguments:
             for a in self.flat_all
             if a.annotation is not None and a.annotation.is_write
         ]
+
+    def symints_to_ints(self) -> "Arguments":
+        arguments = self
+
+        if arguments.self_arg:
+            arguments = dataclasses.replace(
+                arguments,
+                pre_self_positional=[
+                    x.symint_to_int() for x in arguments.pre_self_positional
+                ],
+            )
+
+        if self.tensor_options:
+            arguments = dataclasses.replace(
+                arguments,
+                post_tensor_options_kwarg_only=[
+                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
+                ],
+            )
+
+        arguments = dataclasses.replace(
+            arguments,
+            post_self_positional=[
+                x.symint_to_int() for x in arguments.post_self_positional
+            ],
+            pre_tensor_options_kwarg_only=[
+                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
+            ],
+        )
+
+        return arguments
+
+    def has_tensor_arg(self) -> bool:
+        return any(a.type.is_tensor_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less

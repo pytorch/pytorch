@@ -1,3 +1,5 @@
+# Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -556,11 +558,9 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('matrix_exp'),  # would benefit from narrow_scatter
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
-        xfail('put'),
         xfail('quantile'),  # checks q via a .item() call
         xfail('stft'),
         xfail('view_as_complex'),
@@ -635,7 +635,6 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('scatter'),
-        xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('view_as_complex'),
         xfail('prod'),
@@ -651,7 +650,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
 
-        xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
         # erroring because running_mean and running_var aren't differentiable
@@ -694,7 +692,6 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
-        xfail('linalg.solve_triangular'),
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
@@ -702,10 +699,7 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('linalg.cholesky'),
-        xfail('linalg.qr'),
         xfail('cross'),
-        xfail('qr'),
         xfail('linalg.pinv'),
         xfail('masked_fill'),
         xfail('copysign'),
@@ -715,12 +709,11 @@ class TestOperators(TestCase):
         xfail('linalg.pinv', 'hermitian'),
         xfail('pinverse'),
         skip('_masked.mean'),  # ???
-        xfail('linalg.cholesky_ex'),
         xfail('masked_scatter'),
         xfail('index_fill'),
+        xfail('put'),
         xfail('take'),
         xfail('linalg.eigvals'),
-        xfail('linalg.qr'),
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
@@ -748,8 +741,6 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
-        xfail('linalg.eigh'),  # _linalg_eigh doesn't have batching rule
-        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
         xfail('logdet'),  # _linalg_slogdet doesn't have batching rule
         xfail('linalg.slogdet'),  # _linalg_slogdet doesn't have batching rule
     }))
@@ -782,7 +773,6 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
-        xfail('cholesky'),
         xfail('complex'),
         xfail('copysign'),
         xfail('cummax'),
@@ -794,17 +784,13 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('linalg.cholesky'),
-        xfail('linalg.cholesky_ex'),
         xfail('linalg.det'),
         xfail('linalg.eig'),
-        xfail('linalg.eigh'),
         xfail('linalg.eigvals'),
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.pinv'),
-        xfail('linalg.qr'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.slogdet'),
         xfail('linalg.solve'),
@@ -815,7 +801,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
-        xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('pinverse'),
         xfail('prod'),
@@ -839,7 +824,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
-        xfail('linalg.solve_triangular'),
         xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
@@ -871,8 +855,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'amin'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
-        xfail('qr'),
-        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -915,7 +897,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('index_put', ''),
-        xfail('matrix_exp'),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
@@ -1278,11 +1259,10 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
-        xfail('matrix_exp'),  # inplace
-        xfail('take'),  # inplace
 
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
@@ -1292,15 +1272,17 @@ class TestOperators(TestCase):
         xfail('to_sparse'),  # dispatch key issue
 
         # numerical inconsistencies, look like bugs
+        skip('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),  # fails on linux, passes on windows
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
-        skip('__rmatmul__', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('matmul', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('nn.functional.conv_transpose3d', dtypes=(torch.float32,)),  # only fails on cpu only linux
+        skip('__rmatmul__'),  # flaky needs investigation
+        skip('matmul'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose3d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose2d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose1d'),  # flaky needs investigation
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
     })
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
