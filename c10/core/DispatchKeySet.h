@@ -659,6 +659,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 
 constexpr DispatchKeySet python_ks = DispatchKeySet({
     DispatchKey::Python,
+    DispatchKey::PythonComposite,
     DispatchKey::PythonTLSSnapshot,
 });
 

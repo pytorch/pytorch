@@ -53,7 +53,8 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
     // where we would like to support composite implict kernels but not
     // explicit kernels therefore we manually add the key to the
     // math_dispatch_keyset
-    DispatchKeySet{DispatchKey::NestedTensor};
+    DispatchKeySet{DispatchKey::NestedTensor} |
+    DispatchKeySet{DispatchKey::PythonComposite};
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);

@@ -5,6 +5,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/core/TorchDispatchModeTLS.h>
 
 namespace torch {
 PyObject* disabled_torch_function = nullptr;
@@ -163,27 +164,9 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
         "expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
-  // This implementation is not completely correct.  The moral
-  // meaning of this function is that we should do a redispatch
-  // "after" PythonKey, aka a redispatch() call.  But we don't have a
-  // dispatcher call here; we have an opaque Python object.
-  //
-  // What we have here is a close approximation: instead of redispatch(), we
-  // just exclude Python and all the keys before it, so that we will go
-  // to the next key after Python.  The difference, however, is we are
-  // now PERMANENTLY after Python.  We don't think there are any legitimate
-  // cases where we want to go for another round on the entire dispatcher key
-  // set, but if there are, then we will have to do something else here.
-  c10::impl::ExcludeDispatchKeyGuard guard_(
-      // TODO: add constructor for this specifically
-      c10::DispatchKeySet(c10::DispatchKeySet::FULL) -
-      c10::DispatchKeySet(
-          c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python)
-      // NB: off by one hazard here, but it works out: python key is not
-      // included in AFTER, so it is included in the negation (and that's
-      // correct: we want to exclude Python key and everything BEFORE it.)
-  );
+  at::impl::TorchDispatchModeTLS::exchange_skip_next(true);
   auto r = PyObject_Call(func, py_args.ptr(), kwargs);
+  TORCH_INTERNAL_ASSERT(!at::impl::TorchDispatchModeTLS::peek_skip_next());
   if (r == nullptr)
     throw python_error();
   return r;

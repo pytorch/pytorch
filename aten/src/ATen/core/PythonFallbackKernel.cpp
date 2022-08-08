@@ -43,10 +43,23 @@ private:
   c10::impl::LocalDispatchKeySet saved_;
 };
 
-void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void pythonCompositeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet ks, torch::jit::Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard guard_(
+      c10::DispatchKeySet({c10::DispatchKey::Python, c10::DispatchKey::PythonComposite}));
+  op.callBoxed(stack);
+}
+
+void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet ks, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
+
+  // TODO: use guard semantics instead, see https://github.com/pytorch/pytorch/pull/74728
+  if (at::impl::TorchDispatchModeTLS::exchange_skip_next(false)) {
+    op.redispatchBoxed(ks.remove(c10::DispatchKey::Python), stack);
+    return;
+  }
+
   c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
 
 
@@ -136,4 +149,8 @@ TORCH_LIBRARY_IMPL(_, Python, m) {
 
 TORCH_LIBRARY_IMPL(_, PythonTLSSnapshot, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonTLSSnapshotFallback>());
+}
+
+TORCH_LIBRARY_IMPL(_, PythonComposite, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonCompositeFallback>());
 }

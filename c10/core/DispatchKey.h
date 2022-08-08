@@ -223,6 +223,13 @@ enum class DispatchKey : uint16_t {
   // correct backend.
   BackendSelect,
 
+  // If the operator has a composite implementation that would be valid
+  // Python key, it is registered here.  This allows a Python key to decide
+  // if they want the composite by redispatching past Python, which would
+  // then hit this key.
+  PythonComposite,
+
+  // Handler for Python __torch_dispatch__ subclasses and modes
   Python,
 
   // Out-of-core key for Fake Tensor in torchdistx.

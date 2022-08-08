@@ -20,6 +20,7 @@ ThreadLocalState::ThreadLocalState()
   saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
 
   torch_dispatch_mode_state_ = at::impl::TorchDispatchModeTLS::get_state();
+  // TODO: maybe also need to save skip_next state? Not sure
 }
 
 void ThreadLocalState::set_grad_mode(bool enabled) {

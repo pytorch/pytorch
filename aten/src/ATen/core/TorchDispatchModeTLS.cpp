@@ -5,6 +5,7 @@
 namespace at { namespace impl {
 
 thread_local std::shared_ptr<SafePyObject> torchDispatchModeState;
+thread_local bool torchDispatchModeSkipNext;
 
 void TorchDispatchModeTLS::set_state(std::shared_ptr<SafePyObject> state) {
   if (state) {
@@ -24,6 +25,14 @@ void TorchDispatchModeTLS::reset_state() {
   torchDispatchModeState.reset();
   c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
   c10::impl::tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, false);
+}
+
+bool TorchDispatchModeTLS::exchange_skip_next(bool new_skip_next) {
+  return std::exchange(torchDispatchModeSkipNext, new_skip_next);
+}
+
+bool TorchDispatchModeTLS::peek_skip_next() {
+  return torchDispatchModeSkipNext;
 }
 
 bool dispatch_mode_enabled() {

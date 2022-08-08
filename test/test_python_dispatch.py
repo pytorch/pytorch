@@ -1406,6 +1406,38 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertEqual(SubTensor(x) + SubTensor(y), x + y)
         self.assertEqual(called, [torch.ops.aten.add.Tensor])
 
+    def test_dispatch_inference_mode_super(self):
+        called = []
+        level = 0
+
+        class SubTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal level
+                called.append((func, level))
+                level += 1
+                try:
+                    return super().__torch_dispatch__(func, types, args, kwargs)
+                finally:
+                    level -= 1
+
+        with torch.inference_mode():
+            x = torch.randn(2, 3)
+            y = torch.randn(5, 3)
+            r = torch.nn.functional.linear(SubTensor(x), SubTensor(y))
+
+        self.assertEqual(r, torch.nn.functional.linear(x, y))
+        self.assertEqual(called, [
+            # top level call
+            (torch.ops.aten.linear.default, 0),
+            # ... redispatches to ...
+            (torch.ops.aten.t.default, 1), (torch.ops.aten.matmul.default, 1),
+            # ... matmul redispatches to ...
+            (torch.ops.aten.mm.default, 2)
+        ])
+
     def test_dispatch_super_call_list_arg(self):
         called = []
 

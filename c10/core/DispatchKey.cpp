@@ -100,6 +100,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Python:
       return "Python";
+    case DispatchKey::PythonComposite:
+      return "PythonComposite";
 
     case DispatchKey::Fake:
       return "Fake";
@@ -254,6 +256,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
+      {"PythonComposite", c10::DispatchKey::PythonComposite},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Fake", c10::DispatchKey::Fake},
       {"Named", c10::DispatchKey::Named},
