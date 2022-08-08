@@ -361,12 +361,15 @@ class FakeTensorTest(TestCase):
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_new(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             a = torch.rand([16, 1])
             self.checkType(a.new(10, 10), "cpu", [10, 10])
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_new_cuda(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             b = torch.rand([4, 4], device='cuda')
             self.checkType(b.new(device='cuda'), "cuda", [0])
 
