@@ -136,10 +136,8 @@ def _compare_ort_pytorch_outputs(
     pt_outs = _unpack_to_numpy(pt_outs)
 
     assert len(pt_outs) == len(ort_outs), "number of outputs differ"
-    if (
-        acceptable_error_percentage
-        and acceptable_error_percentage <= 1.0
-        and acceptable_error_percentage >= 0.0
+    if acceptable_error_percentage and (
+        acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
     ):
         raise ValueError(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
