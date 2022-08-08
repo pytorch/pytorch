@@ -39,6 +39,8 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     Returns:
         Torch scripted model.
     """
+    strip_overloads(fx_g)
+
     for node in fx_g.graph.nodes:
         if (node.target == torch.ops.aten._to_copy and len(node.args) == 1
            and len(node.kwargs) == 1 and 'dtype' in node.kwargs):
@@ -51,8 +53,6 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
                 v = v.type
             new_kwargs[k] = v
         node.kwargs = new_kwargs
-
-    strip_overloads(fx_g)
 
     fx_g.graph.lint()
 
@@ -270,6 +270,7 @@ default_decompositions = {
     aten.hardtanh,
     aten.hardswish,
     aten.hardsigmoid,
+    aten.conj_physical
 }
 
 default_decompositions = get_decompositions(default_decompositions)
