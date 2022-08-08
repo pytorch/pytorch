@@ -6072,7 +6072,7 @@ class MvlGammaInfo(UnaryUfuncInfo):
     def __init__(self, variant_test_name, domain, skips, sample_kwargs):
         super(MvlGammaInfo, self).__init__(
             'mvlgamma',
-            ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+            ref=reference_mvlgamma if TEST_SCIPY else None,
             aliases=('special.multigammaln',),
             variant_test_name=variant_test_name,
             domain=domain,
@@ -10351,7 +10351,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
-                       scipy.special.i0) if TEST_SCIPY else _NOTHING,
+                       scipy.special.i0) if TEST_SCIPY else None,
                    aliases=('special.i0',),
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
@@ -10367,7 +10367,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
-                   ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.i0e if TEST_SCIPY else None,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 3e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -10378,7 +10378,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True),
     UnaryUfuncInfo('special.i1',
                    aten_name='special_i1',
-                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1) if TEST_SCIPY else _NOTHING,
+                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1) if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool),
                    sample_inputs_func=sample_inputs_i0_i1,
@@ -10397,7 +10397,7 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True),
     UnaryUfuncInfo('special.i1e',
                    aten_name='special_i1e',
-                   ref=scipy.special.i1e if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.i1e if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool),
                    sample_inputs_func=sample_inputs_i0_i1,
@@ -10407,7 +10407,7 @@ op_db: List[OpInfo] = [
                    aten_name='special_ndtr',
                    decorators=(precisionOverride({torch.bfloat16: 5e-3,
                                                   torch.float16: 5e-4}),),
-                   ref=scipy.special.ndtr if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.ndtr if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_forward_ad=True,
@@ -12390,7 +12390,6 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo(
         "nn.functional.soft_margin_loss",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
@@ -12415,7 +12414,6 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo(
         "nn.functional.margin_ranking_loss",
-        ref=_NOTHING,
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
@@ -12426,7 +12424,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True),
     OpInfo(
         "nn.functional.multi_margin_loss",
-        ref=_NOTHING,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
@@ -12435,7 +12432,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.multilabel_margin_loss",
-        ref=_NOTHING,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
@@ -12458,7 +12454,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
     OpInfo(
         "nn.functional.multilabel_soft_margin_loss",
-        ref=_NOTHING,
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12839,7 +12834,6 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, **kwargs),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, inplace=True, **kwargs),
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_wrapper=wrapper_set_seed,
@@ -13316,7 +13310,6 @@ op_db: List[OpInfo] = [
     #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
     #                 )),
     UnaryUfuncInfo('nn.functional.softshrink',
-                   ref=_NOTHING,
                    aten_name="softshrink",
                    aten_backward_name='softshrink_backward',
                    dtypes=floating_types_and(torch.bfloat16),
@@ -13327,7 +13320,6 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_softshrink,
                    error_inputs_func=error_inputs_softshrink),
     UnaryUfuncInfo('nn.functional.hardshrink',
-                   ref=_NOTHING,
                    aten_name="hardshrink",
                    aten_backward_name='hardshrink_backward',
                    dtypes=floating_types_and(torch.bfloat16,),
@@ -13338,7 +13330,6 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    autodiff_nonfusible_nodes=["aten::hardshrink"]),
     UnaryUfuncInfo('nn.functional.hardtanh',
-                   ref=_NOTHING,
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
                    dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
@@ -13355,7 +13346,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
            aten_backward_name='gelu_backward',
-           ref=reference_gelu if TEST_SCIPY else _NOTHING,
+           ref=reference_gelu if TEST_SCIPY else None,
            error_inputs_func=error_inputs_gelu,
            supports_autograd=True,
            assert_autodiffed=True,
@@ -13371,7 +13362,6 @@ op_db: List[OpInfo] = [
                # May not replicate in CI
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
     UnaryUfuncInfo('nn.functional.relu6',
-                   ref=_NOTHING,
                    aten_name="relu6",
                    dtypes=all_types_and(torch.bfloat16),
                    backward_dtypes=floating_types(),
@@ -14733,7 +14723,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
@@ -14748,7 +14738,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('special.polygamma',
                    op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
                    variant_test_name='special_polygamma_n_0',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
@@ -14765,7 +14755,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
@@ -14787,7 +14777,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_2',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
@@ -14811,7 +14801,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_3',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
@@ -14831,7 +14821,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_4',
-                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_polygamma if TEST_SCIPY else None,
                    decorators=(precisionOverride({torch.float16: 5e-4, torch.float32: 5e-4}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
@@ -16134,7 +16124,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sigmoid',
                    aliases=('special.expit', 'nn.functional.sigmoid'),
                    aten_backward_name='sigmoid_backward',
-                   ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
+                   ref=reference_sigmoid if TEST_SCIPY else None,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.complex64: 1e-1,
                                                   torch.bfloat16: 1e-2}),),
@@ -16158,7 +16148,7 @@ op_db: List[OpInfo] = [
                                             if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
                        safe_val=0)),
     UnaryUfuncInfo('digamma',
-                   ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.digamma if TEST_SCIPY else None,
                    aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16166,7 +16156,7 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
     UnaryUfuncInfo('special.entr',
-                   ref=scipy.special.entr if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.entr if TEST_SCIPY else None,
                    aten_name='special_entr',
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -16181,7 +16171,7 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    sample_inputs_func=sample_inputs_entr),
     UnaryUfuncInfo('special.ndtri',
-                   ref=scipy.special.ndtri if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.ndtri if TEST_SCIPY else None,
                    domain=(0, 1),
                    aten_name='special_ndtri',
                    dtypes=all_types_and(torch.bool),
@@ -16189,13 +16179,13 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True),
     UnaryUfuncInfo('special.log_ndtr',
                    aten_name='special_log_ndtr',
-                   ref=scipy.special.log_ndtr if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.log_ndtr if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    ),
     UnaryUfuncInfo('erf',
-                   ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.erf if TEST_SCIPY else None,
                    aliases=('special.erf', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
@@ -16216,7 +16206,7 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
     UnaryUfuncInfo('erfc',
-                   ref=scipy.special.erfc if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.erfc if TEST_SCIPY else None,
                    aliases=('special.erfc', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
@@ -16226,7 +16216,7 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
     UnaryUfuncInfo('erfinv',
-                   ref=scipy.special.erfinv if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.erfinv if TEST_SCIPY else None,
                    aliases=('special.erfinv', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2,
@@ -16283,7 +16273,7 @@ op_db: List[OpInfo] = [
         ),
     ),
     UnaryUfuncInfo('lgamma',
-                   ref=reference_lgamma if TEST_SCIPY else _NOTHING,
+                   ref=reference_lgamma if TEST_SCIPY else None,
                    aliases=('special.gammaln', ),
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16337,7 +16327,7 @@ op_db: List[OpInfo] = [
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    aten_backward_name='logit_backward',
-                   ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.logit if TEST_SCIPY else None,
                    domain=(0, 1),
                    aliases=('special.logit', ),
                    supports_forward_ad=True,
@@ -16636,7 +16626,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            error_inputs_func=error_inputs_t),
     UnaryUfuncInfo('special.erfcx',
-                   ref=scipy.special.erfcx if TEST_SCIPY else _NOTHING,
+                   ref=scipy.special.erfcx if TEST_SCIPY else None,
                    aten_name='special_erfcx',
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
@@ -16646,7 +16636,6 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
@@ -16670,7 +16659,6 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
@@ -16689,7 +16677,6 @@ op_db: List[OpInfo] = [
         "nn.functional.dropout3d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
@@ -16711,7 +16698,6 @@ op_db: List[OpInfo] = [
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
@@ -16737,7 +16723,6 @@ op_db: List[OpInfo] = [
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="without_train",
-        ref=_NOTHING,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
             # lambda impl
@@ -16867,7 +16852,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.grid_sample",
-        ref=_NOTHING,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_out=False,
@@ -17652,7 +17636,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.ctc_loss",
-        ref=_NOTHING,
         dtypes=floating_types(),
         supports_out=False,
         sample_inputs_func=sample_inputs_ctc_loss,
@@ -17686,7 +17669,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.cosine_embedding_loss",
-        ref=_NOTHING,
         dtypes=all_types_and(torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
@@ -17696,7 +17678,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.nll_loss",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17715,7 +17696,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.gaussian_nll_loss",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -17744,7 +17724,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.hinge_embedding_loss",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17757,7 +17736,6 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.huber_loss",
         aten_backward_name='huber_loss_backward',
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -17779,7 +17757,6 @@ op_db: List[OpInfo] = [
         supports_gradgrad=False),
     OpInfo(
         "nn.functional.poisson_nll_loss",
-        ref=_NOTHING,
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17989,7 +17966,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -18010,7 +17987,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.j0 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18024,7 +18001,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j1 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.j1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18038,7 +18015,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y0 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.y0 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18052,7 +18029,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y1 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.y1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
@@ -18157,7 +18134,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i0 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.i0 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18171,7 +18148,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i1 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.i1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18185,7 +18162,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.k0 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18199,7 +18176,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.k1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18213,7 +18190,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0e if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.k0e if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18227,7 +18204,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1e if TEST_SCIPY else _NOTHING,
+        ref=scipy.special.k1e if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
@@ -18289,7 +18266,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
         supports_autograd=False,
     ),
 ]
@@ -19912,7 +19889,7 @@ sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) 
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
-reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
+reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
 

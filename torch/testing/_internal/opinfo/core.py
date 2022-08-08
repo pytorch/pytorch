@@ -530,7 +530,7 @@ class OpInfo(object):
 
     # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
     # If given, the op will be compared with its reference on each of its sample inputs.
-    ref: Callable = None
+    ref: Optional[Callable] = None
 
     # the following metadata describes the operator, its variants, and its aliases, if any
 
@@ -2146,10 +2146,7 @@ class UnaryUfuncInfo(OpInfo):
         self,
         name,  # the string name of the function
         *,
-        ref,  # a reference function
         dtypes=floating_types(),
-        dtypesIfCUDA=None,
-        dtypesIfROCM=None,
         domain=(None, None),  # the [low, high) domain of the function
         handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
@@ -2157,23 +2154,18 @@ class UnaryUfuncInfo(OpInfo):
         sample_inputs_func=sample_inputs_elementwise_unary,
         reference_inputs_func=reference_inputs_elementwise_unary,
         sample_kwargs=lambda device, dtype, input: ({}, {}),
-        supports_sparse=False,
         reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
         **kwargs,
     ):
         self._original_unary_ufunc_args = locals().copy()
 
-        super(UnaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
-            supports_sparse=supports_sparse,
             **kwargs,
         )
-        self.ref = ref
         self.domain = domain
         self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
