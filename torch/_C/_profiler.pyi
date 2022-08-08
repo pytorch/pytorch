@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Union
 
 # defined in torch/csrc/profiler/python/init.cpp
 

@@ -2,7 +2,7 @@ from typing import List, Set, Callable, Any, Union
 from enum import Enum
 
 import torch
-from ._profiler import ProfilerActivity, ProfilerConfig
+from ._profiler import _ProfilerEvent, ActiveProfilerType, ProfilerActivity, ProfilerConfig
 
 # Defined in tools/autograd/init.cpp
 
