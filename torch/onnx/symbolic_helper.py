@@ -133,7 +133,7 @@ def _parse_arg(
         if desc == "is":
             for v in node.inputs():
                 element_node = v.node()
-                if element_node.kind() == "onnx::Constant":
+                if element_node.kind() != "onnx::Constant":
                     raise errors.SymbolicValueError(
                         f"Failed to export an ONNX attribute '{element_node.kind()}' "
                         f"(node '{element_node}' in list node {node}) "
@@ -157,14 +157,14 @@ def _parse_arg(
 
     raise errors.SymbolicValueError(
         "Expected node type 'onnx::Constant' "
-        f"for argument '{arg_name}' of node '{node_name}', "
-        f"got '{node.kind()}'.",
+        f"for argument '{arg_name}' of node '{node_name}', got '{node.kind()}'.",
         value,
     )
 
 
 def _node_get(node: _C.Node, key: str):
     """Gets attributes of a node which is polymorphic over return type."""
+    assert isinstance(node, _C.Node)
     sel = node.kindOf(key)
     return getattr(node, sel)(key)
 
