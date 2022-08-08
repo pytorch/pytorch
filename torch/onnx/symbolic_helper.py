@@ -14,7 +14,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch, _type_utils, errors  # noqa: F401
+from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -348,23 +348,25 @@ def quantized_args(
     """
 
     def decorator(fn):
-        fn._scale = scale
-        fn._zero_point = zero_point
-
         @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
-            _scale = fn._scale
-            if _scale is not None:
-                _scale = g.op("Constant", value_t=torch.tensor(_scale))
-            _zero_point = fn._zero_point
-            if _zero_point is not None:
-                _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
+            nonlocal scale
+            nonlocal zero_point
+            if scale is not None:
+                _scale = g.op("Constant", value_t=torch.tensor(scale))
+            else:
+                _scale = None
+            if zero_point is not None:
+                _zero_point = g.op("Constant", value_t=torch.tensor(zero_point))
+            else:
+                _zero_point = None
 
             # Support variable length arguments by marking unspecified ones as non-quantized
             arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
                 len(args) - len(arg_q_descriptors)
             )
             descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
+
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
                 (descriptor and arg.node().kind() == "prim::TupleConstruct")
@@ -372,20 +374,29 @@ def quantized_args(
             ):
                 return fn(g, *args, **kwargs)
 
-            dequantized_args = []
+            # Dequantize arguments that are quantized
+            maybe_dequantized_args = []
             for descriptor, arg in descriptor_args:
-                if descriptor:
-                    dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
-                    dequantized_args.append(dequantized_arg)
+                if descriptor and arg.node().kind() == "prim::TupleConstruct":
+                    dequantized_arg, arg_scale, arg_zero_point, _ = dequantize_helper(
+                        g, arg
+                    )
+                    maybe_dequantized_args.append(dequantized_arg)
+                    # Set scale and zero_point to the first quantized input if not already set
                     if _scale is None:
-                        _scale = scale
+                        _scale = arg_scale
                     if _zero_point is None:
-                        _zero_point = zero_point
+                        _zero_point = arg_zero_point
                 else:
-                    dequantized_args.append(arg)
+                    maybe_dequantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
-            output = fn(g, *dequantized_args, **kwargs)
+            output = fn(g, *maybe_dequantized_args, **kwargs)
+
+            assert _scale is not None, "Bug: Scale must be set for quantized operator"
+            assert (
+                _zero_point is not None
+            ), "Bug: Zero point must be set for quantized operator"
 
             return quantize_helper(g, output, _scale, _zero_point)
 
@@ -1366,13 +1377,15 @@ def dequantize_helper(
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
-        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point) for per tensor quantization,
-          or (quantized_tensor, scale, zero_point, axis) for per channel quantization.
-          Representing the quantized tensor.
-        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the data type of quantized tensor.
-          It must be either torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
+        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point)
+            for per tensor quantization, or
+            (quantized_tensor, scale, zero_point, axis) for per channel quantization,
+            representing the quantized tensor.
+        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the
+            data type of quantized tensor. It must be either
+            torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
     """
-    unpacked_qtensors = _unpack_tuple(qtensor)
+    unpacked_qtensors = _unpack_quantized_tensor(qtensor)
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
@@ -1420,6 +1433,9 @@ def quantize_helper(
         zero_point: torch._C.Value, quantized zero point.
         axis: Optional[torch._C.Value] default None, if None, represents per tensor quantization.
             Otherwise, represents per channel quantization, along given axis.
+
+    Returns:
+        A TupleConstruct storing information of the quantized tensor.
     """
     if (
         axis is not None
@@ -1540,7 +1556,7 @@ scalar_name_to_pytorch = {
 # This indicates each scalar type's corresponding
 # torch type. Related source:
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
-scalar_type_to_pytorch_type = [
+scalar_type_to_pytorch_type = (
     torch.uint8,  # 0
     torch.int8,  # 1
     torch.short,  # 2
@@ -1557,7 +1573,7 @@ scalar_type_to_pytorch_type = [
     torch.quint8,  # 13
     torch.qint32,  # 14
     torch.bfloat16,  # 15
-]
+)
 
 # Deprecated. Internally use _type_utils.ScalarType
 # source of truth is
@@ -1599,7 +1615,7 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],  # 13
     cast_pytorch_to_onnx["Int"],  # 14
     cast_pytorch_to_onnx["BFloat16"],  # 15
-]
+)
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.

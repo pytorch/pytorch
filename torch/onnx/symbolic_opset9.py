@@ -324,6 +324,9 @@ __all__ = [
     "zeros",
 ]
 
+
+_INT64_MAX = 9223372036854775807
+
 # used to represent "missing" optional inputs
 def unused(g):
     n = g.op("prim::Constant")
@@ -341,10 +344,12 @@ def _reshape_from_tensor(g, input, shape):
     return reshape(g, input, shape)
 
 
+@symbolic_helper.quantized_args(True)
 def reshape(g, self, shape):
     return symbolic_helper._reshape_helper(g, self, shape)
 
 
+@symbolic_helper.quantized_args(True)
 def reshape_as(g, self, other):
     shape = g.op("Shape", other)
     return reshape(g, self, shape)
@@ -646,9 +651,10 @@ def sign(g, self):
     return g.op("Sign", self)
 
 
+@symbolic_helper.quantized_args(True)
 def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
-    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == _INT64_MAX:
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
@@ -702,6 +708,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
+        @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() == "onnx::Constant":
@@ -715,7 +722,8 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
+        @symbolic_helper.quantized_args(True)
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -769,10 +777,12 @@ def _standard_gamma(g, self, generator):
         return symbolic_helper._onnx_unsupported("_standard_gamma")
 
 
+@symbolic_helper.quantized_args(True)
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+@symbolic_helper.quantized_args(True)
 def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
@@ -780,6 +790,7 @@ def numpy_T(g, input):
     return g.op("Transpose", input, perm_i=perm)
 
 
+@symbolic_helper.quantized_args(True)
 def expand(g, self, size, implicit):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
@@ -798,6 +809,7 @@ def expand(g, self, size, implicit):
     return g.op("Expand", self, size)
 
 
+@symbolic_helper.quantized_args(True, True)
 def expand_as(g, self, other):
     self_t = symbolic_helper._maybe_get_const(self, "t")
     if isinstance(self_t, torch.Tensor):
@@ -813,6 +825,7 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i", "b", "v")
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and GLOBALS.export_training:
@@ -830,6 +843,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
@@ -906,6 +920,7 @@ def permute(g, self, dims):
     return g.op("Transpose", self, perm_i=dims)
 
 
+@symbolic_helper.quantized_args(True)
 def view(g, self, size):
     return reshape(g, self, size)
 
@@ -991,12 +1006,13 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
 def select(g, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
-            end_index = 9223372036854775807
+            end_index = _INT64_MAX
         else:
             end_index = index + 1
         slice_node = symbolic_helper._slice_helper(
@@ -1197,7 +1213,6 @@ def leaky_relu(g, input, negative_slope, inplace=False):
     return g.op("LeakyRelu", input, alpha_f=symbolic_helper._scalar(negative_slope))
 
 
-@symbolic_helper.parse_args("v", "i")
 def glu(g, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
@@ -1742,6 +1757,7 @@ def __not_(g, self):
     return g.op("Not", self)
 
 
+@symbolic_helper.quantized_args(True, True)
 def eq(g, self, other):
     if isinstance(self.type(), _C.DeviceObjType) and isinstance(
         other.type(), _C.DeviceObjType
@@ -1752,11 +1768,13 @@ def eq(g, self, other):
     return g.op("Equal", self, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def ne(g, self, other):
     return eq(g, self, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -1773,6 +1791,7 @@ def gt_impl(g, input, other):
     return g.op("Greater", input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 def lt(g, input, other):
     return lt_impl(g, input, other)
 
@@ -1789,11 +1808,13 @@ def lt_impl(g, input, other):
     return g.op("Less", input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def ge(g, input, other):
     return lt_impl(g, input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def le(g, input, other):
     return gt_impl(g, input, other)
@@ -2274,6 +2295,7 @@ def _layer_norm_returns_normalized_input_mean_rstd(
     return normalized, None, None
 
 
+@symbolic_helper.quantized_args(True, False, True, True)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
 def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
     return _layer_norm_returns_normalized_input_mean_rstd(
@@ -2281,6 +2303,7 @@ def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
     )
 
 
+@symbolic_helper.quantized_args(True, False, True, True)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
@@ -2297,29 +2320,35 @@ def instance_norm(
     bias,
     running_mean,
     running_var,
-    use_input_stats,
-    momentum,
-    eps,
-    cudnn_enabled,
+    use_input_stats: int,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: int,
 ):
     symbolic_helper.check_training_mode(use_input_stats, "instance_norm")
     channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
     if weight is None or symbolic_helper._is_none(weight):
         if channel_size is None:
             raise RuntimeError(
-                "Unsupported: ONNX export of instance_norm for unknown " "channel size."
+                "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
-        weight_value = torch.tensor([1.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        weight_value = torch.tensor(
+            [1.0] * channel_size,
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or symbolic_helper._is_none(bias):
         if channel_size is None:
             raise RuntimeError(
-                "Unsupported: ONNX export of instance_norm for unknown " "channel size."
+                "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
-        bias_value = torch.tensor([0.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        bias_value = torch.tensor(
+            [0.0] * channel_size,
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     if (
@@ -2385,6 +2414,7 @@ def unfold(g, input, dimension, size, step):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
     sizes = symbolic_helper._get_tensor_sizes(input)
+    # FIXME(justinchuby): Get rid of the try catch here to improve readability
     try:
         sizedim = sizes[dimension]
     except Exception:
@@ -2414,6 +2444,7 @@ def unfold(g, input, dimension, size, step):
         return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "t", "t", "t")
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
@@ -2426,6 +2457,7 @@ def elu(g, input, alpha, scale, input_scale):
     return g.op("Elu", input, alpha_f=symbolic_helper._scalar(alpha))
 
 
+@symbolic_helper.quantized_args(True)
 def selu(g, input):
     return g.op("Selu", input)
 
@@ -2675,6 +2707,7 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
+# TODO(justinchuby): Support multiple quantized args in output
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input)
     if dim_or_y is None and keepdim is None:
@@ -2691,10 +2724,12 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+@symbolic_helper.quantized_args(True, True)
 def maximum(g, input, other):
     return max(g, input, dim_or_y=other)
 
 
+# TODO(justinchuby): Support multiple quantized args in output
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -2711,20 +2746,24 @@ def min(g, self, dim_or_y=None, keepdim=None):
         return min, indices
 
 
+@symbolic_helper.quantized_args(True, True)
 def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 def amax(g, self, dim, keepdim):
     return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 def amin(g, self, dim, keepdim):
     return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i")
 def aminmax(g, self, dim, keepdim):
     reduce_kwargs = {"keepdims_i": keepdim}
@@ -3131,11 +3170,7 @@ def slice(g, self, *args):
                 )
         else:
             start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-            end = (
-                9223372036854775807
-                if is_end_none
-                else symbolic_helper._parse_arg(end, "i")
-            )
+            end = _INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
             dim = symbolic_helper._parse_arg(dim, "i")
             return symbolic_helper._slice_helper(
                 g, self, axes=[dim], starts=[start], ends=[end]
@@ -3151,9 +3186,7 @@ def slice(g, self, *args):
             end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-        end = (
-            9223372036854775807 if is_end_none else symbolic_helper._parse_arg(end, "i")
-        )
+        end = _INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
         return symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[start], ends=[end]
         )
@@ -3161,6 +3194,7 @@ def slice(g, self, *args):
         raise NotImplementedError("Unknown aten::slice signature")
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     return op_with_optional_float_cast(
@@ -3168,6 +3202,7 @@ def hardtanh(g, self, min_val, max_val):
     )
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v")
 def hardswish(g, self):
     hs = hardsigmoid(g, self)
@@ -3274,6 +3309,7 @@ def unsqueeze(g, self, dim):
     return symbolic_helper._unsqueeze_helper(g, self, axes_i=[dim])
 
 
+# TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     if out is not None:
@@ -3299,6 +3335,7 @@ def numel(g, self):
     return g.op("ReduceProd", shape, keepdims_i=0)
 
 
+# TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
@@ -4930,6 +4967,7 @@ def gelu(g, self: torch._C.Value, approximate: str = "none"):
         )
 
 
+@symbolic_helper.quantized_args(True, False, True, True)
 @symbolic_helper.parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -4960,14 +4998,20 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # instance norm computation and reshape
     weight_ = g.op(
         "Constant",
-        value_t=torch.tensor([1.0] * num_groups).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        value_t=torch.tensor(
+            [1.0] * num_groups,
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         ),
     )
     bias_ = g.op(
         "Constant",
-        value_t=torch.tensor([0.0] * num_groups).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        value_t=torch.tensor(
+            [0.0] * num_groups,
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         ),
     )
 
@@ -4977,13 +5021,19 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     norm = symbolic_helper._reshape_helper(g, norm_reshaped, g.op("Shape", input))
 
     if weight is None or weight.node().mustBeNone():
-        weight_value = torch.tensor([1.0]).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        weight_value = torch.tensor(
+            [1.0],
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or bias.node().mustBeNone():
-        bias_value = torch.tensor([0.0]).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        bias_value = torch.tensor(
+            [0.0],
+            dtype=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
 
@@ -5082,6 +5132,7 @@ def kl_div(g, input, target, reduction, log_target):
         )
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "is", "i")
 def as_strided(g, self, sizes, strides, offset=None):
     sizes = symbolic_helper._maybe_get_const(sizes, "is")
