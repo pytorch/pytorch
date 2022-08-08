@@ -641,12 +641,13 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
   HANDLE_TH_ERRORS
-    THPUtils_assert(
+  THPUtils_assert(
       PyBool_Check(enabled),
       "recordMemoryHistory expects a bool, "
       "but got %s",
       THPUtils_typename(enabled));
-  c10::cuda::CUDACachingAllocator::setContextRecorder(enabled == Py_True ? StackContext::gather : nullptr);
+  c10::cuda::CUDACachingAllocator::setContextRecorder(
+      enabled == Py_True ? StackContext::gather : nullptr);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

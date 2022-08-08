@@ -4418,7 +4418,7 @@ class TestCudaComm(TestCase):
             tensors = [torch.rand(128, device='cuda') for _ in range(1000)]
             while tensors:
                 del tensors[randint(0, len(tensors) - 1)]
-            torch.rand(128*5, device='cuda')
+            torch.rand(128 * 5, device='cuda')
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:

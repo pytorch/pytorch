@@ -102,7 +102,7 @@ struct Context {
   virtual ~Context() {}
 };
 
-typedef std::unique_ptr<Context>(*CreateContextFn)(void);
+typedef std::unique_ptr<Context> (*CreateContextFn)(void);
 
 struct History {
   void* addr;

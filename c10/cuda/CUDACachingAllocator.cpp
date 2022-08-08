@@ -570,7 +570,7 @@ class DeviceCachingAllocator {
     // to have...
     CreateContextFn context_recorder = context_recorder_.load();
     std::unique_ptr<Context> context =
-        context_recorder? context_recorder() : nullptr;
+        context_recorder ? context_recorder() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
