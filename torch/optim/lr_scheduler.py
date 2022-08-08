@@ -745,7 +745,7 @@ class PolynomialLR(_LRScheduler):
             (
                 base_lr * (1.0 - min(self.total_iters, self.last_epoch) / self.total_iters) ** self.power
             )
-            for i, base_lr in enumerate(self.base_lrs)
+            for base_lr in self.base_lrs
         ]
 
 
