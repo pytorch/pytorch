@@ -11755,10 +11755,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 torch.nn.ReLU(),
                 name="relu",
             ),
-            common_utils.subtest(
-                torch.nn.LeakyReLU(),
-                name="leaky_relu",
-            ),
+            # common_utils.subtest(
+            #     torch.nn.LeakyReLU(),
+            #     name="leaky_relu",
+            # ),
             common_utils.subtest(
                 torch.nn.quantized.Hardswish(2.0, 1),
                 name="quantized_hardswish",
@@ -11825,14 +11825,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             #     ),
             #     name="group_norm",
             # ),
-            common_utils.subtest(
-                lambda x: torch.max(x, dim=0, keepdim=True),
-                name="max",
-            ),
-            common_utils.subtest(
-                lambda x: torch.min(x, dim=0, keepdim=True),
-                name="min",
-            ),
             common_utils.subtest(
                 lambda x: torch.as_strided(x, (2, 2), (1, 2)),
                 name="as_strided",
