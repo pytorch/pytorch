@@ -2916,22 +2916,16 @@ def diagonal(
     else:
         diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
 
-    if diag_size == 0:
-        pass  # skip
-    elif offset >= 0:
-        storage_offset += offset * self.stride()[dim2]
-    else:
-        storage_offset -= offset * self.stride()[dim1]
+    if diag_size > 0:
+        if offset >= 0:
+            storage_offset += offset * self.stride()[dim2]
+        else:
+            storage_offset -= offset * self.stride()[dim1]
 
-    sizes = list(self.size())
-    strides = list(self.stride())
-
-    sizes.pop(max(dim1, dim2))
-    sizes.pop(min(dim1, dim2))
+    sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)
 
-    strides.pop(max(dim1, dim2))
-    strides.pop(min(dim1, dim2))
+    strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
 
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
@@ -2949,36 +2943,52 @@ def diag_embed(
     """
     Reference implementation of torch.diag_embed
     """
-    num_dims = self.dim() + 1
-    dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
-    dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
+    # as per the docs, exchanging dims is equivalent to changing the sign of
+    # offset
+    if dim1 > dim2:
+        dim1, dim2 = dim2, dim1
+        offset = -offset
+
+    # convert from negative dims
+    rank = self.ndim + 1
+    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
+    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
 
     check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    import builtins
+    # insert padding if offset is not 0, increase the size of last dim, then
+    # roll to align the data to match 1s in eye
+    if offset != 0:
+        z_shape = list(self.shape)
+        z_shape[-1] = builtins.abs(offset)
+        z = torch.zeros(
+            z_shape, dtype=self.dtype, device=self.device, requires_grad=False)
+        self = torch.cat((self, z), dim=-1)
+        self = torch.roll(self, self.size(-1) if offset < 0 else offset, dims=-1)
 
-    new_dim_len = builtins.abs(offset) + list(self.size())[-1]
+    # as per the docs, the size of last dim is placed at dim1 and dim2
+    last_dim = self.size(-1)
 
-    sizes = list(self.size())
+    # preserve original data, but place 1 at dim1 and move last dim to dim2
+    # TODO: use movedim here once it's available:
+    # a = self.unsqueeze(dim1).movedim(-1, dim2)
+    a = self.unsqueeze(dim1)
+    a_dims = list(range(a.ndim))
+    a_dims.insert(dim2, a_dims[-1])
+    a_dims.pop()
+    a = torch.permute(a, a_dims)
 
-    sizes.pop()
-    sizes.insert(min(dim1, dim2), new_dim_len)
-    sizes.insert(max(dim1, dim2), new_dim_len)
+    # generate square eye, shift the diagonal, then reshape to be broadcastable
+    # with a
+    b_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(a.shape))]
+    b = torch.eye(last_dim, dtype=torch.int64, device=a.device)
+    b = _maybe_convert_to_dtype(
+        torch.roll(b, offset, dims=-1).reshape(b_shape), a.dtype)
 
-    result = torch.zeros(
-        sizes,
-        dtype=self.dtype,
-        device=self.device,  # TODO: layout=self.layout
-        requires_grad=self.requires_grad,
-    )
-
-    diag = result.diagonal(offset, dim1, dim2)
-    # Note: the inplace copy_ method breaks forward dtype tests
-    copy_to(diag, self)
-
-    return result
+    # broadcast and compute the result
+    return a * b
 
 
 # CompositeImplicitAutograd - don't register decomp

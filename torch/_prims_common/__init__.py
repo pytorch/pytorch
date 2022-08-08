@@ -51,8 +51,11 @@ Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
+    torch.Tensor.size,
+    torch.Tensor.storage_offset,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
@@ -64,9 +67,6 @@ torch_function_passthrough = {
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.dim,  # XXX: for diagonal ref
-    torch.Tensor.storage_offset,  # XXX: for diagonal ref
-    torch.Tensor.size,  # XXX: for diagonal ref
 }
 
 

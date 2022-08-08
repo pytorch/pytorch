@@ -7893,13 +7893,11 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
         if dim1 == dim2:
             err = f"diagonal dimensions cannot be identical {dim1}, {dim2}"
             yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
-
         elif dim1_cond or dim2_cond:
             err_dim = dim1 if dim1_cond else dim2
             err = (r"Dimension out of range \(expected to be in range of "
                    rf"\[{bound1}, {bound2}\], but got {err_dim}\)")
             yield ErrorInput(sample, error_regex=err, error_type=IndexError)
-
         else:
             raise RuntimeError("should be unreachable")
 
