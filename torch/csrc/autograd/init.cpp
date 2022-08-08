@@ -233,15 +233,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
-      .def(
-          "stack",
-          [](const KinetoEvent& e) {
-            if (e.hasStack()) {
-              return e.stack();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) { return e.scope(); })
