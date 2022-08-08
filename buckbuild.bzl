@@ -1689,16 +1689,28 @@ def define_buck_targets(
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
+        # It's very important that this header not be visible outside of the
+        # loader/serializer layer, to avoid leaking fragile implementation
+        # details.
+        visibility = [
+            "{}:mobile_bytecode".format(ROOT),
+        ],
     )
 
+    # Users of this target will need to add third_party("flatbuffers-api") as a
+    # dep.
     fb_xplat_cxx_library(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
-        exported_deps = [
-            third_party("flatbuffers-api"),
+        # It's very important that this header not be visible outside of the
+        # loader/serializer layer, to avoid leaking fragile implementation
+        # details.
+        visibility = [
+            "{}:flatbuffer_loader".format(ROOT),
+            "{}:flatbuffer_serializer".format(ROOT),
         ],
     )
 
@@ -1717,14 +1729,13 @@ def define_buck_targets(
         ],
         visibility = ["PUBLIC"],
         deps = [
+            ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":flatbuffer_loader",
-            ":mobile_bytecode",
             ":torch_mobile_train",
-            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1758,10 +1769,12 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
-        exported_deps = [
+        deps = [
             ":mobile_bytecode",
-            ":torch_mobile_deserialize",
             third_party("flatbuffers-api"),
+        ],
+        exported_deps = [
+            ":torch_mobile_deserialize",
             C10,
         ],
     )
@@ -1786,10 +1799,8 @@ def define_buck_targets(
         deps = [
             ":flatbuffer_loader",
             ":flatbuffer_serializer",
-            ":mobile_bytecode",
             ":torch_core",
             ":torch_mobile_module",
-            third_party("flatbuffers-api"),
             C10,
         ],
     )
