@@ -344,7 +344,7 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  try{
+  try {
     auto shape_compute_functions =
         GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
@@ -359,8 +359,7 @@ void loadFunctions() {
     compilation_unit->define(
         c10::nullopt, shape_compute_functions, resolver, nullptr);
     loadModule(*compilation_unit);
-  }
-  catch (...){
+  } catch (...) {
     // Reset the cache and compilation unit so that we don't get weird errors
     // in later tests when one of the shape functions is invalid.
     compilation_unit = std::make_shared<CompilationUnit>();
