@@ -72,8 +72,7 @@ they are responsible for a folder).
 
 Responsibilities of the maintainer includes:
 * Triaging high priority issues of the module
-* Triaging and reviewing and landing high priority pull requests
-  iof the module
+* Triaging and reviewing and landing high priority pull requests of the module
 * Supporting public documentation related to the module
 * Running public developer meetings
 
