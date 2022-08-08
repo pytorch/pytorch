@@ -888,6 +888,7 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, t.shape)
         self.assertEqual(r.dtype, t.dtype)
+        self.assertEqual(r.storage().data_ptr(), 0)
 
 instantiate_device_type_tests(TestMeta, globals())
 
