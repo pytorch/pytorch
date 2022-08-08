@@ -56,7 +56,7 @@ def gen_autograd(
     disable_autograd: bool = False,
 ) -> None:
     # Parse and load derivatives.yaml
-    differentiability_infos, used_keys = load_derivatives(
+    differentiability_infos, used_dispatch_keys = load_derivatives(
         os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path, tags_path
     )
 
@@ -83,7 +83,7 @@ def gen_autograd(
             tags_path,
             fns_with_diff_infos,
             template_path,
-            used_keys,
+            used_dispatch_keys,
         )
 
         gen_inplace_or_view_type(

@@ -18,6 +18,7 @@ def with_native_function_with_differentiability_info(
     return wrapper
 
 
+# Like the above but with an additional dispatch key string argument
 def with_native_function_with_differentiability_info_and_key(
     func: Callable[[NFWDI, str], T]
 ) -> Callable[[NFWDI, str], T]:

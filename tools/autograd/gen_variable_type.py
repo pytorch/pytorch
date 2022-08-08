@@ -731,10 +731,6 @@ def gen_variable_type(
     compute the output. The grad_fn is attached to differentiable functions.
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    fm1 = FileManager(
-        install_dir=out + "/templates", template_dir=template_path, dry_run=False
-    )
-    fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
     fm.write(
         "VariableType.h",
         lambda: {
@@ -742,27 +738,29 @@ def gen_variable_type(
         },
     )
 
-    sharded_keys = set(
-        [f"type_derived_method_definitions_{key}" for key in used_keys]
-        + [f"wrapper_registrations_{key}" for key in used_keys]
-    )
-
+    # helper that generates a TORCH_LIBRARY_IMPL wrapper for each
+    # dispatch key that appears in derivatives.yaml
     def wrapper_registrations(used_keys: Set[str]) -> str:
-        a = []
+        library_impl_macro_list: List[str] = []
         for key in used_keys:
             dispatch_key = key
             if key == "Default":
                 dispatch_key = "Autograd"
-            s = (
+            library_impl_macro = (
                 f"TORCH_LIBRARY_IMPL(aten, {dispatch_key}, m) "
                 + "{\n"
                 + "${"
                 + f"wrapper_registrations_{key}"
                 + "}\n}"
             )
-            a += [s]
-        return "\n\n".join(a)
+            library_impl_macro_list += [library_impl_macro]
+        return "\n\n".join(library_impl_macro_list)
 
+    # Generate a new template from VariableType.cpp which replaces ${wrapper_registrations}
+    # with per key TORCH_LIBRARY_IMPL macros for each key that appears in derivatives.yaml
+    fm1 = FileManager(
+        install_dir=out + "/templates", template_dir=template_path, dry_run=False
+    )
     fm1.write(
         "VariableType.cpp",
         lambda: {
@@ -776,6 +774,13 @@ def gen_variable_type(
         },
     )
 
+    # Generate final VariableType_*.cpp files from the generated template
+    fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
+
+    sharded_keys = set(
+        [f"type_derived_method_definitions_{key}" for key in used_keys]
+        + [f"wrapper_registrations_{key}" for key in used_keys]
+    )
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
     fm2.write_sharded(
@@ -845,7 +850,7 @@ def gen_variable_type_func(
                 key = "Default"
                 type_definition = METHOD_DEFINITION.substitute(
                     return_type=cpp.returns_type(f.func.returns).cpp_type(),
-                    type_wrapper_name=type_wrapper_name(f, key=key),
+                    type_wrapper_name=type_wrapper_name(f, key),
                     type_definition_body=emit_body(fn, key),
                     formals=formals,
                 )

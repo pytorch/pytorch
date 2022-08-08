@@ -373,12 +373,14 @@ def gen_autograd_functions_lib(
     for each every differentiable torch function.
     """
 
-    # only create an autograd function if we are actually going to calculate a derivative
+    # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
+    # infos with the diff dispatchkeys but the same name will still be in the same shard.
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
         for info in diffinfo_dict.values()
     ]
+    # only create an autograd function if we are actually going to calculate a derivative
     infos = list(filter(lambda info: info.args_with_derivatives, diff_info_list))
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
@@ -420,6 +422,8 @@ def gen_autograd_functions_python(
         },
     )
 
+    # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
+    # infos with the diff dispatchkeys but the same name will still be in the same shard.
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
