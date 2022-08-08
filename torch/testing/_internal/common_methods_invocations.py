@@ -985,7 +985,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         inp, *arg0 = shape
-        yield SampleInput(inp, args=arg0)
+        yield SampleInput(inp, args=tuple(arg0))
 
 def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
