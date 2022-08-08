@@ -65,26 +65,32 @@ using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
 
+template <typename T>
+constexpr bool is_py_fields() {
+  return std::is_base_of<
+      torch::profiler::impl::PyExtraFieldsBase,
+      typename std::remove_cv<typename std::remove_reference<T>::type>::type>::
+      value;
+}
+
 struct EventFieldsVisitor {
-  EventFieldsVisitor(
-      std::shared_ptr<Result>& result,
-      KinetoEvent& kineto_event,
-      const post_process_t& post_process)
+  EventFieldsVisitor(std::shared_ptr<Result>& result, KinetoEvent& kineto_event)
       : kineto_activity_{result->kineto_activity_},
-        kineto_event_{kineto_event},
-        post_process_{post_process} {
+        kineto_event_{kineto_event} {
     c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
       kineto_event.deviceIndex(_(result->kineto_info_).device);
       kineto_event.deviceResourceId(_(result->kineto_info_).resource);
     });
 
-    pushPythonMetadata(result->parent_.lock());
+    setPythonMetadata(result);
     result->visit(*this);
-    handleStack(result->parent_);
+
+    const auto module_hierarchy = kineto_event.moduleHierarchy();
+    addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
+    addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    handleJIT(op_event);
     kineto_event_.get().debugHandle(op_event.debug_handle_);
 
     auto& shapes = op_event.inputs_.shapes_;
@@ -111,7 +117,6 @@ struct EventFieldsVisitor {
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
-    handleJIT(backend_event);
     kineto_event_.get().debugHandle(backend_event.debug_handle_);
 
     if (!backend_event.backend_.empty()) {
@@ -148,38 +153,13 @@ struct EventFieldsVisitor {
     }
   }
 
-  template <typename T>
-  void handleJIT(T& fields) {
-    auto& jit_stack = fields.jit_stack_;
-    auto& jit_modules = fields.jit_modules_;
-    if (post_process_.get()) {
-      post_process_.get()(fields.debug_handle_, jit_stack, jit_modules);
-    }
-    if (!jit_stack.empty()) {
-      // NB: This is only for the JIT stack. The python stack (if applicable)
-      //     is constructed later.
-      kineto_event_.get().stack(jit_stack);
-      addMetadata(
-          "Call stack", torch::profiler::impl::stacksToStr(jit_stack, ";"));
-    }
-
-    if (!jit_modules.empty()) {
-      addMetadata(
-          "Module Hierarchy",
-          torch::profiler::impl::stacksToStr(jit_modules, "."));
-    }
-  }
-
   void operator()(const ExtraFields<EventType::PyCall>& py_call) {
-    addPythonAnnotations(py_call);
     if (py_call.module_.has_value()) {
       addMetadata("Python module id", std::to_string(py_call.module_->id_));
     }
   }
 
-  void operator()(const ExtraFields<EventType::PyCCall>& py_call) {
-    addPythonAnnotations(py_call);
-  }
+  void operator()(const ExtraFields<EventType::PyCCall>& py_call) {}
 
   void operator()(const ExtraFields<EventType::Kineto>& e) {
     TORCH_INTERNAL_ASSERT(kineto_activity_ == nullptr);
@@ -189,65 +169,43 @@ struct EventFieldsVisitor {
     }
   }
 
-  void pushPythonMetadata(std::shared_ptr<Result> parent) {
-    auto push = [&](const auto& i) {
-      c10::guts::if_constexpr<std::is_base_of<
-          torch::profiler::impl::PyExtraFieldsBase,
-          typename std::remove_reference<decltype(i)>::type>::
-                                  value>([&](auto _) {
-        py_metadata_.push_back({_(i).id_, _(i).python_tid_, parent->name()});
-      });
-    };
+  void setPythonMetadata(std::shared_ptr<Result> result) {
+    result->visit([&, this](const auto& i) -> void {
+      c10::guts::if_constexpr<is_py_fields<decltype(i)>()>(
+          [&, this](auto _) -> void {
+            this->addMetadata(
+                "Python thread", std::to_string(_(i).python_tid_));
+            this->addMetadata("Python id", std::to_string(_(i).id_));
 
-    while (parent != nullptr) {
-      parent->visit(push);
-      parent = parent->parent_.lock();
-    }
-  }
+            std::string parent_id = "null";
+            auto update_parent_id = [&](const auto& j) -> bool {
+              // Update parent_id the first time we see a Python Result
+              constexpr bool is_python_parent = is_py_fields<decltype(j)>();
+              c10::guts::if_constexpr<is_python_parent>([&](auto _) -> void {
+                parent_id = std::to_string(_(j).id_);
+              });
 
-  template <typename T>
-  void addPythonAnnotations(T& t) {
-    addMetadata("Python id", std::to_string(t.id_));
-    addMetadata(
-        "Python parent id",
-        !py_metadata_.empty() ? std::to_string(py_metadata_.at(0).id_)
-                              : "null");
-    addMetadata("Python thread", std::to_string(t.python_tid_));
-  }
+              // And then break out of the update loop.
+              return !is_python_parent;
+            };
 
-  void handleStack(std::weak_ptr<Result> parent) {
-    // JIT stack takes precidence.
-    if (!kineto_event_.get().hasStack() && !py_metadata_.empty()) {
-      std::vector<std::string> stack;
-      for (auto i = py_metadata_.rbegin(); i < py_metadata_.rend(); ++i) {
-        stack.push_back(i->name_);
-      }
-      kineto_event_.get().stack(std::move(stack));
-    }
-
-    if (kineto_event_.get().hasStack()) {
-      addMetadata(
-          "Call stack",
-          torch::profiler::impl::stacksToStr(kineto_event_.get().stack(), ";"));
-    }
+            std::shared_ptr<Result> parent = result->parent_.lock();
+            while (parent && parent->visit(update_parent_id)) {
+              parent = parent->parent_.lock();
+            }
+            this->addMetadata("Python parent id", parent_id);
+          });
+    });
   }
 
   void addMetadata(const std::string& key, const std::string& value) {
-    if (kineto_activity_) {
+    if (kineto_activity_ && !value.empty()) {
       torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
     }
   }
 
-  struct PythonMetadata {
-    size_t id_;
-    size_t python_tid_;
-    std::string name_;
-  };
-
   const torch::profiler::impl::kineto::activity_t* kineto_activity_;
   std::reference_wrapper<KinetoEvent> kineto_event_;
-  std::reference_wrapper<const post_process_t> post_process_;
-  std::vector<PythonMetadata> py_metadata_;
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
@@ -344,6 +302,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     return std::move(records_and_trace.second);
   }
 
+  template <typename T>
+  void invokeCallback(T& t) {
+    if (event_post_process_cb_) {
+      event_post_process_cb_(t.debug_handle_, t.jit_stack_, t.jit_modules_);
+    }
+  }
+
   void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
     for (auto& e : events) {
       if (e->parent_.expired()) {
@@ -362,8 +327,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .endThreadId(e->endTID())
             .activityType((uint8_t)e->kinetoType());
 
-        EventFieldsVisitor set_fields_and_metadata(
-            e, kineto_events_.back(), getEventPostProcessingCallback());
+        e->visit(c10::overloaded(
+            [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
+            [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+            [](auto&) {}));
+
+        EventFieldsVisitor set_fields_and_metadata(e, kineto_events_.back());
 
         // It is not safe to use the activity after post processing.
         e->kineto_activity_ = nullptr;
@@ -691,10 +660,34 @@ KinetoEvent::KinetoEvent(
     std::shared_ptr<const torch::profiler::impl::Result> result)
     : result_{result} {
   TORCH_INTERNAL_ASSERT(result != nullptr);
+
+  // Populate Python stack
+  auto parent = result_->parent_.lock();
+  while (parent != nullptr) {
+    parent->visit([&](const auto& i) {
+      if (is_py_fields<decltype(i)>()) {
+        python_stack_.push_back(parent->name());
+      }
+    });
+    parent = parent->parent_.lock();
+  }
 }
 
 bool KinetoEvent::isPythonFunction() const {
-  return result_->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION;
+  return result_->visit(
+      [](const auto& i) { return is_py_fields<decltype(i)>(); });
+}
+
+const c10::ArrayRef<std::string> KinetoEvent::stack() const {
+  auto get = [&](const auto& i) -> auto& {
+    return !i.jit_stack_.empty() ? i.jit_stack_ : python_stack_;
+  };
+
+  using out_t = const c10::ArrayRef<std::string>;
+  return result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::TorchOp>& i) -> out_t { return get(i); },
+      [&](const ExtraFields<EventType::Backend>& i) -> out_t { return get(i); },
+      [&](const auto&) -> out_t { return python_stack_; }));
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
