@@ -223,7 +223,7 @@ class _OpNamespace(types.ModuleType):
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)
             raise AttributeError(
-                f"'_OpNamespace' object has no attribute '{op_name}'"
+                f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
         # let the script frontend know that op is identical to the builtin op
