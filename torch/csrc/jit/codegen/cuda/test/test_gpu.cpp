@@ -24648,7 +24648,7 @@ TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
       __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
+TEST_F(NVFuserTest, FusionTransformPropagatorSelector_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
