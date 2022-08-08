@@ -93,8 +93,17 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<Inputs>(m, "_Inputs")
       .def_readonly("shapes", &Inputs::shapes_)
-      .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
-      .def_readonly("dtypes", &Inputs::dtypes_);
+      .def_readonly("dtypes", &Inputs::dtypes_)
+      .def_property_readonly(
+          "ivalues",
+          [](const Inputs& inputs) {
+            py::list list;
+            for (auto& v : inputs.ivalues_) {
+              list.append(torch::jit::toPyObject(v));
+            }
+            return list;
+          })
+      .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
       .def_property_readonly("layout", [](const TensorMetadata& metadata) {
