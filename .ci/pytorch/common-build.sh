@@ -33,11 +33,11 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
         echo "::group::Sccache Compilation Log"
         echo '=================== sccache compilation log ==================='
         # TODO: see test.sh line 503 to remove fallback in a few weeks for the bc test
-        if [[ -f "$script_dir/print_sccache_log.py" ]]; then
-            python "$script_dir/print_sccache_log.py" ~/sccache_error.log
-        else
-            python ".jenkins/pytorch/print_sccache_log.py" ~/sccache_error.log
-        fi
+        # if [[ -f "$script_dir/print_sccache_log.py" ]]; then
+        #     python "$script_dir/print_sccache_log.py" ~/sccache_error.log
+        # else
+        #     python ".jenkins/pytorch/print_sccache_log.py" ~/sccache_error.log
+        # fi
         echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
         sccache --show-stats
         sccache --stop-server || true
