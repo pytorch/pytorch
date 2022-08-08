@@ -32,7 +32,12 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     function sccache_epilogue() {
         echo "::group::Sccache Compilation Log"
         echo '=================== sccache compilation log ==================='
-        python "$script_dir/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+        # TODO: see test.sh line 503 to remove fallback in a few weeks for the bc test
+        if [[ -f "$script_dir/print_sccache_log.py" ]]; then
+            python "$script_dir/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+        else
+            python ".jenkins/pytorch/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+        fi
         echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
         sccache --show-stats
         sccache --stop-server || true

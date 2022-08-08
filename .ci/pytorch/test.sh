@@ -506,7 +506,8 @@ test_forward_backward_compatibility() {
   # TODO: in a few weeks, once most commits adopt .ci over .jenkins, remove the fallback
   COMMON_BUILD_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   if [[ -f "$COMMON_BUILD_SCRIPT" ]]; then
-    source $COMMON_BUILD_SCRIPT
+    # shellcheck source=./common-build.sh
+    source "$COMMON_BUILD_SCRIPT"
   else
     # shellcheck source=./common-build.sh
     source ".jenkins/pytorch/common-build.sh"
