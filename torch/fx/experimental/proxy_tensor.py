@@ -495,6 +495,18 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
+
+def wrapper_and_args_for_make_fx(func, args, kwargs):
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped(flat_args):
+        fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
+        return func(*fn_args, **fn_kwargs)
+    return wrapped, flat_args
+
+
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
     if tracing_mode != "real" and not trace_factory_functions:
         raise ValueError("""\
@@ -592,13 +604,7 @@ def get_isolated_graphmodule(func, args, kwargs):
     It detaches the args and kwargs from the current tracer so that the trace of
     the current graph module can be created without any side-effects.
     """
-    # make_fx doesn't support kwargs, so we need to do this flattening
-    # and then unflatten the args before calling func
-    all_args, spec = pytree.tree_flatten((args, kwargs))
-
-    def wrapped(args):
-        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
-        return func(*fn_args, **fn_kwargs)
+    wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
