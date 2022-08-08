@@ -638,10 +638,6 @@ def logsumexp(
 
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def nan_to_num(
     a: TensorLikeType,
     nan: Optional[NumberType] = 0.0,
@@ -650,8 +646,11 @@ def nan_to_num(
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
-    if a.dtype == torch.bool:
+    if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return clone(a)
+
+    if nan is None:
+        nan = 0.0
 
     if posinf is None:
         posinf = prims.maximum_value(a.dtype)
@@ -1255,17 +1254,8 @@ def isclose(
 
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
-    dtype = a.dtype
-    promote_to_int = dtype in (torch.int8, torch.int16)
-    if promote_to_int:
-        a = prims.convert_element_type(a, torch.int32)
-        b = prims.convert_element_type(b, torch.int32)
-
-    g = torch.gcd(a, b)
-    # Avoid division by zero in case gcd(0, 0) == 0
-    g = torch.where(g == 0, 1, g)
-    res = torch.abs(prims.div(a, g) * b)
-    return res if not promote_to_int else prims.convert_element_type(res, dtype)
+    g = gcd(a, b)
+    return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
 
 
 # TODO: add docstring
