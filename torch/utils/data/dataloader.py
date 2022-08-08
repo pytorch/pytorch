@@ -570,7 +570,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
 
     def _get_shared_seed(self):
-        if isinstance(self.dataset, IterDataPipe):
+        if isinstance(self.dataset, (MapDataPipe, IterDataPipe)):
             _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
             if dist.is_available() and dist.is_initialized():
                 rank = dist.get_rank()

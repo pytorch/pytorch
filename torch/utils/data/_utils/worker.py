@@ -274,7 +274,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 data_queue.put((r, None))
                 iteration_end = False
 
-                if isinstance(dataset, IterDataPipe):
+                if isinstance(dataset, (MapDataPipe, IterDataPipe)):
                     assert r.seed is not None
                     shared_rng.manual_seed(r.seed)
                     dataset = apply_shuffle_seed(dataset, shared_rng)

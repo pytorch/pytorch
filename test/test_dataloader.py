@@ -23,6 +23,7 @@ from torch.utils.data import (
     Dataset,
     IterableDataset,
     IterDataPipe,
+    MapDataPipe,
     Subset,
     TensorDataset,
     communication,
@@ -2238,14 +2239,27 @@ class TestDataLoader2(TestCase):
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
-    class Sorter(IterDataPipe):
+    class IterSorter(IterDataPipe):
         def __init__(self, datapipe):
             self.datapipe = datapipe
 
         def __iter__(self):
             return iter(sorted(self.datapipe))
 
-    def test_shuffle(self):
+    class MapSorter(MapDataPipe):
+        def __init__(self, datapipe):
+            self.datapipe = datapipe
+            self.sorted_datapipe = None
+
+        def __getitem__(self, index):
+            if self.sorted_datapipe is None:
+                self.sorted_datapipe = sorted(list(self.datapipe))
+            return self.sorted_datapipe[index]
+
+        def __len__(self):
+            return len(self.datapipe)
+
+    def test_iter_shuffle(self):
         items = list(range(1000))
         dp = IterableWrapper(items).sharding_filter().shuffle()
 
@@ -2260,10 +2274,31 @@ class TestDataLoader2(TestCase):
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        dl = DataLoader2(self.IterSorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        dl = DataLoader2(self.IterSorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+    def test_map_shuffle(self):
+        items = list(range(1000))
+        dp = SequenceWrapper(items).shuffle()
+
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
+        self.assertEqual(items, list(dl))
+
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader2(self.MapSorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+        dl = DataLoader2(self.MapSorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
 
