@@ -253,9 +253,8 @@ Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   // we populate the upgraders map before any load starts
-#if ENABLE_UPGRADERS
   populate_upgraders_graph_map();
-#endif
+
   C10_LOG_API_USAGE_ONCE("torch.script.load");
   device_ = device;
   // Load extra files.
