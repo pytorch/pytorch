@@ -42,6 +42,11 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
+      // Scalars are small enough that they are stored in ivalues without an
+      // extra memory alloc
+      // TODO: further optimize this by maybe giving Profiler access to the
+      // guts of IValue.
+      ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       // TODO: Skip TensorList for now.
@@ -82,7 +87,8 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin()]() mutable {
+          tensor_size_it = tensor_sizes_.begin(),
+          ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
@@ -95,6 +101,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             out.shapes_.back().push_back(*tensor_size_it++);
           }
           out.tensor_metadata_.emplace_back(md);
+          out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -103,17 +110,20 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.ivalues_.emplace_back(*ivals_it++);
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.dtypes_.emplace_back();
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
@@ -136,6 +146,7 @@ void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
   tensor_sizes_.clear();
+  ivalues_.clear();
 }
 
 // ---------------------------------------------------
@@ -239,7 +250,7 @@ struct StealOrDefault {
     container_.get().clear();
   }
 
-  auto operator()() {
+  typename T::Iterator::value_type operator()() {
     if (it_.exhausted()) {
       return typename T::Iterator::value_type();
     } else {
@@ -262,6 +273,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
   for (const auto& _ : c10::irange(op_events_.size() - 1)) {
+    (void)_; // Suppress unused variable warning
     auto& first = it->basic_fields_;
     auto& second = (++it)->basic_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
@@ -273,10 +285,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   }
 
   auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
-  auto jit_stack = StealOrDefault(jit_stack_);
-  auto jit_module = StealOrDefault(jit_modules_);
-  auto extra_args = StealOrDefault(extra_args_);
-  auto gpu_fallback = StealOrDefault(gpu_fallback_);
+
+  // TODO: CTAD will take care of template args when we move to C++17
+  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
+  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
+  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
+  auto gpu_fallback = StealOrDefault<decltype(gpu_fallback_)>(gpu_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
