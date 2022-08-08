@@ -98,7 +98,9 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         self.input = input
         self.args = args
+        assert isinstance(self.args, tuple)
         self.kwargs = kwargs if kwargs is not None else {}
+        assert isinstance(self.kwargs, dict)
         self.output_process_fn_grad = output_process_fn_grad
         self.name = name
 
