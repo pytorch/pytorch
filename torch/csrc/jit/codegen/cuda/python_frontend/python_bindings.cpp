@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
@@ -70,6 +71,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "__enter__",
           [](nvfuser::FusionDefinition& self) -> nvfuser::FusionDefinition* {
+            Nvf::inst::Trace::instance()->beginEvent("FusionDefinition Context Manager");
             return self.enter();
           })
       .def(
@@ -77,16 +79,22 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              void* exc_type,
              void* exc_value,
-             void* traceback) { self.exit(); })
+             void* traceback) {
+            self.exit(); 
+            // End FusionDefinition Context Manager
+            Nvf::inst::Trace::instance()->endEvent(nullptr);
+          })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
+            FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
             self.defineRecord(
                 new nvfuser::OutputRecord<Nvf::Val>({output->index}));
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
+            FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
             self.defineRecord(
                 new nvfuser::OutputRecord<Nvf::TensorView>({output->index}));
           })
@@ -95,6 +103,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              size_t ndims,
              Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_tensor (simple)");
             std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);
             ;
             std::vector<bool> contig_info(ndims, false);
@@ -117,6 +126,7 @@ void initNvFuserPythonBindings(PyObject* module) {
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
              Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_tensor");
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -169,6 +179,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_constant (double)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Double, double>(
                 {out->index}, val));
@@ -179,6 +190,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](nvfuser::FusionDefinition& self,
              c10::complex<double> val) -> nvfuser::Scalar* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_constant (complex)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(
                 new nvfuser::
@@ -190,6 +202,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_constant (bool)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Bool, bool>(
                 {out->index}, val));
@@ -199,6 +212,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_constant (int)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Int, int64_t>(
                 {out->index}, val));
@@ -209,6 +223,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_scalar",
           [](nvfuser::FusionDefinition& self,
              Nvf::DataType dtype = Nvf::DataType::Double) -> nvfuser::Scalar* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_scalar");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ScalarRecord({out->index}, dtype));
             return out;
@@ -229,12 +244,13 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(py::init<nvfuser::FusionDefinition*>());
 
   // ******************** INSERT OP BINDINGS BELOW HERE ********************
-
+#define OP_PREFIX "Operators."
 #define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)                  \
   nvf_ops.def(                                                            \
       op_str,                                                             \
       [](nvfuser::FusionDefinition::Operators& self,                      \
          nvfuser::Tensor* input) -> nvfuser::Tensor* {                    \
+        FUSER_PERF_SCOPE("Operators." op_str);                            \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
         self.fusion_definition->defineRecord(                             \
             new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>(    \
@@ -250,6 +266,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       op_str,                                                             \
       [](nvfuser::FusionDefinition::Operators& self,                      \
          nvfuser::Scalar* input) -> nvfuser::Scalar* {                    \
+        FUSER_PERF_SCOPE("Operators." op_str);                            \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar(); \
         self.fusion_definition->defineRecord(                             \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(                  \
@@ -312,6 +329,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Tensor* arg1,                                             \
          nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
                                              Nvf::TensorView*,              \
@@ -331,6 +349,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Tensor* arg1,                                             \
          nvfuser::Scalar* arg2) -> nvfuser::Tensor* {                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
                                              Nvf::TensorView*,              \
@@ -349,6 +368,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Scalar* arg1,                                             \
          nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
                                              Nvf::TensorView*,              \
@@ -367,6 +387,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Scalar* arg1,                                             \
          nvfuser::Scalar* arg2) -> nvfuser::Scalar* {                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*>(         \
@@ -408,6 +429,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        FUSER_PERF_SCOPE("Operators." op_str);                                       \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
                                              Nvf::TensorView*,                       \
@@ -430,6 +452,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        FUSER_PERF_SCOPE("Operators." op_str);                                       \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
                                              Nvf::TensorView*,                       \
@@ -451,6 +474,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+        FUSER_PERF_SCOPE("Operators." op_str);                                       \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
                                              Nvf::TensorView*,                       \
@@ -472,6 +496,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                \
+        FUSER_PERF_SCOPE("Operators." op_str);                                       \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();            \
         self.fusion_definition->defineRecord(                                        \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(       \
@@ -495,6 +520,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                             \
          nvfuser::Scalar* arg2,                                                             \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();                   \
         self.fusion_definition->defineRecord(                                               \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(              \
@@ -512,6 +538,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                             \
          nvfuser::Tensor* arg2,                                                             \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -534,6 +561,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                             \
          nvfuser::Tensor* arg2,                                                             \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -556,6 +584,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                             \
          nvfuser::Scalar* arg2,                                                             \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -578,6 +607,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                             \
          nvfuser::Tensor* arg2,                                                             \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -600,6 +630,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                             \
          nvfuser::Scalar* arg2,                                                             \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -621,6 +652,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                             \
          nvfuser::Scalar* arg2,                                                             \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -642,6 +674,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                             \
          nvfuser::Tensor* arg2,                                                             \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+        FUSER_PERF_SCOPE("Operators." op_str);                                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
                                              Nvf::TensorView*,                              \
@@ -669,6 +702,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
+        FUSER_PERF_SCOPE("Operators." op_str);                                 \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
         self.fusion_definition->defineRecord(                                  \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>( \
@@ -686,6 +720,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
+        FUSER_PERF_SCOPE("Operators." op_str);                                 \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<            \
                                              Nvf::TensorView*,                 \
@@ -714,6 +749,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                                        \
          nvfuser::Scalar* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Scalar* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::Val*,                                                \
@@ -737,6 +773,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                                        \
          nvfuser::Tensor* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -761,6 +798,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                                        \
          nvfuser::Scalar* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -785,6 +823,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                                        \
          nvfuser::Tensor* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -809,6 +848,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                                        \
          nvfuser::Tensor* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -833,6 +873,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                                        \
          nvfuser::Tensor* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -857,6 +898,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                                        \
          nvfuser::Scalar* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -881,6 +923,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                                        \
          nvfuser::Scalar* arg3,                                                                        \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                         \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
         self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
                                              Nvf::TensorView*,                                         \
@@ -910,6 +953,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          const std::vector<int>& axes,                                       \
          bool keep_dim,                                                      \
          Nvf::DataType dtype) -> nvfuser::Tensor* {                          \
+        FUSER_PERF_SCOPE("Operators." op_str);                               \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
         self.fusion_definition->defineRecord(new nvfuser::ReductionOpRecord( \
             {arg->index},                                                    \
@@ -938,6 +982,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Tensor* arg,                                              \
          Nvf::DataType dtype) -> nvfuser::Tensor* {                         \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(  \
@@ -956,6 +1001,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                        \
          nvfuser::Scalar* arg,                                              \
          Nvf::DataType dtype) -> nvfuser::Scalar* {                         \
+        FUSER_PERF_SCOPE("Operators." op_str);                              \
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(                \
@@ -979,6 +1025,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          std::vector<int>& axes,
          int64_t correction,
          bool keepdim) -> nvfuser::Tensor* {
+        FUSER_PERF_SCOPE("Operators.var");
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
             {arg->index}, {output->index}, axes, correction, keepdim));
@@ -992,6 +1039,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg,
          std::vector<int64_t>& output_shape,
          std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor* {
+        FUSER_PERF_SCOPE("Operators.broadcast_in_dim");
         TORCH_CHECK(
             output_shape.size() >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");

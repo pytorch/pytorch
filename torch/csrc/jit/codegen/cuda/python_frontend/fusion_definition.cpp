@@ -29,8 +29,6 @@ void FusionDefinition::buildFusionIr() {
 }
 
 FusionDefinition* FusionDefinition::enter() {
-  Nvf::inst::Trace::instance()->beginEvent("FusionDefinition Context Manager");
-  FUSER_PERF_SCOPE("FusionDefinition::enter");
   fusion_manager_->resetFusionCachePtr();
   return this;
 }
@@ -51,7 +49,6 @@ void FusionDefinition::exit() {
     }
     fusion_manager_->traverseFusionCache(end_record_);
   }
-  Nvf::inst::Trace::instance()->endEvent(nullptr);
 }
 
 Scalar* FusionDefinition::defineScalar() {
