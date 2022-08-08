@@ -21,21 +21,24 @@
 
 namespace py = pybind11;
 
+using torch::jit::kFlatbufferDataAlignmentBytes;
+
 static std::shared_ptr<char> copyStr(const std::string& bytes) {
-  size_t size = (bytes.size() / FLATBUFFERS_MAX_ALIGNMENT + 1) *
-      FLATBUFFERS_MAX_ALIGNMENT;
+  size_t size = (bytes.size() / kFlatbufferDataAlignmentBytes + 1) *
+      kFlatbufferDataAlignmentBytes;
 #ifdef _WIN32
   std::shared_ptr<char> bytes_copy(
-      static_cast<char*>(_aligned_malloc(size, FLATBUFFERS_MAX_ALIGNMENT)),
+      static_cast<char*>(_aligned_malloc(size, kFlatbufferDataAlignmentBytes)),
       _aligned_free);
 #elif defined(__APPLE__)
   void* p;
-  ::posix_memalign(&p, FLATBUFFERS_MAX_ALIGNMENT, size);
+  ::posix_memalign(&p, kFlatbufferDataAlignmentBytes, size);
   TORCH_INTERNAL_ASSERT(p, "Could not allocate memory for flatbuffer");
   std::shared_ptr<char> bytes_copy(static_cast<char*>(p), free);
 #else
   std::shared_ptr<char> bytes_copy(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, size)), free);
+      static_cast<char*>(aligned_alloc(kFlatbufferDataAlignmentBytes, size)),
+      free);
 #endif
   memcpy(bytes_copy.get(), bytes.data(), bytes.size());
   return bytes_copy;
