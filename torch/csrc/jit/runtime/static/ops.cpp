@@ -1338,19 +1338,19 @@ ToArgs extract_to_args(ProcessedNode* p_node) {
     const auto& other = p_node->Input(1).toTensor();
     result.dtype = other.scalar_type();
     result.layout = other.layout();
-    DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
   } else {
     const auto& self = p_node->Input(0).toTensor();
     result.dtype = p_node->Input(1).toOptional<at::ScalarType>();
     result.layout = self.layout();
     // Static runtime only works with CPU tensors; don't need to read this.
-    DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
     result.know_to_will_alias = has_constant_non_tensor_dtype_and_flags &&
         (!result.dtype.has_value() ||
          result.dtype.value() == self.dtype().toScalarType());
   }
   if (has_memory_format) {
-    DCHECK_EQ(p_node->num_inputs(), 5);
+    TORCH_DCHECK_EQ(p_node->num_inputs(), 5);
     result.memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
     result.know_to_will_alias = result.know_to_will_alias &&
         (result.memory_format.value_or(c10::MemoryFormat::Preserve) ==
@@ -1691,10 +1691,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     };
   }
   if (n->matches(torch::schema(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const at::Tensor& self = p_node->Input(0).toTensor();
-      auto dim = p_node->Input(1).toIntList().vec();
+      auto dim = p_node->Input(1).toDimVector();
       auto keepdim = p_node->Input(2).toBool();
       auto dtype = p_node->Input(3).toOptional<at::ScalarType>();
       if (p_node->Output(0).isNone()) {
@@ -1712,7 +1712,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+          "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto dim = p_node->Input(1).toDimVector();

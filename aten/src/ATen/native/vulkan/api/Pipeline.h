@@ -22,10 +22,8 @@ struct PipelineBarrier final {
   c10::SmallVector<ImageMemoryBarrier, 4u> images;
 
   inline operator bool() const {
-    return (0u != stage.src) ||
-           (0u != stage.dst) ||
-           !buffers.empty() ||
-           !images.empty();
+    return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||
+        !images.empty();
   }
 };
 

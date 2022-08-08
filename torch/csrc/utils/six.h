@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/structseq.h>
 
 namespace six {

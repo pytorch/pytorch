@@ -14,9 +14,7 @@ Tensor _clamp(
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
     const api::ShaderSource& shader_descriptor) {
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
 
@@ -24,34 +22,28 @@ Tensor _clamp(
   const vTensor& v_self = convert(self_arg);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   const struct Block final {
     uvec3 extents;
     uint32_t _;
     vec2 clamp;
-  } block {
-    v_output.extents(),
-    0u,
-    {
-      min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-      max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-    },
+  } block{
+      v_output.extents(),
+      0u,
+      {
+          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+      },
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -67,9 +59,7 @@ Tensor _clamp(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -88,9 +78,7 @@ Tensor& _clamp_(
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
     const api::ShaderSource& shader_descriptor) {
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
       self_arg.is_vulkan(),
@@ -105,24 +93,19 @@ Tensor& _clamp_(
     uvec3 extents;
     uint32_t _;
     vec2 clamp;
-  } block {
-    v_self.extents(),
-    0u,
-    {
-      min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-      max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-    },
+  } block{
+      v_self.extents(),
+      0u,
+      {
+          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+      },
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -167,29 +150,23 @@ Tensor activation(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   const struct Block final {
     uvec3 extents;
     uint32_t _;
-  } block {
-    v_output.extents(),
-    0u,
+  } block{
+      v_output.extents(),
+      0u,
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -205,9 +182,7 @@ Tensor activation(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -228,20 +203,15 @@ Tensor& activation_(
   const struct Block final {
     uvec3 extents;
     uint32_t _;
-  } block {
-    v_self.extents(),
-    0u,
+  } block{
+      v_self.extents(),
+      0u,
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -263,17 +233,11 @@ Tensor& activation_(
   return self_arg;
 }
 
-Tensor hardtanh(
-    const Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::_clamp(self, min, max, VK_KERNEL(clamp));
 }
 
-Tensor& hardtanh_(
-    Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::_clamp_(self, min, max, VK_KERNEL(clamp_));
 }
 
@@ -311,31 +275,25 @@ Tensor activation_scalar(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   const struct Block final {
     uvec3 extents;
     uint32_t _;
     float scalar_value;
-  } block {
-    v_output.extents(),
-    0u,
-    scalar_arg.to<float>(),
+  } block{
+      v_output.extents(),
+      0u,
+      scalar_arg.to<float>(),
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -351,9 +309,7 @@ Tensor activation_scalar(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -376,21 +332,16 @@ Tensor& activation_scalar_(
     uvec3 extents;
     uint32_t _;
     float scalar_value;
-  } block {
-    v_self.extents(),
-    0u,
-    scalar_arg.to<float>(),
+  } block{
+      v_self.extents(),
+      0u,
+      scalar_arg.to<float>(),
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -412,29 +363,22 @@ Tensor& activation_scalar_(
   return self_arg;
 }
 
-Tensor hardshrink(
-    const Tensor& self_arg,
-    const Scalar& lambd) {
+Tensor hardshrink(const Tensor& self_arg, const Scalar& lambd) {
   float abs_lambd = std::abs(lambd.to<float>());
   return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(hardshrink));
 }
 
-Tensor& hardshrink_(
-    Tensor& self,
-    const Scalar& lambd) {
+Tensor& hardshrink_(Tensor& self, const Scalar& lambd) {
   float abs_lambd = std::abs(lambd.to<float>());
   return ops::activation_scalar_(self, abs_lambd, VK_KERNEL(hardshrink_));
 }
 
-Tensor leaky_relu(
-    const Tensor& self_arg,
-    const Scalar& negative_slope) {
-  return ops::activation_scalar(self_arg, negative_slope, VK_KERNEL(leaky_relu));
+Tensor leaky_relu(const Tensor& self_arg, const Scalar& negative_slope) {
+  return ops::activation_scalar(
+      self_arg, negative_slope, VK_KERNEL(leaky_relu));
 }
 
-Tensor& leaky_relu_(
-    Tensor& self,
-    const Scalar& negative_slope) {
+Tensor& leaky_relu_(Tensor& self, const Scalar& negative_slope) {
   return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_));
 }
 

@@ -187,8 +187,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       // Check if this inference session is logged. If so, log every N inferences
       bool succeeded = outputsProvider != nil;
       bool should_log = load_id < kSampleThreshold && inferences > 1;
-      should_log = should_log && (inferences % kSampleEvery == 0);
-      should_log = should_log || succeeded;
+      should_log = !succeeded || (should_log && (inferences % kSampleEvery == 0));
       observer->onExitExecuteModel(instance_key, inferences, succeeded, should_log);
     }
 

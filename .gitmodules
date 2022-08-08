@@ -139,6 +139,9 @@
 [submodule "third_party/pocketfft"]
 	path = third_party/pocketfft
 	url = https://github.com/mreineck/pocketfft
+[submodule "third_party/ittapi"]
+	path = third_party/ittapi
+	url = https://github.com/intel/ittapi.git
 [submodule "third_party/flatbuffers"]
 	path = third_party/flatbuffers
 	url = https://github.com/google/flatbuffers.git

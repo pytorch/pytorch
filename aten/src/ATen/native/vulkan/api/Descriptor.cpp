@@ -14,17 +14,16 @@ DescriptorSet::DescriptorSet(
     const VkDevice device,
     const VkDescriptorSet handle,
     const ShaderLayout::Signature& shader_layout_signature)
-  : device_(device),
-    handle_(handle),
-    shader_layout_signature_(shader_layout_signature),
-    bindings_{} {
-}
+    : device_(device),
+      handle_(handle),
+      shader_layout_signature_(shader_layout_signature),
+      bindings_{} {}
 
 DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
-  : device_(other.device_),
-    handle_(other.handle_),
-    shader_layout_signature_(std::move(other.shader_layout_signature_)),
-    bindings_(std::move(other.bindings_)) {
+    : device_(other.device_),
+      handle_(other.handle_),
+      shader_layout_signature_(std::move(other.shader_layout_signature_)),
+      bindings_(std::move(other.bindings_)) {
   other.handle_ = VK_NULL_HANDLE;
 }
 
@@ -43,17 +42,19 @@ DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
   add_binding(DescriptorSet::ResourceBinding{
-      idx,  // binding_idx
-      shader_layout_signature_[idx],  // descriptor_type
-      false,  // is_image
-      {  // resource_info
-        .buffer_info = {
-          buffer.handle(),  // buffer
-          buffer.mem_offset(),  // offset
-          buffer.mem_range(),  // range
-        },
+      idx, // binding_idx
+      shader_layout_signature_[idx], // descriptor_type
+      false, // is_image
+      {
+          // resource_info
+          .buffer_info =
+              {
+                  buffer.handle(), // buffer
+                  buffer.mem_offset(), // offset
+                  buffer.mem_range(), // range
+              },
       },
-    });
+  });
 
   return *this;
 }
@@ -67,17 +68,19 @@ DescriptorSet& DescriptorSet::bind(
   }
 
   add_binding(DescriptorSet::ResourceBinding{
-      idx,  // binding_idx
-      shader_layout_signature_[idx],  // descriptor_type
-      true,  // is_image
-      {  // resource_info
-        .image_info = {
-          image.sampler(),  // buffer
-          image.image_view(),  // imageView
-          binding_layout,  // imageLayout
-        },
+      idx, // binding_idx
+      shader_layout_signature_[idx], // descriptor_type
+      true, // is_image
+      {
+          // resource_info
+          .image_info =
+              {
+                  image.sampler(), // buffer
+                  image.image_view(), // imageView
+                  binding_layout, // imageLayout
+              },
       },
-    });
+  });
 
   return *this;
 }
@@ -87,22 +90,21 @@ VkDescriptorSet DescriptorSet::get_bind_handle() const {
 
   for (const ResourceBinding& binding : bindings_) {
     VkWriteDescriptorSet write{
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  // sType
-      nullptr,  // pNext
-      handle_,  // dstSet
-      binding.binding_idx,  // dstBinding
-      0u,  // dstArrayElement
-      1u,  // descriptorCount
-      binding.descriptor_type,  // descriptorType
-      nullptr,  // pImageInfo
-      nullptr,  // pBufferInfo
-      nullptr,  // pTexelBufferView
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
+        nullptr, // pNext
+        handle_, // dstSet
+        binding.binding_idx, // dstBinding
+        0u, // dstArrayElement
+        1u, // descriptorCount
+        binding.descriptor_type, // descriptorType
+        nullptr, // pImageInfo
+        nullptr, // pBufferInfo
+        nullptr, // pTexelBufferView
     };
 
     if (binding.is_image) {
       write.pImageInfo = &binding.resource_info.image_info;
-    }
-    else {
+    } else {
       write.pBufferInfo = &binding.resource_info.buffer_info;
     }
 
@@ -131,8 +133,7 @@ void DescriptorSet::add_binding(const ResourceBinding& binding) {
 
   if (bindings_.end() == bindings_itr) {
     bindings_.emplace_back(binding);
-  }
-  else {
+  } else {
     *bindings_itr = binding;
   }
 }
@@ -146,12 +147,12 @@ DescriptorSetPile::DescriptorSetPile(
     const VkDescriptorSetLayout descriptor_set_layout,
     const VkDevice device,
     const VkDescriptorPool descriptor_pool)
-  : pile_size_{pile_size},
-    set_layout_{descriptor_set_layout},
-    device_{device},
-    pool_{descriptor_pool},
-    descriptors_{},
-    in_use_(0u) {
+    : pile_size_{pile_size},
+      set_layout_{descriptor_set_layout},
+      device_{device},
+      pool_{descriptor_pool},
+      descriptors_{},
+      in_use_(0u) {
   descriptors_.resize(pile_size_);
   allocate_new_batch();
 }
@@ -178,17 +179,15 @@ void DescriptorSetPile::allocate_new_batch() {
   fill(layouts.begin(), layouts.end(), set_layout_);
 
   const VkDescriptorSetAllocateInfo allocate_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,  // sType
-    nullptr, // pNext
-    pool_,  // descriptorPool
-    utils::safe_downcast<uint32_t>(layouts.size()),  // descriptorSetCount
-    layouts.data(),  // pSetLayouts
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // sType
+      nullptr, // pNext
+      pool_, // descriptorPool
+      utils::safe_downcast<uint32_t>(layouts.size()), // descriptorSetCount
+      layouts.data(), // pSetLayouts
   };
 
-  VK_CHECK(vkAllocateDescriptorSets(
-      device_,
-      &allocate_info,
-      descriptors_.data()));
+  VK_CHECK(
+      vkAllocateDescriptorSets(device_, &allocate_info, descriptors_.data()));
 
   in_use_ = 0u;
 }
@@ -200,44 +199,40 @@ void DescriptorSetPile::allocate_new_batch() {
 DescriptorPool::DescriptorPool(
     const VkDevice device,
     const DescriptorPoolConfig& config)
-  : device_(device),
-    pool_(VK_NULL_HANDLE),
-    config_(config),
-    mutex_{},
-    piles_{} {
-  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes {
-    {
-      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      config_.descriptorUniformBufferCount,
-    },
-    {
-      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      config_.descriptorStorageBufferCount,
-    },
-    {
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      config_.descriptorCombinedSamplerCount,
-    },
-    {
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-      config_.descriptorStorageBufferCount,
-    },
+    : device_(device),
+      pool_(VK_NULL_HANDLE),
+      config_(config),
+      mutex_{},
+      piles_{} {
+  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes{
+      {
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          config_.descriptorUniformBufferCount,
+      },
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          config_.descriptorStorageBufferCount,
+      },
+      {
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          config_.descriptorCombinedSamplerCount,
+      },
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          config_.descriptorStorageBufferCount,
+      },
   };
 
   const VkDescriptorPoolCreateInfo create_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,  // sType
-    nullptr,  // pNext
-    0u,  // flags
-    config_.descriptorPoolMaxSets,  // maxSets
-    static_cast<uint32_t>(type_sizes.size()),  // poolSizeCounts
-    type_sizes.data(),  // pPoolSizes
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      config_.descriptorPoolMaxSets, // maxSets
+      static_cast<uint32_t>(type_sizes.size()), // poolSizeCounts
+      type_sizes.data(), // pPoolSizes
   };
 
-  VK_CHECK(vkCreateDescriptorPool(
-      device_,
-      &create_info,
-      nullptr,
-      &pool_));
+  VK_CHECK(vkCreateDescriptorPool(device_, &create_info, nullptr, &pool_));
 }
 
 DescriptorPool::~DescriptorPool() {
@@ -252,15 +247,13 @@ DescriptorSet DescriptorPool::get_descriptor_set(
     const ShaderLayout::Signature& signature) {
   auto it = piles_.find(set_layout);
   if (piles_.cend() == it) {
-    it = piles_.insert(
-        {
-          set_layout,
-          DescriptorSetPile(
-              config_.descriptorPileSizes,
-              set_layout,
-              device_,
-              pool_),
-        }).first;
+    it = piles_
+             .insert({
+                 set_layout,
+                 DescriptorSetPile(
+                     config_.descriptorPileSizes, set_layout, device_, pool_),
+             })
+             .first;
   }
 
   VkDescriptorSet handle = it->second.get_descriptor_set();

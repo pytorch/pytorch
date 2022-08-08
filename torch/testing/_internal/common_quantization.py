@@ -38,7 +38,7 @@ try:
         prepare_fx,
         prepare_qat_fx,
         convert_fx,
-        convert_to_reference,
+        convert_to_reference_fx,
     )
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
@@ -884,7 +884,7 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(copy.deepcopy(prepared))
-            qgraph_reference = convert_to_reference(copy.deepcopy(prepared))
+            qgraph_reference = convert_to_reference_fx(copy.deepcopy(prepared))
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)

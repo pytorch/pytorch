@@ -59,7 +59,6 @@ full_codegen:
   - gt.Tensor
   - hardsigmoid
   - index_select
-  - kl_div_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
@@ -169,6 +168,8 @@ full_codegen:
   - slice_scatter
   - diagonal_scatter
   - as_strided_scatter
+ir_gen:
+  - selu
 supported:
   - clone
   - _copy_from
@@ -183,6 +184,7 @@ supported:
   - _to_copy
   - _unsafe_view
   - lift
+  - lift_fresh
   # Below are all operators that are "composite" in core,
   # but require us to explicitly re-enable functionalization in order to use them.
   # Why? These operators are all CompositeExplicitAutograd, which mean that they run

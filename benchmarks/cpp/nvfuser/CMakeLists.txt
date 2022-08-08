@@ -26,7 +26,7 @@ if(USE_CUDA)
 
   target_link_libraries(nvfuser_bench PRIVATE torch_library benchmark)
   if(NOT MSVC)
-    target_compile_options(nvfuser_bench PRIVATE -Wno-unused-variable -Werror)
+    target_compile_options(nvfuser_bench PRIVATE -Wno-unused-variable -Wno-deprecated-copy -Werror)
   endif()
 
 endif()

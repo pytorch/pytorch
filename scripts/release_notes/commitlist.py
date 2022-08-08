@@ -263,7 +263,10 @@ def rerun_with_new_filters(path):
     for i in range(len(current_commits.commits)):
         c = current_commits.commits[i]
         if 'Uncategorized' in str(c):
-            current_commits.commits[i] = CommitList.categorize(c.commit_hash, c.title)
+            feature_item = get_commit_data_cache().get(c.commit_hash)
+            features = features_to_dict(feature_item)
+            category, topic = CommitList.categorize(features)
+            current_commits[i] = dataclasses.replace(c, category=category, topic=topic)
     current_commits.write_result()
 
 def get_hash_or_pr_url(commit: Commit):

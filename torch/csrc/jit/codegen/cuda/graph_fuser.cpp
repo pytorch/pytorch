@@ -1151,15 +1151,83 @@ struct CudaGraphFuser {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
+  void removeNoopBinaryOps(Block* block) {
+    for (Node* node : block->nodes()) {
+      for (Block* b : node->blocks()) {
+        removeNoopBinaryOps(b);
+      }
+
+      if (node->matches(
+              "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+              /*const_inputs=*/{attr::alpha, attr::other}) ||
+          node->matches(
+              "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+              /*const_inputs=*/{attr::alpha, attr::other})) {
+        // x + 0 == x - 0 == x
+        // if either scalar input is a float, than removing this operator could
+        // remove type promotion and affect semantics
+        auto scalar_type =
+            node->input(0)->type()->expectRef<TensorType>().scalarType();
+        if (!scalar_type.has_value() ||
+            !at::isFloatingType(scalar_type.value())) {
+          auto inps = node->inputs();
+          if (!inps.at(1)->type()->isSubtypeOf(IntType::get()) ||
+              !inps.at(2)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
+        if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
+            node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x + 0 == x - 0 == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+        }
+      } else if (
+          node->matches(
+              "aten::mul(Tensor self, Scalar other) -> Tensor",
+              /*const_inputs=*/attr::other) ||
+          node->matches(
+              "aten::div(Tensor self, Scalar other) -> Tensor",
+              /*const_inputs=*/attr::other)) {
+        // x * 1 == x / 1 == x
+        // is the node is a division or other isn't an integer, than removing
+        // this operator could remove type promotion and affect semantics
+        auto scalar_type =
+            node->input(0)->type()->expectRef<TensorType>().scalarType();
+        if (!scalar_type.has_value() ||
+            !at::isFloatingType(scalar_type.value())) {
+          if (node->kind() == aten::div ||
+              !node->input(1)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
+        if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x * 1 == x / 1 == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+        }
+      }
+    }
+  }
+
   void optimizeFusedGraphs() {
     for (Node* node : block_->nodes()) {
       if (node->kind() != kind_) {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);
+      GRAPH_DEBUG("before optimizing: ", *subgraph);
+      removeNoopBinaryOps(subgraph->block());
       EliminateDeadCode(subgraph);
       EliminateCommonSubexpression(subgraph);
       ConstantPooling(subgraph);
+      GRAPH_DEBUG("after optimizing: ", *subgraph);
     }
   }
 
@@ -1193,8 +1261,6 @@ struct CudaGraphFuser {
 
     GRAPH_DEBUG("after scan and merge", *graph_);
     refreshAliasDb();
-
-    // fuseConcats();
 
     optimizeFusedGraphs();
 
@@ -2110,7 +2176,9 @@ void decomposeLinearOps(Block* block) {
 // Replace 'operation' with 'operation_copy' to guard alias operations.
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping;
+  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
+      {{aten::expand, prim::expand_copy},
+       {aten::expand_as, prim::expand_as_copy}});
   // TODO: revert disabled aten::view
   //    ({{aten::view, prim::view_copy},
   //     {aten::reshape, prim::reshape_copy},
@@ -2160,7 +2228,9 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // e.g., Any non-fused alias operation including within the prim::FallbackGraph
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping;
+  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
+      {{prim::expand_copy, aten::expand},
+       {prim::expand_as_copy, aten::expand_as}});
   // TODO: revert disabled aten::view
   //    ({{prim::view_copy, aten::view},
   //     {prim::flatten_copy, aten::flatten},
@@ -2369,12 +2439,16 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("Remove inplace operations: ", *graph);
 
   // TODO: separate passes into different file;
-  // TODO: restore decomposition after fusion, in case we are decomposing
-  //       operation that can't be fused;
-  decomposeLinearOps(graph->block());
+  if (isEnabled(EnableOption::LinearDecomposition)) {
+    // TODO: restore decomposition after fusion, in case we are decomposing
+    //       operation that can't be fused;
+    decomposeLinearOps(graph->block());
+  }
   GRAPH_DEBUG("After decompose Linear Ops by nvfuser: ", *graph);
 
-  decomposeConvOps(graph->block());
+  if (isEnabled(EnableOption::ConvDecomposition)) {
+    decomposeConvOps(graph->block());
+  }
   GRAPH_DEBUG("After decompose decompose Conv Ops by nvfuser: ", *graph);
 
   replaceAliasOpsWithCopy(graph, graph->block());

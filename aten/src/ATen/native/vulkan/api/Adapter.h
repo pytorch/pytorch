@@ -3,8 +3,8 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
+#include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ostream>
 
@@ -57,9 +57,10 @@ class DeviceHandle final {
 // which points to the logical device object on the GPU.
 //
 // This class is primarily used by the Runtime class, which holds one Adapter
-// instance for each physical device visible to the VkInstance. Upon construction,
-// this class will populate the physical device properties, but will not create
-// the logical device until specifically requested via the init_device() funtion.
+// instance for each physical device visible to the VkInstance. Upon
+// construction, this class will populate the physical device properties, but
+// will not create the logical device until specifically requested via the
+// init_device() funtion.
 //
 // init_device() will create the logical device and obtain the VkDevice handle
 // for it. It will also create a number of compute queues up to the amount
@@ -119,7 +120,6 @@ class Adapter final {
   MemoryAllocator vma_;
 
  public:
-
   // Physical Device metadata
 
   inline VkPhysicalDevice physical_handle() const {
@@ -194,7 +194,11 @@ class Adapter final {
   // Miscellaneous
 
   inline utils::uvec3 local_work_group_size() const {
-    return { 4u, 4u, 4u, };
+    return {
+        4u,
+        4u,
+        4u,
+    };
   }
 
   std::string stringize() const;

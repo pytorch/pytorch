@@ -44,14 +44,14 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
     // Use the extent that's extended by halo
     new_scope = IrBuilder::create<kir::ForLoop>(
         id,
-        id->isBroadcast() ? GpuLower::current()->kernel()->zeroVal()
-                          : IrBuilder::create<Int>(c10::nullopt),
+        GpuLower::current()->caMap()->getIndexVariable(id),
         nullptr,
         extent_with_halo,
         nullptr,
         false,
         nullptr,
-        false);
+        false,
+        DoubleBufferLoopStage::NotApplicable);
   } else {
     new_scope = IrBuilder::create<kir::ForLoop>(id);
   }

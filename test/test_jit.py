@@ -5368,7 +5368,7 @@ a")
         def func2(x):
             return x.sum(dim=4)
 
-        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
+        # test that shape analysis is written correctly for sum with OptionalIntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
@@ -7441,6 +7441,9 @@ a")
                 for option in option_pairs:
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
+                        continue
+                    # Skip unsigned tensor initializaton for signed values on 3.10
+                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
@@ -11137,12 +11140,12 @@ dedent """
         def randint():
             return torch.randint(0, 5, [1, 2])
         out = randint()
-        self.assertEqual(out.dtype, torch.double)
-        # although the type should be int here, testing that the runtime dtype
-        # and shape analysis dtype is the same.
+        self.assertEqual(out.dtype, torch.int64)
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
-                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+            FileCheck().check("Long(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Double(*, *, requires_grad=0, device=cpu)") \
+                       .run(randint.graph_for())
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
@@ -11241,14 +11244,12 @@ dedent """
         def randint():
             return torch.randint(0, 5, [1, 2])
 
-        # although the type should be int here, testing that the runtime dtype
-        # and shape analysis dtype is the same.
         with enable_profiling_mode_for_profiling_tests():
             with num_profiled_runs(1):
                 out = randint()
                 graph_str = torch.jit.last_executed_optimized_graph()
-                self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("profiled_type=Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(graph_str)
+                self.assertEqual(out.dtype, torch.int64)
+                FileCheck().check("profiled_type=Long(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(graph_str)
 
 
     def test_erase_number_types(self):
@@ -16134,6 +16135,22 @@ dedent """
                 return x[(1,)]
 
         self.checkModule(MyModule(), (torch.ones(2, 3),))
+
+    def test_context_manager(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                p = x + y
+                q = p + 2.0
+                return q
+
+        x = torch.randn(3, 2, dtype=torch.float)
+        y = torch.randn(3, 2, dtype=torch.float)
+        for fuser_name in ['fuser0', 'fuser1', 'none']:
+            with torch.jit.fuser(fuser_name):
+                self.checkModule(MyModule(), (x, y))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
