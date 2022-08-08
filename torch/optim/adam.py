@@ -108,7 +108,7 @@ class Adam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         self._cuda_graph_capture_health_check()
@@ -377,7 +377,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
@@ -405,7 +405,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
