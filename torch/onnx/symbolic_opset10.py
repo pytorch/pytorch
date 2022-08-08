@@ -642,7 +642,9 @@ class Quantized:
                 )
             weight_value = torch.tensor(
                 [1.0] * channel_size,
-                dtype=_type_utils.JitScalarType.from_name(input.type().scalarType()).dtype(),
+                dtype=_type_utils.JitScalarType.from_name(
+                    input.type().scalarType()
+                ).dtype(),
             )
             weight = g.op("Constant", value_t=weight_value)
         if bias is None or symbolic_helper._is_none(bias):
@@ -652,7 +654,9 @@ class Quantized:
                 )
             bias_value = torch.tensor(
                 [0.0] * channel_size,
-                dtype=_type_utils.JitScalarType.from_name(input.type().scalarType()).dtype(),
+                dtype=_type_utils.JitScalarType.from_name(
+                    input.type().scalarType()
+                ).dtype(),
             )
             bias = g.op("Constant", value_t=bias_value)
 

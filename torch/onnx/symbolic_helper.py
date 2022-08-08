@@ -1556,7 +1556,7 @@ scalar_name_to_pytorch = {
 # This indicates each scalar type's corresponding
 # torch type. Related source:
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
-scalar_type_to_pytorch_type = (
+scalar_type_to_pytorch_type = [
     torch.uint8,  # 0
     torch.int8,  # 1
     torch.short,  # 2
@@ -1573,7 +1573,7 @@ scalar_type_to_pytorch_type = (
     torch.quint8,  # 13
     torch.qint32,  # 14
     torch.bfloat16,  # 15
-)
+]
 
 # Deprecated. Internally use _type_utils.ScalarType
 # source of truth is
@@ -1615,7 +1615,7 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],  # 13
     cast_pytorch_to_onnx["Int"],  # 14
     cast_pytorch_to_onnx["BFloat16"],  # 15
-)
+]
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
