@@ -173,6 +173,48 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_skip_one_hop_torch_dispatch(
+    PyObject* /*self*/,
+    PyObject* a) {
+  HANDLE_TH_ERRORS
+  PyObject *func = nullptr, *args = nullptr,
+           *kwargs = nullptr;
+  if (!PyArg_ParseTuple(a, "OOO", &func, &args, &kwargs)) {
+    return nullptr;
+  }
+  py::tuple py_args;
+  if (args == Py_None) {
+    py_args = py::make_tuple();
+  } else {
+    py_args = py::reinterpret_borrow<py::tuple>(args);
+  }
+
+  // PyObject_Call allows kwargs to be nullptr.
+  if (kwargs == Py_None) {
+    kwargs = nullptr;
+  } else {
+    TORCH_CHECK_TYPE(PyDict_Check(kwargs), "kwargs must be a dictionary");
+  }
+
+  // PyObject_Call is a C-API calls so no exceptions will be raised
+  // and therefore no need for RAII approach to storing the old value.
+  TORCH_CHECK(
+      !at::impl::TorchDispatchModeTLS::peek_skip_next(),
+      "skip_one_hop_torch_dispatch called but skip_next_torch_dispatch was already true!");
+  at::impl::TorchDispatchModeTLS::exchange_skip_next(true);
+  auto result = py::reinterpret_steal<py::object>(
+      PyObject_Call(func, py_args.ptr(), kwargs));
+  bool prev_skip = at::impl::TorchDispatchModeTLS::exchange_skip_next(false);
+  // propagate error
+  if (!result) return nullptr;
+  TORCH_CHECK(
+      !prev_skip,
+      "skip_one_hop_torch_dispatch called on a "
+      "function that didn't attempt torch dispatch! ");
+  return result.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 // Makes sure that we don't check for __torch_function__ on basic Python types
 static bool is_basic_python_type(PyTypeObject* tp) {
   return (

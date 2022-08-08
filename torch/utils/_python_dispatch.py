@@ -3,6 +3,7 @@ from typing import Iterator, Set
 import functools
 
 import warnings
+import torch
 from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
@@ -138,7 +139,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self)`` to make PyTorch
+    ``self.restore()`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
     # Force metaclass to generate constructor at the base of the hierarchy
@@ -163,6 +164,37 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
+
+    def decompose(self, func, args, kwargs):
+        """
+        Attempt to recursively decompose this function call into a series
+        of underlying operations, using `CompositeImplicitAutograd`
+        decompositions in C++.  If successful, your `__torch_dispatch__`
+        method will be called recursively with simpler operations (e.g.,
+        if you decompose `torch.ops.aten.linear.default`, you will
+        get calls to `torch.ops.aten.t.default` and `torch.ops.aten.matmul`).
+        Returns `NotImplemented` if no decomposition is possible.
+
+        Note that typically, all of these operations will already be decomposed,
+        as autograd handling will implicitly decompose the operators.
+        One situation where the decomposition may not happen is if
+        `torch.inference_mode` is enabled; use this API to reenable
+        decompositions in this setting.
+
+        If you find this useful, you may also be interested in the API in
+        `torch._decomp`, which offers a more expansive set of decompositions
+        that are not applied by default.
+        """
+        assert isinstance(func, torch._ops.OpOverload)
+        # TODO: factor this logic into OpOverload or Library API
+        name = func._schema.name
+        if func._schema.overload_name:
+            name += "." + func._schema.overload_name
+        if torch._C._dispatch_has_kernel_for_dispatch_key(name, "CompositeImplicitAutograd"):
+            with self.restore():
+                return torch._C._skip_one_hop_torch_dispatch(func, args, kwargs)
+        else:
+            return NotImplemented
 
     @contextlib.contextmanager
     def restore(self):

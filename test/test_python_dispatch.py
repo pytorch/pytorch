@@ -1438,6 +1438,40 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             (torch.ops.aten.mm.default, 2)
         ])
 
+    def test_dispatch_mode_decompose(self):
+        called = []
+        level = 0
+
+        class MyMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                nonlocal level
+                called.append((func, level))
+                level += 1
+                try:
+                    r = self.decompose(func, args, kwargs)
+                    if r is NotImplemented:
+                        return func(*args, **kwargs)
+                    else:
+                        return r
+                finally:
+                    level -= 1
+
+        with torch.inference_mode():
+            x = torch.randn(2, 3)
+            y = torch.randn(5, 3)
+            with MyMode():
+                r = torch.nn.functional.linear(x, y)
+
+        self.assertEqual(r, torch.nn.functional.linear(x, y))
+        self.assertEqual(called, [
+            # top level call
+            (torch.ops.aten.linear.default, 0),
+            # ... redispatches to ...
+            (torch.ops.aten.t.default, 1), (torch.ops.aten.matmul.default, 1),
+            # ... matmul redispatches to ...
+            (torch.ops.aten.mm.default, 2)
+        ])
+
     def test_dispatch_super_call_list_arg(self):
         called = []
 
