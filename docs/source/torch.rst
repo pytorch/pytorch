@@ -533,6 +533,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex

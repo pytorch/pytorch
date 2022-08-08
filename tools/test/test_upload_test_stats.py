@@ -1,9 +1,9 @@
-import unittest
 import os
-
-IN_CI = os.environ.get("CI")
+import unittest
 
 from tools.stats.upload_test_stats import get_tests, summarize_test_cases
+
+IN_CI = os.environ.get("CI")
 
 
 class TestUploadTestStats(unittest.TestCase):
@@ -13,7 +13,7 @@ class TestUploadTestStats(unittest.TestCase):
     )
     def test_existing_job(self) -> None:
         """Run on a known-good job and make sure we don't error and get basically okay reults."""
-        test_cases = get_tests(2561394934, 1)
+        test_cases, _ = get_tests(2561394934, 1)
         self.assertEqual(len(test_cases), 609873)
         summary = summarize_test_cases(test_cases)
         self.assertEqual(len(summary), 5068)

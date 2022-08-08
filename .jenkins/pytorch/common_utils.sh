@@ -98,7 +98,7 @@ function get_pinned_commit() {
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
-  pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
@@ -137,6 +137,16 @@ function checkout_install_torchdynamo() {
   time python setup.py develop
   popd
   popd
+}
+
+function install_functorch() {
+  pushd functorch
+  time python setup.py develop
+  popd
+}
+
+function test_functorch() {
+  python test/run_test.py --functorch --verbose
 }
 
 function print_sccache_stats() {

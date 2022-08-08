@@ -19,10 +19,7 @@ Tensor batch_norm(
     double /* momentum, not used in eval mode */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-
-  TORCH_CHECK(
-      !training,
-      "Vulkan batchnorm only supports evaluation mode.");
+  TORCH_CHECK(!training, "Vulkan batchnorm only supports evaluation mode.");
   TORCH_CHECK(
       weight_opt && weight_opt->defined() && bias_opt && bias_opt->defined(),
       "Vulkan batchnorm expects weight and bias arguments to be defined");
@@ -32,9 +29,7 @@ Tensor batch_norm(
   TORCH_CHECK(
       running_var_opt && running_var_opt->defined(),
       "running_var must be defined in evaluation mode.");
-  TORCH_CHECK(
-      input_arg.dim() == 4,
-      "Vulkan batchnorm expects 4-dim input!");
+  TORCH_CHECK(input_arg.dim() == 4, "Vulkan batchnorm expects 4-dim input!");
   TORCH_CHECK(
       channels_size(input_arg) % 4 == 0,
       "Vulkan batchnorm expects channel dim to be multiple of 4!");
@@ -47,65 +42,70 @@ Tensor batch_norm(
   auto channels_ext = num_features / 4;
 
   const Tensor weight_opt_3d = weight_opt->reshape({num_features, 1, 1});
-  const Tensor weight = weight_opt_3d.is_vulkan() ? weight_opt_3d : weight_opt_3d.vulkan();
+  const Tensor weight =
+      weight_opt_3d.is_vulkan() ? weight_opt_3d : weight_opt_3d.vulkan();
   const vTensor& v_weight = convert(weight);
   TORCH_CHECK(
       weight.numel() == num_features,
-      "weight tensor should contain ", num_features, " elements!");
+      "weight tensor should contain ",
+      num_features,
+      " elements!");
 
   const Tensor bias_opt_3d = bias_opt->reshape({num_features, 1, 1});
-  const Tensor bias = bias_opt_3d.is_vulkan() ? bias_opt_3d : bias_opt_3d.vulkan();
+  const Tensor bias =
+      bias_opt_3d.is_vulkan() ? bias_opt_3d : bias_opt_3d.vulkan();
   const vTensor& v_bias = convert(bias);
   TORCH_CHECK(
       bias.numel() == num_features,
-      "bias tensor should contain ", num_features, " elements!");
+      "bias tensor should contain ",
+      num_features,
+      " elements!");
 
-  const Tensor running_mean_opt_3d = running_mean_opt->reshape({num_features, 1, 1});
-  const Tensor running_mean = running_mean_opt_3d.is_vulkan() ? running_mean_opt_3d : running_mean_opt_3d.vulkan();
+  const Tensor running_mean_opt_3d =
+      running_mean_opt->reshape({num_features, 1, 1});
+  const Tensor running_mean = running_mean_opt_3d.is_vulkan()
+      ? running_mean_opt_3d
+      : running_mean_opt_3d.vulkan();
   const vTensor& v_running_mean = convert(running_mean);
   TORCH_CHECK(
       running_mean.numel() == num_features,
-      "running mean tensor should contain ", num_features, " elements!");
+      "running mean tensor should contain ",
+      num_features,
+      " elements!");
 
-  const Tensor running_var_opt_3d = running_var_opt->reshape({num_features, 1, 1});
-  const Tensor running_var = running_var_opt_3d.is_vulkan() ? running_var_opt_3d : running_var_opt_3d.vulkan();
+  const Tensor running_var_opt_3d =
+      running_var_opt->reshape({num_features, 1, 1});
+  const Tensor running_var = running_var_opt_3d.is_vulkan()
+      ? running_var_opt_3d
+      : running_var_opt_3d.vulkan();
   const vTensor& v_running_var = convert(running_var);
   TORCH_CHECK(
       running_var.numel() == num_features,
-      "running var tensor should contain ", num_features, " elements!");
+      "running var tensor should contain ",
+      num_features,
+      " elements!");
 
   api::Context* const context = api::context();
 
   vTensor v_output{
-    context,
-    v_input_sizes,
-    v_input.options(),
+      context,
+      v_input_sizes,
+      v_input.options(),
   };
 
   const struct Block final {
     uvec3 iextents;
     int32_t channels_ext;
     float epsilon;
-  } block {
-    v_output.extents(),
-    safe_downcast<int32_t>(channels_ext),
-    safe_downcast<float>(eps)
-  };
+  } block{
+      v_output.extents(),
+      safe_downcast<int32_t>(channels_ext),
+      safe_downcast<float>(eps)};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(batchnorm),
       // pipeline barrier
@@ -121,21 +121,11 @@ Tensor batch_norm(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_weight.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_bias.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_running_mean.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_running_var.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_running_mean.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_running_var.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

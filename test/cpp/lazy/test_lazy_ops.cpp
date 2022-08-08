@@ -22,7 +22,9 @@ namespace lazy {
 #ifndef FBCODE_CAFFE2
 
 namespace {
-// This registers the torchscript backend, without which lazy device won't work
+// This registers the torchscript backend, without which lazy device won't work.
+// FIXME: This registers the backend for the whole test binary. We should
+// probably do it and undo it in the test fixture below.
 static bool inline init_backend() {
   torch::lazy::InitTorchScriptBackend();
   return true;
@@ -89,7 +91,7 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   auto y = torch::rand({Y_DIM}).to(kLazy);
   auto ly = torch::lazy::TryGetLtcTensor(y);
   auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
-  auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+  auto lmn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
   auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, lmn->toSymInt());
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }

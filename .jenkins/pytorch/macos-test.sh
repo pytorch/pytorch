@@ -10,7 +10,9 @@ pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" p
 # TODO move this to docker
 # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
 pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
-  pytest
+  pytest \
+  pytest-xdist \
+  pytest-rerunfailures
 
 if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
@@ -167,7 +169,10 @@ test_dynamo() {
   popd
 }
 
-if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+if [[ "${TEST_CONFIG}" == *functorch* ]]; then
+  install_functorch
+  test_functorch
+elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_libtorch
