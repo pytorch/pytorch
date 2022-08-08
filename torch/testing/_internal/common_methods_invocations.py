@@ -15689,6 +15689,8 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # Batching rule not implemented for aten::concatenate
+           check_batched_forward_grad=False,
            assert_autodiffed=True,
            skips=(
                # RuntimeError: Arguments for call not valid.
