@@ -2915,22 +2915,16 @@ def diagonal(
     else:
         diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
 
-    if diag_size == 0:
-        pass  # skip
-    elif offset >= 0:
-        storage_offset += offset * self.stride()[dim2]
-    else:
-        storage_offset -= offset * self.stride()[dim1]
+    if diag_size > 0:
+        if offset >= 0:
+            storage_offset += offset * self.stride()[dim2]
+        else:
+            storage_offset -= offset * self.stride()[dim1]
 
-    sizes = list(self.size())
-    strides = list(self.stride())
-
-    sizes.pop(max(dim1, dim2))
-    sizes.pop(min(dim1, dim2))
+    sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)
 
-    strides.pop(max(dim1, dim2))
-    strides.pop(min(dim1, dim2))
+    strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
 
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
