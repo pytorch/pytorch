@@ -35,6 +35,11 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
+      // Scalars are small enough that they are stored in ivalues without an
+      // extra memory alloc
+      // TODO: further optimize this by maybe giving Profiler access to the
+      // guts of IValue.
+      ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       // TODO: Skip TensorList for now.
@@ -75,7 +80,8 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin()]() mutable {
+          tensor_size_it = tensor_sizes_.begin(),
+          ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
@@ -88,6 +94,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             out.shapes_.back().push_back(*tensor_size_it++);
           }
           out.tensor_metadata_.emplace_back(md);
+          out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -96,17 +103,20 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.ivalues_.emplace_back(*ivals_it++);
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.dtypes_.emplace_back();
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
@@ -129,6 +139,7 @@ void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
   tensor_sizes_.clear();
+  ivalues_.clear();
 }
 
 namespace {
