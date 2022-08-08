@@ -86,7 +86,7 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
     if value.node().mustBeNone():
         return None
     if value.node().kind() == "onnx::Constant":
-        tval = value.node()["value"]
+        tval = _node_get(value.node(), "value")
         if desc == "i":
             return int(tval)
         elif desc == "f":
@@ -113,7 +113,7 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
                         + "', since it's not constant, please try to make "
                         "things (e.g., kernel size) static if possible"
                     )
-            return [int(v.node()["value"]) for v in value.node().inputs()]
+            return [int(_node_get(v.node(), "value")) for v in value.node().inputs()]
         else:
             raise RuntimeError(
                 "ONNX symbolic doesn't know to interpret ListConstruct node"
@@ -129,6 +129,12 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
             f"for argument '{arg_name}' of node '{node_name}', "
             f"got '{value.node().kind()}'."
         )
+
+
+def _node_get(node: _C.Node, key: str):
+    """Gets attributes of a node which is polymorphic over return type."""
+    sel = node.kindOf(key)
+    return getattr(node, sel)(key)
 
 
 def _maybe_get_const(value, desc):

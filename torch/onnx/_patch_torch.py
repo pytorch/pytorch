@@ -1,10 +1,12 @@
 """Importing this patches torch._C classes to add ONNX conveniences."""
 import numbers
 import re
-from typing import Iterable, Tuple, Union
+from typing import Any, Iterable, Tuple, Union
 
 import torch
-import torch._C._onnx as _C_onnx
+from torch import _C
+from torch._C import _onnx as _C_onnx
+from torch.onnx import _deprecation
 from torch.onnx._globals import GLOBALS
 
 
@@ -74,14 +76,14 @@ def _graph_op(
 
 
 # Generate an ONNX ATen op node.
-def _aten_op(g, operator, *args, overload_name="", **kwargs):
+def _aten_op(g, operator: str, *args, overload_name: str = "", **kwargs):
     kwargs["aten"] = True
     return g.op(
         "ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs
     )
 
 
-def _block_op(b, opname, *args, **kwargs):
+def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     if "::" in opname:
         aten = False
         ns_opname = opname
@@ -128,7 +130,7 @@ def _is_onnx_list(value):
     )
 
 
-def _scalar(x):
+def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
@@ -141,15 +143,13 @@ def _is_caffe2_aten_fallback():
     )
 
 
-def _add_attribute(node, key, value, aten):
+def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _attr_pattern.match(key)
     if m is None:
         raise IndexError(
-            (
-                "Invalid attribute specifier '{}' names "
-                + " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
-            ).format(key)
+            f"Invalid attribute specifier '{key}' names "
+            " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
         )
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
@@ -168,8 +168,10 @@ def _add_attribute(node, key, value, aten):
     return getattr(node, kind + "_")(name, value)
 
 
-# TODO: We might not need this anymore, since most scalars now show up as tensors
-# TODO(#76254): Remove the helper function if not needed.
+# TODO(#76254): Remove the deprecated function.
+@_deprecation.deprecated(
+    "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
+)
 def _graph_constant(
     g,
     value,
@@ -223,6 +225,12 @@ def _graph_constant(
     return g.op("Constant", *args, value_t=tensor, **kwargs)
 
 
+# TODO(#76254): Remove the deprecated function.
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "Internally use '_node_get' in symbolic_helper instead.",
+)
 def _node_getitem(self, k):
     """Gets attributes of a node which is polymorphic over return type.
 
