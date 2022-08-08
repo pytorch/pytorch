@@ -1100,8 +1100,11 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
-  const auto window_envelop_lowest = window_envelop.abs().min().item().toDouble();
-  if (window_envelop_lowest < 1e-11) {
+  const auto window_envelop_lowest = window_envelop.abs().min();
+  if (at::equal(
+          window_envelop_lowest.lt(1e-11),
+          window_envelop_lowest.new_ones(
+              {}, window_envelop_lowest.options().dtype(kBool)))) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
     AT_ERROR(ss.str());
