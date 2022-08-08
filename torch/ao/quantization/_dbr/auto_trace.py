@@ -54,6 +54,11 @@ def add_auto_observation(
         else:
             return x
 
+    def call_unwrapped(func, args, kwargs):
+        with torch._C.DisableTorchFunction():
+            res = func(*args) if kwargs is None else func(*args, **kwargs)
+        return map_aggregate(res, convert_to_interception_proxy)
+
     cur_module = None
     first_call = True
     module_stack : List[torch.nn.Module] = []
@@ -101,7 +106,7 @@ def add_auto_observation(
                 # we don't need to override getters in this framework
                 func.__name__ == '__get__'
             ):
-                return super().__torch_function__(func, types, args, kwargs)
+                return call_unwrapped(func, args, kwargs)
 
             # if we are in a function, the current module is always a parent
             nonlocal cur_module
@@ -135,7 +140,7 @@ def add_auto_observation(
                     args, kwargs = qstate.op_prepare_before_hook(
                         func, args, kwargs)
                 # forward
-                output = super().__torch_function__(func, types, args, kwargs)
+                output = call_unwrapped(func, args, kwargs)
                 # run "after" hook
                 if first_call:
                     output = qstate.first_call_op_prepare_after_hook(
@@ -158,7 +163,7 @@ def add_auto_observation(
                             func, args, kwargs, qtensor_id, fqn, parent_module,
                             OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
-                output = super().__torch_function__(func, types, args, kwargs)
+                output = call_unwrapped(func, args, kwargs)
 
                 if first_call:
                     qstate = getattr(parent_module, '_auto_quant_state', None)
@@ -166,13 +171,6 @@ def add_auto_observation(
                         output = qstate.first_call_op_prepare_after_hook(
                             func, output, args, qtensor_id,
                             OpQuantizeabilityType.NOT_QUANTIZEABLE)
-
-            # TODO: is this right? Don't really understand this
-            if output is NotImplemented:
-                with torch._C.DisableTorchFunction():
-                    output = func(*args, **kwargs).as_subclass(
-                        QuantizationPrepareTensorProxy)
-                assert output is not NotImplemented
 
             return output
 
@@ -434,6 +432,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         else:
             return x
 
+    def call_unwrapped(func, args, kwargs):
+        with torch._C.DisableTorchFunction():
+            res = func(*args) if kwargs is None else func(*args, **kwargs)
+        return map_aggregate(res, convert_to_dispatch_proxy)
+
+
     module_id_to_fqn: Dict[int, str] = {}
     # Counter for global quantizeable ops, useful for intermediate activation
     # logging.
@@ -472,7 +476,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 # we don't need to override getters in this framework
                 func.__name__ == '__get__'
             ):
-                return super().__torch_function__(func, types, args, kwargs)
+                return call_unwrapped(func, args, kwargs)
 
             kwargs = kwargs if kwargs else {}
             # if we are in a function, the current module is always a parent
@@ -496,8 +500,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     func, args, kwargs, parent_module)  # type: ignore[arg-type]
 
                 # forward
-                with torch._C.DisableTorchFunction():
-                    output = func(*args, **kwargs)
+                output = call_unwrapped(func, args, kwargs)
 
                 # after hooks
                 output = qstate.op_convert_after_hook(
@@ -513,19 +516,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     else:
                         new_args.append(arg)
                 args = tuple(new_args)
-                with torch._C.DisableTorchFunction():
-                    output = super().__torch_function__(func, types, args, kwargs)
+                output = call_unwrapped(func, args, kwargs)
 
             else:  # HookType.NONE
-                with torch._C.DisableTorchFunction():
-                    output = super().__torch_function__(func, types, args, kwargs)
-
-            # TODO: is this right? Don't really understand this
-            if output is NotImplemented:
-                with torch._C.DisableTorchFunction():
-                    output = func(*args, **kwargs).as_subclass(
-                        QuantizationConvertTensorProxy)
-                assert output is not NotImplemented
+                output = call_unwrapped(func, args, kwargs)
 
             if enable_logging:
                 fqn_for_logging = module_id_to_fqn.get(

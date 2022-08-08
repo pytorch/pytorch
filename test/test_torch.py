@@ -1422,6 +1422,25 @@ else:
 
         backward_func(self, device)
 
+    @dtypes(*all_types_and_complex_and(torch.bool))
+    def test_nondeterministic_alert_cumsum(self, device, dtype):
+
+        def test_func(op_call):
+            input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
+
+            @expectedAlertNondeterministic('cumsum_cuda_kernel', ['cuda'])
+            def forward_func_alert(slf, device):
+                op_call(input, 0)
+
+            if dtype.is_floating_point or dtype.is_complex:
+                forward_func_alert(self, device)
+            else:
+                with DeterministicGuard(True):
+                    op_call(input, 0)
+
+        test_func(torch.Tensor.cumsum)
+        test_func(torch.cumsum)
+
     def test_nondeterministic_alert_scatter_add(self, device):
         def test_func(op_call):
             input = torch.randn(5, 4, device=device)

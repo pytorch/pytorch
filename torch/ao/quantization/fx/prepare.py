@@ -1312,7 +1312,12 @@ def insert_observers_for_model(
                         node_name_to_target_dtype, qconfig_map,
                         model, modules, graph)
 
-        #
+        # Second pass: Look for getitem nodes and make the input and output observers the same.
+        # Note: This is meant to be a workaround for the lack of dtype propagation. In the future,
+        # we should remove this pass if we can differentiate between tensors and non-tensors
+        # (e.g. dictionaries, lists) as getitem arguments.
+        _make_getitem_share_input_output_observers(model)
+
         # After this point, the current node has input and output observers
         # that it needs for itself inserted.
         #
@@ -1326,6 +1331,24 @@ def insert_observers_for_model(
             results_node = node
 
     return results_node
+
+def _make_getitem_share_input_output_observers(model: GraphModule):
+    """
+    For patterns (obs0 - getitem - obs1), make the output observer the same as the input observer,
+    such that the new pattern becomes (obs0 - getitem - obs0). Note that this does not handle
+    patterns with multiple nodes between the two observers, e.g. (obs0 - reshape - getitem - obs1).
+    """
+    modules = dict(model.named_modules(remove_duplicate=False))
+    for node in model.graph.nodes:
+        if not is_activation_post_process_node(node, modules):
+            continue
+        if node.args[0].op != "call_function" or node.args[0].target != operator.getitem:
+            continue
+        getitem_node = node.args[0]
+        assert(isinstance(getitem_node, Node))
+        if not is_activation_post_process_node(getitem_node.args[0], modules):
+            continue
+        maybe_make_input_output_share_observers(getitem_node, model, modules)
 
 def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
     """
