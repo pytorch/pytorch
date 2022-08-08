@@ -748,9 +748,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode()):
                 torch.empty([])
-
-        self.assertExpectedInline('\n'.join(logs), ("$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32," +
-                                                    " device=device(type='cpu'), pin_memory=False)"))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -777,8 +776,8 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -789,7 +788,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
@@ -801,8 +800,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
