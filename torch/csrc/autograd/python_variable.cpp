@@ -2486,9 +2486,7 @@ c10::SymInt concrete_sym_numel_fn(
         "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return py::cast<c10::SymInt>(out);
 }
 
 } // anonymous namespace
