@@ -723,7 +723,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         dim_desc = "is" if allow_multi_dim_support else "i"
 
         @symbolic_helper.quantized_args(True)
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")

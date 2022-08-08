@@ -220,6 +220,27 @@ def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     return tuple(tuple_node.inputs())
 
 
+def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+    """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
+    Args:
+        tuple_value: A tuple of tensor, scale, zero_point, and optionally axis.
+    Returns:
+        A tuple of tensor, scale, zero_point, and optionally axis.
+    """
+    tuple_node = tuple_value.node()
+    # A quantized tensor is represented as tuple of the form (tensor, scale, zero_point, <axis>)
+    if tuple_node.kind() != "prim::TupleConstruct":
+        raise errors.SymbolicValueError(
+            f"ONNX symbolic expected the output of `{tuple_node}` to be a quantized "
+            f"tensor. Is this likely due to missing support for quantized "
+            f"`{tuple_node.kind()}`. Please create an issue on {_constants.PYTORCH_GITHUB_ISSUES_URL}",
+            tuple_value,
+        )
+    unpacked = tuple(tuple_node.inputs())
+    assert len(unpacked) == 3 or len(unpacked) == 4
+    return unpacked
+
+
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
 def _is_packed_list(list_value: _C.Value) -> bool:
