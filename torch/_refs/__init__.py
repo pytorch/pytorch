@@ -1886,16 +1886,7 @@ def std(
         a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
     )
 
-    result = _reduction(
-        a,
-        partial(prims.var, correction=correction),
-        dims=dim,
-        keepdims=keepdim,
-        dtype=opmath_dtype,
-        out=None,
-        has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
-    )
+    result = torch.var(a, dim=dim, keepdim=keepdim, correction=correction)
     result = sqrt(result)
     return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
