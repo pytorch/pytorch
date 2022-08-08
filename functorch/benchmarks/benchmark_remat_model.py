@@ -8,7 +8,7 @@ import warnings
 
 import torch
 from functorch._src.torchbench_utils import *
-from functorch._src.benchmark_remat_utils import profile_model, check_remat_info_model
+from functorch._src.benchmark_remat_utils import profile_model, check_remat_info_model, profile_model_eager
 
 
 """
@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 models_to_run = [
     # "BERT_pytorch",
-    "LearningToPaint",
+    # "LearningToPaint",
     # "alexnet",
     # "dcgan",
     # "densenet121",
@@ -50,21 +50,21 @@ models_to_run = [
     "hf_Bert",
     "hf_GPT2",
     "hf_T5",
-    # "mnasnet1_0",
+    "mnasnet1_0",
     "mobilenet_v2",
-    "mobilenet_v3_large",
-    "nvidia_deeprecommender",
-    "pytorch_unet",
-    "resnet18",
+    # "mobilenet_v3_large",
+    # "nvidia_deeprecommender",
+    # "pytorch_unet",
+    # "resnet18",
     "resnet50",
-    "resnext50_32x4d",
+    # "resnext50_32x4d",
     "shufflenet_v2_x1_0",
     "squeezenet1_1",
     "timm_efficientnet",
     "timm_regnet",
     "timm_resnest",
     # "timm_vision_transformer",
-    # "timm_vovnet",
+    "timm_vovnet",
     # "vgg16"
 ]
 
@@ -79,7 +79,7 @@ def main():
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
-        "--isolate", action="store_true", help="run each model in its own process"
+        "--eager", action="store_true", help="run model in eager mode"
     )
 
     parser.add_argument(
@@ -111,9 +111,12 @@ def main():
             if args.info:
                 check_remat_info_model(name, model, example_inputs)
             else:
-                profile_model(name, model, example_inputs)
+                if args.eager:
+                    profile_model_eager(name, model, example_inputs)
+                else:
+                    profile_model(name, model, example_inputs)
 
-    elif args.isolate:
+    else:
         if args.info:
             print("name, num_fusion_group, num_remat_group, memory_reduced, num_node_pairs", flush=True)
         else:

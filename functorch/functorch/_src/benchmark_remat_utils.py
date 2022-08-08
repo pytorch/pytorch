@@ -359,7 +359,7 @@ def get_cuda_time(timing):
     return cuda_time_total
 
 
-def benchmark_GPU_time(f, inp, list_inp, itr = 5):
+def benchmark_GPU_time(f, inp, list_inp, itr = 50):
     """
     Return the average CUDA time of an iteration of ``f`` on inputs ``inp``
     Using `with torch.no_grad`.
@@ -411,7 +411,7 @@ def benchmark_GPU_time(f, inp, list_inp, itr = 5):
     
 
 
-def profile_scripted_graph(traced_graph, inp, list_inp, itr = 5):
+def profile_scripted_graph(traced_graph, inp, list_inp, itr = 50):
     """
     Return the average cuda time of the jit.scripted version of `traced_graph` on input `inp`
 
@@ -472,13 +472,29 @@ def profile_fused_graph(fused_graph, inp, list_inp, overload_dict = None, itr = 
     return avg_cuda_time_g, num_fusion_group, memory
 
 
-def profile_graph(name, traced_graph, inp, eager_inp=False):
+# def profile_graph(name, traced_graph, inp, eager_inp=False):
+
+
+def profile_module(name, m, inp):
+    def fake_fn(args):
+        return m(*args)
+    
+    if USE_FUNCTIONALIZATION:
+        logging.info("Using functionalization")
+        traced_graph = make_fx(functionalize(fake_fn, remove='mutations_and_views'), decomposition_table=default_decompositions)(inp)
+        traced_graph_eager = make_fx(functionalize(fake_fn, remove='mutations_and_views'))(inp)
+    else:
+        logging.info("Not using functionalization")
+        traced_graph = make_fx(fake_fn, decomposition_table=default_decompositions)(inp)
+        traced_graph_eager = make_fx(fake_fn)(inp)
+    traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
+
     # Profile eager time
     traced_graph_copy = copy.deepcopy(traced_graph)
-    eager_time = benchmark_GPU_time(traced_graph, inp, eager_inp) # can't strup overloads here
+    eager_time = benchmark_GPU_time(traced_graph_eager, inp, False) # can't strup overloads here
 
     # Profile jit.scripted time
-    traced_graph.recompile()
+    # traced_graph.recompile()
     inp, spec  = pytree.tree_flatten(inp)
     avg_cuda_time_f = profile_scripted_graph(traced_graph, inp, True)
 
@@ -508,21 +524,8 @@ def profile_graph(name, traced_graph, inp, eager_inp=False):
 
 
 
-def profile_module(name, m, inp):
-    def fake_fn(args):
-        return m(*args)
-    
-    if USE_FUNCTIONALIZATION:
-        logging.info("Using functionalization")
-        traced_graph = make_fx(functionalize(fake_fn, remove='mutations_and_views'), decomposition_table=default_decompositions)(inp)
-    else:
-        logging.info("Not using functionalization")
-        traced_graph = make_fx(fake_fn, decomposition_table=default_decompositions)(inp)
-    traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
-    profile_graph(name, traced_graph, inp)
 
-
-def trace_model(model, inputs):
+def trace_model(model, inputs, use_decomp = True):
     """
     Get the full graph (both forward and backward) of `model` on `inputs`
     The moddel should have a single forward and a single backward graph
@@ -534,7 +537,10 @@ def trace_model(model, inputs):
         return [param.grad for param in params.values()]
     
     params = dict(model.named_parameters())
-    traced_graph = make_fx(f, decomposition_table=default_decompositions)(params, inputs)
+    if use_decomp:
+        traced_graph = make_fx(f, decomposition_table=default_decompositions)(params, inputs)
+    else:
+        traced_graph = make_fx(f)(params, inputs)
     return traced_graph, params
 
 
@@ -561,17 +567,19 @@ def profile_model(name, model, inputs):
     """
     Profile a model on inputs
     """
-    traced_graph, params = trace_model(model, inputs)
-    traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
-    traced_graph_copy = copy.deepcopy(traced_graph)
-    
-    eager_time, eager_memory = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
+    # traced_graph, params = trace_model(model, inputs, use_decomp=False) # eager mode does not use deocomposition
+    # traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
+    # eager_time, eager_memory = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
+    # print(f"{name}, {eager_time}, 0, 0, 0, 0, 0, 0, 0, {eager_memory}, 0, 0", flush=True)
+    # return 
+    # arg_list, spec  = pytree.tree_flatten([params, inputs])
+    # script_f = ts_compile(traced_graph, 0)
 
-    arg_list, spec  = pytree.tree_flatten([params, inputs])
-    script_f = ts_compile(traced_graph, 0)
+    eager_time, eager_memory =0, 0
     avg_cuda_time_f = 0 #benchmark_GPU_time(script_f, arg_list, True)# profile_scripted_graph(traced_graph, inp, True)
 
-    traced_graph = traced_graph_copy
+    traced_graph, params = trace_model(model, inputs)
+    arg_list, spec  = pytree.tree_flatten([params, inputs])
     traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
     csed = fx_graph_cse(traced_graph.graph)
     csed_graph =  fx.GraphModule(traced_graph, csed)
@@ -592,6 +600,12 @@ def profile_model(name, model, inputs):
     print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
 
 
+def profile_model_eager(name, model, inputs):
+    traced_graph, params = trace_model(model, inputs, use_decomp=False) # eager mode does not use deocomposition
+    traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
+    eager_time, eager_memory = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
+    print(f"{name}, {eager_time}, 0, 0, 0, 0, 0, 0, 0, {eager_memory}, 0, 0", flush=True)
+    return 
 
 
 def check_remat_info(name, traced_graph, inputs):
