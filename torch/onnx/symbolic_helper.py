@@ -141,7 +141,7 @@ def _parse_arg(
                         f"Please try to make things (e.g. kernel sizes) static if possible.",
                         value,
                     )
-            return [int(_node_get(v.node, "value")) for v in node.inputs()]
+            return [int(_node_get(v.node(), "value")) for v in value.node().inputs()]
         else:
             raise errors.SymbolicValueError(
                 f"ONNX symbolic does not know to unpack the ListConstruct node that "
