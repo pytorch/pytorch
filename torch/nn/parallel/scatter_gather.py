@@ -25,7 +25,7 @@ def scatter(inputs, target_gpus, dim=0):
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
-        if is_namedtuple(obj):
+        if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(scatter_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
@@ -76,7 +76,7 @@ def gather(outputs, target_device, dim=0):
                 raise ValueError('All dicts must have the same number of keys')
             return type(out)((k, gather_map([d[k] for d in outputs]))
                              for k in out)
-        if is_namedtuple(out):
+        if _is_namedtuple(out):
             return type(out)._make(map(gather_map, zip(*outputs)))
         return type(out)(map(gather_map, zip(*outputs)))
 

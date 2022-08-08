@@ -48,7 +48,7 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -59,7 +59,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] != "rocm" %}
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -88,11 +88,12 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: !{{ config["container_image"] }}
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
       !{{ common.teardown_rocm_linux() }}
 {%- endif %}
 

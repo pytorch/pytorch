@@ -38,7 +38,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -58,7 +58,7 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -98,7 +98,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -118,7 +118,7 @@ jobs:
   libtorch-cpu-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -158,7 +158,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -178,7 +178,7 @@ jobs:
   libtorch-cpu-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -218,7 +218,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -238,7 +238,7 @@ jobs:
   libtorch-cpu-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -278,7 +278,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda10_2-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -299,7 +299,7 @@ jobs:
   libtorch-cuda10_2-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -341,7 +341,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda10_2-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -362,7 +362,7 @@ jobs:
   libtorch-cuda10_2-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -404,7 +404,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda10_2-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -425,7 +425,7 @@ jobs:
   libtorch-cuda10_2-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -467,7 +467,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda10_2-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -488,7 +488,7 @@ jobs:
   libtorch-cuda10_2-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -530,7 +530,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_3-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -551,7 +551,7 @@ jobs:
   libtorch-cuda11_3-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -593,7 +593,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_3-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -614,7 +614,7 @@ jobs:
   libtorch-cuda11_3-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -656,7 +656,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_3-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -677,7 +677,7 @@ jobs:
   libtorch-cuda11_3-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -719,7 +719,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_3-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -740,7 +740,7 @@ jobs:
   libtorch-cuda11_3-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -782,7 +782,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_6-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -803,7 +803,7 @@ jobs:
   libtorch-cuda11_6-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -845,7 +845,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_6-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -866,7 +866,7 @@ jobs:
   libtorch-cuda11_6-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -908,7 +908,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_6-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -929,7 +929,7 @@ jobs:
   libtorch-cuda11_6-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -971,7 +971,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_6-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -992,7 +992,7 @@ jobs:
   libtorch-cuda11_6-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1032,9 +1032,261 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda11_7-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  libtorch-cuda11_7-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda11_7-shared-with-deps-cxx11-abi-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-shared-with-deps-cxx11-abi-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-with-deps-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda11_7-shared-without-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-without-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  libtorch-cuda11_7-shared-without-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-shared-without-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-without-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda11_7-shared-without-deps-cxx11-abi-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-shared-without-deps-cxx11-abi-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-shared-without-deps-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda11_7-static-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  libtorch-cuda11_7-static-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-static-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda11_7-static-with-deps-cxx11-abi-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-static-with-deps-cxx11-abi-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-with-deps-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda11_7-static-without-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-without-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  libtorch-cuda11_7-static-without-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-static-without-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-without-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda11_7-static-without-deps-cxx11-abi-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_7-static-without-deps-cxx11-abi-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.7
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_7-static-without-deps-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
   libtorch-rocm5_0-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1139,11 +1391,12 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -1176,7 +1429,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-rocm5_0-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1281,11 +1534,12 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -1318,7 +1572,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1423,11 +1677,12 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -1460,7 +1715,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1565,11 +1820,12 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
         if: always()
         run: |
