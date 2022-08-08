@@ -16,7 +16,7 @@ struct FusionCacheEntry {
   FusionCacheEntry();
 
   std::shared_ptr<RecordFunctor> record;
-  std::unordered_map<RecordFunctor*, std::unique_ptr<FusionCacheEntry>>
+  std::unordered_map<std::shared_ptr<RecordFunctor>, std::unique_ptr<FusionCacheEntry>>
       record_hash_map;
 
   bool is_terminal;
@@ -37,7 +37,7 @@ class FusionManager {
   Nvf::Fusion* fusionPtr() const;
 
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
-      RecordFunctor* rec) const;
+      std::shared_ptr<RecordFunctor>& rec) const;
   void createFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
   void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
   void resetFusionCachePtr();

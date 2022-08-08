@@ -799,15 +799,15 @@ namespace std {
 using namespace nvfuser;
 
 template <>
-struct hash<RecordFunctor*> {
-  size_t operator()(const RecordFunctor* p) const {
+struct hash<std::shared_ptr<RecordFunctor>> {
+  size_t operator()(const std::shared_ptr<RecordFunctor> &p) const {
     return p->hash();
   }
 };
 template <>
-struct equal_to<RecordFunctor*>
-    : public binary_function<RecordFunctor*, RecordFunctor*, bool> {
-  bool operator()(const RecordFunctor* p, const RecordFunctor* q) const {
+struct equal_to<std::shared_ptr<RecordFunctor>>
+    : public binary_function<std::shared_ptr<RecordFunctor>, std::shared_ptr<RecordFunctor>, bool> {
+  bool operator()(const std::shared_ptr<RecordFunctor> &p, const std::shared_ptr<RecordFunctor> &q) const {
     return p->operator==(*q);
   }
 };

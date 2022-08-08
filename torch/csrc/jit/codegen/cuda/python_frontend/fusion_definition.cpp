@@ -36,7 +36,7 @@ FusionDefinition* FusionDefinition::enter() {
 }
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
-  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_.get());
+  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_);
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
@@ -68,19 +68,18 @@ Tensor* FusionDefinition::defineTensor() {
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
-  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(record);
+  recording_.emplace_back(record);
+  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(recording_.back());
   if (cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
           std::hex << record->hash() << ") hit in Fusion Cache.\n";
     }
-    recording_.emplace_back(cache_entry.value()->record);
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
           std::hex << record->hash() << ") missed in Fusion Cache.\n";
     }
-    recording_.emplace_back(record);
     fusion_manager_->createFusionCacheEntry(recording_.back());
   }
   fusion_manager_->traverseFusionCache(recording_.back());
