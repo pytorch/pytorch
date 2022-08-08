@@ -390,7 +390,7 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         with in_kernel_invocation_manager(self.fake_mode):
             self_repr = super().__repr__()
-        return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
+        return f"FakeTensor(FakeTensorMode at {hex(id(self.fake_mode))}, {self_repr}, {self.fake_device})"
 
     def stride(self):
         if self.has_sym_ints:
