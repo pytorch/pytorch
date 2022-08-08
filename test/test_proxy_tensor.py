@@ -1036,7 +1036,6 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
         except Exception:
             continue
         new_out = wrapper_set_seed(new_f, args, kwargs)
-        print(new_out, old_out)
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
