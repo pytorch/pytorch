@@ -147,7 +147,7 @@ void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePip
 {
   uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
-  auto threadGroupSize = MTLSizeMake(std::max(maxThreadsPerGroup, length), 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
   [commandEncoder dispatchThreads:size
             threadsPerThreadgroup:threadGroupSize];
 }
