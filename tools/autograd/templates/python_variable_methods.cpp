@@ -110,17 +110,15 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-
   if (r.idx == 0) {
     if (jit::tracer::isTracing()) {
+      // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
-      return wrap(self_.size(r.toInt64(0)));
+      return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python.
-    return THPSize_New(self_);
+    return THPSize_NewFromSymSizes(self_);
   }
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
@@ -1148,7 +1146,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1164,7 +1162,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,

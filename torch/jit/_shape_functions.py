@@ -922,24 +922,14 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
-"""
-Currently deferring the enabling of this, as part of the propoasal to suspend
-adding ops.
-There are currently cases in the test case where this is being called
-in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
-opinfo test). The behavoir of index is significantly dependent on the inputs.
-
-This could be an error with how we are matching up shape functions, or that this
-function needs to just implement everything.
-
-def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
-    assert len(indices) <= len(self), "More indices than dimensions to index"
-    broadcasted_shape: List[int] = []
-    for index_tensor_shape in indices:
-        if index_tensor_shape is not None:
-            broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
-    return broadcasted_shape
-"""
+# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
+# def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+#     assert len(indices) <= len(self), "More indices than dimensions to index"
+#     broadcasted_shape: List[int] = []
+#     for index_tensor_shape in indices:
+#         if index_tensor_shape is not None:
+#             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+#     return broadcasted_shape
 
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
@@ -969,16 +959,6 @@ def add_bounded_compute_mapping(operator_schema: str, lower_bound_func: Callable
     # Adds a shape compute function for both upper and lower bounds
     fns = (process_func(lower_bound_func), process_func(upper_bound_func))
     bounded_compute_graph_mapping[operator_schema] = fns
-
-def stack(inputs: List[List[int]], dim: int) -> List[int]:
-    assert len(inputs) > 0, "stack requires at least 1 input"
-    input_0 = inputs[0]
-    for i in range(1, len(inputs)):
-        assert inputs[i] == input_0
-    result = _copy(input_0)
-    result.insert(dim, len(inputs))
-    return result
-
 
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
 add_shape_compute_mapping("aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary)
@@ -1019,13 +999,12 @@ add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
-add_shape_compute_mapping("aten::stack(Tensor[] tensors, int dim=0) -> Tensor", stack)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
-add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
-add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
 add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", max_dim)
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
@@ -1042,7 +1021,8 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
-# add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
+# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
+#add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed

@@ -301,7 +301,6 @@ graph(%a : Float(4, 5),
 TEST(IRParserTest, MalformedStrides) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
-  bool error_thrown = false;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(parseIR(
       R"IR(

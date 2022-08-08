@@ -4,6 +4,7 @@ from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 
+__all__ = ['Dirichlet']
 
 # This helper is exposed for testing.
 def _Dirichlet_backward(x, concentration, grad_output):
@@ -33,7 +34,7 @@ class Dirichlet(ExponentialFamily):
     Example::
 
         >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
-        >>> m.sample()  # Dirichlet distributed with concentrarion concentration
+        >>> m.sample()  # Dirichlet distributed with concentration [0.5, 0.5]
         tensor([ 0.1046,  0.8954])
 
     Args:

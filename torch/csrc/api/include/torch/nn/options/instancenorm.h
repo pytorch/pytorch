@@ -34,7 +34,8 @@ struct TORCH_API InstanceNormOptions {
 ///
 /// Example:
 /// ```
-/// InstanceNorm1d model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm1d
+/// model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm1dOptions = InstanceNormOptions;
 
@@ -42,7 +43,8 @@ using InstanceNorm1dOptions = InstanceNormOptions;
 ///
 /// Example:
 /// ```
-/// InstanceNorm2d model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm2d
+/// model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm2dOptions = InstanceNormOptions;
 
@@ -50,7 +52,8 @@ using InstanceNorm2dOptions = InstanceNormOptions;
 ///
 /// Example:
 /// ```
-/// InstanceNorm3d model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm3d
+/// model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm3dOptions = InstanceNormOptions;
 
@@ -61,7 +64,8 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::instance_norm(input, F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
+/// F::instance_norm(input,
+/// F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
 /// ```
 struct TORCH_API InstanceNormFuncOptions {
   TORCH_ARG(Tensor, running_mean) = Tensor();

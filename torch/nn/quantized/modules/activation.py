@@ -183,3 +183,95 @@ class Softmax(torch.nn.Softmax):
     @classmethod
     def from_reference(cls, mod, scale, zero_point):
         return cls(mod.dim, float(scale), int(zero_point))
+
+class MultiheadAttention(torch.nn.quantizable.MultiheadAttention):
+    _FLOAT_MODULE = torch.nn.quantizable.MultiheadAttention
+
+    def _get_name(self):
+        return "QuantizedMultiheadAttention"
+
+    @classmethod
+    def from_float(cls, other):
+        # The whole flow is float -> observed -> quantized
+        # This class does observed -> quantized only
+        raise NotImplementedError("It looks like you are trying to convert a "
+                                  "non-observed MHA module. Please, see "
+                                  "the examples on quantizable MHAs.")
+
+    @classmethod
+    def from_observed(cls, other):
+        converted = torch.ao.quantization.convert(other, mapping=None,
+                                                  inplace=False,
+                                                  remove_qconfig=True,
+                                                  convert_custom_config_dict=None)
+        converted.__class__ = cls
+        # Remove the parameters for the bias_k and bias_v to quantize them
+        # TODO: This is a potential source of accuracy drop.
+        #       quantized cat takes the scale and zp of the first
+        #       element, which might lose the precision in the bias_k
+        #       and the bias_v (which are cat'ed with k/v being first).
+        if converted.bias_k is not None:
+            bias_k = converted._parameters.pop('bias_k')
+            sc, zp = torch._choose_qparams_per_tensor(bias_k,
+                                                      reduce_range=False)
+            bias_k = torch.quantize_per_tensor(bias_k, sc, zp, torch.quint8)
+            setattr(converted, 'bias_k', bias_k)  # noqa: B010
+
+        if converted.bias_v is not None:
+            bias_v = converted._parameters.pop('bias_v')
+            sc, zp = torch._choose_qparams_per_tensor(bias_k,
+                                                      reduce_range=False)
+            bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
+            setattr(converted, 'bias_v', bias_v)  # noqa: B010
+
+        return converted
+
+class PReLU(torch.nn.Module):
+    r"""This is the quantized equivalent of :class:`~torch.nn.PReLU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        num_parameters: number of parameters: 1, or the number of channels at input. Default: 1
+    """
+    def __init__(self, output_scale: float, output_zero_point: int,
+                 num_parameters: int = 1) -> None:
+        super().__init__()
+        self.num_parameters = num_parameters
+        self.scale = output_scale
+        self.zero_point = output_zero_point
+        w = torch.randn(num_parameters, dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.quint8)
+        self.set_weight(qw)
+
+    def set_weight(self, w: torch.Tensor) -> None:
+        self.weight = w
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return torch.ops.quantized.prelu(input, self.weight, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedPReLU'
+
+    @classmethod
+    def from_float(cls, mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
+        float_wt = mod.weight.float()
+        observer = mod.qconfig.weight()
+        wt_scale, wt_zp = observer.calculate_qparams()
+        qweight = torch.quantize_per_tensor(
+            float_wt, float(wt_scale), int(wt_zp), torch.quint8)
+        qprelu.set_weight(qweight)
+        return qprelu
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
+        float_wt = mod.weight.float()
+        observer = mod.qconfig.weight()
+        wt_scale, wt_zp = observer.calculate_qparams()
+        qweight = torch.quantize_per_tensor(
+            float_wt, float(wt_scale), int(wt_zp), torch.quint8)
+        qprelu.set_weight(qweight)
+        return qprelu

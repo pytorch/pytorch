@@ -35,11 +35,6 @@ void checkRoundingMode(const std::string& fn_name) {
   return;
 }
 
-void checkCPUTensor(const std::string& fn_name, const Tensor& t) {
-  TORCH_CHECK(
-      t.device().type() == kCPU, fn_name, " only supports CPU device type.");
-}
-
 void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat, fn_name, " expects a Float Tensor, got ",

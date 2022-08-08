@@ -1,9 +1,9 @@
+#include <ATen/core/ivalue.h>
 #include <gtest/gtest.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <iostream>
 #include <string>
-#include <torch/csrc/jit/mobile/import.h>
-#include <ATen/core/ivalue.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 
 std::string add_negative_flag(const std::string& flag) {
   std::string filter = ::testing::GTEST_FLAG(filter);
@@ -16,8 +16,8 @@ std::string add_negative_flag(const std::string& flag) {
   return filter;
 }
 int main(int argc, char* argv[]) {
-    ::testing::InitGoogleTest(&argc, argv);
-    ::testing::GTEST_FLAG(filter) = add_negative_flag("*_CUDA:*_MultiCUDA");
+  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::GTEST_FLAG(filter) = add_negative_flag("*_CUDA:*_MultiCUDA");
 
-    return RUN_ALL_TESTS();
+  return RUN_ALL_TESTS();
 }

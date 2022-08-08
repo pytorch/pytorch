@@ -1922,29 +1922,7 @@ def transpose(self: List[int],
   return _11
 
 )=====")
-+ std::string(R"=====(def stack(inputs: List[List[int]],
-    dim: int) -> List[int]:
-  _0 = "AssertionError: stack requires at least 1 input"
-  if torch.gt(torch.len(inputs), 0):
-    pass
-  else:
-    ops.prim.RaiseException(_0)
-  input_0 = inputs[0]
-  _1 = torch.__range_length(1, torch.len(inputs), 1)
-  for _2 in range(_1):
-    i = torch.__derive_index(_2, 1, 1)
-    if torch.eq(inputs[i], input_0):
-      pass
-    else:
-      ops.prim.RaiseException("AssertionError: ")
-  result = annotate(List[int], [])
-  for _3 in range(torch.len(input_0)):
-    elem = input_0[_3]
-    _4 = torch.append(result, elem)
-  torch.insert(result, dim, torch.len(inputs))
-  return result
-
-def permute(input: List[int],
++ std::string(R"=====(def permute(input: List[int],
     dims: List[int]) -> List[int]:
   _0 = torch.eq(torch.len(input), torch.len(dims))
   if _0:
@@ -2758,13 +2736,12 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
-    {"aten::stack(Tensor[] tensors, int dim=0) -> Tensor", "stack"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
-    {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-    {"aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+    {"aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
     {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},

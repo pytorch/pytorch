@@ -42,11 +42,6 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
   return index;
 }
 
-// TODO: temporary hack to resolve my is_constructible issue;
-std::vector<size_t> toVector(const at::DimVector& small_vec) {
-  return std::vector<size_t>(small_vec.begin(), small_vec.end());
-}
-
 void encodeBuffer(size_t value, std::string& buffer) {
   const char* v = reinterpret_cast<char*>(&value);
   for (const auto i : c10::irange(sizeof(size_t))) {

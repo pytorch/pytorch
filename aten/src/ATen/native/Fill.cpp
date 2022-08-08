@@ -28,7 +28,7 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
 
 Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
   at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
-  out = out.to(self.device());
+  out = out.to(self.device()).to(self.suggest_memory_format());
   // Trust the `copy_` to handle the quantization and the boundary chacks.
   self.copy_(out);
   return self;

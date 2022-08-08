@@ -49,6 +49,12 @@ TORCH_CUDA_CU_API TensorView* variance(
     bool unbiased,
     bool keepdim);
 
+TORCH_CUDA_CU_API TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    int64_t correction,
+    bool keepdim);
+
 TORCH_CUDA_CU_API TensorView* standard_deviation(
     TensorView* x,
     const std::vector<int>& dims,

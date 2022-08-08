@@ -1,4 +1,5 @@
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace impl {
@@ -6,4 +7,6 @@ namespace dispatch {
 
 void initDispatchBindings(PyObject* module);
 
-}}} // namespace torch::impl::dispatch
+}
+} // namespace impl
+} // namespace torch

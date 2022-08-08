@@ -12,6 +12,49 @@ namespace fuser {
 namespace cuda {
 namespace ir_utils {
 
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims) {
+  TORCH_CHECK(
+      new2old_in.size() == ndims,
+      "There must be a transpose mapping for each dimension in domain");
+
+  // Canonicalize dimensions by wrapping each dim for the given ndims
+  std::vector<int64_t> new2old;
+  std::transform(
+      new2old_in.begin(),
+      new2old_in.end(),
+      std::inserter(new2old, new2old.begin()),
+      [ndims](int64_t entry) { return entry < 0 ? entry + ndims : entry; });
+
+  // Check if any adjusted values are < 0, or >= nDims, which are invalid
+  TORCH_CHECK(
+      std::none_of(
+          new2old.begin(),
+          new2old.end(),
+          [ndims](int64_t entry) {
+            return entry < 0 || (unsigned int)entry >= ndims;
+          }),
+      "New2Old axes are not within the number of dimensions of the provided domain.\t",
+      new2old);
+
+  // Going to use sets, to see if any duplicate values are in the map.
+  std::set<int64_t> old_pos_set;
+  std::transform(
+      new2old.begin(),
+      new2old.end(),
+      std::inserter(old_pos_set, old_pos_set.begin()),
+      [](int64_t entry) { return entry; });
+
+  // Error out if duplicate values are found.
+  TORCH_CHECK(
+      new2old.size() == ndims && old_pos_set.size() == new2old.size(),
+      "Duplicate entries in transformation map.");
+
+  // END VALIDATION CHECKS
+  return new2old;
+}
+
 std::vector<int> normalizeOld2New(
     const std::unordered_map<int, int>& old2new_in,
     size_t ndims) {
@@ -256,6 +299,26 @@ struct SubstituteInExpr : public OptInDispatch {
         transpose_expr->container(), out, in, transpose_expr->new2old());
   }
 
+  void handle(ExpandOp* expand_expr) final {
+    auto out = reference_->sameAs(expand_expr->out())
+        ? substitute_->as<TensorView>()
+        : expand_expr->out();
+    auto in = reference_->sameAs(expand_expr->in())
+        ? substitute_->as<TensorView>()
+        : expand_expr->in();
+
+    auto expanded_extents = expand_expr->expanded_extents();
+    if (substitute_->isA<Int>()) {
+      for (auto i : c10::irange(expanded_extents.size())) {
+        if (!expanded_extents[i]->sameAs(substitute_)) {
+          expanded_extents[i] = substitute_;
+        }
+      }
+    }
+    expr_ = IrBuilder::create<ExpandOp>(
+        expand_expr->container(), out, in, expanded_extents);
+  }
+
   void handle(ShiftOp* shift_expr) final {
     auto out =
         reference_->sameAs(shift_expr->out()) ? substitute_ : shift_expr->out();
@@ -466,6 +529,22 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
   return uniqueEntries<Val>(consumer_vals);
 }
 
+// Return immediate siblings of val
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val) {
+  std::vector<Val*> sibling_vals;
+  auto def = val->definition();
+  if (def != nullptr) {
+    auto outs = def->outputs();
+    for (auto sibling_val : outs) {
+      if (sibling_val == val) {
+        continue;
+      }
+      sibling_vals.emplace_back(sibling_val);
+    }
+  }
+  return sibling_vals;
+}
+
 // Return immediate producers of val
 TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
     const std::vector<Val*>& vals) {
@@ -493,22 +572,21 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
 }
 
 std::vector<TensorView*> producerTvsOf(TensorView* tv) {
-  if (tv->definition() == nullptr) {
-    return {};
-  }
-  auto producer_vals =
-      ir_utils::filterByType<TensorView>(tv->definition()->inputs());
-  return uniqueEntries<TensorView>(
-      {producer_vals.begin(), producer_vals.end()});
+  auto producer_vals = producerValsOf(tv);
+  auto producer_tvs = ir_utils::filterByType<TensorView>(producer_vals);
+  return {producer_tvs.begin(), producer_tvs.end()};
 }
 
 std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
-  std::vector<TensorView*> consumer_tvs;
-  for (auto use_expr : tv->uses()) {
-    auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
-    consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
-  }
-  return uniqueEntries<TensorView>(consumer_tvs);
+  auto consumer_vals = consumerValsOf(tv);
+  auto consumer_tvs = ir_utils::filterByType<TensorView>(consumer_vals);
+  return {consumer_tvs.begin(), consumer_tvs.end()};
+}
+
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv) {
+  auto sibling_vals = siblingValsOf(tv);
+  auto sibling_tvs = ir_utils::filterByType<TensorView>(sibling_vals);
+  return {sibling_tvs.begin(), sibling_tvs.end()};
 }
 
 std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
@@ -689,7 +767,7 @@ Val* getReductionInitValOf(TensorView* tv) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
     int output_idx = -1;
-    for (const auto i : c10::irange(grop->numReductions())) {
+    for (const auto i : c10::irange(grop->numExprs())) {
       if (tv == grop->output(i)) {
         output_idx = static_cast<int>(i);
         break;

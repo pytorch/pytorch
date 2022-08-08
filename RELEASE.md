@@ -11,6 +11,7 @@
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
+    - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
@@ -147,6 +148,16 @@ Release candidates are currently stored in the following places:
 * Libtorch: https://download.pytorch.org/libtorch/test
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
+
+### Release Candidate health validation
+
+Validate the release jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
+
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
 
 ### Cherry Picking Fixes
 

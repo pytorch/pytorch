@@ -124,8 +124,8 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
       if (K > 1) {
         TileArrayIntoVector(lambda1_ptr, D, K, &b.lambda1_);
         TileArrayIntoVector(lambda2_ptr, D, K, &b.lambda2_);
-        DCHECK_EQ(K * D, b.lambda1_.size());
-        DCHECK_EQ(K * D, b.lambda2_.size());
+        TORCH_DCHECK_EQ(K * D, b.lambda1_.size());
+        TORCH_DCHECK_EQ(K * D, b.lambda2_.size());
         for (; i < N - K + 1; i += K, data_ptr += K * D, output_ptr += K * D) {
           BoxCoxNonzeroLambda(
               K * D,
@@ -144,7 +144,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
       int64_t i = 0;
       if (K > 1) {
         TileArrayIntoVector(lambda2_ptr, D, K, &b.lambda2_z_);
-        DCHECK_EQ(K * D, b.lambda2_z_.size());
+        TORCH_DCHECK_EQ(K * D, b.lambda2_z_.size());
         for (; i < N - K + 1; i += K, data_ptr += K * D, output_ptr += K * D) {
           BoxCoxZeroLambda(
               K * D, data_ptr, b.lambda2_z_.data(), k_eps, output_ptr);
@@ -176,9 +176,9 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
         zeros_.resize(D - n);
         TileIndicesInPlace(&nonzeros_, D, K);
         TileIndicesInPlace(&zeros_, D, K);
-        DCHECK_EQ(nonzeros_.size(), b.lambda1_.size());
-        DCHECK_EQ(nonzeros_.size(), b.lambda2_.size());
-        DCHECK_EQ(zeros_.size(), b.lambda2_z_.size());
+        TORCH_DCHECK_EQ(nonzeros_.size(), b.lambda1_.size());
+        TORCH_DCHECK_EQ(nonzeros_.size(), b.lambda2_.size());
+        TORCH_DCHECK_EQ(zeros_.size(), b.lambda2_z_.size());
         for (; i < N - K + 1; i += K, data_ptr += K * D, output_ptr += K * D) {
           BoxCoxMixedLambda(
               data_ptr,

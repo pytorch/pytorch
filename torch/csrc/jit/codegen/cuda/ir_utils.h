@@ -126,6 +126,14 @@ auto filterByType(const ContainerType& inputs) {
 
 //! Returns a list of new-to-old mappings.
 //!
+//! This funcion canonicalizes the dimensions and validates that multiple old
+//! dimension are mapped to the same new dimension.
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims);
+
+//! Returns a list of new-to-old mappings.
+//!
 //! The input map does not need to be complete. Missing axes are
 //! assumed not to be affected.
 //!
@@ -173,6 +181,16 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
 // code.
 TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
 
+// Return immediate siblings of val, this function can be used on any Val and
+// will return siblings through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val);
+
 // Return immediate producers of vals, this function can be used on any vals and
 // will return producers through Exprs.
 //
@@ -214,6 +232,16 @@ TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 // strictly between fusion inputs/outputs, it could effectively return dead
 // code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+
+// Return immediate siblings of tv, this function will return all immediate
+// siblings of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv);
 
 // Return immediate producers of tvs, this function will return all immediate
 // producers of tvs through Exprs.

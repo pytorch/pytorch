@@ -5,7 +5,10 @@ namespace nn {
 
 namespace detail {
 
-RNNOptionsBase::RNNOptionsBase(rnn_options_base_mode_t mode, int64_t input_size, int64_t hidden_size)
+RNNOptionsBase::RNNOptionsBase(
+    rnn_options_base_mode_t mode,
+    int64_t input_size,
+    int64_t hidden_size)
     : mode_(mode), input_size_(input_size), hidden_size_(hidden_size) {}
 
 } // namespace detail
@@ -21,8 +24,15 @@ GRUOptions::GRUOptions(int64_t input_size, int64_t hidden_size)
 
 namespace detail {
 
-RNNCellOptionsBase::RNNCellOptionsBase(int64_t input_size, int64_t hidden_size, bool bias, int64_t num_chunks)
-    : input_size_(input_size), hidden_size_(hidden_size), bias_(bias), num_chunks_(num_chunks) {}
+RNNCellOptionsBase::RNNCellOptionsBase(
+    int64_t input_size,
+    int64_t hidden_size,
+    bool bias,
+    int64_t num_chunks)
+    : input_size_(input_size),
+      hidden_size_(hidden_size),
+      bias_(bias),
+      num_chunks_(num_chunks) {}
 
 } // namespace detail
 

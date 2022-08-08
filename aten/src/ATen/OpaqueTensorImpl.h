@@ -36,6 +36,8 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     TensorImpl::release_resources();
     opaque_handle_ = {};
