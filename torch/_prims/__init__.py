@@ -924,9 +924,8 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = (
-        isinstance(a, (bool, int)) or
-        (isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype))
+    is_integral = isinstance(a, (bool, int)) or (
+        isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 
     if is_integral:
