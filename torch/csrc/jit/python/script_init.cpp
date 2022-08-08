@@ -1776,8 +1776,6 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
-  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
-
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
