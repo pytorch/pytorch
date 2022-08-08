@@ -2482,8 +2482,13 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d,)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
+
+def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, None)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
 
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -10792,7 +10797,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           error_inputs_func=error_inputs_lstsq,
+           error_inputs_func=error_inputs_lstsq_grad_oriented,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_autograd=True,
