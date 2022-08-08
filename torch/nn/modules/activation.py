@@ -9,6 +9,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 
+__all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsigmoid', 'Tanh',
+           'SiLU', 'Mish', 'Hardswish', 'ELU', 'CELU', 'SELU', 'GLU', 'GELU', 'Hardshrink', 'LeakyReLU',
+           'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
+           'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
@@ -431,9 +435,10 @@ class Mish(Module):
         return inplace_str
 
 class Hardswish(Module):
-    r"""Applies the hardswish function, element-wise, as described in the paper:
+    r"""Applies the Hardswish function, element-wise, as described in the paper:
+    `Searching for MobileNetV3 <https://arxiv.org/abs/1905.02244>`_.
 
-    `Searching for MobileNetV3`_.
+    Hardswish is defined as:
 
     .. math::
         \text{Hardswish}(x) = \begin{cases}
@@ -456,9 +461,6 @@ class Hardswish(Module):
         >>> m = nn.Hardswish()
         >>> input = torch.randn(2)
         >>> output = m(input)
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
     """
     __constants__ = ['inplace']
 
@@ -655,7 +657,7 @@ class GELU(Module):
         :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
@@ -736,7 +738,7 @@ class LeakyReLU(Module):
     or
 
     .. math::
-        \text{LeakyRELU}(x) =
+        \text{LeakyReLU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
         \text{negative\_slope} \times x, & \text{ otherwise }
@@ -955,7 +957,7 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
-        if self._qkv_same_embed_dim is False:
+        if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
             self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
             self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
@@ -1051,7 +1053,7 @@ class MultiheadAttention(Module):
         - **attn_output_weights** - Only returned when ``need_weights=True``. If ``average_attn_weights=True``,
           returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
@@ -1066,9 +1068,9 @@ class MultiheadAttention(Module):
             # enforce that the dtypes all match or test cases where
             # they don't!
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
-        elif query.dtype != self.in_proj_bias.dtype:
+        elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif query.dtype != self.in_proj_weight.dtype:
+        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
             # this case will fail anyway, but at least they'll get a useful error message.
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
@@ -1085,10 +1087,10 @@ class MultiheadAttention(Module):
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
-        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
-            why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
-        elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
-            why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
+        elif attn_mask is not None:
+            why_not_fast_path = "attn_mask was not None"
+        elif query.is_nested and key_padding_mask is not None:
+            why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
 
         if not why_not_fast_path:
             tensor_args = (

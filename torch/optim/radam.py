@@ -5,6 +5,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['RAdam', 'radam']
 
 class RAdam(Optimizer):
     r"""Implements RAdam algorithm.
@@ -90,7 +91,7 @@ class RAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -160,7 +161,7 @@ def radam(params: List[Tensor],
     See :class:`~torch.optim.RAdam` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:

@@ -1,6 +1,6 @@
 #pragma once
-#include <torch/csrc/python_headers.h>
 #include <ATen/Dimname.h>
+#include <torch/csrc/python_headers.h>
 
 at::Dimname THPDimname_parse(PyObject* obj);
 bool THPUtils_checkDimname(PyObject* obj);

@@ -6,6 +6,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/Load.h>
 
 #include <ATen/cuda/cub.cuh>
 
@@ -61,7 +62,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       int col2 = block_col + num_threads_x + threadIdx.x;
       if (row < num_rows) {
         if (col1 < row_size) {
-          row_buf[threadIdx.x] = row_self[col1];
+          row_buf[threadIdx.x] = c10::load(&row_self[col1]);
           row_idx_buf[threadIdx.x] = col1;
         } else {
           row_buf[threadIdx.x] = init;
@@ -69,7 +70,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
         }
 
         if (col2 < row_size) {
-          row_buf[num_threads_x + threadIdx.x] = row_self[col2];
+          row_buf[num_threads_x + threadIdx.x] = c10::load(&row_self[col2]);
           row_idx_buf[num_threads_x + threadIdx.x] = col2;
         } else {
           row_buf[num_threads_x + threadIdx.x] = init;
@@ -142,8 +143,9 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
       int64_t out_idx = 0;
 
       for (auto col = decltype(row_size){0}; col < row_size; ++col) {
-        if(at::_isnan(*self) || (!at::_isnan(out) && binary_op(*self, out))) {
-          out = *self;
+        const auto val = c10::load(self);
+        if(at::_isnan(val) || (!at::_isnan(out) && binary_op(val, out))) {
+          out = val;
           out_idx = col;
         }
         *values = out;
@@ -267,7 +269,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
       scalar_t acc = init;
 
       for (uint32_t col = 0; col < row_size; ++col) {
-        acc = binary_op(acc, *src);
+        acc = binary_op(acc, c10::load(src));
         *tgt = acc;
 
         src += num_irows;
@@ -467,7 +469,6 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
 }
 
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
@@ -485,7 +486,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
              return x;
           }
         };
-        scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
+        scan_dim<scalar_t>(self, result, dim, init, log_add_exp);
       });
 }
 

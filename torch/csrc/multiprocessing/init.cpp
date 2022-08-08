@@ -1,3 +1,4 @@
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -18,7 +19,7 @@ namespace multiprocessing {
 
 namespace {
 
-PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
+PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   if (!multiprocessing_module) {

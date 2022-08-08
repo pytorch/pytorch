@@ -17,7 +17,7 @@ struct TORCH_API PythonTorchFunctionTLS {
   static void set_state(const PythonTorchFunctionTLS& state);
   static const PythonTorchFunctionTLS& get_state();
 
-private:
+ private:
   bool disabled_;
   std::shared_ptr<c10::SafePyObject> mode_;
 };

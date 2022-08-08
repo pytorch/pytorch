@@ -19,9 +19,9 @@ from torch.utils.data.dataset import (
 )
 from torch.utils.data.datapipes.datapipe import (
     DFIterDataPipe,
+    DataChunk,
     IterDataPipe,
     MapDataPipe,
-    DataChunk,
 )
 from torch.utils.data.dataloader import (
     DataLoader,

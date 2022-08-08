@@ -23,18 +23,22 @@ runs:
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
+        retry () {
+          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+        }
         echo "${GITHUB_WORKSPACE}"
         if [ -z "${NO_SUDO}" ]; then
-          sudo rm -rf "${GITHUB_WORKSPACE}"
+          retry sudo rm -rf "${GITHUB_WORKSPACE}"
         else
-          rm -rf "${GITHUB_WORKSPACE}"
+          retry rm -rf "${GITHUB_WORKSPACE}"
         fi
         mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch
-      uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      uses: malfet/checkout@silent-checkout
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
+        quiet-checkout: true

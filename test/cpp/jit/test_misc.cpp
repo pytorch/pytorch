@@ -1049,8 +1049,7 @@ TEST(RecordFunctionTest, Callbacks) {
   GraphOptimizerEnabledGuard opt_guard(false);
 
   auto h1 = add_remove_test_add_cb<1>();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto h2 = add_remove_test_add_cb<2>();
+  add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
   { RECORD_USER_SCOPE("test"); }
@@ -1144,7 +1143,6 @@ TEST(RecordFunctionTest, Callbacks) {
   } // END: global test
   { // START: thread local test
     auto ctx_th = std::thread([]() {
-      const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
           [](const RecordFunction&
@@ -1386,9 +1384,9 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
 TEST(TestSymIntArrayRef, BasicConversion) {
   const size_t X = 2, Y = 4, Z = 5;
   std::vector<int64_t> tgt_size_v{2, 4, 5};
-  std::vector<c10::SymInt> tgt_size({X, Y, Z});
+  std::vector<c10::SymInt> tgt_size({SymInt(X), SymInt(Y), SymInt(Z)});
   auto a = at::randn({1, 4, 1}, at::kCPU);
-  auto b = a.expand(tgt_size);
+  auto b = a.expand_symint(tgt_size);
   auto c = a.expand(tgt_size_v);
   ASSERT_TRUE(torch::allclose(b, c));
 }
@@ -1397,7 +1395,7 @@ TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
   static const size_t LENGTH = 5;
   auto a = at::randn({10}, at::kCPU);
   c10::SymInt si(LENGTH);
-  auto b = a.narrow_copy(0, 0, si);
+  auto b = a.narrow_copy_symint(0, 0, si);
   auto c = a.narrow(0, 0, LENGTH);
   ASSERT_TRUE(torch::allclose(b, c));
 }
@@ -1417,22 +1415,6 @@ TEST(TestSymInt, AddSymbolicInt) {
 }
 
 TEST(FallbackGraphsTest, Basic) {
-  static const auto nestGraphIntoFallbackGraph =
-      [](const std::shared_ptr<Graph>& graph) {
-        ProfilingRecord::removeProfileCounter(graph->block());
-        auto fallback =
-            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
-        for (size_t i = 0; i < graph->outputs().size(); i++) {
-          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
-          fallback->output(i)->copyMetadata(graph->outputs()[i]);
-        }
-        for (auto it = graph->block()->nodes().rbegin();
-             it != fallback->iterator();
-             it++) {
-          it.destroyCurrent();
-        }
-      };
-
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
   auto stack = createStack({x.clone(), y.clone()});
@@ -2656,11 +2638,13 @@ TEST(RecordDebugHandles, Basic) {
     RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
+    (void)z;
   }
   {
     RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
+    (void)z;
   }
   auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
   const auto& kineto_events = profiler_results_ptr->events();

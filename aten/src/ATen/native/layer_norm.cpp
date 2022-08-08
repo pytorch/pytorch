@@ -8,7 +8,6 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
-#include <ATen/native/cpu/mixed_data_type.h>
 
 #include <array>
 #include <functional>
@@ -30,10 +29,6 @@ void layer_norm_with_mean_rstd_out(
     double eps,
     int64_t M,
     int64_t N) {
-  if (M <= 0) {
-    return;
-  }
-
   LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, &mean, &rstd);
   const auto input_shape = input.sizes();
   const size_t axis = input.dim() - normalized_shape.size();
@@ -75,7 +70,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  bool mixed_type = is_mixed_type(input, weight, bias);
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -91,9 +85,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
-  const auto dtype = param_scalar_type(input, mixed_type);
-  Tensor mean = at::empty({M}, X->options().dtype(dtype));
-  Tensor rstd = at::empty({M}, X->options().dtype(dtype));
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
 
   layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));

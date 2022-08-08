@@ -16,6 +16,7 @@ from .metadata import (
     TensorWriteRequest,
 )
 from .storage import StorageReader, StorageWriter
+from torch.distributed._shard._utils import narrow_tensor_by_index
 
 
 class FileSystemWriter(StorageWriter):
@@ -43,9 +44,10 @@ class FileSystemWriter(StorageWriter):
 
     def write_bytes(self, requests: List[BytesWriteRequest]) -> Future[None]:
         for req in requests:
-            (self.path / req.storage_key).write_bytes(
-                req.bytes.getbuffer()
-            )
+            with (self.path / req.storage_key).open("wb") as w:
+                w.write(req.bytes.getbuffer())
+                os.fsync(w.fileno())
+
         fut: Future[None] = Future()
         fut.set_result(None)
         return fut
@@ -67,20 +69,20 @@ class FileSystemWriter(StorageWriter):
             # 2. pickle is not streamable.
             with (self.path / req.storage_key).open("wb") as w:
                 torch.save(req.tensor, w)
+                os.fsync(w.fileno())
 
         fut: Future[None] = Future()
         fut.set_result(None)
         return fut
 
-    # Implementating the abstract function in Storage Writer
-    def write_metadata(self, metadata: Metadata) -> None:
-        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
-            pickle.dump(metadata, metadata_file)
-
     def prepare(self) -> None:
         self.path.mkdir(parents=True, exist_ok=True)
 
-    def finish(self) -> None:
+    def finish(self, metadata: Metadata) -> None:
+        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
+            pickle.dump(metadata, metadata_file)
+            os.fsync(metadata_file.fileno())
+
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
 class FileSystemReader(StorageReader):
@@ -111,8 +113,7 @@ class FileSystemReader(StorageReader):
             # During load time, we will load the Tensor (with it orignal view)
             # narrow it along all dimemsions, and copy_ it to the
             # target tensor, which will be the same size.
-            for dim, (start, length) in enumerate(zip(req.offsets, req.lengths)):
-                view_to_copy = torch.narrow(view_to_copy, dim, start, length)
+            view_to_copy = narrow_tensor_by_index(view_to_copy, req.offsets, req.lengths)
 
             assert (
                 view_to_copy.size() == req.tensor.size()

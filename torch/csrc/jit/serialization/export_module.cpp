@@ -16,10 +16,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
-#if defined(ENABLE_FLATBUFFER)
-#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
-#endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -34,6 +30,8 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
+#include <cerrno>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -345,17 +343,6 @@ void pushMobileFunctionsToIValues(
   }
 }
 
-std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
-  std::unordered_set<const FunctionSchema*> ret;
-  auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
-  for (Node* node : nodes) {
-    if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
-      ret.insert(iface->getMethod(node->s(attr::name)));
-    }
-  }
-  return ret;
-}
-
 struct ModuleMethod {
   ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
       : module(m), function(f), exportName(std::move(n)) {}
@@ -363,28 +350,6 @@ struct ModuleMethod {
   const GraphFunction& function;
   c10::QualifiedName exportName;
 };
-
-std::vector<ModuleMethod> getModuleInterfaceExports(
-    const Module& module,
-    const std::unordered_set<const FunctionSchema*>& schemas) {
-  if (schemas.size() == 0) {
-    return {};
-  }
-  std::unordered_set<std::string> names;
-  for (auto schema : schemas) {
-    names.insert(schema->name());
-  }
-  std::vector<ModuleMethod> ret;
-  for (const auto& submodule : module.modules()) {
-    for (const auto& method : submodule.get_methods()) {
-      const auto& f = toGraphFunction(method.function());
-      if (names.find(f.qualname().name()) != names.end()) {
-        ret.emplace_back(submodule, f, f.qualname());
-      }
-    }
-  }
-  return ret;
-}
 
 bool isLoweredModule(const Module& m) {
   c10::QualifiedName type_name;
@@ -850,23 +815,6 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
-#if defined(ENABLE_FLATBUFFER)
-void save_mobile_module_to(
-    const Module& module,
-    const ExtraFilesMap& extra_files,
-    bool save_mobile_debug_info,
-    const std::function<size_t(const void*, size_t)>& writer_func) {
-  ExtraFilesMap jitFiles;
-  CompilationOptions options = getOptionsFromGlobal();
-  std::vector<IValue> constants;
-  jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
-  mobile::Module mod = jitModuleToMobile(module, options);
-  auto buffer =
-      save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
-  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
-}
-#endif
-
 void ExportModule(
     const Module& module,
     std::ostream& out,
@@ -878,21 +826,13 @@ void ExportModule(
     out.write(static_cast<const char*>(buf), nbytes);
     return !out ? 0 : nbytes;
   };
-  if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
-    save_mobile_module_to(
-        module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
-  } else {
-    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
-    ScriptModuleSerializer serializer(writer);
-    serializer.serialize(
-        module, extra_files, bytecode_format, save_mobile_debug_info);
-  }
+  ExportModule(
+      module,
+      writer_func,
+      extra_files,
+      bytecode_format,
+      save_mobile_debug_info,
+      use_flatbuffer);
 }
 
 void ExportModule(
@@ -902,28 +842,40 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
-  if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
-    auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-      std::fstream ofile(filename, std::ios::binary | std::ios::out);
-      ofile.write(static_cast<const char*>(buf), nbytes);
-      ofile.close();
-      return !ofile ? 0 : nbytes;
-    };
-    save_mobile_module_to(
-        module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
-  } else {
+  if (!use_flatbuffer) {
+    // the zip archive need to know the filepath
     caffe2::serialize::PyTorchStreamWriter writer(filename);
     ScriptModuleSerializer serializer(writer);
     serializer.serialize(
         module, extra_files, bytecode_format, save_mobile_debug_info);
+    return;
   }
+  std::ofstream ofile;
+  ofile.open(filename, std::ios::binary | std::ios::out);
+  if (ofile.fail()) {
+    std::stringstream message;
+    if (errno == ENOENT) {
+      message << "Parent directory of " << filename << " does not exist.\n";
+    } else {
+      message << "Error while opening file: " << errno << std::endl;
+      ;
+    }
+    TORCH_CHECK(false, message.str());
+  }
+  ExportModule(
+      module,
+      ofile,
+      extra_files,
+      bytecode_format,
+      save_mobile_debug_info,
+      use_flatbuffer);
 }
+
+void (*_save_jit_module_to)(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) = nullptr;
 
 void ExportModule(
     const Module& module,
@@ -933,14 +885,14 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
-    save_mobile_module_to(
-        module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
+    if (_save_jit_module_to != nullptr) {
+      _save_jit_module_to(
+          module, extra_files, save_mobile_debug_info, writer_func);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+    }
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);

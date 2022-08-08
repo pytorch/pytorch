@@ -66,6 +66,17 @@ TORCH_API IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
+// Hack to overload the behavior of toIValue to accept Python
+// numbers in places where a Tensor is expected
+// See also torch::should_allow_numbers_as_tensors
+class ToIValueAllowNumbersAsTensors {
+  bool old_;
+
+ public:
+  ToIValueAllowNumbersAsTensors(bool enable);
+  ~ToIValueAllowNumbersAsTensors();
+};
+
 // Wrap Python function to guard deref
 // NB: Need VISIBILITY_HIDDEN for silencing compiler error,
 // 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
@@ -720,6 +731,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
+  } else if (ivalue.isGenerator()) {
+    return py::cast(ivalue.toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -837,6 +850,9 @@ inline py::object toPyObject(IValue ivalue) {
 #else
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
+  } else if (ivalue.isSymInt()) {
+    auto si = ivalue.toSymInt();
+    return py::cast(si);
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -1215,14 +1231,8 @@ inline py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
-    std::vector<py::object> overloaded_types;
-    overloaded_types.reserve(overloaded_args.size());
-    for (auto& oarg : overloaded_args) {
-      overloaded_types.push_back(
-          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
-    }
-    py::tuple py_types = py::cast(overloaded_types);
+  if (overloaded_args.size() > 0 ||
+      at::impl::PythonTorchFunctionTLS::get_mode()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();

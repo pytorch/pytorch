@@ -11,10 +11,15 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -52,36 +57,40 @@ jobs:
 
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e OUR_GITHUB_JOB_ID \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -96,39 +105,52 @@ jobs:
 
       # !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
+        id: test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         env:
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
+
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # sanitize the input commit message and PR body here:
+          #
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
+
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
-            -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e PR_LABELS \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
+            -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -146,16 +168,9 @@ jobs:
         uses: ./.github/actions/chown-workspace
         if: always()
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
@@ -166,8 +181,9 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}

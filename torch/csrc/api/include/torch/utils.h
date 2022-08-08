@@ -2,9 +2,9 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/record_function.h>
+#include <torch/csrc/api/include/torch/types.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/api/include/torch/types.h>
 #include <cstdint>
 
 namespace torch {
@@ -13,10 +13,12 @@ namespace torch {
 ///
 /// Disabling gradient calculation is useful for inference, when you are sure
 /// that you will not call `at::Tensor::backward`. It will reduce memory
-/// consumption for computations that would otherwise have `requires_grad() == true`.
+/// consumption for computations that would otherwise have `requires_grad() ==
+/// true`.
 ///
 /// In this mode, the result of every computation will have
-/// `requires_grad() == false`, even when the inputs have `requires_grad() == true`.
+/// `requires_grad() == false`, even when the inputs have `requires_grad() ==
+/// true`.
 ///
 /// This context manager is thread-local; it will not affect computation
 /// in other threads.
@@ -42,7 +44,8 @@ using NoGradGuard = at::NoGradGuard;
 
 /// A RAII, thread-local guard that sets gradient calculation to on or off.
 ///
-/// ``AutoGradMode`` will enable or disable grads based on its argument `enabled`.
+/// ``AutoGradMode`` will enable or disable grads based on its argument
+/// `enabled`.
 ///
 /// This context manager is thread-local; it will not affect computation
 /// in other threads.
@@ -87,25 +90,27 @@ using at::set_num_interop_threads;
 
 // Returns true if both t1, t2 are undefined or both are defined and equal
 inline bool equal_if_defined(Tensor t1, Tensor t2) {
-  return ((!t1.defined() && !t2.defined()) || (t1.defined() && t2.defined() && torch::equal(t1, t2)));
+  return (
+      (!t1.defined() && !t2.defined()) ||
+      (t1.defined() && t2.defined() && torch::equal(t1, t2)));
 }
 
 // RecordFunction API
-using at::RecordFunctionCallback;
-using at::addThreadLocalCallback;
-using at::hasThreadLocalCallbacks;
-using at::clearThreadLocalCallbacks;
 using at::addGlobalCallback;
-using at::removeCallback;
-using at::hasGlobalCallbacks;
-using at::clearGlobalCallbacks;
-using at::hasCallbacks;
-using at::clearCallbacks;
-using at::enableRecordFunction;
-using at::isRecordFunctionEnabled;
-using at::RecordFunctionGuard;
-using at::DisableRecordFunctionGuard;
+using at::addThreadLocalCallback;
 using at::CallbackHandle;
+using at::clearCallbacks;
+using at::clearGlobalCallbacks;
+using at::clearThreadLocalCallbacks;
+using at::DisableRecordFunctionGuard;
+using at::enableRecordFunction;
+using at::hasCallbacks;
+using at::hasGlobalCallbacks;
+using at::hasThreadLocalCallbacks;
+using at::isRecordFunctionEnabled;
 using at::RecordFunction;
+using at::RecordFunctionCallback;
+using at::RecordFunctionGuard;
+using at::removeCallback;
 
 } // namespace torch

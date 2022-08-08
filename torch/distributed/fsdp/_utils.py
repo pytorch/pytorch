@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import dataclasses
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
@@ -26,6 +27,12 @@ def _apply_to_tensors(
     def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
         if torch.is_tensor(x):
             return fn(x)
+        elif hasattr(x, "__dataclass_fields__"):
+            dc = dataclasses.replace(x)
+            for f in dataclasses.fields(dc):
+                name = f.name
+                setattr(dc, name, apply(getattr(dc, name)))
+            return dc
         elif isinstance(x, OrderedDict):
             od = x.__class__()
             for key, value in x.items():
@@ -42,31 +49,6 @@ def _apply_to_tensors(
             return x
 
     return apply(container)
-
-
-def _replace_by_prefix(
-    state_dict: Dict[str, Any],
-    old_prefix: str,
-    new_prefix: str,
-) -> None:
-    """
-    Replace all keys that match a given old_prefix with a new_prefix (in-place).
-
-    Usage::
-
-        state_dict = {"layer.xyz": torch.tensor(1)}
-        replace_by_prefix_(state_dict, "layer.", "module.layer.")
-        assert state_dict == {"module.layer.xyz": torch.tensor(1)}
-    """
-    if old_prefix == new_prefix:
-        raise ValueError("old_prefix and new_prefix must be distinct")
-    for key in list(state_dict.keys()):
-        if not key.startswith(old_prefix):
-            continue
-        new_key = new_prefix + key[len(old_prefix) :]
-        state_dict[new_key] = state_dict[key]
-        del state_dict[key]
-
 
 def _apply_to_modules(
     root_module: torch.nn.Module,

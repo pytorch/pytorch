@@ -866,7 +866,7 @@ void MemDependencyChecker::visit(ForPtr v) {
       std::vector<IndexBounds> newBoundSlices;
       for (auto& b : openBounds) {
         OverlapKind overlap = overlaps(b, other->bounds());
-        if (overlap == NoOverlap) {
+        if (overlap == OverlapKind::NoOverlap) {
           newBoundSlices.push_back(b);
           continue;
         }
@@ -875,7 +875,7 @@ void MemDependencyChecker::visit(ForPtr v) {
         info->addDependency(other);
         other->addDependent(info);
 
-        if (overlap == Contains) {
+        if (overlap == OverlapKind::Contains) {
           continue;
         }
 
@@ -1192,7 +1192,7 @@ void MemDependencyChecker::updateWriteHistory(
 
     OverlapKind overlap = overlaps(indexBounds, info->bounds());
 
-    if (overlap == NoOverlap) {
+    if (overlap == OverlapKind::NoOverlap) {
       ++it;
       continue;
     }
@@ -1211,7 +1211,7 @@ void MemDependencyChecker::updateWriteHistory(
       continue;
     }
 
-    if (overlap == ContainedOrEqual) {
+    if (overlap == OverlapKind::ContainedOrEqual) {
       // Total overlap is easy - the new access totally replaces the old.
       it = writeHistory.erase(it);
     } else {

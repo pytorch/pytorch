@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="short-perf-test-gpu"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 

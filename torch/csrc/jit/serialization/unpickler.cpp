@@ -472,7 +472,7 @@ PickleOpCode Unpickler::readInstruction() {
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
-        if (numel > 0 && !device.is_meta()) {
+        if (numel > 0) {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
@@ -492,7 +492,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       auto options = at::CPU(type).options();
-      if (use_storage_device_ && !device.is_meta()) {
+      if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();
       }
@@ -505,11 +505,12 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu() || device.is_meta()) {
+      if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
+          device.is_hpu()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU and CUDA, however got ",
+            "supported devices include CPU, CUDA and HPU, however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
@@ -685,7 +686,12 @@ void Unpickler::readGlobal(
         class_name,
         "'");
   } else {
-    AT_ASSERT(type_resolver_);
+    TORCH_CHECK(
+        type_resolver_,
+        "Unpickler found unknown type ",
+        module_name,
+        ".",
+        class_name);
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
     if (auto enum_type = type.type_->cast<c10::EnumType>()) {
