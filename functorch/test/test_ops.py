@@ -558,10 +558,10 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('nanquantile'),  # checks q via a .item() call
+        xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
-        xfail('quantile'),  # checks q via a .item() call
+        xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('stft'),
         xfail('view_as_complex'),
 

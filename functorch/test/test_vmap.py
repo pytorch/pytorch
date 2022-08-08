@@ -3241,8 +3241,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # needs to be fixed
         inplace_failure_list = (
             'squeeze',
-            't',
-            'transpose',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
@@ -3398,8 +3396,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'square',
             'squeeze',
             'sub',
-            't',
-            'transpose',
             'tril',
             'triu',
             'trunc',
