@@ -30,93 +30,27 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
-
-  uint64_t flops() const {
-    return flops_;
-  }
-
-  KinetoEvent& flops(uint64_t flops) {
-    flops_ = flops;
-    return *this;
-  }
-
+  uint64_t flops() const;
   int64_t sequenceNr() const;
-
-  bool hasStack() const {
-    return !stack().empty();
-  }
-
+  bool hasStack() const;
   const c10::ArrayRef<std::string> stack() const;
-
   uint8_t scope() const;
   bool hasModuleHierarchy() const;
   const c10::ArrayRef<std::string> moduleHierarchy() const;
-
-  KinetoEvent& debugHandle(int64_t debug_handle) {
-    debug_handle_ = debug_handle;
-    return *this;
-  }
-
-  int64_t debugHandle() const {
-    return debug_handle_;
-  }
-
+  int64_t debugHandle() const;
   std::string name() const;
   c10::DeviceType deviceType() const;
-
-  uint8_t deviceIndex() const {
-    return device_index_;
-  }
-
-  KinetoEvent& deviceIndex(uint8_t device_index) {
-    device_index_ = device_index;
-    return *this;
-  }
-
+  uint8_t deviceIndex() const;
   int64_t nBytes() const;
   uint64_t startUs() const;
-
-  uint64_t durationUs() const {
-    return duration_us_;
-  }
-
-  KinetoEvent& durationUs(uint64_t duration_us) {
-    duration_us_ = duration_us;
-    return *this;
-  }
-
+  uint64_t durationUs() const;
   bool isAsync() const;
   uint64_t correlationId() const;
-
-  uint64_t linkedCorrelationId() const {
-    return linked_correlation_id_;
-  }
-
-  KinetoEvent& linkedCorrelationId(uint64_t linked_correlation_id) {
-    linked_correlation_id_ = linked_correlation_id;
-    return *this;
-  }
-
-  int64_t deviceResourceId() const {
-    return device_resource_id_;
-  }
-
-  KinetoEvent& deviceResourceId(int64_t device_resource_id) {
-    device_resource_id_ = device_resource_id;
-    return *this;
-  }
-
+  uint64_t linkedCorrelationId() const;
+  int64_t deviceResourceId() const;
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
-
-  uint64_t flops_ = 0;
-
-  uint8_t device_index_ = 0;
-  uint64_t duration_us_ = 0;
-  uint64_t linked_correlation_id_ = 0;
-  int64_t device_resource_id_ = 0;
-  int64_t debug_handle_{-1};
 
  private:
   torch::profiler::impl::ProfilerEventStub fallbackStart() const;
