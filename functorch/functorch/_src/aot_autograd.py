@@ -135,6 +135,30 @@ def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=
     return torch.full(size, value, dtype=inp.dtype, device=inp.device)
 
 
+# @register_decomposition(torch.ops.aten.zeros_like, aot_autograd_decompositions)
+# def zeros_like(inp, dtype=None, layout=None, device=None, pin_memory=None):
+#     return inp * 0
+
+
+import torch.fx as fx
+import typing
+class ListCodeGen(fx.CodeGen):
+    def gen_fn_def(self, free_vars, maybe_return_annotation):
+        lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list
+    args_list.clear()
+    """
+        return lst_unpack
+
+    def additional_globals(self):
+        return [('List', typing.List)]
+
+    def process_inputs(self, *inputs):
+        assert(len(inputs) == 1)
+        return inputs[0]
+
+
 graph_being_compiled: str = None
 nth_graph: int = 0
 model_name: str = "model"
@@ -224,6 +248,8 @@ def create_aot_autograd_function(
                         fx_g = make_fx(joint_forward_backward, aot_decompositions)(
                             *joint_inputs
                         )
+                        # from functorch.compile import draw_graph
+                        # draw_graph(fx_g, "joint")
 
                         if config.use_functionalize:
                             # Functionalize the foward backward graph. First create a
@@ -242,6 +268,7 @@ def create_aot_autograd_function(
                     print(fw_module.code, bw_module.code)
 
                 with track_graph_compiling("forward"):
+                    # compiled_fw = fw_module
                     compiled_fw = fw_compiler(fw_module, flat_tensor_args)
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
                 if config.debug_partitioner:
@@ -252,12 +279,17 @@ def create_aot_autograd_function(
                     print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
+                # bw_module.graph.set_codegen(ListCodeGen())
+                # bw_module.recompile()
                 with track_graph_compiling("backward", True):
+                    # compiled_bw = bw_module
                     compiled_bw = bw_compiler(bw_module, bw_args)
             else:
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
             ctx.save_for_backward(*fw_outs[num_outs:])
+            # No way of clearing ctx.saved_tensors right now afaik
+            # ctx.saved_values = fw_outs[num_outs:]
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -269,6 +301,9 @@ def create_aot_autograd_function(
             contiguous_args = [t.contiguous() for t in flat_args]
             # contiguous_args = [t for t in flat_args]
             out = normalize_as_list(compiled_bw(*ctx.saved_tensors, *contiguous_args))
+            # flat_args = list(ctx.saved_values) + list(contiguous_args)
+            # ctx.saved_values = None
+            # out = normalize_as_list(compiled_bw(flat_args))
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
             return tuple(out)
 
