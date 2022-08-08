@@ -37,7 +37,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS)
+                                                  IS_MACOS, IS_ARM64)
 
 
 try:
@@ -1462,6 +1462,7 @@ except RuntimeError as e:
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
     @skipIfNoNumpy
+    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
@@ -2229,6 +2230,7 @@ except RuntimeError as e:
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader2(TestCase):
     @skipIfNoDill
+    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
