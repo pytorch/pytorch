@@ -51,17 +51,23 @@ MINIMUM_MSVC_VERSION = (19, 0, 24215)
 CUDA_GCC_VERSIONS = {
     '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.2': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.3': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.4': ((6, 0, 0), (11, 5, 0)),
+    '11.5': ((6, 0, 0), (11, 5, 0)),
+    '11.6': ((6, 0, 0), (11, 5, 0)),
+    '11.7': ((6, 0, 0), (11, 5, 0)),
 }
 
 CUDA_CLANG_VERSIONS = {
     '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (10, 0, 0)),
-    '11.2': ((6, 0, 0), (10, 0, 0)),
-    '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.1': ((6, 0, 0), (9, 0, 0)),
+    '11.2': ((6, 0, 0), (9, 0, 0)),
+    '11.3': ((6, 0, 0), (11, 0, 0)),
+    '11.4': ((6, 0, 0), (11, 0, 0)),
+    '11.5': ((6, 0, 0), (12, 0, 0)),
+    '11.6': ((6, 0, 0), (12, 0, 0)),
+    '11.7': ((6, 0, 0), (13, 0, 0)),
 }
 
 
@@ -387,6 +393,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
         min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds that 11.4.1
+        if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
+            max_compiler_version = (10, 0, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
         max_compiler_version_str = '.'.join(map(str, max_compiler_version))
 
