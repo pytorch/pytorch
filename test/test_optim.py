@@ -794,6 +794,7 @@ class TestOptim(TestCase):
                     [weight, bias], lr=1e-1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
