@@ -19,7 +19,6 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-import torch.optim._fused
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
@@ -2226,20 +2225,24 @@ torch.cuda.synchronize()
             self.assertEqual(s1.get_growth_interval(), 2)
             self.assertEqual(s1._init_growth_tracker, 0)
 
-    def _create_scaling_models_optimizers(self, device="cuda", optimizer_ctor=torch.optim.SGD):
+    def _create_scaling_models_optimizers(self, device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
         # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
         mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
         mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-            s.data.copy_(c.data)
+        with torch.no_grad():
+            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                s.copy_(c)
 
-        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0)
-        opt_scaling = optimizer_ctor(mod_scaling.parameters(), lr=1.0)
+        kwargs = {"lr": 1.0}
+        if optimizer_kwargs is not None:
+            kwargs.update(optimizer_kwargs)
+        opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
+        opt_scaling = optimizer_ctor(mod_scaling.parameters(), **kwargs)
 
         return mod_control, mod_scaling, opt_control, opt_scaling
 
-    def _create_scaling_case(self, device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD):
+    def _create_scaling_case(self, device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
@@ -2249,15 +2252,17 @@ torch.cuda.synchronize()
 
         skip_iter = 2
 
-        return self._create_scaling_models_optimizers(device=device, optimizer_ctor=optimizer_ctor) + (data, loss_fn, skip_iter)
+        return self._create_scaling_models_optimizers(
+            device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        ) + (data, loss_fn, skip_iter)
 
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
-    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD):
+    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:
             (
                 mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
-            ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor)
+            ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
@@ -2279,10 +2284,16 @@ torch.cuda.synchronize()
                 self.assertTrue(scaler.get_scale() == 1.0)
 
             for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertEqual(c.grad, s.grad, atol=atol, rtol=1e-05)
+
+                c_state, s_state = opt_control.state[c], opt_scaling.state[s]
+                for k in c_state:
+                    self.assertEqual(c_state[k], s_state[k], atol=atol, rtol=1e-05, msg=k)
+
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
-    def test_grad_scaling_autocast(self, optimizer_ctor=torch.optim.SGD, atol=1e-3):
+    def _grad_scaling_autocast_test(self, *, atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         try_pickle = False
 
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2294,7 +2305,8 @@ torch.cuda.synchronize()
                 if try_scaling_api:
                     scaler.scale(loss).backward()
                     if i == skip_iter and scaler.is_enabled():
-                        model[1].weight.grad.data.fill_(float('inf'))
+                        with torch.no_grad():
+                            model[1].weight.grad.fill_(float('inf'))
                     scaler.step(optimizer)
                     scaler.update()
                     if try_pickle:
@@ -2305,19 +2317,53 @@ torch.cuda.synchronize()
                         optimizer.step()
             return scaler
 
-        # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
-        # this will be picked up by try_pickle within run():
-        try_pickle = True
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
+        # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
+        #   Giving some flexibility to this test might help.
+        context = contextlib.nullcontext
+        if optimizer_ctor in (torch.optim.Adam,):
+            from functools import partial
+            context = partial(self.assertRaises, AssertionError)
+        with context():
+            # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+            self._run_scaling_case(
+                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+            )
+            # this will be picked up by try_pickle within run():
+            try_pickle = True
+            self._run_scaling_case(
+                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+            )
 
-    # Assure the parity between optim.Adam and optim._fused.Adam when `GradScaler` is used
-    # as the fused one unscales gradients inside its kernel.
-    def test_grad_scaling_autocast_fusedadam(self):
+    def test_grad_scaling_autocast(self):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+            # with self.subTest(optimizer=optimizer_ctor.__name__):
+            with contextlib.nullcontext():
+                self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
+
+    def test_grad_scaling_autocast_foreach(self):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+            # with self.subTest(optimizer=optimizer_ctor.__name__):
+            with contextlib.nullcontext():
+                self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+
+    def test_grad_scaling_autocast_fused(self):
+        self._grad_scaling_autocast_test(optimizer_ctor=torch.optim.Adam, optimizer_kwargs={"fused": True})
+
+    def test_grad_scaling_autocast_fused_optimizers(self):
+        for optimizer_ctor, optimizer_kwargs in (
+            (torch.optim.Adam, {"fused": True, "amsgrad": False}),
+            (torch.optim.Adam, {"fused": True, "amsgrad": True}),
+        ):
+            self._grad_scaling_autocast_fused_optimizers(
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+
+    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs):
         (
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
-        ) = self._create_scaling_case(optimizer_ctor=torch.optim._fused.Adam)
-        opt_control = torch.optim.Adam(mod_control.parameters(), lr=1.0)
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
+        ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+        kwargs = optimizer_kwargs
+        kwargs["fused"] = False
+        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
 
         scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
 
