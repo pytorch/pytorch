@@ -2965,7 +2965,8 @@ def diag_embed(
         z_shape = list(self.shape)
         z_shape[-1] = builtins.abs(offset)
         z = torch.zeros(
-            z_shape, dtype=self.dtype, device=self.device, requires_grad=False)
+            z_shape, dtype=self.dtype, device=self.device, requires_grad=False
+        )
         self = torch.cat((self, z), dim=-1)
         self = torch.roll(self, self.size(-1) if offset < 0 else offset, dims=-1)
 
@@ -2986,7 +2987,8 @@ def diag_embed(
     b_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(a.shape))]
     b = torch.eye(last_dim, dtype=torch.int64, device=a.device)
     b = _maybe_convert_to_dtype(
-        torch.roll(b, offset, dims=-1).reshape(b_shape), a.dtype)
+        torch.roll(b, offset, dims=-1).reshape(b_shape), a.dtype
+    )  # type: ignore[assignment]
 
     # broadcast and compute the result
     return a * b
