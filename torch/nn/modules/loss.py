@@ -1029,14 +1029,16 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits
+    and target.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
-    The `input` is expected to contain raw, unnormalized scores for each class.
+    The `input` is expected to contain the unnormalized logits for each class (which do `not` need
+    to be positive or sum to 1, in general).
     `input` has to be a Tensor of size :math:`(C)` for unbatched input,
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
     `K`-dimensional case. The last being useful for higher dimension inputs, such
