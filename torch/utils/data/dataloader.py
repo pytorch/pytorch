@@ -321,6 +321,10 @@ class DataLoader(Generic[T_co]):
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
+            if isinstance(dataset, MapDataPipe):
+                if shuffle is not None:
+                    dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+                shuffle = False
             shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
 
