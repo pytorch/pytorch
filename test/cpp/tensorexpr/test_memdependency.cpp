@@ -9,6 +9,61 @@
 #include <torch/csrc/jit/tensorexpr/mem_dependency_checker.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+// Struct to associate Input/Load/Store/Output with
+// its appropriate history index.
+struct HistoryStruct {
+  size_t InputIndex1, InputIndex2;
+  size_t LoadIndex1, LoadIndex2;
+  size_t StoreIndex3;
+  size_t OutputIndex3;
+};
+
+// Helper function to populate a struct associating history indices
+// with the correct Input/Load.
+void populate_history_struct(
+    std::vector<std::shared_ptr<torch::jit::tensorexpr::analysis::AccessInfo>>&
+        history,
+    HistoryStruct& hs,
+    char id1,
+    char id2,
+    char id3) {
+  for (auto i = 0; i < history.size(); i++) {
+    auto isInput = history[i]->type() ==
+        torch::jit::tensorexpr::analysis::AccessType::Input;
+    auto isLoad = history[i]->type() ==
+        torch::jit::tensorexpr::analysis::AccessType::Load;
+    auto isStore = history[i]->type() ==
+        torch::jit::tensorexpr::analysis::AccessType::Store;
+    auto isOutput = history[i]->type() ==
+        torch::jit::tensorexpr::analysis::AccessType::Output;
+
+    std::string varName;
+    std::stringstream varNameStream;
+    varNameStream << *history[i]->var();
+    varName = varNameStream.str();
+    if (isInput) {
+      if (varName.find(id1) != std::string::npos)
+        hs.InputIndex1 = i;
+      else if (varName.find(id2) != std::string::npos)
+        hs.InputIndex2 = i;
+    }
+    if (isLoad) {
+      if (varName.find(id1) != std::string::npos)
+        hs.LoadIndex1 = i;
+      else if (varName.find(id2) != std::string::npos)
+        hs.LoadIndex2 = i;
+    }
+    if (isStore) {
+      if (varName.find(id3) != std::string::npos)
+        hs.StoreIndex3 = i;
+    }
+    if (isOutput) {
+      if (varName.find(id3) != std::string::npos)
+        hs.OutputIndex3 = i;
+    }
+  }
+}
+
 namespace torch {
 namespace jit {
 
@@ -2429,15 +2484,18 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
     auto history = analyzer.getHistory();
     ASSERT_EQ(history.size(), 6);
 
-    // The store depends on both loads, the load of A depends on the load of B.
-    ASSERT_TRUE(history[4]->hasDependency(history[2]));
-    ASSERT_TRUE(history[4]->hasDependency(history[3]));
+    HistoryStruct hs;
+    populate_history_struct(history, hs, 'A', 'B', 'C');
 
-    ASSERT_TRUE(history[3]->hasDependency(history[2]));
+    // The store depends on both loads, the load of A depends on the load of B.
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex1]));
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex2]));
+
+    ASSERT_TRUE(history[hs.LoadIndex1]->hasDependency(history[hs.LoadIndex2]));
 
     // The loads in the indices depend on the relevant input buffer.
-    ASSERT_TRUE(history[3]->hasDependency(history[1]));
-    ASSERT_TRUE(history[2]->hasDependency(history[0]));
+    ASSERT_TRUE(history[hs.LoadIndex1]->hasDependency(history[hs.InputIndex1]));
+    ASSERT_TRUE(history[hs.LoadIndex2]->hasDependency(history[hs.InputIndex2]));
 
     // The load from B has the loop bounds.
     ASSERT_TRUE(EQ(history[2]->bounds(), {CB(0, 9)}));
@@ -2473,17 +2531,20 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
     auto history = analyzer.getHistory();
     ASSERT_EQ(history.size(), 6);
 
+    HistoryStruct hs;
+    populate_history_struct(history, hs, 'A', 'B', 'C');
+
     // The store depends on both loads, neither load is dependent.
-    ASSERT_TRUE(history[4]->hasDependency(history[2]));
-    ASSERT_TRUE(history[4]->hasDependency(history[3]));
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex1]));
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex1]));
 
     ASSERT_FALSE(history[3]->hasDependency(history[2]));
     ASSERT_FALSE(history[2]->hasDependency(history[3]));
 
     // The loads each depend on their relevant input. (but accesses are in a
     // different order than the last case).
-    ASSERT_TRUE(history[3]->hasDependency(history[0]));
-    ASSERT_TRUE(history[2]->hasDependency(history[1]));
+    ASSERT_TRUE(history[hs.LoadIndex2]->hasDependency(history[hs.InputIndex2]));
+    ASSERT_TRUE(history[hs.LoadIndex1]->hasDependency(history[hs.InputIndex1]));
 
     // The load from B has the loop bounds.
     ASSERT_TRUE(EQ(history[3]->bounds(), {CB(0, 9)}));
@@ -2525,22 +2586,27 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
     // The outer load depends on the inner.
     ASSERT_TRUE(history[3]->hasDependency(history[2]));
 
+    HistoryStruct hs;
+    populate_history_struct(history, hs, 'A', 'B', 'C');
+
     // The loads each depend on their relevant input. (but accesses are in a
     // different order than the last case).
-    ASSERT_TRUE(history[3]->hasDependency(history[0]));
-    ASSERT_TRUE(history[2]->hasDependency(history[1]));
+    ASSERT_TRUE(history[hs.LoadIndex2]->hasDependency(history[hs.InputIndex2]));
+    ASSERT_TRUE(history[hs.LoadIndex1]->hasDependency(history[hs.InputIndex1]));
 
     // The load from A has the loop bounds.
-    ASSERT_TRUE(EQ(history[2]->bounds(), {CB(0, 9)}));
+    ASSERT_TRUE(EQ(history[hs.LoadIndex1]->bounds(), {CB(0, 9)}));
     // The load from B as bounds A[0] to A[9].
     ExprHandle loadFromA0 = Load::make(a, {0});
     ExprHandle loadFromA9 = Load::make(a, {9});
-    ASSERT_TRUE(EQ(history[3]->bounds(), {CB(loadFromA0, loadFromA9)}));
+    ASSERT_TRUE(
+        EQ(history[hs.LoadIndex2]->bounds(), {CB(loadFromA0, loadFromA9)}));
 
     // The store has bounds of B[A[0]] to B[A[9]].
     ExprHandle loadFromBA0 = Load::make(b, {loadFromA0});
     ExprHandle loadFromBA9 = Load::make(b, {loadFromA9});
-    ASSERT_TRUE(EQ(history[4]->bounds(), {CB(loadFromBA0, loadFromBA9)}));
+    ASSERT_TRUE(
+        EQ(history[hs.StoreIndex3]->bounds(), {CB(loadFromBA0, loadFromBA9)}));
   }
 }
 
@@ -2734,14 +2800,18 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     auto history = analyzer.getHistory();
     ASSERT_EQ(history.size(), 6);
 
+    HistoryStruct hs;
+    populate_history_struct(history, hs, 'A', 'C', 'B');
+
     // Simple chain from input to output over the A buf.
     // history[0] is the C input, history[3] is the load from C.
-    ASSERT_TRUE(history[5]->hasDependency(history[4]));
-    ASSERT_TRUE(history[4]->hasDependency(history[2]));
-    ASSERT_TRUE(history[2]->hasDependency(history[1]));
+    ASSERT_TRUE(
+        history[hs.OutputIndex3]->hasDependency(history[hs.StoreIndex3]));
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex1]));
+    ASSERT_TRUE(history[hs.LoadIndex1]->hasDependency(history[hs.InputIndex1]));
     // The store also depends on the load from the C input.
-    ASSERT_TRUE(history[4]->hasDependency(history[3]));
-    ASSERT_TRUE(history[3]->hasDependency(history[0]));
+    ASSERT_TRUE(history[hs.StoreIndex3]->hasDependency(history[hs.LoadIndex2]));
+    ASSERT_TRUE(history[hs.LoadIndex2]->hasDependency(history[hs.InputIndex2]));
 
     // A Buf accesses.
     ASSERT_TRUE(
