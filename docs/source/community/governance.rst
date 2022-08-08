@@ -62,7 +62,7 @@ future direction of the project and can participate in discussion.
 
 Within `pytorch/pytorch <https://github.com/pytorch/pytorch>`__,
 maintainer groups are defined in the
-`merge_rules.json <https://github.com/pytorch/pytorch/blob/master/.github/merge_rules.json>`__
+`CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
 file in the GitHub repository. For other modules that correspond
 to repositories, membership is recorded on GitHub as access
 level to the repo (i.e. “write” permission). Module maintainers
