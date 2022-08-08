@@ -1689,9 +1689,6 @@ def define_buck_targets(
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
-        # It's very important that this header not be visible outside of the
-        # loader/serializer layer, to avoid leaking fragile implementation
-        # details.
         visibility = [
             "{}:mobile_bytecode".format(ROOT),
         ],
@@ -1705,9 +1702,8 @@ def define_buck_targets(
         exported_headers = {
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
-        # It's very important that this header not be visible outside of the
-        # loader/serializer layer, to avoid leaking fragile implementation
-        # details.
+        # Avoid leaking implementation details by only exposing this header to
+        # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer".format(ROOT),
