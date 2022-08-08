@@ -160,6 +160,43 @@ Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
   return self;
 }
 
+Tensor& squeeze__batching_rule(Tensor& self) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.squeeze_();
+  }
+  auto* batched = maybeGetBatchedImpl(self);
+
+  // Need to find out how many dimensions of size 1 are before the bdim
+  const auto bdim = batched->bdim();
+  const auto physical_shape = batched->value().sizes();
+  auto how_many_dims_of_size_1_before_bdim = 0;
+  for (const auto i : c10::irange(0, physical_shape.size())) {
+    if ((int64_t)i == bdim) {
+      break;
+    }
+    if (physical_shape[i] == 1) {
+      how_many_dims_of_size_1_before_bdim++;
+    }
+  }
+
+  int64_t new_bdim = bdim - how_many_dims_of_size_1_before_bdim;
+  if (physical_shape[bdim] != 1) {
+    // if bdim is not 1, can just call squeeze_()
+    batched->value().squeeze_();
+  } else {
+    // otherwise, squeeze_() is going to get rid of the bdim too.
+    // We "fix it up" by calling unsqueeze_.
+    batched->value().squeeze_();
+    batched->value().unsqueeze(new_bdim);
+  }
+
+  // Refresh metadata
+  batched->unsafe_set_bdim(new_bdim);
+  batched->refreshTensorMetadata();
+  return self;
+}
+
 Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -738,6 +775,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("stack", stack_batching_rule);
 
   // still legacy b/c needs special inplace rules
+  m.impl("squeeze_", squeeze__batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("transpose_", transpose__batching_rule);
