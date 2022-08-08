@@ -3797,6 +3797,28 @@ else:
         self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 1, dim=0)])
         self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
+    def test_split_deprecated_overloads(self, device):
+        x = torch.randn((10, 1, 3, 2), device=device)
+
+        # split_sizes_or_sections is deprecated in favour of split_sizes
+        self.assertEqual(
+            torch.split(x, split_size_or_sections=2, dim=0),
+            torch.split(x, split_size=2, dim=0),
+        )
+        self.assertEqual(
+            torch.split(x, split_size_or_sections=5),
+            torch.split(x, split_size=5),
+        )
+
+        self.assertEqual(
+            torch.split(x, split_size_or_sections=[6, 4], dim=0),
+            torch.split(x, split_size=[6, 4], dim=0),
+        )
+        self.assertEqual(
+            torch.split(x, split_size_or_sections=[7, 3]),
+            torch.split(x, split_size=[7, 3]),
+        )
+
     # functions that operate over a dimension but don't reduce.
     def test_dim_function_empty(self, device):
         shape = (0, 1, 2, 0)
