@@ -601,13 +601,11 @@ make_fx_failures = {
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
-    xfail('cov'),
     xfail('istft'),
     xfail('nanquantile'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('quantile'),
     xfail('tensor_split'),
-    xfail('corrcoef'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -631,6 +629,10 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+    # Incorrectly takes a conditional
+    # path for FakeTensor.
+    xfail('cov'),
+    xfail('corrcoef'),
 }
 
 symbolic_tensor_failures = {
@@ -691,7 +693,9 @@ symbolic_tensor_failures = {
     xfail('clone', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('constant_pad_nd', ''),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
+    xfail('corrcoef'),  # AttributeError: 'PySymInt' object has no attribute 'truediv'
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
+    xfail('cov'),  # AttributeError: 'PySymInt' object has no attribute 'truediv'
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
     xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
@@ -1032,6 +1036,7 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
         except Exception:
             continue
         new_out = wrapper_set_seed(new_f, args, kwargs)
+        print(new_out, old_out)
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
