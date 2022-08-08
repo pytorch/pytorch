@@ -1,4 +1,5 @@
 import functools
+from contextlib import nullcontext
 from typing import Any, Callable, Dict, Sequence
 
 import torch
@@ -64,6 +65,39 @@ def all_prims():
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
 
 
+class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.ops.prims.* functions to
+    use nvFuser's prims in torch.ops.nvprims.*
+
+    >>> with NvfuserPrimMode():
+    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
+
+    By default, this context manager will fall back on the torch.ops.prims* if the
+    nvprim does not exist.
+    """
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
+            orig_func, torch._ops.OpOverloadPacket
+        ):
+            namespace = str(orig_func).split(".")[0]
+            name = str(orig_func).split(".")[1]
+            if namespace == "prims":
+                nvfunc = getattr(torch.ops.nvprims, name, None)
+                if nvfunc is not None:
+                    return nvfunc(*args, **kwargs)
+        return orig_func(*args, **kwargs)
+
+
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
     """
     Switches the interpretation of torch.* functions and Tensor methods to
@@ -78,9 +112,15 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False, should_fallback_fn=lambda *_: False):
+    def __init__(
+        self,
+        strict=False,
+        should_fallback_fn=lambda *_: False,
+        prims_mode_cls=nullcontext,
+    ):
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
+        self.prims_mode_cls = prims_mode_cls
 
     def __torch_function__(
         self,
@@ -92,8 +132,10 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         # For primitive operations, run them as is without interception
+        # Unless we are in prims_mode, in which case we want to use nvprims
         if orig_func in torch_function_passthrough or orig_func in all_prims():
-            return orig_func(*args, **kwargs)
+            with self.prims_mode_cls():
+                return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
@@ -131,5 +173,7 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 TorchRefsNvfuserCapabilityMode = functools.partial(
-    TorchRefsMode, should_fallback_fn=_is_func_unsupported_nvfuser
+    TorchRefsMode,
+    should_fallback_fn=_is_func_unsupported_nvfuser,
+    prims_mode_cls=NvfuserPrimsMode,
 )

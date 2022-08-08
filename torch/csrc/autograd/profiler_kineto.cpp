@@ -15,6 +15,7 @@
 #include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
+#include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
 
@@ -96,7 +97,6 @@ struct AddKinetoMetadata {
     if (!dtypes.empty()) {
       addMetadata("Input type", dtypesToStr(dtypes));
     }
-
 
     // add information about an associated forward op, if a sequence number
     // is available (e.g. during training)
@@ -391,46 +391,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   post_process_t event_post_process_cb_;
 };
 
-class GlobalStateManager {
- public:
-  static GlobalStateManager& singleton() {
-    static GlobalStateManager singleton_;
-    return singleton_;
-  }
-
-  template <typename... Args>
-  static void init(Args... args) {
-    if (singleton().state_) {
-      LOG(WARNING) << "GlobalStatePtr already exists!";
-    } else {
-      singleton().state_ =
-          std::make_shared<KinetoThreadLocalState>(std::forward<Args>(args)...);
-    }
-  }
-
-  static auto* get() {
-    return singleton().state_.get();
-  }
-
-  static std::shared_ptr<c10::DebugInfoBase> pop() {
-    TORCH_INTERNAL_ASSERT(
-        singleton().state_ != nullptr,
-        "Global state ptr cannot be null before resetting");
-    auto out = singleton().state_;
-    singleton().state_.reset();
-    return out;
-  }
-
- private:
-  GlobalStateManager() = default;
-
-  std::shared_ptr<KinetoThreadLocalState> state_;
-};
+using KinetoTLSGlobalStateManager =
+    torch::profiler::impl::GlobalStateManager<KinetoThreadLocalState>;
 
 template <bool use_global>
 static KinetoThreadLocalState* getStatePtr() {
   return c10::guts::if_constexpr<use_global>(
-      [] { return GlobalStateManager::get(); },
+      [] { return KinetoTLSGlobalStateManager::get(); },
       [] { return KinetoThreadLocalState::getTLS(); });
 }
 
@@ -506,7 +473,7 @@ void reportBackendEventToActiveKinetoProfiler(
     const std::string& event_name,
     const std::string& backend_name) {
   TORCH_INTERNAL_ASSERT(
-      GlobalStateManager::get() == nullptr,
+      KinetoTLSGlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
 
   auto state_ptr = KinetoThreadLocalState::getTLS();
@@ -557,7 +524,7 @@ void enableProfilerWithEventPostProcess(
       config.state != ProfilerState::ITT,
       "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
-      GlobalStateManager::get() == nullptr,
+      KinetoTLSGlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
@@ -597,7 +564,7 @@ void enableProfiler(
   }
 
   if (config.state == ProfilerState::KINETO_ONDEMAND) {
-    GlobalStateManager::init(config, activities);
+    KinetoTLSGlobalStateManager::init(config, activities);
 
     TORCH_INTERNAL_ASSERT(
         activities.count(ActivityType::CPU),
@@ -609,9 +576,9 @@ void enableProfiler(
 std::unique_ptr<ProfilerResult> disableProfiler() {
   auto state_ptr = std::static_pointer_cast<
       torch::profiler::impl::ProfilerThreadLocalStateBase>(
-      GlobalStateManager::get() == nullptr
+      KinetoTLSGlobalStateManager::get() == nullptr
           ? c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE)
-          : GlobalStateManager::pop());
+          : KinetoTLSGlobalStateManager::pop());
 
   const auto& config = state_ptr->config();
   TORCH_CHECK(
@@ -687,6 +654,15 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
       [&](const ExtraFields<EventType::TorchOp>& i) -> out_t { return get(i); },
       [&](const ExtraFields<EventType::Backend>& i) -> out_t { return get(i); },
       [&](const auto&) -> out_t { return python_stack_; }));
+}
+
+const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e)
+          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
+      [](const ExtraFields<EventType::Backend>& e)
+          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
+      [](const auto&) -> const c10::ArrayRef<std::string> { return {}; }));
 }
 
 uint64_t KinetoEvent::durationUs() const {
@@ -776,7 +752,6 @@ TYPED_ATTR(TorchOp, hasTypes, !e.inputs_.dtypes_.empty())
 TYPED_ATTR(TorchOp, dtypes, e.inputs_.dtypes_)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
-TYPED_ATTR(TorchOp, moduleHierarchy, e.jit_modules_)
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
 TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
