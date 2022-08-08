@@ -36,7 +36,8 @@ from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              SynchronizedDataLoaderPattern,
                                              GradNotSetToNonePattern,
                                              Conv2dBiasFollowedByBatchNorm2dPattern,
-                                             MatMulDimInFP16Pattern)
+                                             MatMulDimInFP16Pattern,
+                                             report_all_anti_patterns)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1161,6 +1162,22 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+    def test_nested_tensor_with_shapes(self):
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        inp = torch.nested_tensor([a, b])
+        with torch.profiler.profile(record_shapes=True) as prof:
+            torch.nn.functional.linear(inp, c, None)
+        for e in prof.events():
+            if e.name in ("aten::mm", "aten::addmm"):
+                # intentionally vague tests to protect against possible future changes
+                # of mm to addmm or other impl, or changing internal order of args
+                self.assertTrue(len(e.input_shapes) > 0)
+                self.assertTrue(len(e.input_shapes[0]) > 0)
+
+
+
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1564,6 +1581,9 @@ aten::mm""")
             (1, lambda: torch.rand((100, 100)).cuda()),
             (1, lambda: torch.randn((100, 100)).cuda()),
             (1, lambda: torch.full((100, 100), 10).cuda()),
+            (0, lambda: torch.rand((100, 100)).to(dtype=torch.float16)),
+            (0, lambda: torch.rand((100, 100)).half()),
+            (0, lambda: torch.rand((100, 100), device="cuda").half()),
         )
         num_matched = []
         for _, fn in cases:
@@ -1728,6 +1748,32 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    def test_profiler_pattern_matcher_json_report(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+        optimizer = torch.optim.Adam(model.parameters())
+        with profile(with_stack=True, record_shapes=True) as prof:
+            y_hat = model(x)
+            loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
+        try:
+            with open("./torchtidy_report.json") as f:
+                report = json.load(f)
+            self.assertTrue("test_profiler.py" in report)
+            self.assertTrue(len(report["test_profiler.py"]) > 0)
+            expected_fields = sorted(["line_number", "name", "url", "message"])
+            for event in report["test_profiler.py"]:
+                actual_fields = sorted(event.keys())
+                self.assertEqual(expected_fields, actual_fields)
+        finally:
+            os.remove("torchtidy_report.json")
 
 if __name__ == '__main__':
     run_tests()
