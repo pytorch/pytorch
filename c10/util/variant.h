@@ -1195,15 +1195,9 @@ struct recursive_union {
 struct base {
   template <std::size_t I, typename V>
   inline static constexpr AUTO_REFREF get_alt(V&& v)
-#ifdef _MSC_VER
-      AUTO_REFREF_RETURN(recursive_union::get_alt(
-          lib::forward<V>(v).data_,
-          in_place_index_t<I>{}))
-#else
-      AUTO_REFREF_RETURN(recursive_union::get_alt(
-          data(lib::forward<V>(v)),
-          in_place_index_t<I>{}))
-#endif
+    AUTO_REFREF_RETURN(recursive_union::get_alt(
+        lib::forward<V>(v).data_,
+        in_place_index_t<I>{}))
 };
 
 struct variant {
