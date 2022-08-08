@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -28,17 +28,19 @@ configure_file(
 file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
-        core/boxing/*.cpp
-        core/boxing/impl/*.cpp
-        core/dispatch/*.cpp
-        core/op_registration/*.cpp
         core/impl/*.cpp
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
         )
-file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
-file(GLOB_RECURSE C10_HEADERS *.h)
+file(GLOB C10_HEADERS
+        *.h
+        core/*.h
+        core/impl/*.h
+        mobile/*.h
+        macros/*.h
+        util/*.h
+        )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 if(HAVE_SOVERSION)
   set_target_properties(c10 PROPERTIES

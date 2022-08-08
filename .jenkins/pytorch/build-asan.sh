@@ -4,14 +4,15 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 echo "Clang version:"
 clang --version
+
+python tools/stats/export_test_times.py
 
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
@@ -35,5 +36,7 @@ tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
 python setup.py build --cmake-only
 popd
+
+print_sccache_stats
 
 assert_git_not_dirty

@@ -21,13 +21,12 @@ DataType indexModeToDtype(KernelIndexMode index_mode) {
 
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
-    case DataType::Bool:
-      return false;
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Bool:
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
@@ -78,10 +77,9 @@ bool isIntegralType(DataType dtype) {
     case DataType::Int32:
       return true;
     case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+      TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isIntegralType");
   }
 }
 
@@ -310,6 +308,8 @@ static const char* expr_type2string(ExprType t) {
       return "MmaOp";
     case ExprType::TransposeOp:
       return "TransposeOp";
+    case ExprType::ExpandOp:
+      return "ExpandOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
     case ExprType::GatherOp:
@@ -346,6 +346,12 @@ static const char* expr_type2string(ExprType t) {
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::Swizzle2D:
+      return "Swizzle2D";
+    case ExprType::Swizzle2DInt:
+      return "Swizzle2DInt";
+    case ExprType::PairSelect:
+      return "PairSelect";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -370,6 +376,8 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
+    case UnaryOpType::Real:
+    case UnaryOpType::Imag:
       return false;
     default:
       return true;
@@ -464,6 +472,10 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "isposinf";
     case UnaryOpType::IsReal:
       return "isreal";
+    case UnaryOpType::Real:
+      return "std::real";
+    case UnaryOpType::Imag:
+      return "std::imag";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -677,6 +689,8 @@ static const char* parallel_type2string(ParallelType t) {
       return "US";
     case ParallelType::Mma:
       return "MMA";
+    case ParallelType::Group:
+      return "G";
     case ParallelType::Serial:
       return "S";
     default:
@@ -717,9 +731,7 @@ static const char* iter_type2string(IterType t) {
       return "i";
     case IterType::Reduction:
       return "r";
-    case IterType::BroadcastWithStride:
-      return "sb";
-    case IterType::BroadcastWithoutStride:
+    case IterType::Broadcast:
       return "b";
     case IterType::Gather:
       return "g";
@@ -967,6 +979,32 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
   return out << iter_type2string(bt);
 }
 
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const Swizzle2DType& swizzle) {
+  switch (swizzle) {
+    case Swizzle2DType::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case Swizzle2DType::ZShape:
+      os << "ZShape";
+      break;
+    case Swizzle2DType::Transpose:
+      os << "Transpose";
+      break;
+    case Swizzle2DType::XOR:
+      os << "Xor";
+      break;
+    case Swizzle2DType::Scatter:
+      os << "Scatter";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
+}
+
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
     const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
@@ -1089,6 +1127,27 @@ size_t dataTypeSize(DataType type, DataType index_type) {
     return dataTypeSize(index_type);
   }
   return dataTypeSize(type);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const DoubleBufferLoopStage loop_stage) {
+  switch (loop_stage) {
+    case DoubleBufferLoopStage::NotApplicable:
+      break;
+    case DoubleBufferLoopStage::Prolog:
+      os << "{DoubleBufferProlog}";
+      break;
+    case DoubleBufferLoopStage::Main:
+      os << "{DoubleBufferMainLoop}";
+      break;
+    case DoubleBufferLoopStage::Epilog:
+      os << "{DoubleBufferEpilog}";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown double buffer stage");
+  }
+  return os;
 }
 
 } // namespace cuda

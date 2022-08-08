@@ -6,10 +6,10 @@ from torch.autograd.graph import save_on_cpu
 from torch.utils.checkpoint import checkpoint
 from torch.distributed.utils import _replace_by_prefix
 import torch.nn as nn
-from typing import Dict, Any
+from typing import Any, Dict, Iterator, Tuple
+from functools import partial
 
-_CHECKPOINT_PREFIX = "mod"
-
+_CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
 
 class CheckpointImpl(Enum):
     REENTRANT = auto()
@@ -27,7 +27,7 @@ class CheckpointWrapper(torch.nn.Module):
         offload_to_cpu: bool = False,
     ):
         super().__init__()
-        self.mod = mod
+        self._checkpoint_wrapped_module = mod
         self.checkpoint_impl = checkpoint_impl
         self.offload_to_cpu = offload_to_cpu
         # state_dict post hook to remove prefix to allow loading into a
@@ -39,15 +39,38 @@ class CheckpointWrapper(torch.nn.Module):
             self._pre_load_state_dict_hook, with_module=True
         )
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward missing attributes to wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self._checkpoint_wrapped_module, name)
+
+    def __getitem__(self, key: int) -> Any:
+        """Forward indexing calls in case the module is a nn.Sequential."""
+        return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
+
     def forward(self, *args, **kwargs):
         offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
         with offload_mgr:  # type: ignore[attr-defined]
             return checkpoint(
-                self.mod,
+                self._checkpoint_wrapped_module,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
                 *args,
                 **kwargs,
             )
+
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of _CHECKPOINT_PREFIX.
+        """
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            yield param_name.replace(f"{_CHECKPOINT_PREFIX}.", ""), param
 
     @staticmethod
     def _post_state_dict_hook(
@@ -110,16 +133,48 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-    # saved tensor hooks based-checkpoint wrapper is not yet supported.
-    if checkpoint_impl == CheckpointImpl.NO_REENTRANT:
-        raise ValueError(
-            "No support for non-reentrant based checkpoint implementation."
-        )
-
-    if offload_to_cpu and checkpoint_impl != CheckpointImpl.REENTRANT:
-        raise ValueError(
-            "No support for CPU offload activations and non-reentrant based "
-            "checkpoint implementation."
-        )
 
     return CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
+
+
+def apply_activation_checkpointing_wrapper(
+    model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _: True
+):
+    """
+    Applies :func:`checkpoint_wrapper` to modules within `model` based on a user-defined
+    configuration. For each module within `model`, the `check_fn` is used to decide
+    whether `module` should be wrapped with :func:`checkpoint_wrapper` or not.
+
+    Note::
+        This function modifies `model` in place and replaces appropriate layers with
+        their checkpoint-wrapped modules.
+    Note::
+        This function will not wrap the overall root module. If this is needed, please directly use
+        :class:`CheckpointWrapper`.
+    Usage::
+        model = nn.Sequential(
+            nn.Linear(10, 10), nn.Linear(10, 10), nn.Linear(10, 10)
+        )
+        check_fn = lambda l: isinstance(l, nn.Linear)
+        apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
+    Args:
+        module (nn.Module):
+            The model who's submodules (or self) should be wrapped with activation checkpointing.
+        checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
+            A `Callable` which will wrap modules
+        check_fn (Optional[Callable[nn.Module, nn.Module]])
+            A lambda function which will be passed current layer and returns
+            ``True`` or ``False`` depending on whether input layer should be wrapped.
+    Returns: None (`model` is modified inplace)
+    """
+    # TODO: Importing inside function to avoid circular import issue between FSDP and
+    # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
+    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
+    return _recursive_wrap(
+        module=model,
+        auto_wrap_policy=partial(lambda_auto_wrap_policy, lambda_fn=check_fn),
+        wrapper_cls=checkpoint_wrapper_fn,
+        ignored_modules=set(),
+        ignored_params=set(),
+        only_wrap_children=True
+    )

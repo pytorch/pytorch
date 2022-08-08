@@ -34,12 +34,12 @@ class LibKinetoClient : public libkineto::ClientInterface {
   void stop() override {
     (void)disableProfiler();
   }
+
  private:
   bool reportInputShapes_{true};
 };
 
 } // namespace
-
 
 } // namespace impl
 } // namespace profiler

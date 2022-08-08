@@ -15,6 +15,8 @@
 
 #include <ATen/native/Activation.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <unordered_map>
 #include <utility>
 
@@ -71,6 +73,32 @@ const auto& profileFailedAttr = Symbol::attr("profile_failed");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
+
+Val* castTensoToDtype(CgValue self, JitValue* cast_val) {
+  auto cast_ival = toIValue(cast_val);
+  // we need static type for cast
+  TORCH_INTERNAL_ASSERT(cast_ival.has_value());
+  if (cast_ival->isInt()) {
+    auto dtype = cast_ival->toScalarType();
+
+    // We want to keep our internal fusion math in FP32
+    // Shape Inference will continue to propagate the right
+    // type to outputs unchanged.
+    if (dtype == at::ScalarType::Half || dtype == at::ScalarType::BFloat16) {
+      dtype = at::ScalarType::Float;
+    }
+
+    return castOp(aten_to_data_type(dtype), self);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        cast_ival->isNone(),
+        "unrecognized dtype option, expect 'int' but got: ",
+        cast_ival->tagKind());
+
+    // return a copy if dtype is `None`
+    return set(self);
+  }
+}
 
 bool isReductionNonCompatibleTensor(
     const std::shared_ptr<c10::TensorType>& tensor_type) {
@@ -324,38 +352,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> apply() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[permuted_order_[i]] = rank - 1 - i;
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to restore back to non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> restore() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[rank - 1 - i] = permuted_order_[i];
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> apply_vec() const {
+  // note: used for aten::permute API and codegen tranpose API
+  std::vector<int64_t> apply() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       ret.resize(permuted_order_.size());
@@ -365,8 +363,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to restore back to non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> restore_vec() const {
+  // note: used for aten::permute API and codegen transpose API
+  std::vector<int64_t> restore() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       int rank = permuted_order_.size();
@@ -384,10 +382,6 @@ struct MemoryCompare {
       const {
     return format0.permutation_ < format1.permutation_;
   }
-};
-
-bool operator==(const MemoryFormat& a, const MemoryFormat& b) {
-  return a.permutation_ == b.permutation_;
 };
 
 typedef std::map<MemoryFormat, CgValue, MemoryCompare> MemoryFormatMap;
@@ -507,11 +501,11 @@ class ValueHolder {
 
     // restore source permutation
     if (format_s.hasPermutation()) {
-      tv = transpose(tv, format_s.restore());
+      tv = permute(tv, format_s.restore());
     }
     // apply destination permutation
     if (format_d.hasPermutation()) {
-      tv = transpose(tv, format_d.apply());
+      tv = permute(tv, format_d.apply());
     }
     return tv;
   }
@@ -774,6 +768,13 @@ class IrParser {
                   aten_to_data_type(*tensor_type->scalarType()), out)
                   ->as<TensorView>();
       }
+
+      if (out->isFusionOutput()) {
+        // TODO: This is wasted memory bandwidth, we need to copy since we can't
+        // output a tensor twice.
+        out = set(out);
+      }
+
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
@@ -785,13 +786,13 @@ class IrParser {
     for (const auto& i : c10::irange(fusion->inputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->inputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnInput(i, entry->second.apply_vec());
+        fusion->setPermutationOnInput(i, entry->second.apply());
       }
     }
     for (const auto& i : c10::irange(fusion->outputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->outputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnOutput(i, entry->second.restore_vec());
+        fusion->setPermutationOnOutput(i, entry->second.restore());
       }
     }
     return fusion;
@@ -852,7 +853,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() {
+    c10::call_once(once_flag_, []() {
       std::lock_guard<std::mutex> lock(parser_mutex_);
       registerJitOperator();
     });
@@ -2512,7 +2513,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2577,7 +2578,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+          "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2731,6 +2732,56 @@ class IrParser {
       }
     }
 
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front();
+            list_val.pop_front();
+
+            auto out = castTensoToDtype(self, node->input(1));
+
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[2]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[3]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[4]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[6]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
     // Limiting aten::to implementation to only change the dtype of a tensor
     {
       auto ptr_op = getOperatorForLiteral(
@@ -2745,22 +2796,8 @@ class IrParser {
             auto self = list_val.front();
             list_val.pop_front();
 
-            // we need static type for cast
-            TORCH_INTERNAL_ASSERT(
-                node->input(1)->node()->kind() == prim::Constant);
-            auto dtype = toIValue(node->input(1))->toScalarType();
+            auto out = castTensoToDtype(self, node->input(1));
 
-            // We want to keep our internal fusion math in FP32
-            // Shape Inference will continue to propagate the right
-            // type to outputs unchanged.
-            if (dtype == at::ScalarType::Half) {
-              dtype = at::ScalarType::Float;
-            }
-            if (dtype == at::ScalarType::BFloat16) {
-              dtype = at::ScalarType::Float;
-            }
-
-            auto out = castOp(aten_to_data_type(dtype), self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -3235,6 +3272,79 @@ class IrParser {
             nullptr);
       }
     }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_as_copy(Tensor self, Tensor other) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getPWFormatValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+            auto other = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto output = expand_as(self, other);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                expand_sizes.has_value(), "The size parameter is required.");
+
+            std::vector<CgValue> expand_sizes_vec;
+            for (const int64_t& size : expand_sizes.value()) {
+              expand_sizes_vec.push_back(IrBuilder::create<Int>(size));
+            }
+
+            // TODO: we should be able to support dynamic expand values
+            auto output = expand(self, expand_sizes_vec);
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            // expand_sizes needs to be constant
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            if (!expand_sizes.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
   }
 
   void processJitNode(const JitOp* node) {
@@ -3369,8 +3479,9 @@ class IrParser {
         std::vector<c10::ShapeSymbol> s_vec = opt_s_vec.value();
         // apply permutation
         auto permutation = format.apply();
-        for (const auto& p : permutation) {
-          s_vec[p.second] = opt_s_vec.value()[p.first];
+        for (auto new_axis : c10::irange(permutation.size())) {
+          auto old_axis = permutation.at(new_axis);
+          s_vec[new_axis] = opt_s_vec.value()[old_axis];
         }
 
         // copying stride properties because we need to permute it
@@ -3422,7 +3533,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::once_flag once_flag_;
+  static c10::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
@@ -3433,7 +3544,7 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::once_flag IrParser::once_flag_;
+c10::once_flag IrParser::once_flag_;
 
 ProfileIValueOp* insertProfileIValueOp(
     Node* node,
@@ -3888,7 +3999,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto reduction_operator_schema =
       getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
           ->schema();
   if (node->matches(reduction_operator_schema)) {
     switch (offset) {
@@ -4137,6 +4248,20 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return false;
     }
     return true;
+  }
+
+  static auto to_copy_schema =
+      getOperatorForLiteral(
+          "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor")
+          ->schema();
+  if (node->matches(to_copy_schema)) {
+    switch (offset) {
+      case 1:
+        profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
   }
 
   static auto to_dtype_schema =

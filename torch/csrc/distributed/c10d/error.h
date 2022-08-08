@@ -37,7 +37,8 @@ struct formatter<std::error_code> {
 
   template <typename FormatContext>
   decltype(auto) format(const std::error_code& err, FormatContext& ctx) {
-    return format_to(ctx.out(), "({}: {} - {})", err.category(), err.value(), err.message());
+    return format_to(
+        ctx.out(), "({}: {} - {})", err.category(), err.value(), err.message());
   }
 };
 

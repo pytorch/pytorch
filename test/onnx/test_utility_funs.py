@@ -4,24 +4,21 @@ import copy
 import io
 
 import onnx
-import torchvision
-from autograd_helper import CustomFunction as CustomFunction2
-from test_pytorch_common import (
-    TestCase,
-    run_tests,
-    skipIfNoCuda,
-    skipIfUnsupportedMaxOpsetVersion,
-    skipIfUnsupportedMinOpsetVersion,
-)
-from verify import verify
 
 import torch
 import torch.onnx
 import torch.utils.cpp_extension
+import torchvision
+from autograd_helper import CustomFunction as CustomFunction2
+from pytorch_test_common import (
+    skipIfNoCuda,
+    skipIfUnsupportedMaxOpsetVersion,
+    skipIfUnsupportedMinOpsetVersion,
+)
 from torch.onnx import (
     OperatorExportTypes,
-    TrainingMode,
     register_custom_op_symbolic,
+    TrainingMode,
     unregister_custom_op_symbolic,
     utils,
 )
@@ -32,9 +29,12 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
+from verify import verify
 
 
-class _BaseTestCase(TestCase):
+class _BaseTestCase(common_utils.TestCase):
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
@@ -170,8 +170,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Transpose")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
@@ -189,7 +188,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -207,7 +206,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -226,8 +225,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
@@ -249,8 +247,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
@@ -274,7 +271,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
 
     def test_constant_fold_gather(self):
         class GatherModule(torch.nn.Module):
@@ -313,8 +309,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_unsqueeze_multi_axies(self):
         class PReluModel(torch.nn.Module):
@@ -336,8 +331,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 4)
+        self.assertEqual(len(list(graph.nodes())), 5)
 
     def test_constant_fold_squeeze_without_axes(self):
         class SqueezeModule(torch.nn.Module):
@@ -354,8 +348,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Squeeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 2)
+        self.assertEqual(len(list(graph.nodes())), 4)
 
     def test_constant_fold_squeeze_with_axes(self):
         class SqueezeAxesModule(torch.nn.Module):
@@ -373,8 +366,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Squeeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
@@ -410,8 +402,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Concat")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
@@ -639,6 +630,16 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Shape")
         self.assertEqual(len(list(graph.nodes())), 1)
+
+    def test_constant_fold_upsample_scale_fold_as_constant(self):
+        # upsample scale is a constant, not a model parameter,
+        # therefore should not be added as initializer after constant folding.
+        model = torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        x = torch.randn(1, 32, 224, 224)
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertEqual(len(onnx_model.graph.initializer), 0)
 
     def test_verbose(self):
         class MyModule(torch.nn.Module):
@@ -1084,6 +1085,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[0].op_type, "Gelu")
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
+    @skipIfNoLapack
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
             def forward(self, x):
@@ -1301,6 +1303,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 "Graph parameter names does not match model parameters.",
             )
 
+    @skipIfNoCaffe2
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1592,6 +1595,32 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[3].op_type, "Gemm")
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
 
+    def test_deduplicate_ignore_upsample_scale(self):
+        # upsample scale is a constant, not a model parameter,
+        # therefore should be ignored by shared weight deduplication.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.upsample_1 = torch.nn.Upsample(scale_factor=2)
+                self.upsample_2 = torch.nn.Upsample(scale_factor=2)
+
+            def forward(self, x):
+                return self.upsample_1(x), self.upsample_2(x)
+
+        f = io.BytesIO()
+        x = torch.randn(1, 32, 224, 224)
+        torch.onnx.export(Model(), x, f)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        # aten::upsample converts to onnx::resize
+        resize_nodes = [n for n in onnx_model.graph.node if n.op_type == "Resize"]
+        self.assertEqual(len(resize_nodes), 2)
+        for resize_node in resize_nodes:
+            scale_node = [
+                n for n in onnx_model.graph.node if n.output[0] == resize_node.input[2]
+            ]
+            self.assertEqual(len(scale_node), 1)
+            self.assertEqual(scale_node[0].op_type, "Constant")
+
     def test_bad_symbolic_registration(self):
         _onnx_opset_version = 9
 
@@ -1649,4 +1678,4 @@ class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

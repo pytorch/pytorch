@@ -9,12 +9,11 @@ if [ ! -f setup.py ]; then
   exit 1
 fi
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-build
-
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
+# shellcheck source=./common-build.sh
+source "$SCRIPT_PARENT_DIR/common-build.sh"
 
 IMAGE_COMMIT_ID=$(git rev-parse HEAD)
 export IMAGE_COMMIT_ID

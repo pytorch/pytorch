@@ -162,9 +162,7 @@ TEST(RecordFunctionTest, ThreadMigration) {
       at::RecordFunctionCallback(
           [](const at::RecordFunction&)
               -> std::unique_ptr<at::ObserverContext> { return nullptr; },
-          [](const at::RecordFunction&, at::ObserverContext*) {
-            ++call_count;
-          })
+          [](const at::RecordFunction&, at::ObserverContext*) { ++call_count; })
           .scopes({at::RecordScope::FUNCTION}));
 
   EXPECT_EQ(call_count, 0);
@@ -176,7 +174,7 @@ TEST(RecordFunctionTest, ThreadMigration) {
     cv.notify_all();
   });
   auto guard = std::unique_lock<std::mutex>(lock);
-  cv.wait(guard, []{ return call_count > 0; });
+  cv.wait(guard, [] { return call_count > 0; });
 
   EXPECT_EQ(call_count, 1);
 

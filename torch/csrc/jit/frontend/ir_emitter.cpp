@@ -3565,7 +3565,9 @@ struct to_ir {
       case prim::enumerate: {
         const SourceRange& loc = apply.range();
         auto inputs = apply.inputs();
-        auto input_size = apply.inputs().size();
+        auto input_size = inputs.size();
+        auto attributes = apply.attributes();
+        auto attribute_size = attributes.size();
         // enumerate(x) can be rewrite as subtrees:
         // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
         Value* start_index = nullptr;
@@ -3577,11 +3579,22 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-
-        if (input_size > 2) {
+        auto arg_size = input_size + attribute_size;
+        if (arg_size > 2) {
           throw ErrorReport(loc)
-              << "enumerate expected at most 2 arguments, got " << input_size;
+              << "enumerate expected at most 2 arguments, got " << arg_size;
         }
+
+        if (attribute_size == 1) {
+          if (attributes[0].name().name() != "start") {
+            throw ErrorReport(loc)
+                << "enumerate expected kwarg name 'start', got '"
+                << attributes[0].name().name() << "'";
+          }
+          start_index =
+              emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
+        }
+
         std::vector<Value*> range_inputs;
         if (start_index != nullptr) {
           range_inputs.emplace_back(start_index);
@@ -3639,7 +3652,10 @@ struct to_ir {
         }
         auto input =
             emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
-
+        if (input->type()->kind() == TypeKind::TupleType) {
+          return std::make_shared<SimpleValue>(
+              emitIndex(loc, self, createTupleUnpack(input)));
+        }
         return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
       }
       default:

@@ -58,7 +58,8 @@ std::vector<BackendDataPtr> CreateTensorsData(
 }
 
 bool IsSpecialScalar(const at::Scalar& value) {
-  if (FLAGS_torch_lazy_handle_special_scalars && (value.isIntegral(false) || value.isFloatingPoint())) {
+  if (FLAGS_torch_lazy_handle_special_scalars &&
+      (value.isIntegral(false) || value.isFloatingPoint())) {
     double scalar_value = value.toDouble();
     return scalar_value == 0.0 || std::fabs(scalar_value) == 1.0;
   }

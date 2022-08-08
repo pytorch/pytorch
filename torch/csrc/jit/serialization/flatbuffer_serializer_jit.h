@@ -31,5 +31,11 @@ TORCH_API Module load_jit_module_from_stream(
     ExtraFilesMap& extra_files,
     c10::optional<at::Device> device = c10::nullopt);
 
+// This function will make the capabilities to load and safe
+// Module as a flatbuffer file available for use by _load_for_mobile
+// and friends. This is NOT needed if using the other functions
+// in this file directly.
+TORCH_API bool register_flatbuffer_all();
+
 } // namespace jit
 } // namespace torch
