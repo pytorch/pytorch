@@ -186,11 +186,11 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 }
 
 Tensor expand_symint_batching_rule(const Tensor& self, SymIntArrayRef psize, bool implicit) {
-  return expand_batching_rule(self, asIntArrayRefSlow(psize), implicit);
+  return self.expand(asIntArrayRefSlow(psize), implicit);
 }
 
 Tensor sum_symint_batching_rule(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return sum_batching_rule(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
+  return input_t.sum(c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
 }
 
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -473,7 +473,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor view_symint_batching_rule(const Tensor& self, c10::SymIntArrayRef size) {
-  return view_batching_rule(self, asIntArrayRefSlow(size));
+  return self.view(asIntArrayRefSlow(size));
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
