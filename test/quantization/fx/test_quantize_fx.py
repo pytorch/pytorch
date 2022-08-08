@@ -167,7 +167,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -7237,6 +7237,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.assertEqual(out.device.type, device_after)
 
     @skip_if_no_torchvision
+    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_model_dropout(self):
         from torchvision import models
         m = models.mobilenet_v3_small()

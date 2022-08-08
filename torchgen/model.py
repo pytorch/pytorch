@@ -1514,11 +1514,6 @@ class FunctionSchema:
         returns = original_returns + returns_from_mutable_inputs
 
         args_sig = self.arguments.signature(strip_default=strip_default)
-        # See Note [arange.start_step schema]
-        if str(self.name) == "arange.start_step":
-            args_sig = Arguments.parse(
-                str(args_sig).replace("Scalar step", "Scalar step=1")
-            )
         # See Note [bernoulli.p schema]
         if str(self.name) == "bernoulli.p":
             args_sig = Arguments.parse(str(args_sig).replace("float p", "float p=0.5"))
@@ -1633,7 +1628,7 @@ class Type:
         # '__torch__.torch.classes.' is the prefix for custom class
         m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$", t)
         if m is not None:
-            return CustomClassType(t)
+            return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
         except KeyError:
@@ -1728,13 +1723,17 @@ class OptionalType(Type):
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
 
+
 # A type representing a PyTorch custom class
 @dataclass(frozen=True)
 class CustomClassType(Type):
     class_name: str
 
     def __str__(self) -> str:
-        return self.class_name
+        """
+        Return the class name will prefix __torch__.torch.classes
+        """
+        return f"__torch__.torch.classes.{self.class_name}"
 
     def is_tensor_like(self) -> bool:
         """
@@ -1751,8 +1750,9 @@ class CustomClassType(Type):
     def symint_to_int(self) -> "Type":
         return self
 
-    def is_like_like(self) -> Optional["ListType"]:
+    def is_list_like(self) -> Optional["ListType"]:
         return None
+
 
 # List types specify that we may have multiples of an element.  We
 # also support explicit sizes on list types, but these have
