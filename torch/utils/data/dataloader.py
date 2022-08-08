@@ -625,7 +625,7 @@ class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = loader._get_shared_seed()
-        if isinstance(self._dataset, IterDataPipe):
+        if isinstance(self._dataset, (MapDataPipe, IterDataPipe)):
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
             self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
