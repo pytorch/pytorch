@@ -143,6 +143,9 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
+#Disable kernel assert due to performance regression
+set(ROCM_ENABLE_KERNEL_ASSERTS FALSE CACHE BOOL "Kernel asserts are disabled by default for ROCm")
+
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
@@ -284,7 +287,12 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
 
   if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    message("ROCm version >= 4.1; enabling asserts")
+    if(ROCM_ENABLE_KERNEL_ASSERTS)
+      message("ROCm version >= 4.1; enabling asserts")
+    else()
+      add_definitions(-DROCM_DISABLE_GPU_ASSERTS)
+      message("ROCm version >= 4.1; kernel asserts are disabled")
+    endif()
   else()
     # Disable Asserts In Code (Can't use asserts on HIP stack.)
     add_definitions(-DNDEBUG)

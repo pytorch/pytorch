@@ -332,8 +332,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) ||  \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
+    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -378,7 +379,8 @@ __host__ __device__
         unsigned int line,
         const char* function) throw() __attribute__((__noreturn__));
 
-#if defined(__HIP_ARCH__) || defined(__HIP__)
+#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
+    !defined(ROCM_DISABLE_GPU_ASSERTS)
 // ROCm supports __assert_fail only as a device side function.
 __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion,
