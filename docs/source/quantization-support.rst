@@ -428,14 +428,14 @@ This module implements the quantized versions of the functional layers such as
     upsample_bilinear
     upsample_nearest
 
-torch.ao.nn.quantizable
-~~~~~~~~~~~~~~~~~~~~~~~
+torch.nn.quantizable
+~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantizable versions of some of the nn layers.
 These modules can be used in conjunction with the custom module mechanism,
 by providing the ``custom_module_config`` argument to both prepare and convert.
 
-.. currentmodule:: torch.ao.nn.quantizable
+.. currentmodule:: torch.nn.quantizable
 
 .. autosummary::
     :toctree: generated
@@ -532,5 +532,5 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 
 
 .. These modules are missing docs. Adding them here only for tracking
-.. automodule:: torch.ao.nn.quantizable
-.. automodule:: torch.ao.nn.quantizable.modules
+.. automodule:: torch.nn.quantizable
+.. automodule:: torch.nn.quantizable.modules
