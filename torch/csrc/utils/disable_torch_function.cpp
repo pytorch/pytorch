@@ -177,8 +177,7 @@ PyObject* THPModule_skip_one_hop_torch_dispatch(
     PyObject* /*self*/,
     PyObject* a) {
   HANDLE_TH_ERRORS
-  PyObject *func = nullptr, *args = nullptr,
-           *kwargs = nullptr;
+  PyObject *func = nullptr, *args = nullptr, *kwargs = nullptr;
   if (!PyArg_ParseTuple(a, "OOO", &func, &args, &kwargs)) {
     return nullptr;
   }
@@ -206,7 +205,8 @@ PyObject* THPModule_skip_one_hop_torch_dispatch(
       PyObject_Call(func, py_args.ptr(), kwargs));
   bool prev_skip = at::impl::TorchDispatchModeTLS::exchange_skip_next(false);
   // propagate error
-  if (!result) return nullptr;
+  if (!result)
+    return nullptr;
   TORCH_CHECK(
       !prev_skip,
       "skip_one_hop_torch_dispatch called on a "
