@@ -78,6 +78,7 @@ Responsibilities of the maintainer includes:
 
 Core Maintainers
 ----------------
+
 The core maintainers are expected to have a deep understanding
 of the PyTorch code base and design philosophies. Their responsibilities
 include:
