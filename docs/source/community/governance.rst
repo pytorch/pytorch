@@ -72,8 +72,8 @@ they are responsible for a folder).
 
 Responsibilities of the maintainer includes:
 * Triaging high priority issues of the module
-* Triaging and reviewing and landing high priority pull requests 
-  of the module
+* Triaging and reviewing and landing high priority pull requests
+  iof the module
 * Supporting public documentation related to the module
 * Running public developer meetings
 
@@ -141,7 +141,7 @@ The Process for Nomination
   However, if there is no process identified, you can file a request to the core maintainers
   by submitting [this form](https://forms.gle/xNeu1byGMZVHcA2q7). Core maintainers are
   meeting every three months.
-* If you are submitting a request to the core maintainers, the information in your request 
+* If you are submitting a request to the core maintainers, the information in your request
   must include the following items:
 
   * The nominees depth and breadth of code, review and design
