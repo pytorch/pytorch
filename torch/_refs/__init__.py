@@ -121,6 +121,7 @@ __all__ = [
     "hypot",
     "igamma",
     "igammac",
+    "imag",
     "isclose",
     "lcm",
     # 'ldexp',
@@ -139,6 +140,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
+    "real",
     "remainder",
     "rsub",
     # # special.xlog1py
@@ -1815,6 +1817,10 @@ def _set_correction(
     return correction
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 @out_wrapper()
 def var(
     a: TensorLikeType,
@@ -1828,17 +1834,37 @@ def var(
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
+    dim = utils.reduction_dims(a.shape, dim)
 
-    result = _reduction(
-        a,
-        partial(prims.var, correction=correction),
-        dims=dim,
-        keepdims=keepdim,
-        dtype=None,
-        out=None,
-        has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
-    )
+    # For complex tensors eager computes the variance as the sum of variances of
+    # the real and imaginary parts
+    if utils.is_complex_dtype(a.dtype):
+        return var(
+            torch.real(a), dim=dim, keepdim=keepdim, correction=correction
+        ) + var(torch.imag(a), dim=dim, keepdim=keepdim, correction=correction)
+
+    # For empty tensors eager returns nan
+    if a.numel() == 0:
+        if keepdim:
+            output_shape = [a.shape[i] if i not in dim else 1 for i in range(a.ndim)]
+        else:
+            output_shape = [a.shape[i] for i in range(a.ndim) if i not in dim]
+        return torch.full(
+            output_shape,
+            float("nan"),
+            device=a.device,
+            dtype=a.dtype,
+            requires_grad=a.requires_grad,
+        )
+
+    bcast_mean = torch.mean(a, dim=dim, keepdim=True)
+    a_mean_sub = a - bcast_mean
+    a_mean_sub_squared = torch.pow(a_mean_sub, 2)
+    a_mean_sub_squared_sum = torch.sum(a_mean_sub_squared, dim=dim, keepdim=keepdim)
+
+    nelem = reduce(operator.mul, (a.shape[i] for i in dim), 1)
+    assert correction is not None  # for mypy
+    result = a_mean_sub_squared_sum / (nelem - correction)
     return result
 
 

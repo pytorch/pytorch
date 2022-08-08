@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
@@ -1297,9 +1298,11 @@ def validate_no_repeating_dims(dims: Sequence):
         raise RuntimeError("duplicate value in the list of dims")
 
 
-def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
+def reduction_dims(shape: ShapeType, dims: Optional[DimsType]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
     validate_no_repeating_dims(dims)
     return dims
