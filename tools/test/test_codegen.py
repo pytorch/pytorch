@@ -43,20 +43,16 @@ class TestCreateDerivative(unittest.TestCase):
         _, differentiability_info = load_derivatives.create_differentiability_info(
             defn_dict={
                 "name": specification,
-                "dispatch": {
-                    "Default": {
-                        "a": "grads[0]",
-                        "b": "grads[2]"
-                    }
-                }
+                "dispatch": {"Default": {"a": "grads[0]", "b": "grads[2]"}},
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
 
         self.assertSequenceEqual(
-            differentiability_info['Default'].available_named_gradients,
+            differentiability_info["Default"].available_named_gradients,
             # grad_y is not present because y is a
             # bool and thus not differentiable.
             ["grad_x", "grad_z"],
@@ -94,11 +90,12 @@ class TestCreateDerivative(unittest.TestCase):
                             "a": "grad_x",
                             "b": "grads[1]",
                         }
-                    }
+                    },
                 },
                 functions_by_signature={schema.signature(): [native_function]},
                 functions_by_schema={specification: native_function},
                 op_counter=typing.Counter[str](),
+                used_dispatch_keys=set(),
             )
 
 
@@ -116,14 +113,16 @@ class TestGenAutogradFunctions(unittest.TestCase):
                         "a": "grad_x",
                         "b": "grad_z",
                     }
-                }
+                },
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
         definition = gen_autograd_functions.process_function(
-            differentiability_info['Default'], gen_autograd_functions.FUNCTION_DEFINITION
+            differentiability_info["Default"],
+            gen_autograd_functions.FUNCTION_DEFINITION,
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
@@ -144,14 +143,16 @@ class TestGenAutogradFunctions(unittest.TestCase):
                         "b": "grad_z",
                         "output_differentiability": [True, False, True],
                     }
-                }
+                },
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
         definition = gen_autograd_functions.process_function(
-            differentiability_info['Default'], gen_autograd_functions.FUNCTION_DEFINITION
+            differentiability_info["Default"],
+            gen_autograd_functions.FUNCTION_DEFINITION,
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
@@ -163,8 +164,10 @@ class TestGenAutogradFunctions(unittest.TestCase):
         schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
-        
-        with self.assertRaisesRegex(RuntimeError, "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
+        ):
             load_derivatives.create_differentiability_info(
                 defn_dict={
                     "name": specification,
@@ -176,13 +179,15 @@ class TestGenAutogradFunctions(unittest.TestCase):
                         "AutogradRandomTensor": {
                             "a": "grad_x",
                             "b": "grad_z",
-                        }
-                    }
+                        },
+                    },
                 },
                 functions_by_signature={schema.signature(): [native_function]},
                 functions_by_schema={specification: native_function},
                 op_counter=typing.Counter[str](),
+                used_dispatch_keys=set(),
             )
+
 
 class TestGenSchemaRegistration(unittest.TestCase):
     def setUp(self) -> None:

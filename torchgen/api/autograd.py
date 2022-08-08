@@ -245,13 +245,6 @@ class DifferentiableOutput:
     cpp_type: str
 
 
-# @dataclass(frozen=True)
-# class NativeFunctionWithDifferentiabilityInfo:
-#     func: NativeFunction
-#     info: Optional[DifferentiabilityInfo]
-#     fw_derivatives: Sequence[ForwardDerivative]
-
-
 @dataclass(frozen=True)
 class NativeFunctionWithDifferentiabilityInfo:
     func: NativeFunction
@@ -305,7 +298,6 @@ def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
         return "use_type"
 
 
-# TODO: change type of differentiability_infos
 def match_differentiability_info(
     native_functions: List[NativeFunction],
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
@@ -541,7 +533,7 @@ def gen_differentiable_outputs(
     fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
 ) -> List[DifferentiableOutput]:
     f = fn.func
-    info = fn.info[key] if fn.info else fn.info
+    info = fn.info[key] if fn.info else None
     outputs: List[DifferentiableOutput] = [
         DifferentiableOutput(
             name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type()

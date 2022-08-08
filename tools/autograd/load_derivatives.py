@@ -3,7 +3,6 @@
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 import re
-
 from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
@@ -52,8 +51,6 @@ _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 
-_USED_DISPATCH_KEYS = set()
-
 # This function directly adds derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
 # we generate them here instead of duplicating them in the yaml.
@@ -69,10 +66,9 @@ def add_view_copy_derivatives(
 
     view_infos = dict()
 
-    for name, info_dispatch_dict in infos.items():
+    for _, info_dispatch_dict in infos.items():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
-        fn_schema = None
         view_copy_differentiability_infos = dict()
         for dispatch_key, info in info_dispatch_dict.items():
             if maybe_view_group is None:
@@ -82,12 +78,12 @@ def add_view_copy_derivatives(
                     maybe_view_group
                 )
                 if view_copy_info is not None:
-                    if fn_schema is None:
-                        fn_schema = view_copy_info.func.func
+                    fn_schema = view_copy_info.func.func
                     view_copy_differentiability_infos[dispatch_key] = view_copy_info
             else:
                 break
         if len(view_copy_differentiability_infos) > 0:
+            assert fn_schema is not None
             view_infos[fn_schema] = view_copy_differentiability_infos
 
     infos.update(view_infos)
@@ -142,21 +138,26 @@ def load_derivatives(
         # maybe could be List[DifferentiabilityInfo] and add key field to DifferentiabilityInfo
         # or alternatively DifferentiabilityInfoWithKey
         infos = dict()
+        used_dispatch_keys: Set[str] = set()
         for defn_dict in definitions:
             # key should perhaps be just the name and not the signature
             if "dispatch" not in defn_dict:
                 specification = defn_dict.pop("name")
                 defn_dict = {"name": specification, "dispatch": {"Default": defn_dict}}
             name, per_dispatch_diffinfos = create_differentiability_info(
-                defn_dict, functions_by_signature, functions_by_schema, op_counter
+                defn_dict,
+                functions_by_signature,
+                functions_by_schema,
+                op_counter,
+                used_dispatch_keys,
             )
             infos[name] = per_dispatch_diffinfos
 
         add_view_copy_derivatives(infos, view_groups)
 
-        _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
+        _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos, used_dispatch_keys
 
-    return _GLOBAL_LOAD_DERIVATIVE_CACHE[key], _USED_DISPATCH_KEYS
+    return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
 @with_native_function
@@ -420,6 +421,7 @@ def create_differentiability_info(
     functions_by_signature: Dict[FunctionSchema, List[NativeFunction]],
     functions_by_schema: Dict[str, NativeFunction],
     op_counter: Counter[str],
+    used_dispatch_keys: Set[str],
 ) -> Tuple[FunctionSchema, Dict[str, DifferentiabilityInfo]]:
     """Processes a single entry `defn` in derivatives.yaml"""
 
@@ -644,8 +646,8 @@ def create_differentiability_info(
                 f"Invalid dispatch key {key} in derivatives.yaml for {specification},"
                 f" expected key to be one of {_VALID_AUTOGRAD_KEYS}"
             )
-        if key not in _USED_DISPATCH_KEYS:
-            _USED_DISPATCH_KEYS.add(key)
+        if key not in used_dispatch_keys:
+            used_dispatch_keys.add(key)
         # NB: Removes 'output_differentiability' from defn dictionary
         #     `None` means all differentiable.
         output_differentiability = defn.pop("output_differentiability", None)
@@ -919,7 +921,6 @@ def saved_variables(
     return formula, tuple(saved)
 
 
-# TODO: this might be the part where we append the dispatchkey to the name
 def _create_op_prefix(name: str) -> str:
     """Takes a native function name converts to a op prefix name.
 
