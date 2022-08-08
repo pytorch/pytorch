@@ -5,7 +5,6 @@
 import torch
 import torch._C._onnx as _C_onnx
 from torch.onnx import (
-    _type_utils,
     symbolic_helper,
     symbolic_opset11 as opset11,
     symbolic_opset9 as opset9,
@@ -19,7 +18,7 @@ def softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
+            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
         )
 
     return softmax
@@ -31,7 +30,7 @@ def log_softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
+            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
         )
     return return_op
 
@@ -270,7 +269,9 @@ def nonzero_numpy(g, input, _outputs=None):
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
-        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
+        condition = g.op(
+            "Cast", condition, to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"]
+        )
     if self is None:
         condition = opset9.nonzero(g, condition)
         return symbolic_helper._unbind_helper(
@@ -357,7 +358,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
+                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -368,7 +369,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
+                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
