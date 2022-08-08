@@ -1703,30 +1703,30 @@ def _run_symbolic_function(
     """
 
     opset_version = GLOBALS.export_onnx_opset_version
-    symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]
-    # TODO(ezyang): I think this is not necessary anymore
-    if n.kind().endswith("_"):
-        ns_op_name = n.kind()[:-1]
+    node_kind = n.kind()
+    if node_kind.endswith("_"):
+        # Treat relu_ -> relu; add_ -> add etc.
+        ns_op_name = node_kind[:-1]
     else:
-        ns_op_name = n.kind()
-    ns, op_name = ns_op_name.split("::")
+        ns_op_name = node_kind
+
+    namespace, op_name = ns_op_name.split("::")
 
     try:
         symbolic_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        if ns == "aten":
+        if namespace == "aten":
             domain = ""
-        elif ns == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
+        elif namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
             domain = "caffe2"
         else:
-            domain = ns
+            domain = namespace
 
         if symbolic_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(
@@ -1734,7 +1734,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
                 ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1743,13 +1743,21 @@ def _run_symbolic_function(
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
             return symbolic_fn(g, *inputs, **attrs)
-        elif ns == "onnx":
+        elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
-        elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+        elif _should_aten_fallback(
+            namespace, op_name, opset_version, operator_export_type
+        ):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
@@ -1773,7 +1781,10 @@ def _run_symbolic_function(
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
