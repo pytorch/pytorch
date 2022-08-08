@@ -984,7 +984,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 If the argument itself is ``None``, then all parameters are
                 updated, and the gradients are assumed to be already populated.
                 (default: ``None``)
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers and should be
                 ``None`` if ``gradients`` is not ``None``; (default: ``None``)
         Returns:
@@ -1043,7 +1043,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         Performs a single optimizer step and syncs parameters across all ranks.
 
         Arguments:
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers.
         Returns:
             Optional loss depending on the underlying local optimizer.
@@ -1117,6 +1117,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             else:
                 # Load the parameter state to the local optimizer
                 self.optim.state[param] = _recursive_copy_to_device(value, non_blocking=True, device=param.device)
+                # Force zero-dimensional tensors (like Adam "step") on CPU
+                for state_name, state_value in self.optim.state[param].items():
+                    if torch.is_tensor(state_value) and state_value.dim() == 0:
+                        self.optim.state[param][state_name] = state_value.cpu()
 
         super().load_state_dict(state_dict)
 

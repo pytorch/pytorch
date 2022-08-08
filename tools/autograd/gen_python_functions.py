@@ -30,24 +30,16 @@
 #   message, but use what's there
 #
 
-from collections import defaultdict
 import itertools
 import re
+from collections import defaultdict
+
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
 import yaml
-
-from .gen_trace_type import should_trace
-
-from torchgen.code_template import CodeTemplate
 from torchgen.api import cpp
-from torchgen.api.types import CppSignatureGroup
 from torchgen.api.python import (
-    PythonArgument,
-    PythonSignature,
-    PythonSignatureDeprecated,
-    PythonSignatureGroup,
-    PythonSignatureNativeFunctionPair,
     arg_parser_output_exprs,
-    argument_type_str,
     cpp_dispatch_exprs,
     cpp_dispatch_target,
     dispatch_lambda_args,
@@ -55,20 +47,28 @@ from torchgen.api.python import (
     dispatch_lambda_return_str,
     has_tensor_options,
     namedtuple_fieldnames,
+    PythonSignature,
+    PythonSignatureDeprecated,
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair,
     signature,
+    signature_from_schema,
 )
-from torchgen.gen import cpp_string, parse_native_yaml
+
+from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
+from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
 from torchgen.model import (
     Argument,
     BaseOperatorName,
+    FunctionSchema,
     NativeFunction,
     Type,
     Variant,
 )
-from torchgen.utils import split_name_params, YamlLoader, FileManager
+from torchgen.utils import FileManager, split_name_params, YamlLoader
 
-from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
+from .gen_trace_type import should_trace
 
 #
 # declarations blocklist
@@ -91,19 +91,18 @@ _SKIP_PYTHON_BINDINGS = [
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
     ".*_forward_out",
+    ".*_jvp",
     "_unsafe_view",
     "tensor",
     "_?sparse_(coo|compressed|csr|csc|bsr|bsc)_tensor.*",
-    "_arange.*",
     "_range.*",
-    "linspace.*",
-    "logspace.*",
     "_sparse_add_out",
     "_sparse_div.*",
     "_sparse_mul.*",
     "_sparse_sub.*",
     "_sparse_dense_add_out",
     "index",
+    "index_out",
     "unique_dim_consecutive",
     "_cumsum.*",
     "_cumprod.*",
@@ -111,18 +110,15 @@ _SKIP_PYTHON_BINDINGS = [
     "_prod.*",
     "_th_.*",
     "_thnn_.*",
-    "arange.*",
     "range.*",
     "_solve.*",
     "_inverse.*",
-    "full(_out)?",
     "_cholesky.*",
     "_triangular_solve.*",
     "_qr.*",
     "_symeig.*",
     "_svd.*",
     "slice",
-    "randint(_out)?",
     "item",
     "_local_scalar_dense",
     "to",
@@ -153,7 +149,8 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
-    "lift",
+    "lift.*",
+    "normal_functional",  # only used by the functionalization pas
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -176,6 +173,9 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
+    # So far, all NativeFunctions that are entirely code-generated do not get python bindings.
+    if "generated" in f.tags:
+        return False
     name = cpp.name(f.func)
     for skip_regex in SKIP_PYTHON_BINDINGS:
         if skip_regex.match(name):
@@ -320,6 +320,17 @@ def gen(
     create_python_return_type_bindings(
         fm, functions, lambda fn: True, "python_return_types.cpp"
     )
+
+    valid_tags = parse_tags_yaml(tags_yaml_path)
+
+    def gen_tags_enum() -> Dict[str, str]:
+        return {
+            "enum_of_valid_tags": (
+                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+            )
+        }
+
+    fm.write("python_enum_tag.cpp", gen_tags_enum)
 
 
 def group_filter_overloads(
@@ -484,46 +495,10 @@ def load_deprecated_signatures(
     # the call) to generate the full python signature.
     # We join the deprecated and the original signatures using type-only form.
 
-    # native function -> type-only signature
-    @with_native_function
-    def signature_original(f: NativeFunction) -> str:
-        # remove inplace suffix but keep outplace suffix
-        opname = str(f.func.name.name.base)
-        if f.func.is_out_fn():
-            opname += "_out"
-        if f.func.name.name.inplace and pyi:
-            opname += "_"
-        args = CppSignatureGroup.from_native_function(
-            f, method=False
-        ).signature.arguments()
-        # Simply ignore TensorOptionsArguments as it does not exist in deprecated.yaml.
-        types = ", ".join(
-            argument_type_str(a.argument.type)
-            for a in args
-            if isinstance(a.argument, Argument)
-        )
-        return f"{opname}({types})"
-
-    # deprecated -> type-only native signature (according to the call order)
-    def signature_deprecated(
-        opname: str, params: List[str], call_args: List[str]
-    ) -> str:
-        # create a mapping of parameter name to parameter type
-        types: Dict[str, str] = {}
-        for param in params:
-            if param == "*":
-                continue
-            type, name = param.split(" ")
-            types[name] = type
-        # if the name in the call is not in the parameter list, assume it's
-        # a literal Scalar
-        rearranged_types = ", ".join(types.get(arg, "Scalar") for arg in call_args)
-        return f"{opname}({rearranged_types})"
-
-    # group the original ATen signatures by type-only signature
+    # group the original ATen signatures by name
     grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
     for pair in pairs:
-        grouped[signature_original(pair.function)].append(pair)
+        grouped[pair.signature.name].append(pair)
 
     # find matching original signatures for each deprecated signature
     results: List[PythonSignatureNativeFunctionPair] = []
@@ -532,66 +507,89 @@ def load_deprecated_signatures(
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
-        _, params = split_name_params(deprecated["name"])
+        schema = FunctionSchema.parse(deprecated["name"])
         aten_name, call_args = split_name_params(deprecated["aten"])
+        is_out = aten_name.endswith("_out")
+        if is_out:
+            aten_name = aten_name.replace("_out", "")
 
-        for pair in grouped[signature_deprecated(aten_name, params, call_args)]:
-            # It uses the types from the original ATen declaration, but the
-            # ordering and parameter names from the deprecated overload. Any
-            # default parameter values from the original ATen declaration are
-            # ignored.
-            # Deprecated signature might reorder input_args and input_kwargs,
-            # but never changes output_args nor TensorOptions (if any?),
-            # so here we only look into these two types of args.
-            python_sig = pair.signature
-            src_args: Dict[str, PythonArgument] = {
-                a.name: PythonArgument(
-                    name=a.name,
-                    type=a.type,
-                    default=None,
-                    default_init=None,
+        # HACK: these are fixed constants used to pass the the aten function.
+        # The type must be known ahead of time
+        known_constants = {
+            "1": Type.parse("Scalar"),
+        }
+        schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
+        for name in call_args:
+            assert (
+                name in schema_args_by_name or name in known_constants
+            ), f"deprecation definiton: Unrecognized value {name}"
+
+        # Map deprecated signature arguments to their aten signature and test
+        # if the types and alias annotation match.
+        def is_schema_compatible(
+            aten_schema: FunctionSchema,
+        ) -> bool:
+            arguments: Iterable[Argument]
+            if is_out:
+                arguments = itertools.chain(
+                    aten_schema.arguments.out, aten_schema.arguments.flat_non_out
                 )
-                for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)
-            }
+            else:
+                arguments = aten_schema.arguments.flat_all
 
-            args: List[str] = []
-            input_args: List[PythonArgument] = []
-            input_kwargs: List[PythonArgument] = []
+            for i, arg in enumerate(arguments):
+                if i < len(call_args):
+                    arg_name = call_args[i]
+                    if arg_name in known_constants:
+                        schema_type = known_constants[arg_name]
+                        schema_annotation = None
+                    else:
+                        schema_arg = schema_args_by_name[arg_name]
+                        schema_type = schema_arg.type
+                        schema_annotation = schema_arg.annotation
 
-            kwarg_only = False
-            for param in params:
-                if param == "*":
-                    kwarg_only = True
-                    continue
-                _, param_name = param.split(" ")
-                args.append(param_name)
-
-                if param_name not in src_args:
-                    # output argument
-                    continue
-
-                if not kwarg_only:
-                    if not method or param_name != "self":
-                        input_args.append(src_args[param_name])
+                    if schema_type != arg.type or schema_annotation != arg.annotation:
+                        return False
                 else:
-                    input_kwargs.append(src_args[param_name])
+                    if arg.default is None:
+                        return False
+
+            return len(schema.returns) == len(aten_schema.returns) and all(
+                a == b for a, b in zip(schema.returns, aten_schema.returns)
+            )
+
+        any_schema_found = False
+        for pair in grouped[aten_name]:
+            if not is_schema_compatible(pair.function.func):
+                continue
+            any_schema_found = True
+
+            python_sig = signature_from_schema(
+                schema,
+                category_override=pair.function.category_override,
+                method=method,
+                pyi=pyi,
+            )
 
             results.append(
                 PythonSignatureNativeFunctionPair(
                     signature=PythonSignatureDeprecated(
                         name=python_sig.name,
-                        input_args=tuple(input_args),
-                        input_kwargs=tuple(input_kwargs),
+                        input_args=python_sig.input_args,
+                        input_kwargs=python_sig.input_kwargs,
                         output_args=python_sig.output_args,
                         tensor_options_args=python_sig.tensor_options_args,
                         method=python_sig.method,
-                        deprecated_args_names=tuple(args),
+                        deprecated_schema=schema,
                         deprecated_args_exprs=tuple(call_args),
                         returns=python_sig.returns,
                     ),
                     function=pair.function,
                 )
             )
+        assert (
+            any_schema_found
+        ), f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
 
     return results
 
@@ -899,7 +897,9 @@ def emit_dispatch_case(
                 overload.signature, overload.base, namedtuple_typenames
             ),
             call_dispatch_out=emit_single_dispatch(
-                overload.signature, overload.outplace, namedtuple_typenames
+                overload.signature,
+                overload.outplace,
+                namedtuple_typenames,
             ),
         )
     else:
@@ -1031,21 +1031,13 @@ def group_overloads(
                 + "\n".join(f"- {candidate}" for candidate in candidates)
             )
 
-    grouped: List[PythonSignatureGroup] = []
-    for sig, base in bases.items():
-        outplace = outplaces.get(sig)
-        grouped.append(
-            PythonSignatureGroup(
-                # prefer the signature with optional out=... arguments because it's the
-                # superset that can be used to parse input for both base and outplace.
-                signature=outplace.signature
-                if outplace is not None
-                else base.signature,
-                base=base.function,
-                outplace=outplace.function if outplace is not None else None,
-            )
+    grouped = [
+        PythonSignatureGroup.from_pairs(
+            functional=base,
+            out=outplaces.get(sig),
         )
-
+        for sig, base in bases.items()
+    ]
     return sort_overloads(grouped)
 
 
@@ -1097,6 +1089,8 @@ def group_overloads(
 def sort_overloads(
     grouped_overloads: Sequence[PythonSignatureGroup],
 ) -> Sequence[PythonSignatureGroup]:
+    # NB: Smaller here means lower priority
+
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (
             str(t1) == "Scalar"
@@ -1115,6 +1109,10 @@ def sort_overloads(
             # last in signature ordering. See discussion: https://github.com/pytorch/pytorch/issues/58087
             str(t1) == "Tensor[]"
             and str(t2).find("[]") != -1
+            or
+            # Prioritize IntArrayRef overload over SymIntArrayRef
+            str(t1) == "SymInt[]"
+            and str(t2) == "int[]"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
@@ -1181,8 +1179,12 @@ def emit_single_dispatch(
     @with_native_function
     def go(f: NativeFunction) -> str:
         # header comments
+        if isinstance(ps, PythonSignatureDeprecated):
+            schema_comment = f"// [deprecated] aten::{ps.deprecated_schema}"
+        else:
+            schema_comment = f"// aten::{f.func}"
+
         deprecated = "[deprecated] " if ps.deprecated else ""
-        schema_comment = f"// {deprecated}aten::{f.func}"
 
         # dispatch lambda signature
         name = cpp.name(f.func)

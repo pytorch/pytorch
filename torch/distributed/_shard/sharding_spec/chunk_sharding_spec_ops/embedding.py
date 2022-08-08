@@ -1,7 +1,5 @@
 # coding=utf-8
 
-from typing import cast
-
 import torch
 import torch.distributed as dist
 from ._common import (
@@ -17,7 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.embedding)
-def sharded_embedding(types, args, kwargs):
+def sharded_embedding(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.embedding``.
     This method computes a sharded embedding lookup and has the following limitations:
@@ -104,7 +102,6 @@ def sharded_embedding(types, args, kwargs):
     norm_type = kwargs.get("norm_type")
     padding_idx = kwargs.get("padding_idx")
 
-    pg = weight._process_group
     local_shard = weight.local_tensor().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
@@ -159,7 +156,7 @@ def _validate_embedding_param(args, kwargs):
         raise TypeError("input need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:

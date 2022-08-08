@@ -5,9 +5,9 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#include <ATen/core/functional.h>
 
 #include <ATen/Device.h>
 #include <ATen/Parallel.h>
@@ -61,23 +61,30 @@ namespace {
 // in data parallel, and should not be exposed as a user API.
 struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
-      : destination_device_(destination_device) {};
+      : destination_device_(destination_device){};
   ~ReduceAdd() override {}
 
   autograd::variable_list apply(autograd::variable_list&& inputs) override {
-    TORCH_CHECK(!torch::autograd::compute_requires_grad(inputs),
+    TORCH_CHECK(
+        !torch::autograd::compute_requires_grad(inputs),
         "ReduceAdd can only be used during the backward pass of data parallel.");
 
     Tensor output = torch::zeros_like(inputs[0], {destination_device_});
 
-    for (auto& input: inputs) {
-      TORCH_CHECK(input.sizes() == inputs[0].sizes(),
+    for (auto& input : inputs) {
+      TORCH_CHECK(
+          input.sizes() == inputs[0].sizes(),
           "All inputs of ReduceAdd must have the same size, but got ",
-          input.sizes(), " and ", inputs[0].sizes());
+          input.sizes(),
+          " and ",
+          inputs[0].sizes());
 
-      TORCH_CHECK(input.dtype() == inputs[0].dtype(),
+      TORCH_CHECK(
+          input.dtype() == inputs[0].dtype(),
           "All inputs of ReduceAdd must have the same dtype, but got ",
-          input.dtype(), " and ", inputs[0].dtype());
+          input.dtype(),
+          " and ",
+          inputs[0].dtype());
 
       // TODO: use nccl reduce
       output.add_(input.to(destination_device_));
@@ -100,7 +107,6 @@ void replicate_grad_edges(
     const std::shared_ptr<Module>& module,
     const std::vector<std::shared_ptr<ModuleType>>& replicas,
     const std::vector<Device>& devices) {
-
   for (auto& parameter : module->named_parameters(/*recurse=*/false)) {
     auto grad_fn = std::make_shared<ReduceAdd>((*parameter).device());
     grad_fn->set_next_edges(autograd::collect_next_edges(*parameter));
@@ -111,7 +117,7 @@ void replicate_grad_edges(
   }
 
   for (auto& buffer : module->named_buffers(/*recurse=*/false)) {
-    if (buffer.value().requires_grad()){
+    if (buffer.value().requires_grad()) {
       auto grad_fn = std::make_shared<ReduceAdd>((*buffer).device());
       grad_fn->set_next_edges(autograd::collect_next_edges(*buffer));
 
@@ -274,7 +280,9 @@ Tensor data_parallel(
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
   // Input tensor might not be big enough to scale across all available devices
   if (scattered_inputs.size() < devices->size()) {
-    devices->resize(scattered_inputs.size(), Device(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES));
+    devices->resize(
+        scattered_inputs.size(),
+        Device(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES));
   }
 
   auto replicas = replicate(module, *devices);

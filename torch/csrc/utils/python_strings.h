@@ -1,10 +1,10 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <stdexcept>
-#include <string>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <stdexcept>
+#include <string>
 
 // Utilities for handling Python strings. Note that PyString, when defined, is
 // the same as PyBytes.
@@ -83,7 +83,8 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
 }
 
 /*
- * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
+ * Reference:
+ * https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
  *
  * Stripped down version of PyObject_GetAttrString,
  * avoids lookups for None, tuple, and List objects,
@@ -96,37 +97,35 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  *
  * 'name' is the attribute to search for.
  *
- * Returns a py::object wrapping the return value. If the attribute lookup failed
- * the value will be NULL.
+ * Returns a py::object wrapping the return value. If the attribute lookup
+ * failed the value will be NULL.
  *
  */
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static py::object PyObject_FastGetAttrString(PyObject *obj, const char *name)
-{
-    PyTypeObject *tp = Py_TYPE(obj);
-    PyObject *res = (PyObject *)nullptr;
+static py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
+  PyTypeObject* tp = Py_TYPE(obj);
+  PyObject* res = (PyObject*)nullptr;
 
-    /* Attribute referenced by (char *)name */
-    if (tp->tp_getattr != nullptr) {
-      // This is OK per https://bugs.python.org/issue39620
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
-      if (res == nullptr) {
-        PyErr_Clear();
-        }
+  /* Attribute referenced by (char *)name */
+  if (tp->tp_getattr != nullptr) {
+    // This is OK per https://bugs.python.org/issue39620
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
+    if (res == nullptr) {
+      PyErr_Clear();
     }
-    /* Attribute referenced by (PyObject *)name */
-    else if (tp->tp_getattro != nullptr) {
-        auto w = py::reinterpret_steal<py::object>(
-          THPUtils_internString(name));
-        if (w.ptr() == nullptr) {
-          return py::object();
-        }
-        res = (*tp->tp_getattro)(obj, w.ptr());
-        if (res == nullptr) {
-            PyErr_Clear();
-        }
+  }
+  /* Attribute referenced by (PyObject *)name */
+  else if (tp->tp_getattro != nullptr) {
+    auto w = py::reinterpret_steal<py::object>(THPUtils_internString(name));
+    if (w.ptr() == nullptr) {
+      return py::object();
     }
-    return py::reinterpret_steal<py::object>(res);
+    res = (*tp->tp_getattro)(obj, w.ptr());
+    if (res == nullptr) {
+      PyErr_Clear();
+    }
+  }
+  return py::reinterpret_steal<py::object>(res);
 }

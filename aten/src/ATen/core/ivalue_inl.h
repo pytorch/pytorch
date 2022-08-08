@@ -215,6 +215,14 @@ inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
+inline c10::SymInt IValue::toSymInt() const {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt::toSymInt(toIntrusivePtr<c10::SymIntNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
 
 namespace ivalue {
 
@@ -991,7 +999,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
         guts::if_constexpr<std::is_convertible<
-            typename std::result_of<T && (Future&)>::type,
+            typename c10::invoke_result_t<T &&, Future&>,
             IValueWithStorages>::value>(
             [&](auto identity) {
               IValue value;
@@ -1179,7 +1187,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         continue;
       }
       c10::Device device = storage->device();
-      if (!device.is_cpu() && !device.is_meta()) {
+      if (!device.is_cpu()) {
         TORCH_CHECK_VALUE(
             device.type() == impl.type(),
             "Expected all data ptrs to be on a device of type ",

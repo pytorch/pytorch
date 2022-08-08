@@ -19,7 +19,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
 #if AT_USE_JITERATOR()
     static const auto log_string = jiterator_stringify(
         template <typename T> T log_kernel(T x) { return std::log(x); });
-    AT_DISPATCH_COMPLEX_TYPES(common_dtype, "log_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "log_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log_name,
           /*return_dtype=*/scalar_t,
@@ -27,9 +27,12 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
           /*arity=*/1>(iter, log_string);
     });
 #else
-    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "log_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "log_cuda", [&]() {
       gpu_kernel(
-          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ::log(a); });
+          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+            using opmath_t = at::opmath_type<scalar_t>;
+            return ::log(static_cast<opmath_t>(a));
+          });
     });
 #endif
   } else {

@@ -2,6 +2,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
@@ -59,6 +60,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -486,7 +488,12 @@ static void setInputTensorTypes(
   auto s_iter = stack.begin();
   size_t list_idx = 0;
   if (!param_count_list.empty()) {
-    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+    TORCH_INTERNAL_ASSERT(
+        input_values.size() == param_count_list.size(),
+        " input_values:",
+        input_values.size(),
+        " vs param_count_list:",
+        param_count_list.size());
   }
   for (auto v : input_values) {
     // Leave packed param types alone. This is needed for downstream passes
@@ -1503,6 +1510,14 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def(
+          "_set_ignore_amp",
+          [](StrongFunctionPtr& self, bool ignore) {
+            auto fn = self.function_;
+            TORCH_INTERNAL_ASSERT(fn->isGraphFunction());
+            GraphFunction& g_fn = toGraphFunction(*fn);
+            g_fn._set_ignore_amp(ignore);
+          })
       .def_property_readonly(
           "qualified_name",
           [](const StrongFunctionPtr& self) {
@@ -1891,9 +1906,30 @@ void initJitScriptBindings(PyObject* module) {
     return _get_model_bytecode_version(filename);
   });
   m.def(
+      "_get_model_extra_files",
+      [](const std::string& filename, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        _load_for_mobile(filename, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
+      });
+  m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def(
+      "_get_model_extra_files_from_buffer",
+      [](const std::string& buffer, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        std::istringstream in(buffer);
+        _load_for_mobile(in, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
       });
   m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
     return _get_mobile_model_contained_types(filename);
@@ -2264,6 +2300,14 @@ void initJitScriptBindings(PyObject* module) {
         return "invalid";
     }
   });
+
+  m.def(
+      "_save_parameters",
+      [](const std::map<std::string, at::Tensor>& map,
+         const std::string& filename,
+         bool use_flatbuffer = false) {
+        _save_parameters(map, filename, use_flatbuffer);
+      });
 
   initScriptDictBindings(module);
   initScriptListBindings(module);

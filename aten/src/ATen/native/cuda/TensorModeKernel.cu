@@ -7,10 +7,12 @@
 #include <ATen/cuda/ThrustAllocator.h>
 #include <c10/core/DeviceArray.h>
 
+#include <thrust/count.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
+#include <thrust/find.h>
 #include <thrust/inner_product.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/sequence.h>
@@ -20,15 +22,118 @@ namespace at {
 namespace native {
 
 template <typename scalar_t>
+struct ModeImpl {
+  std::tuple<scalar_t, int64_t> operator()(
+      scalar_t *iter_begin,
+      scalar_t *iter_end) {
+    at::cuda::ThrustAllocator thrust_allocator;
+    auto stream = at::cuda::getCurrentCUDAStream();
+    auto policy = thrust::cuda::par(thrust_allocator).on(stream);
+
+    const auto n_element = iter_end - iter_begin;
+    auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
+    auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
+    auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
+    auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
+    thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
+
+
+    // Sort the input data. The original indices of the data are stored in
+    // sort_buffer_ptr
+    thrust::sort_by_key(policy, iter_begin, iter_end, sort_buffer_ptr);
+
+    // Count # of unique elements via an inner product between adjacent elements.
+    // Add 1 if two neighboring element are not equal.
+    int unique = 1 +
+        thrust::inner_product(
+                    policy,
+                    iter_begin,
+                    iter_end - 1,
+                    iter_begin + 1,
+                    0,
+                    thrust::plus<int>(),
+                    thrust::not_equal_to<scalar_t>());
+
+    // Count frequency of each element
+    auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
+    auto counts = c10::DeviceArray<int64_t>(*cuda_allocator, unique);
+
+    auto keys_ptr = thrust::device_pointer_cast(keys.get());
+    auto counts_ptr = thrust::device_pointer_cast(counts.get());
+
+    thrust::reduce_by_key(
+        policy,
+        iter_begin,
+        iter_end,
+        thrust::constant_iterator<int>(1),
+        keys_ptr,
+        counts_ptr);
+
+    // Find index of maximum count
+    auto it = thrust::max_element(policy, counts_ptr, counts_ptr + unique);
+    scalar_t mode = keys_ptr[it - counts_ptr];
+
+    // Find first index within which it occurs
+    auto position_iter = thrust::find(policy, iter_begin, iter_end, mode);
+
+    // Translate to original non-sorted index
+    TORCH_INTERNAL_ASSERT(position_iter != iter_end);
+    int64_t index = sort_buffer_ptr[position_iter - iter_begin];
+    return {mode, index};
+  }
+};
+
+struct EqualsMode {
+  bool mode;
+
+  C10_DEVICE bool operator()(const uint8_t x) {
+    return static_cast<bool>(x) == mode;
+  }
+};
+
+template <>
+struct ModeImpl<bool> {
+  std::tuple<bool, int64_t> operator()(
+      const bool *first,
+      const bool *last) {
+    at::cuda::ThrustAllocator thrust_allocator;
+    auto stream = at::cuda::getCurrentCUDAStream();
+    auto policy = thrust::cuda::par(thrust_allocator).on(stream);
+
+    // For bool, we can skip finding the unique elements since there
+    // are only two possible values.
+
+    // See NOTE [Loading boolean values]
+    auto first_bytes = reinterpret_cast<const uint8_t*>(first);
+    auto last_bytes = reinterpret_cast<const uint8_t*>(last);
+
+    const auto numel = last - first;
+    const auto num_true = thrust::count_if(
+        policy,
+        first_bytes,
+        last_bytes,
+        [] GPU_LAMBDA (uint8_t x) {
+          return static_cast<bool>(x);
+        }
+      );
+    const auto num_false = (numel - num_true);
+    const auto mode = num_true > num_false;
+
+    // Find first index within which it occurs
+    const auto position_iter = thrust::find_if(
+        policy, first_bytes, last_bytes, EqualsMode{mode});
+    const int64_t index = position_iter - first_bytes;
+    return {mode, index};
+  }
+};
+
+template <typename scalar_t>
 void calculate_mode(
     const TensorBase& values,
     const TensorBase& indices,
     const TensorBase& self,
     std::vector<int64_t>& position,
     int dim) {
-  at::cuda::ThrustAllocator thrust_allocator;
-  auto stream = at::cuda::getCurrentCUDAStream();
-  auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 
   TORCH_INTERNAL_ASSERT(self.is_contiguous());
 
@@ -47,53 +152,9 @@ void calculate_mode(
   scalar_t* iter_begin = data;
   scalar_t* iter_end = data + n_element;
 
-  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
-  auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
-  auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
-  thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
-
-
-  // Sort the input data. The original indices of the data are stored in
-  // sort_buffer_ptr
-  thrust::sort_by_key(policy, iter_begin, iter_end, sort_buffer_ptr);
-
-  // Count # of unique elements via an inner product between adjacent elements.
-  // Add 1 if two neighboring element are not equal.
-  int unique = 1 +
-      thrust::inner_product(
-                   policy,
-                   iter_begin,
-                   iter_end - 1,
-                   iter_begin + 1,
-                   0,
-                   thrust::plus<int>(),
-                   thrust::not_equal_to<scalar_t>());
-
-  // Count frequency of each element
-  auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
-  auto counts = c10::DeviceArray<int64_t>(*cuda_allocator, unique);
-
-  auto keys_ptr = thrust::device_pointer_cast(keys.get());
-  auto counts_ptr = thrust::device_pointer_cast(counts.get());
-
-  thrust::reduce_by_key(
-      policy,
-      iter_begin,
-      iter_end,
-      thrust::constant_iterator<int>(1),
-      keys_ptr,
-      counts_ptr);
-
-  // Find index of maximum count
-  auto it = thrust::max_element(policy, counts_ptr, counts_ptr + unique);
-  scalar_t mode = keys_ptr[it - counts_ptr];
-
-  // Find first index within which it occurs
-  auto position_iter = thrust::find(policy, iter_begin, iter_end, mode);
-
-  TORCH_INTERNAL_ASSERT(position_iter != iter_end);
-  int64_t index = sort_buffer_ptr[position_iter - iter_begin];
+  scalar_t mode;
+  int64_t index;
+  std::tie(mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end);
 
   // Place mode, index in output
   scalar_t* values_data = values.data_ptr<scalar_t>();
@@ -105,10 +166,11 @@ void calculate_mode(
     indices_data += ensure_nonempty_stride(indices, i) * pos;
   }
 
+  auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_CHECK(cudaMemcpyAsync(
       values_data, &mode, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
   //memcpy_and_sync will synchronize results
-  at::cuda::memcpy_and_sync(indices_data, &index, sizeof(scalar_t), cudaMemcpyHostToDevice, stream);
+  at::cuda::memcpy_and_sync(indices_data, &index, sizeof(int64_t), cudaMemcpyHostToDevice, stream);
 }
 
 template <typename scalar_t>

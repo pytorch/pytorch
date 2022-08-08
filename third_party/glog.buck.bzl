@@ -1,8 +1,8 @@
 GLOG_CONFIG_HEADERS = [
-    'vlog_is_on.h',
-    'stl_logging.h',
-    'raw_logging.h',
-    'logging.h',
+    "vlog_is_on.h",
+    "stl_logging.h",
+    "raw_logging.h",
+    "logging.h",
 ]
 
 GLOG_SED_COMMAND = " ".join([
@@ -24,76 +24,74 @@ GLOG_SED_COMMAND = " ".join([
 ])
 
 def define_glog():
-
-    native.cxx_library(
+    cxx_library(
         name = "glog",
         srcs = [
-            'glog/src/demangle.cc',
-            'glog/src/vlog_is_on.cc',
-            'glog/src/symbolize.cc',
-            'glog/src/raw_logging.cc',
-            'glog/src/logging.cc',
-            'glog/src/signalhandler.cc',
-            'glog/src/utilities.cc',
+            "glog/src/demangle.cc",
+            "glog/src/vlog_is_on.cc",
+            "glog/src/symbolize.cc",
+            "glog/src/raw_logging.cc",
+            "glog/src/logging.cc",
+            "glog/src/signalhandler.cc",
+            "glog/src/utilities.cc",
         ],
         exported_headers = [":glog_{}".format(header) for header in GLOG_CONFIG_HEADERS],
         header_namespace = "glog",
         compiler_flags = [
-            '-Wno-sign-compare',
-            '-Wno-unused-function',
-            '-Wno-unused-local-typedefs',
-            '-Wno-unused-variable',
-            '-Wno-deprecated-declarations',
+            "-Wno-sign-compare",
+            "-Wno-unused-function",
+            "-Wno-unused-local-typedefs",
+            "-Wno-unused-variable",
+            "-Wno-deprecated-declarations",
         ],
         preferred_linkage = "static",
         exported_linker_flags = [],
         exported_preprocessor_flags = [
-            '-DGLOG_NO_ABBREVIATED_SEVERITIES',
-            '-DGLOG_STL_LOGGING_FOR_UNORDERED',
-            '-DGOOGLE_GLOG_DLL_DECL=',
-            '-DGOOGLE_NAMESPACE=google',
+            "-DGLOG_NO_ABBREVIATED_SEVERITIES",
+            "-DGLOG_STL_LOGGING_FOR_UNORDERED",
+            "-DGOOGLE_GLOG_DLL_DECL=",
+            "-DGOOGLE_NAMESPACE=google",
             # this is required for buck build
-            '-DGLOG_BAZEL_BUILD',
-            '-DHAVE_PTHREAD',
+            "-DGLOG_BAZEL_BUILD",
+            "-DHAVE_PTHREAD",
             # Allows src/logging.cc to determine the host name.
-            '-DHAVE_SYS_UTSNAME_H',
+            "-DHAVE_SYS_UTSNAME_H",
             # For src/utilities.cc.
-            '-DHAVE_SYS_SYSCALL_H',
-            '-DHAVE_SYS_TIME_H',
-            '-DHAVE_STDINT_H',
-            '-DHAVE_STRING_H',
+            "-DHAVE_SYS_SYSCALL_H",
+            "-DHAVE_SYS_TIME_H",
+            "-DHAVE_STDINT_H",
+            "-DHAVE_STRING_H",
             # Enable dumping stacktrace upon sigaction.
-            '-DHAVE_SIGACTION',
+            "-DHAVE_SIGACTION",
             # For logging.cc.
-            '-DHAVE_PREAD',
-            '-DHAVE___ATTRIBUTE__',
+            "-DHAVE_PREAD",
+            "-DHAVE___ATTRIBUTE__",
         ],
         deps = [":glog_config"],
         soname = "libglog.$(ext)",
         visibility = ["PUBLIC"],
     )
 
-    native.cxx_library(
+    cxx_library(
         name = "glog_config",
         header_namespace = "",
         exported_headers = {
             "config.h": ":glog_config.h",
-            "glog/log_severity.h" : "glog/src/glog/log_severity.h",
-        }
+            "glog/log_severity.h": "glog/src/glog/log_severity.h",
+        },
     )
 
-    native.genrule(
+    genrule(
         name = "glog_config.h",
-        srcs = ['glog/src/config.h.cmake.in'],
+        srcs = ["glog/src/config.h.cmake.in"],
         out = "config.h",
         cmd = "awk '{ gsub(/^#cmakedefine/, \"//cmakedefine\"); print; }' $SRCS > $OUT",
     )
 
-    [
-        native.genrule(
+    for header in GLOG_CONFIG_HEADERS:
+        genrule(
             name = "glog_{}".format(header),
             out = header,
-            srcs = ['glog/src/glog/{}.in'.format(header)],
+            srcs = ["glog/src/glog/{}.in".format(header)],
             cmd = "{} $SRCS > $OUT".format(GLOG_SED_COMMAND),
-        ) for header in GLOG_CONFIG_HEADERS
-    ]
+        )

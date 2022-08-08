@@ -1,13 +1,13 @@
 import torch
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
     ShardedTensor,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 
 
 def register_chunk_op(op):
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     def sharded_chunk(types, args=(), kwargs=None, pg=None):
         """
         Handles ``__torch_function__`` dispatch for the chunk op.

@@ -19,9 +19,15 @@ void aten_format(Stack& stack);
 
 void size(Stack& stack);
 
+void sym_size(Stack& stack);
+
+void sym_numel(Stack& stack);
+
 void device(Stack& stack);
 
 void dtype(Stack& stack);
+
+void layout(Stack& stack);
 
 void toPrimDType(Stack& stack);
 

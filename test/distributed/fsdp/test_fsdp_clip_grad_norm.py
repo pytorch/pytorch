@@ -85,7 +85,7 @@ class TestClipGradNorm(FSDPTest):
 
 class TestCalcuGradNorm(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    @parametrize("norm_type", [2.0, inf])
+    @parametrize("norm_type", [2.0, inf, 1.3, 2.5])
     @parametrize("nested_fsdp", [True, False])
     def test_fsdp_calc_grad_norm(self, norm_type, nested_fsdp):
         """Test grad norm cal API."""
@@ -96,18 +96,6 @@ class TestCalcuGradNorm(FSDPTest):
         total_norm = _calc_grad_norm(model.params_with_grad, norm_type)
         total_norm_expected = _collect_total_grad_norm_local(model, norm_type)
         self.assertEqual(total_norm, total_norm_expected)
-
-    @skip_if_lt_x_gpu(2)
-    @parametrize("norm_type", [1.3, 2.5])
-    def test_fsdp_calc_grad_norm_error(self, norm_type):
-        """Test the abnormal cases of grad norm cal API."""
-        model = DeterministicModel(False)
-        input = torch.rand(12, 2, device=self.rank)
-        out = model(input)
-        out.sum().backward()
-        error_msg = f"Order {norm_type} not supported for matrix norm"
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            total_norm = _calc_grad_norm(model.parameters(), norm_type)
 
 
 instantiate_parametrized_tests(TestClipGradNorm)

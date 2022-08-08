@@ -24,7 +24,9 @@ namespace serialize {
 class TORCH_API OutputArchive final {
  public:
   explicit OutputArchive(std::shared_ptr<jit::CompilationUnit> cu);
-  explicit OutputArchive() : cu_(std::make_shared<jit::CompilationUnit>()), module_("__torch__.Module", cu_) {}
+  explicit OutputArchive()
+      : cu_(std::make_shared<jit::CompilationUnit>()),
+        module_("__torch__.Module", cu_) {}
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;

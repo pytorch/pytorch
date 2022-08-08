@@ -118,6 +118,10 @@ if(INTERN_BUILD_ATEN_OPS)
         --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
         --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
         )
+    if(SELECTED_OP_LIST)
+      list(APPEND GEN_UNBOXING_COMMAND
+              --TEST_ONLY_op_registration_allowlist_yaml_path "${SELECTED_OP_LIST}")
+    endif()
     set("GEN_UNBOXING_COMMAND_sources"
         ${GEN_UNBOXING_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
@@ -349,11 +353,11 @@ function(append_filelist name outputvar)
   set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
-      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
+      ${PROJECT_SOURCE_DIR}/build_variables.bzl
       ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+            "exec(open('${PROJECT_SOURCE_DIR}/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)

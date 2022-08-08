@@ -128,8 +128,8 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
 }
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
-    TORCH_INTERNAL_ASSERT(false, "as_strided has not been implemented in the functionalization pass yet");
-    return Tensor();
+    // Pessimism: we can't reapply views for as_strided_scatter.
+    return base.as_strided_scatter(mutated_view, size, stride, storage_offset);
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -142,7 +142,7 @@ Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor&
 }
 
 Tensor FunctionalInverses::expand_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, c10::expectIntArrayRef(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
+    return at::sum_to(mutated_view, c10::asIntArrayRefSlow(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
 }
 
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
@@ -169,6 +169,10 @@ Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Ten
 }
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
     // the functionalization pass doesn't care about autograd metadata - as a view, I think detach() is just an identity function
+    return mutated_view;
+}
+
+Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
     return mutated_view;
 }
 
@@ -292,6 +296,14 @@ Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& m
       return mutated_view.view(base.sizes());
     } else {
       return at::view_copy(mutated_view, base.sizes());
+    }
+}
+
+Tensor FunctionalInverses::view_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size) {
+    if (reapply_views) {
+      return mutated_view.view_symint(base.sym_sizes());
+    } else {
+      return at::view_copy_symint(mutated_view, base.sym_sizes());
     }
 }
 

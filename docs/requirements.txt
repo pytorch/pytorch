@@ -1,6 +1,4 @@
-sphinx==3.5.4
-Jinja2==3.0.*
-docutils==0.16
+sphinx==5.0.0
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
 sphinxcontrib.katex
 matplotlib

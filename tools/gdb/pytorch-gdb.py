@@ -1,6 +1,7 @@
-import gdb  # type: ignore[import]
 import textwrap
 from typing import Any
+
+import gdb  # type: ignore[import]
 
 
 class DisableBreakpoints:

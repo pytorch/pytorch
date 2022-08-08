@@ -13,40 +13,32 @@ import signal
 import subprocess
 import sys
 import tempfile
+import json
+from typing import Dict, Optional, List, cast, Any
 
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import (
+    IS_CI,
     FILE_SCHEMA,
-    IS_IN_CI,
     TEST_WITH_ROCM,
     shell,
     set_cwd,
     parser as common_parser,
 )
 import torch.distributed as dist
-from typing import Dict, Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
-        export_S3_test_times,
-        get_shard_based_on_S3,
-        # NS: Disable target determination
-        # get_slow_tests_based_on_S3,
-        get_specified_test_cases,
         get_reordered_tests,
         get_test_case_configs,
+        calculate_shards,
     )
-    # NS: Disable target determination
-    # from tools.testing.modulefinder_determinator import (
-    #     should_run_test,
-    #     TARGET_DET_LIST,
-    # )
-
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
     HAVE_TEST_SELECTION_TOOLS = False
@@ -81,6 +73,7 @@ def discover_tests(
         rc += extra_tests
     return sorted(rc)
 
+
 TESTS = discover_tests(
     blocklisted_patterns=[
         'ao',
@@ -109,8 +102,6 @@ TESTS = discover_tests(
         'test_static_runtime',
         'test_throughput_benchmark',
         'test_typing',
-        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
-        "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",
@@ -176,6 +167,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
+    "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/pipeline/sync/skip/test_api",
     "distributed/pipeline/sync/skip/test_gpipe",
@@ -201,6 +193,8 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
+    "distributed/_shard/checkpoint/test_checkpoint"
+    "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
@@ -216,17 +210,18 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
-    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
-    "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
+    "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/_shard/checkpoint/test_checkpoint"
+    "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
@@ -242,18 +237,17 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
-    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_type_hints",
     "test_openmp",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -265,8 +259,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_primary_ctx",
 ] + FSDP_TEST
 
-WINDOWS_COVERAGE_BLOCKLIST = []
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -277,9 +269,6 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch"
 ]
-
-# the JSON file to store the S3 test stats
-TEST_TIMES_FILE = ".pytorch-test-times.json"
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -319,10 +308,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
-ENABLE_PR_HISTORY_REORDERING = bool(
-    os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1"
-)
-
 JIT_EXECUTOR_TESTS = [
     "test_jit_profiling",
     "test_jit_legacy",
@@ -331,55 +316,34 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 
+
+def discover_functorch_tests():
+    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
+    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
+    result = discover_tests(pathlib.Path(functorch_test_dir))
+    result = [os.path.join(functorch_test_dir, r) for r in result]
+
+    # Sanity check
+    assert len(result) >= 8
+    return result
+
+FUNCTORCH_TESTS = discover_functorch_tests()
+
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
     "distributions/test_distributions",
 ]
-
-# Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
-# options.run_specified_test_cases is enabled.
-# For example:
-# {
-#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
-#   ...
-# }
-# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
-SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
-
-# The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
-# options.run_specified_test_cases is enabled.
-SPECIFIED_TEST_CASES_FILE: str = ".pytorch_specified_test_cases.csv"
 
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_test_case_args(test_module, using_pytest) -> List[str]:
-    args = []
-    # if test_module not specified or specified with '__all__' then run all tests
-    if (
-        test_module not in SPECIFIED_TEST_CASES_DICT
-        or "__all__" in SPECIFIED_TEST_CASES_DICT[test_module]
-    ):
-        return args
-
-    if using_pytest:
-        args.append("-k")
-        args.append(" or ".join(SPECIFIED_TEST_CASES_DICT[test_module]))
-    else:
-        for test in SPECIFIED_TEST_CASES_DICT[test_module]:
-            args.append("-k")
-            args.append(test)
-
-    return args
-
-
 def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
-        executable = [sys.executable]
+        executable = [sys.executable, "-bb"]
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
@@ -407,26 +371,14 @@ def run_test(
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_IN_CI:
+    elif IS_CI:
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
 
-    # Multiprocessing related tests cannot run with coverage.
-    # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
-    disable_coverage = (
-        sys.platform == "win32" and test_module in WINDOWS_COVERAGE_BLOCKLIST
-    )
-
     # Extra arguments are not supported with pytest
     executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args, disable_coverage=disable_coverage
+        options, allow_pytest=not extra_unittest_args
     )
-
-    # TODO: move this logic into common_utils.py instead of passing in "-k" individually
-    # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
-    # to test_distributed and not run_test (this function)
-    if options.run_specified_test_cases:
-        unittest_args.extend(get_test_case_args(test_module, "pytest" in executable))
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -442,12 +394,12 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+
 run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
 
 
 def get_run_test_with_subprocess_fn():
     return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
-
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -484,6 +436,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     python_path = os.environ.get("PYTHONPATH", "")
     from shutil import copyfile
 
+    os.environ['USE_NINJA'] = shell_env['USE_NINJA']
     test_module = "test_cpp_extensions_aot" + ("_ninja" if use_ninja else "_no_ninja")
     copyfile(
         test_directory + "/test_cpp_extensions_aot.py",
@@ -505,6 +458,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         os.environ["PYTHONPATH"] = python_path
         if os.path.exists(test_directory + "/" + test_module + ".py"):
             os.remove(test_directory + "/" + test_module + ".py")
+        os.environ.pop('USE_NINJA')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
@@ -601,6 +555,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
@@ -610,8 +565,10 @@ CUSTOM_HANDLERS = {
     "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
+
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -645,6 +602,16 @@ def parse_args():
         "--distributed-tests",
         action="store_true",
         help="run all distributed tests",
+    )
+    parser.add_argument(
+        "--functorch",
+        "--functorch",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run functorch tests. "
+            "If this flag is not present, we will not run any functorch tests. "
+            "This requires functorch to already be installed."
+        )
     )
     parser.add_argument(
         "-core",
@@ -734,13 +701,6 @@ def parse_args():
         "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
     )
     parser.add_argument(
-        "--export-past-test-times",
-        nargs="?",
-        type=str,
-        const=TEST_TIMES_FILE,
-        help="dumps test times from previous S3 stats into a file, format JSON",
-    )
-    parser.add_argument(
         "--shard",
         nargs=2,
         type=int,
@@ -757,31 +717,6 @@ def parse_args():
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
-    )
-    parser.add_argument(
-        "--run-specified-test-cases",
-        nargs="?",
-        type=str,
-        const=SPECIFIED_TEST_CASES_FILE,
-        help="load specified test cases file dumped from previous OSS CI stats, format CSV. "
-        " If all test cases should run for a <test_module> please add a single row: \n"
-        " test_filename,test_case_name\n"
-        " ...\n"
-        " <test_module>,__all__\n"
-        " ...\n"
-        'how we use the stats will be based on option "--use-specified-test-cases-by".',
-    )
-    parser.add_argument(
-        "--use-specified-test-cases-by",
-        type=str,
-        choices=["include", "bring-to-front"],
-        default="include",
-        help='used together with option "--run-specified-test-cases". When specified test case '
-        "file is set, this option allows the user to control whether to only run the specified test "
-        "modules or to simply bring the specified modules to front and also run the remaining "
-        "modules. Note: regardless of this option, we will only run the specified test cases "
-        " within a specified test module. For unspecified test modules with the bring-to-front "
-        "option, all test cases will be run, as one may expect.",
     )
     parser.add_argument(
         "--dry-run",
@@ -840,13 +775,6 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
-    # First make sure run specific test cases options are processed.
-    if options.run_specified_test_cases:
-        if options.use_specified_test_cases_by == "include":
-            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
-        elif options.use_specified_test_cases_by == "bring-to-front":
-            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
-
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -865,6 +793,9 @@ def get_selected_tests(options):
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
+
+    if options.functorch:
+        selected_tests = FUNCTORCH_TESTS
 
     # process reordering
     if options.bring_to_front:
@@ -926,11 +857,29 @@ def get_selected_tests(options):
         assert num_shards <= len(
             selected_tests
         ), f"Number of shards must be less than {len(selected_tests)}"
-        # TODO: fix this to use test_times_filename, but currently this is not working
-        # because setting the export arg immeidately halts the test execution.
-        selected_tests = get_shard_based_on_S3(
-            which_shard, num_shards, selected_tests, TEST_TIMES_FILE
-        )
+
+        if num_shards == 1:
+            return selected_tests
+
+        # Download previous test times to make sharding decisions
+        path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
+        test_config = os.environ.get("TEST_CONFIG")
+        if test_config not in test_file_times:
+            print(
+                "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
+            )
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        else:
+            print("Found test time stats from artifacts")
+            test_file_times_config = test_file_times[test_config]
+            shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
+            _, tests_from_shard = shards[which_shard - 1]
+            selected_tests = tests_from_shard
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
@@ -970,25 +919,6 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 def main():
     options = parse_args()
 
-    # TODO: move this export & download function in tools/ folder
-    test_times_filename = options.export_past_test_times
-    if test_times_filename:
-        print(
-            f"Exporting past test times from S3 to {test_times_filename}, no tests will be run."
-        )
-        export_S3_test_times(test_times_filename)
-        return
-
-    specified_test_cases_filename = options.run_specified_test_cases
-    if specified_test_cases_filename:
-        print(
-            f"Loading specified test cases to run from {specified_test_cases_filename}."
-        )
-        global SPECIFIED_TEST_CASES_DICT
-        SPECIFIED_TEST_CASES_DICT = get_specified_test_cases(
-            specified_test_cases_filename, TESTS
-        )
-
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
@@ -1001,36 +931,8 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    # NS: Disable target determination until it can be made more reliable
-    # if options.determine_from is not None and os.path.exists(options.determine_from):
-    #     slow_tests = get_slow_tests_based_on_S3(
-    #         TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
-    #     )
-    #     print_to_stderr(
-    #         "Added the following tests to target_det tests as calculated based on S3:"
-    #     )
-    #     print_to_stderr(slow_tests)
-    #     with open(options.determine_from, "r") as fh:
-    #         touched_files = [
-    #             os.path.normpath(name.strip())
-    #             for name in fh.read().split("\n")
-    #             if len(name.strip()) > 0
-    #         ]
-    #     # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-    #     sys.path.append(test_directory)
-    #     selected_tests = [
-    #         test
-    #         for test in selected_tests
-    #         if should_run_test(
-    #             TARGET_DET_LIST + slow_tests, test, touched_files, options
-    #         )
-    #     ]
-    #     sys.path.remove(test_directory)
-
-    if IS_IN_CI:
-        selected_tests = get_reordered_tests(
-            selected_tests, ENABLE_PR_HISTORY_REORDERING
-        )
+    if IS_CI:
+        selected_tests = get_reordered_tests(selected_tests)
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 

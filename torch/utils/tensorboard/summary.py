@@ -1,24 +1,28 @@
 import json
 import logging
-import numpy as np
 import os
 from typing import Optional
 
+import numpy as np
+from google.protobuf import struct_pb2
+
 # pylint: disable=unused-import
 from six.moves import range
-
-from google.protobuf import struct_pb2
-from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
+from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
-from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
-from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
+from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
+from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
+
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
+__all__ = ['hparams', 'scalar', 'histogram_raw', 'histogram', 'make_histogram', 'image', 'image_boxes', 'draw_boxes',
+           'make_image', 'video', 'make_video', 'audio', 'custom_scalars', 'text', 'pr_curve_raw', 'pr_curve', 'compute_curve',
+           'mesh']
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +264,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     return exp, ssi, sei
 
 
-def scalar(name, scalar, collections=None, new_style=False, double_precision=False):
+def scalar(name, tensor, collections=None, new_style=False, double_precision=False):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
@@ -276,14 +280,16 @@ def scalar(name, scalar, collections=None, new_style=False, double_precision=Fal
     Raises:
       ValueError: If tensor has the wrong shape or type.
     """
-    scalar = make_np(scalar)
-    assert scalar.squeeze().ndim == 0, "scalar should be 0D"
+    tensor = make_np(tensor).squeeze()
+    assert (
+        tensor.ndim == 0
+    ), f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions."
     # python float is double precision in numpy
-    scalar = float(scalar)
+    scalar = float(tensor)
     if new_style:
-        tensor = TensorProto(float_val=[scalar], dtype="DT_FLOAT")
+        tensor_proto = TensorProto(float_val=[scalar], dtype="DT_FLOAT")
         if double_precision:
-            tensor = TensorProto(double_val=[scalar], dtype="DT_DOUBLE")
+            tensor_proto = TensorProto(double_val=[scalar], dtype="DT_DOUBLE")
 
         plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
         smd = SummaryMetadata(plugin_data=plugin_data)
@@ -291,7 +297,7 @@ def scalar(name, scalar, collections=None, new_style=False, double_precision=Fal
             value=[
                 Summary.Value(
                     tag=name,
-                    tensor=tensor,
+                    tensor=tensor_proto,
                     metadata=smd,
                 )
             ]
@@ -565,12 +571,11 @@ def audio(tag, tensor, sample_rate=44100):
     import wave
 
     fio = io.BytesIO()
-    wave_write = wave.open(fio, "wb")
-    wave_write.setnchannels(1)
-    wave_write.setsampwidth(2)
-    wave_write.setframerate(sample_rate)
-    wave_write.writeframes(array.data)
-    wave_write.close()
+    with wave.open(fio, "wb") as wave_write:
+        wave_write.setnchannels(1)
+        wave_write.setsampwidth(2)
+        wave_write.setframerate(sample_rate)
+        wave_write.writeframes(array.data)
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(

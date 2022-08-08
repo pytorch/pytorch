@@ -5,6 +5,7 @@ from typing import Union, Iterable
 
 _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
+__all__ = ['clip_grad_norm_', 'clip_grad_norm', 'clip_grad_value_']
 
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
@@ -29,17 +30,17 @@ def clip_grad_norm_(
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    parameters = [p for p in parameters if p.grad is not None]
+    grads = [p.grad for p in parameters if p.grad is not None]
     max_norm = float(max_norm)
     norm_type = float(norm_type)
-    if len(parameters) == 0:
+    if len(grads) == 0:
         return torch.tensor(0.)
-    device = parameters[0].grad.device
+    device = grads[0].device
     if norm_type == inf:
-        norms = [p.grad.detach().abs().max().to(device) for p in parameters]
+        norms = [g.detach().abs().max().to(device) for g in grads]
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
-        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
+        total_norm = torch.norm(torch.stack([torch.norm(g.detach(), norm_type).to(device) for g in grads]), norm_type)
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(
             f'The total norm of order {norm_type} for gradients from '
@@ -51,8 +52,8 @@ def clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for p in parameters:
-        p.grad.detach().mul_(clip_coef_clamped.to(p.grad.device))
+    for g in grads:
+        g.detach().mul_(clip_coef_clamped.to(g.device))
     return total_norm
 
 

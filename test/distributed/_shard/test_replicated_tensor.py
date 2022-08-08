@@ -112,7 +112,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             res = binary_op(st, replica_tensor)
             self.assertIsInstance(res, sharded_tensor.ShardedTensor)
             self.assertNotIsInstance(res, ReplicatedTensor)
-            output = torch.empty((12, 3)) if self.rank == 0 else None
+            output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             res.gather(dst=0, out=output)
 
             if self.rank == 0:
@@ -123,7 +123,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             reflect_res = binary_op(replica_tensor, st)
             self.assertIsInstance(reflect_res, sharded_tensor.ShardedTensor)
             self.assertNotIsInstance(reflect_res, ReplicatedTensor)
-            reflect_output = torch.empty((12, 3)) if self.rank == 0 else None
+            reflect_output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             reflect_res.gather(dst=0, out=reflect_output)
 
             if self.rank == 0:
@@ -165,7 +165,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             res = binary_op(st, replica_tensor)
 
             self.assertIsInstance(res, sharded_tensor.ShardedTensor)
-            output = torch.empty((12, 3)) if self.rank == 0 else None
+            output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             res.gather(dst=0, out=output)
 
             if self.rank == 0:

@@ -22,12 +22,13 @@ class StorageWriter(abc.ABC):
     3) write_bytes
     4) write_tensors.
     5) Wait for (2) and (3) futures. If either fail, abort checkpoint.
-    6) (called once globally) write_metadata().
-    7) (called once globally) finish().
+    6) (called once globally) finish().
 
     There's a single process that executes methods that are called once globally.
-
     The writes from (3) and (4) are initiated before any waiting is done.
+    The last call to finish() has the semantics of commiting the checkpoint.
+
+
     """
     @abc.abstractmethod
     def prepare(self) -> None:
@@ -78,12 +79,12 @@ class StorageWriter(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def write_metadata(self, metadata: Metadata) -> None:
+    def finish(self, metadata: Metadata) -> None:
         """
-        Write the global metadata and commit the checkpoint.
+        Writes the metadata and marks the current checkpoint as sucessfull.
 
         This method is called once globally after all data was writen
-        and is used to commit the checkpoint.
+        and is used to write its metadata and commit the checkpoint.
 
         The `metadata` object includes a global view of the checkpoint
         and, while writing it is optional, it must be recoverable by the
@@ -99,16 +100,6 @@ class StorageWriter(abc.ABC):
             None
         """
         pass
-
-    @abc.abstractmethod
-    def finish(self) -> None:
-        """
-        Mark the current checkpoint as sucessfully done.
-
-        This method is called once globally after metadata is writen.
-        """
-        pass
-
 
     def prepare_storage(self, storage_writes: List[Union[TensorWriteRequest, BytesWriteRequest]]) -> None:
         """

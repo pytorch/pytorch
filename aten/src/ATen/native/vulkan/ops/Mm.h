@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/VulkanPackedContext.h>
 #include <torch/library.h>
 
 namespace at {
@@ -10,41 +11,28 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-class LinearOpContext final : public torch::jit::CustomClassHolder {
+class LinearPackedContext final : virtual public VulkanPackedContext,
+                                  public torch::jit::CustomClassHolder {
+ private:
+  c10::impl::GenericList unpacked_;
+
  public:
-  static LinearOpContext create(
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias);
+  LinearPackedContext(const Tensor& weight, const c10::optional<Tensor>& bias);
 
-  using State = std::tuple<Tensor, c10::optional<Tensor>>;
+  static LinearPackedContext pack(c10::impl::GenericList);
 
-  Tensor run(const Tensor& input, float beta, float alpha, const std::string& op_name) const;
-  State unpack() const;
-
- private:
-  LinearOpContext(
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias);
-
- private:
-  struct {
-    vTensor v_weight;
-    vTensor v_bias;
-  } packed_;
-
-  struct {
-    Tensor weight;
-    c10::optional<Tensor> bias;
-  } unpacked_;
+  const c10::impl::GenericList unpack() const override {
+    return unpacked_;
+  }
 };
 
-c10::intrusive_ptr<LinearOpContext> linear_prepack(
+c10::intrusive_ptr<LinearPackedContext> create_linear_context(
     Tensor&& weight,
     c10::optional<Tensor>&& bias);
 
-Tensor linear_run(
+Tensor run_linear_context(
     const Tensor& input,
-    const c10::intrusive_ptr<LinearOpContext>& context);
+    const c10::intrusive_ptr<LinearPackedContext>& context);
 
 } // namespace ops
 } // namespace vulkan

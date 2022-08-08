@@ -12,6 +12,8 @@
 #define MPS_ERROR_RUNTIME_TOO_LOW \
   "The MPS backend is supported on MacOS 12.3+.", \
   "Current OS version can be queried using `sw_vers`"
+#define MPS_ERROR_DOUBLE_NOT_SUPPORTED "Cannot convert a MPS Tensor to float64 dtype " \
+  "as the MPS framework doesn't support float64. Please use float32 instead."
 
 namespace at { namespace detail {
 TensorBase empty_mps(
@@ -23,7 +25,7 @@ TensorBase empty_mps(
     c10::optional<c10::MemoryFormat> memory_format_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
-  if (__builtin_available(macOS 12.3, *)) {
+  if (at::hasMPS()) {
     auto device = device_or_default(device_opt);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::MPS);
 
@@ -35,6 +37,8 @@ TensorBase empty_mps(
     auto* allocator = at::mps::GetMPSAllocator();
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
+    TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
+
     auto dtype_meta = scalarTypeToTypeMeta(dtype);
     int64_t size_bytes = nelements * dtype_meta.itemsize();
     auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -83,9 +87,10 @@ TensorBase empty_strided_mps(
     c10::optional<Device> device_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
-  if (__builtin_available(macOS 12.3, *)) {
+  if (at::hasMPS()) {
     auto device = device_or_default(device_opt);
     TORCH_INTERNAL_ASSERT(device.is_mps());
+    TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
     const DeviceGuard device_guard(device);
     auto* allocator = at::mps::GetMPSAllocator();
     constexpr c10::DispatchKeySet mps_dks(c10::DispatchKey::MPS);
