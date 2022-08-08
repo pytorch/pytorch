@@ -807,13 +807,13 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
   not_zero_mask = not_zero_mask.any(-1).any(-1);
 
-  if (n_batch_dim > 1) {
-    // Flatten to single batch dim
-    values = values.flatten(0, n_batch_dim - 1);
-    not_zero_mask = not_zero_mask.flatten(0, n_batch_dim - 1);
-  }
   if (is_batched) {
     // Some extra setup and checks for batched
+    if (n_batch_dim > 1) {
+      // Flatten to single batch dim
+      values = values.flatten(0, n_batch_dim - 1);
+      not_zero_mask = not_zero_mask.flatten(0, n_batch_dim - 1);
+    }
     TORCH_CHECK(
         not_zero_mask.size(0) > 0,
         "to_sparse_bsc: Expected product of batch dimensions to be non-zero.");
@@ -840,11 +840,16 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   // This only works if the col_indices vector is in ascending order.
   Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
       col_indices, not_zero_mask.size(-1), false /*out_int32*/);
-  // We need the values to blocked row major (they are), but blocks to be col
-  // major, so we transpose the leading two dims The mask must transpose as well
-  // to index it correctly
-  values = values.transpose(0, 1).flatten(0, -3).index_select(
-      0, _mask_to_indices(not_zero_mask.transpose(0, 1).flatten()));
+  {
+    // We need the values to blocked row major (they are), but blocks to be col
+    // major, so we transpose the leading two dims.
+    values = values.transpose(0, 1).flatten(0, -3);
+    // The mask must transpose as well
+    // to index it correctly
+    auto mask_indices =
+        _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
+    values = values.index_select(0, mask_indices);
+  }
   if (is_batched) {
     auto batch_shape = self.sizes().slice(0, n_batch_dim);
     auto n_batch = std::accumulate(
@@ -852,7 +857,6 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
         batch_shape.end(),
         int64_t{1},
         std::multiplies<int64_t>());
-    // Note nonzero_mask.size(-1) / block_size_1 leads to FPE when cols is zero
     ccol_indices = at::_compressed_to_batched_compressed_indices(
         ccol_indices, n_batch, false /*out_int32*/);
 

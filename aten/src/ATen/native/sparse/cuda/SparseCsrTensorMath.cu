@@ -218,7 +218,7 @@ __global__ void compressed_to_batched_compressed_indices_cuda_kernel(
   const int64_t batch_length = ncomp_per_batch + 1;
   if (b < n_batch) {
     const auto c0 = b * ncomp_per_batch;
-    //Subtract the first cindx value from each within the bath to get the batched_cindx value.
+    //Subtract the first cindx value from each within the batch to get the batched_cindx value.
     const auto batch_delta = compressed_in[c0];
     const auto b0 = b * batch_length;
     for (int64_t i = 0; i < batch_length; ++i) {
@@ -237,7 +237,7 @@ void compressed_to_batched_compressed_indices_cuda(
   TORCH_INTERNAL_ASSERT(batched_out.is_contiguous());
   input_t* compressed_data_in = compressed_->data_ptr<input_t>();
   output_t* batched_data_out = batched_out.data_ptr<output_t>();
-  const auto ncomp_per_batch = (compressed_in.size(-1) - 1) / n_batch;
+  const auto ncomp_per_batch = batched_out.size(-1) - 1;
 
   // Run n_batch threads...
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
