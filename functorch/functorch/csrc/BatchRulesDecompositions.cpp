@@ -130,7 +130,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
   OP_DECOMPOSE(instance_norm);
-  OP_DECOMPOSE(inverse);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
   OP_DECOMPOSE(layer_norm);
