@@ -11,7 +11,6 @@ import torch
 from torch._six import inf
 import torch.optim as optim
 import torch.optim._multi_tensor as optim_mt
-import torch.optim._fused as optim_fused
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -462,15 +461,17 @@ class TestOptim(TestCase):
                 lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
             )
 
-    def _test_derived_optimizers(self, optimizer_pairs_with_flags):
+    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
+        assert flag in ("foreach", "fused")
 
         kIterations = 4
         device = 'cuda'
-        for optimizers, params in optimizer_pairs_with_flags:
+        for optimizer_ctor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for opt in optimizers:
+            for flag_value in (False, True):
+                params[flag] = flag_value
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
                 torch.manual_seed(1)
@@ -479,7 +480,7 @@ class TestOptim(TestCase):
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
                 model.to(dtype=torch.float64, device=device)
-                optimizer = opt(model.parameters(), **params)
+                optimizer = optimizer_ctor(model.parameters(), **params)
 
                 for _ in range(kIterations):
                     optimizer.zero_grad()
@@ -515,46 +516,46 @@ class TestOptim(TestCase):
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
-            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=1., amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=1., amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=0., amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=0., amsgrad=False)),
+            (optim.NAdam, dict(weight_decay=0., momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=1., momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=0., momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.SGD, dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
+            (optim.SGD, dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
+            (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.ASGD, dict(weight_decay=0)),
+            (optim.ASGD, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0)),
+            (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0)),
+            (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0)),
+            (optim.Adagrad, dict(weight_decay=1)),
         ]
-        self._test_derived_optimizers(optimizer_pairs_with_flags)
+        self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
 
     def test_fused_optimizers(self):
         optimizer_pairs_with_flags = [
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=True)),
         ]
-        self._test_derived_optimizers(optimizer_pairs_with_flags)
+        self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
