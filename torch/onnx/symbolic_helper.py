@@ -113,7 +113,7 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
                         + "', since it's not constant, please try to make "
                         "things (e.g., kernel size) static if possible"
                     )
-            return [int(_node_get(v.node, "value")) for v in value.node().inputs()]
+            return [int(_node_get(v.node(), "value")) for v in value.node().inputs()]
         else:
             raise RuntimeError(
                 "ONNX symbolic doesn't know to interpret ListConstruct node"
