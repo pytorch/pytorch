@@ -1554,7 +1554,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(TypeError):
             len(dp1)
 
-    def test_shuffle_iterdatapipe(self):
+    def test_shuffler_iterdatapipe(self):
         exp = list(range(100))
         input_ds = dp.iter.IterableWrapper(exp)
 
