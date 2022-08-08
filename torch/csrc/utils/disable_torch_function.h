@@ -23,6 +23,35 @@ bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
 bool has_torch_function(PyObject* obj);
 bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
+struct TorchFunctionChecker {
+  bool has_torch_function(PyObject* obj) {
+    return check_has_torch_function(obj);
+  }
+  bool has_torch_function(c10::ArrayRef<PyObject*> args) {
+    for (auto obj : args) {
+      if (check_has_torch_function(obj)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+private:
+  TorchFunctionChecker() = default;
+
+  template <typename FCheck, typename FHandle, typename FDefault>
+  friend auto with_torch_function(FCheck check, FHandle handle, FDefault def);
+};
+
+template <typename FCheck, typename FHandle, typename FDefault>
+auto with_torch_function(FCheck check, FHandle handle_torch_function, FDefault default_impl) {
+  TorchFunctionChecker checker;
+  if (!should_skip_torch_function() && check(checker)) {
+    return handle_torch_function();
+  }
+  return default_impl();
+}
+
 struct DisableTorchDispatch {
   DisableTorchDispatch()
       : guard_(c10::DispatchKey::Python),

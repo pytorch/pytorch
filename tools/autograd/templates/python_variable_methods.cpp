@@ -64,15 +64,17 @@ namespace torch { namespace autograd {
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
-    return handle_torch_function(self, "_is_view", args);
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_view()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
+  return with_torch_function(
+      [&](auto checker) {
+        return checker.has_torch_function(self);
+      },
+      [&] {
+        return handle_torch_function(self, "_is_view", args);
+      },
+      [&] {
+        auto& self_ = THPVariable_Unpack(self);
+        return wrap(self_.is_view());
+      });
   END_HANDLE_TH_ERRORS
 }
 
