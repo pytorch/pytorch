@@ -39,6 +39,7 @@ from common_utils import (
     is_batch_norm_training,
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
+    is_valid_inplace_sample_input,
 )
 import types
 from collections import namedtuple
@@ -3114,19 +3115,6 @@ def discover_variants(opinfo):
         if alias.inplace_variant:
             inplace_variants.append(alias.inplace_variant)
     return aliases, inplace_variants
-
-
-def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
-    if inplace_variant is None:
-        return False
-    if sample_input.broadcasts_input:
-        return False
-
-    # Check if input's dtype matches the output's dtype
-    args = (sample_input.input,) + sample_input.args
-    kwargs = sample_input.kwargs
-    output_dtype = op(*args, **kwargs).dtype
-    return sample_input.input.dtype == output_dtype
 
 
 class TestVmapOperatorsOpInfo(TestCase):
