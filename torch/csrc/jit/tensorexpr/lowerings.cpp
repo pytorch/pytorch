@@ -594,6 +594,22 @@ int nnc_lowerings_lazy_registration() {
             });
       });
 
+  RegisterNNCLoweringsFunction aten_silu(
+      {"aten::silu(Tensor self) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeOneOperand(
+            "aten_silu",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a) { return a * sigmoid(a); });
+      });
+
   RegisterNNCLoweringsFunction aten_reciprocal(
       {"aten::reciprocal(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,

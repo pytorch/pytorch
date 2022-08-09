@@ -669,12 +669,12 @@ class TestCudaFuser(JitTestCase):
                       torch.isreal,
                       torch.nn.functional.softplus,
                       torch.nn.functional.gelu,
+                      torch.nn.functional.silu,
                       torch.relu,
                       torch.sigmoid,
                       torch.bitwise_not,
                       torch.tan,
-                      torch.tanh,
-                      torch.nn.functional.silu]
+                      torch.tanh]
         skip_complex = {torch.rsqrt, torch.reciprocal}
         for op, dtype in itertools.product(operations, data_types):
             if dtype.is_complex and op in skip_complex:

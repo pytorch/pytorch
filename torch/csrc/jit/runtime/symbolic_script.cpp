@@ -927,6 +927,13 @@ const std::vector<std::string> functions = {
                 return torch.gelu_backward(grad_output, self, approximate=approximate), None
             return result, backward
 
+        def silu(self):
+            result = torch.silu(self)
+            def backward(grad_output):
+                input_sigmoid = torch.sigmoid(self)
+                return grad_output * (input_sigmoid * (1 + self * (1 - input_sigmoid)))
+            return result, backward
+
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
