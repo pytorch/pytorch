@@ -471,15 +471,20 @@ def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
+def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
+    if isinstance(jit_type, _C.ListType):
+        return jit_type
+    return None
+
+
 def _is_list(x: _C.Value) -> bool:
-    return isinstance(x.type(), _C.ListType)
+    return _as_list_type(x.type()) is not None
 
 
 def _is_tensor_list(x: _C.Value) -> bool:
-    if not _is_list(x):
+    x_type = _as_list_type(x.type())
+    if x_type is None:
         return False
-    x_type = x.type()
-    x_type = typing.cast(_C.ListType, x_type)
     return isinstance(x_type.getElementType(), _C.TensorType)
 
 
@@ -489,10 +494,9 @@ def _is_scalar_list(x: _C.Value) -> bool:
     Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
-    if not _is_list(x):
+    x_type = _as_list_type(x.type())
+    if x_type is None:
         return False
-    x_type = x.type()
-    x_type = typing.cast(_C.ListType, x_type)
     element_type = str(x_type.getElementType())
     return (
         _type_utils.valid_torch_name(element_type)
