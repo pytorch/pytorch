@@ -2778,7 +2778,6 @@ const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings(
   return shape_mappings;
 }
 
-
 // clang-format on
 
 } // namespace jit
