@@ -1023,7 +1023,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
             infer_index = idim;
           }
         }
-        else {
+        else if (size_reshaped < 0) {
           AT_ERROR("invalid shape dimension ", size_reshaped);
         }
       }
