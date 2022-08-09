@@ -236,7 +236,6 @@ at::Tensor tensor_from_numpy(
     stride /= element_size_in_bytes;
   }
 
-  size_t storage_size = 1;
   for (const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
@@ -245,8 +244,6 @@ at::Tensor tensor_from_numpy(
           "(You can probably work around this by making a copy of your array "
           " with array.copy().) ");
     }
-    // XXX: this won't work for negative strides
-    storage_size += (sizes[i] - 1) * strides[i];
   }
 
   void* data_ptr = PyArray_DATA(array);
