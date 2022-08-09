@@ -42,7 +42,13 @@ class TracerBase:
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
-        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+        node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+
+        retracing_node = torch.fx.experimental.proxy_tensor.RetracingMode.current_node()
+        if retracing_node:
+            node.stack_trace = retracing_node.stack_trace
+
+        return node
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':

@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
-from torch.fx import immutable_collections
+from torch.fx import immutable_collections, Interpreter
+from torch.fx.experimental.proxy_tensor import RetracingMode
 from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -657,7 +658,10 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         with _stateless.reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            out = mod(*args[params_len:], **kwargs)
+            interpreter = Interpreter(mod)
+            with RetracingMode.preserve_stack_trace(interpreter):
+                out = interpreter.run(*args[params_len:], **kwargs)
+
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "

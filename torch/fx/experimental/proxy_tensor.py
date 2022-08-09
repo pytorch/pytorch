@@ -21,7 +21,8 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"
+           "RetracingMode"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -382,6 +383,24 @@ def wrap_key(f, inps, proxy_mode):
 
     return wrapped
 
+class RetracingMode:
+    active_interpreter = None
+
+    @classmethod
+    @contextmanager
+    def preserve_stack_trace(cls, interpreter):
+        saved_intepreter = cls.active_interpreter
+        try:
+            cls.active_interpreter = interpreter
+            yield
+        finally:
+            cls.active_interpreter = saved_intepreter
+
+    @classmethod
+    def current_node(cls):
+        if cls.active_interpreter:
+            return getattr(cls.active_interpreter, "current_node", None)
+        return None
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, trace_factory_functions=True):
