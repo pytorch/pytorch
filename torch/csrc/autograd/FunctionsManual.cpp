@@ -3463,15 +3463,15 @@ Tensor eig_backward(
   // complex components of eigenvalues, while torch.linalg.eig will most likely
   // always return complex eigenvalues.
   if (!self.is_complex()) {
-    auto is_imag_eigvals_zero = false;
+    Tensor is_imag_eigvals_zero;
     // path for torch.eig with always a "real" 2D tensor of eigenvalues
     if (!D.is_complex()) {
       // narrow extracts the column corresponding to the imaginary part
-      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min();
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D) == 0.0).min();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for
@@ -3481,7 +3481,7 @@ Tensor eig_backward(
     }
     // No support for complex eigenvalues for real inputs yet.
     TORCH_CHECK(
-        is_imag_eigvals_zero,
+        at::equal(is_imag_eigvals_zero, is_imag_eigvals_zero.new_ones({})),
         "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
   } else {
     // torch.eig returns 2d tensors for eigenvalues,
