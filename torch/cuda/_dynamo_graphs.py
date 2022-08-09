@@ -5,7 +5,7 @@ from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 import torchdynamo  # type: ignore[import]
-from torchdynamo.optimizations.training import AOTAutogradStrategy  # type: ignore[import]
+from torchdynamo.optimizations.training import AotAutogradStrategy  # type: ignore[import]
 
 import operator
 from collections import defaultdict
@@ -152,9 +152,9 @@ def raw_aot_autograd_cudagraphs(model, inputs):
     return aot_module_simplified(model, **kwargs)
 
 
-class AOTAutogradCudaGraphs(AOTAutogradStrategy):
+class AotAutogradCudaGraphs(AotAutogradStrategy):
     def candidate(self):
         return raw_aot_autograd_cudagraphs(self.gm, self.example_inputs)
 
 
-aot_autograd_cudagraphs = AOTAutogradCudaGraphs.compile_fn
+aot_autograd_cudagraphs = AotAutogradCudaGraphs.compile_fn
