@@ -2337,15 +2337,11 @@ torch.cuda.synchronize()
 
     def test_grad_scaling_autocast(self):
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
-            # with self.subTest(optimizer=optimizer_ctor.__name__):
-            with contextlib.nullcontext():
-                self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
 
     def test_grad_scaling_autocast_foreach(self):
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
-            # with self.subTest(optimizer=optimizer_ctor.__name__):
-            with contextlib.nullcontext():
-                self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
     def test_grad_scaling_autocast_fused(self):
         self._grad_scaling_autocast_test(optimizer_ctor=torch.optim.Adam, optimizer_kwargs={"fused": True})
