@@ -1,5 +1,18 @@
 #pragma once
 
+#include <cstdlib>
+#include <cstdint>
+#include <cmath>
+#include <cfloat>
+#include <limits>
+#include <type_traits>
+#include <ATen/NumericUtils.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <c10/util/MathConstants.h>
+#include <c10/util/math_compat.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/jiterator_macros.h>
 #include <ATen/native/special_functions/bessel_j_0.h>
 
 namespace at {

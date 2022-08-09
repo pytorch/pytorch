@@ -1,0 +1,510 @@
+INCLUDE(FetchContent)
+
+FETCHCONTENT_DECLARE(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG release-1.12.1
+)
+
+SET(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+FETCHCONTENT_MAKEAVAILABLE(googletest)
+
+ENABLE_TESTING()
+
+INCLUDE(GoogleTest)
+
+ADD_EXECUTABLE(airy_ai_test airy_ai_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(airy_ai_test PRIVATE .)
+TARGET_LINK_LIBRARIES(airy_ai_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(airy_ai_test)
+
+ADD_EXECUTABLE(airy_bi_test airy_bi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(airy_bi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(airy_bi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(airy_bi_test)
+
+ADD_EXECUTABLE(associated_laguerre_polynomial_l_test associated_laguerre_polynomial_l_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(associated_laguerre_polynomial_l_test PRIVATE .)
+TARGET_LINK_LIBRARIES(associated_laguerre_polynomial_l_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(associated_laguerre_polynomial_l_test)
+
+ADD_EXECUTABLE(associated_legendre_p_test associated_legendre_p_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(associated_legendre_p_test PRIVATE .)
+TARGET_LINK_LIBRARIES(associated_legendre_p_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(associated_legendre_p_test)
+
+ADD_EXECUTABLE(bernoulli_number_test bernoulli_number_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(bernoulli_number_test PRIVATE .)
+TARGET_LINK_LIBRARIES(bernoulli_number_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(bernoulli_number_test)
+
+ADD_EXECUTABLE(bessel_j_test bessel_j_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(bessel_j_test PRIVATE .)
+TARGET_LINK_LIBRARIES(bessel_j_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(bessel_j_test)
+
+ADD_EXECUTABLE(bessel_y_test bessel_y_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(bessel_y_test PRIVATE .)
+TARGET_LINK_LIBRARIES(bessel_y_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(bessel_y_test)
+
+ADD_EXECUTABLE(beta_test beta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(beta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(beta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(beta_test)
+
+ADD_EXECUTABLE(binomial_coefficient_test binomial_coefficient_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(binomial_coefficient_test PRIVATE .)
+TARGET_LINK_LIBRARIES(binomial_coefficient_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(binomial_coefficient_test)
+
+ADD_EXECUTABLE(carlson_elliptic_r_c_test carlson_elliptic_r_c_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(carlson_elliptic_r_c_test PRIVATE .)
+TARGET_LINK_LIBRARIES(carlson_elliptic_r_c_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(carlson_elliptic_r_c_test)
+
+ADD_EXECUTABLE(carlson_elliptic_r_d_test carlson_elliptic_r_d_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(carlson_elliptic_r_d_test PRIVATE .)
+TARGET_LINK_LIBRARIES(carlson_elliptic_r_d_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(carlson_elliptic_r_d_test)
+
+ADD_EXECUTABLE(carlson_elliptic_r_f_test carlson_elliptic_r_f_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(carlson_elliptic_r_f_test PRIVATE .)
+TARGET_LINK_LIBRARIES(carlson_elliptic_r_f_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(carlson_elliptic_r_f_test)
+
+ADD_EXECUTABLE(carlson_elliptic_r_g_test carlson_elliptic_r_g_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(carlson_elliptic_r_g_test PRIVATE .)
+TARGET_LINK_LIBRARIES(carlson_elliptic_r_g_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(carlson_elliptic_r_g_test)
+
+ADD_EXECUTABLE(carlson_elliptic_r_j_test carlson_elliptic_r_j_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(carlson_elliptic_r_j_test PRIVATE .)
+TARGET_LINK_LIBRARIES(carlson_elliptic_r_j_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(carlson_elliptic_r_j_test)
+
+ADD_EXECUTABLE(chebyshev_polynomial_t_test chebyshev_polynomial_t_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(chebyshev_polynomial_t_test PRIVATE .)
+TARGET_LINK_LIBRARIES(chebyshev_polynomial_t_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(chebyshev_polynomial_t_test)
+
+ADD_EXECUTABLE(chebyshev_polynomial_u_test chebyshev_polynomial_u_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(chebyshev_polynomial_u_test PRIVATE .)
+TARGET_LINK_LIBRARIES(chebyshev_polynomial_u_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(chebyshev_polynomial_u_test)
+
+ADD_EXECUTABLE(chebyshev_polynomial_v_test chebyshev_polynomial_v_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(chebyshev_polynomial_v_test PRIVATE .)
+TARGET_LINK_LIBRARIES(chebyshev_polynomial_v_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(chebyshev_polynomial_v_test)
+
+ADD_EXECUTABLE(chebyshev_polynomial_w_test chebyshev_polynomial_w_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(chebyshev_polynomial_w_test PRIVATE .)
+TARGET_LINK_LIBRARIES(chebyshev_polynomial_w_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(chebyshev_polynomial_w_test)
+
+ADD_EXECUTABLE(clausen_cl_test clausen_cl_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(clausen_cl_test PRIVATE .)
+TARGET_LINK_LIBRARIES(clausen_cl_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(clausen_cl_test)
+
+ADD_EXECUTABLE(complete_elliptic_integral_e_test complete_elliptic_integral_e_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(complete_elliptic_integral_e_test PRIVATE .)
+TARGET_LINK_LIBRARIES(complete_elliptic_integral_e_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(complete_elliptic_integral_e_test)
+
+ADD_EXECUTABLE(complete_elliptic_integral_k_test complete_elliptic_integral_k_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(complete_elliptic_integral_k_test PRIVATE .)
+TARGET_LINK_LIBRARIES(complete_elliptic_integral_k_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(complete_elliptic_integral_k_test)
+
+ADD_EXECUTABLE(complete_elliptic_integral_pi_test complete_elliptic_integral_pi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(complete_elliptic_integral_pi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(complete_elliptic_integral_pi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(complete_elliptic_integral_pi_test)
+
+ADD_EXECUTABLE(complete_legendre_elliptic_integral_d_test complete_legendre_elliptic_integral_d_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(complete_legendre_elliptic_integral_d_test PRIVATE .)
+TARGET_LINK_LIBRARIES(complete_legendre_elliptic_integral_d_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(complete_legendre_elliptic_integral_d_test)
+
+ADD_EXECUTABLE(confluent_hypergeometric_0_f_1_test confluent_hypergeometric_0_f_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(confluent_hypergeometric_0_f_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(confluent_hypergeometric_0_f_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(confluent_hypergeometric_0_f_1_test)
+
+ADD_EXECUTABLE(cos_pi_test cos_pi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(cos_pi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(cos_pi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(cos_pi_test)
+
+ADD_EXECUTABLE(cosine_integral_ci_test cosine_integral_ci_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(cosine_integral_ci_test PRIVATE .)
+TARGET_LINK_LIBRARIES(cosine_integral_ci_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(cosine_integral_ci_test)
+
+ADD_EXECUTABLE(debye_d_test debye_d_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(debye_d_test PRIVATE .)
+TARGET_LINK_LIBRARIES(debye_d_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(debye_d_test)
+
+ADD_EXECUTABLE(digamma_test digamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(digamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(digamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(digamma_test)
+
+ADD_EXECUTABLE(dilogarithm_li_2_test dilogarithm_li_2_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(dilogarithm_li_2_test PRIVATE .)
+TARGET_LINK_LIBRARIES(dilogarithm_li_2_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(dilogarithm_li_2_test)
+
+ADD_EXECUTABLE(dirichlet_beta_test dirichlet_beta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(dirichlet_beta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(dirichlet_beta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(dirichlet_beta_test)
+
+ADD_EXECUTABLE(dirichlet_eta_test dirichlet_eta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(dirichlet_eta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(dirichlet_eta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(dirichlet_eta_test)
+
+ADD_EXECUTABLE(dirichlet_lambda_test dirichlet_lambda_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(dirichlet_lambda_test PRIVATE .)
+TARGET_LINK_LIBRARIES(dirichlet_lambda_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(dirichlet_lambda_test)
+
+ADD_EXECUTABLE(double_factorial_test double_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(double_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(double_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(double_factorial_test)
+
+ADD_EXECUTABLE(exp_airy_ai_test exp_airy_ai_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exp_airy_ai_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exp_airy_ai_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exp_airy_ai_test)
+
+ADD_EXECUTABLE(exp_airy_bi_test exp_airy_bi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exp_airy_bi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exp_airy_bi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exp_airy_bi_test)
+
+ADD_EXECUTABLE(exp_modified_bessel_i_test exp_modified_bessel_i_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exp_modified_bessel_i_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exp_modified_bessel_i_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exp_modified_bessel_i_test)
+
+ADD_EXECUTABLE(exp_modified_bessel_k_test exp_modified_bessel_k_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exp_modified_bessel_k_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exp_modified_bessel_k_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exp_modified_bessel_k_test)
+
+ADD_EXECUTABLE(exponential_integral_e_test exponential_integral_e_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exponential_integral_e_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exponential_integral_e_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exponential_integral_e_test)
+
+ADD_EXECUTABLE(exponential_integral_ei_test exponential_integral_ei_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(exponential_integral_ei_test PRIVATE .)
+TARGET_LINK_LIBRARIES(exponential_integral_ei_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(exponential_integral_ei_test)
+
+ADD_EXECUTABLE(factorial_test factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(factorial_test)
+
+ADD_EXECUTABLE(falling_factorial_test falling_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(falling_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(falling_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(falling_factorial_test)
+
+ADD_EXECUTABLE(fresnel_integral_c_test fresnel_integral_c_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(fresnel_integral_c_test PRIVATE .)
+TARGET_LINK_LIBRARIES(fresnel_integral_c_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(fresnel_integral_c_test)
+
+ADD_EXECUTABLE(fresnel_integral_s_test fresnel_integral_s_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(fresnel_integral_s_test PRIVATE .)
+TARGET_LINK_LIBRARIES(fresnel_integral_s_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(fresnel_integral_s_test)
+
+ADD_EXECUTABLE(gauss_hypergeometric_2_f_1_test gauss_hypergeometric_2_f_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(gauss_hypergeometric_2_f_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(gauss_hypergeometric_2_f_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(gauss_hypergeometric_2_f_1_test)
+
+ADD_EXECUTABLE(gegenbauer_polynomial_c_test gegenbauer_polynomial_c_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(gegenbauer_polynomial_c_test PRIVATE .)
+TARGET_LINK_LIBRARIES(gegenbauer_polynomial_c_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(gegenbauer_polynomial_c_test)
+
+ADD_EXECUTABLE(hankel_h_1_test hankel_h_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hankel_h_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hankel_h_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hankel_h_1_test)
+
+ADD_EXECUTABLE(hankel_h_2_test hankel_h_2_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hankel_h_2_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hankel_h_2_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hankel_h_2_test)
+
+ADD_EXECUTABLE(hermite_polynomial_h_test hermite_polynomial_h_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hermite_polynomial_h_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hermite_polynomial_h_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hermite_polynomial_h_test)
+
+ADD_EXECUTABLE(hermite_polynomial_he_test hermite_polynomial_he_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hermite_polynomial_he_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hermite_polynomial_he_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hermite_polynomial_he_test)
+
+ADD_EXECUTABLE(heuman_lambda_test heuman_lambda_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(heuman_lambda_test PRIVATE .)
+TARGET_LINK_LIBRARIES(heuman_lambda_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(heuman_lambda_test)
+
+ADD_EXECUTABLE(hurwitz_zeta_test hurwitz_zeta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hurwitz_zeta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hurwitz_zeta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hurwitz_zeta_test)
+
+ADD_EXECUTABLE(hyperbolic_cosine_integral_chi_test hyperbolic_cosine_integral_chi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hyperbolic_cosine_integral_chi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hyperbolic_cosine_integral_chi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hyperbolic_cosine_integral_chi_test)
+
+ADD_EXECUTABLE(hyperbolic_sine_integral_shi_test hyperbolic_sine_integral_shi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(hyperbolic_sine_integral_shi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(hyperbolic_sine_integral_shi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(hyperbolic_sine_integral_shi_test)
+
+ADD_EXECUTABLE(incomplete_beta_test incomplete_beta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(incomplete_beta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(incomplete_beta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(incomplete_beta_test)
+
+ADD_EXECUTABLE(incomplete_elliptic_integral_e_test incomplete_elliptic_integral_e_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(incomplete_elliptic_integral_e_test PRIVATE .)
+TARGET_LINK_LIBRARIES(incomplete_elliptic_integral_e_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(incomplete_elliptic_integral_e_test)
+
+ADD_EXECUTABLE(incomplete_elliptic_integral_f_test incomplete_elliptic_integral_f_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(incomplete_elliptic_integral_f_test PRIVATE .)
+TARGET_LINK_LIBRARIES(incomplete_elliptic_integral_f_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(incomplete_elliptic_integral_f_test)
+
+ADD_EXECUTABLE(incomplete_elliptic_integral_pi_test incomplete_elliptic_integral_pi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(incomplete_elliptic_integral_pi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(incomplete_elliptic_integral_pi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(incomplete_elliptic_integral_pi_test)
+
+ADD_EXECUTABLE(incomplete_legendre_elliptic_integral_d_test incomplete_legendre_elliptic_integral_d_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(incomplete_legendre_elliptic_integral_d_test PRIVATE .)
+TARGET_LINK_LIBRARIES(incomplete_legendre_elliptic_integral_d_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(incomplete_legendre_elliptic_integral_d_test)
+
+ADD_EXECUTABLE(jacobi_polynomial_p_test jacobi_polynomial_p_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(jacobi_polynomial_p_test PRIVATE .)
+TARGET_LINK_LIBRARIES(jacobi_polynomial_p_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(jacobi_polynomial_p_test)
+
+ADD_EXECUTABLE(jacobi_zeta_test jacobi_zeta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(jacobi_zeta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(jacobi_zeta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(jacobi_zeta_test)
+
+ADD_EXECUTABLE(kummer_confluent_hypergeometric_1_f_1_test kummer_confluent_hypergeometric_1_f_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(kummer_confluent_hypergeometric_1_f_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(kummer_confluent_hypergeometric_1_f_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(kummer_confluent_hypergeometric_1_f_1_test)
+
+#ADD_EXECUTABLE(laguerre_polynomial_l_test laguerre_polynomial_l_test.cpp)
+#TARGET_INCLUDE_DIRECTORIES(laguerre_polynomial_l_test PRIVATE .)
+#TARGET_LINK_LIBRARIES(laguerre_polynomial_l_test mmath GTest::gtest_main)
+#GTEST_DISCOVER_TESTS(laguerre_polynomial_l_test)
+
+ADD_EXECUTABLE(legendre_polynomial_p_test legendre_polynomial_p_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(legendre_polynomial_p_test PRIVATE .)
+TARGET_LINK_LIBRARIES(legendre_polynomial_p_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(legendre_polynomial_p_test)
+
+ADD_EXECUTABLE(legendre_q_test legendre_q_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(legendre_q_test PRIVATE .)
+TARGET_LINK_LIBRARIES(legendre_q_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(legendre_q_test)
+
+ADD_EXECUTABLE(ln_binomial_coefficient_test ln_binomial_coefficient_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_binomial_coefficient_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_binomial_coefficient_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_binomial_coefficient_test)
+
+ADD_EXECUTABLE(ln_double_factorial_test ln_double_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_double_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_double_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_double_factorial_test)
+
+ADD_EXECUTABLE(ln_factorial_test ln_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_factorial_test)
+
+ADD_EXECUTABLE(ln_falling_factorial_test ln_falling_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_falling_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_falling_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_falling_factorial_test)
+
+ADD_EXECUTABLE(ln_gamma_test ln_gamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_gamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_gamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_gamma_test)
+
+ADD_EXECUTABLE(ln_rising_factorial_test ln_rising_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(ln_rising_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(ln_rising_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(ln_rising_factorial_test)
+
+ADD_EXECUTABLE(lower_incomplete_gamma_test lower_incomplete_gamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(lower_incomplete_gamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(lower_incomplete_gamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(lower_incomplete_gamma_test)
+
+ADD_EXECUTABLE(modified_bessel_i_test modified_bessel_i_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(modified_bessel_i_test PRIVATE .)
+TARGET_LINK_LIBRARIES(modified_bessel_i_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(modified_bessel_i_test)
+
+ADD_EXECUTABLE(modified_bessel_k_test modified_bessel_k_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(modified_bessel_k_test PRIVATE .)
+TARGET_LINK_LIBRARIES(modified_bessel_k_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(modified_bessel_k_test)
+
+ADD_EXECUTABLE(nome_q_test nome_q_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(nome_q_test PRIVATE .)
+TARGET_LINK_LIBRARIES(nome_q_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(nome_q_test)
+
+ADD_EXECUTABLE(owens_t_test owens_t_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(owens_t_test PRIVATE .)
+TARGET_LINK_LIBRARIES(owens_t_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(owens_t_test)
+
+ADD_EXECUTABLE(polygamma_test polygamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(polygamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(polygamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(polygamma_test)
+
+ADD_EXECUTABLE(radial_polynomial_r_test radial_polynomial_r_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(radial_polynomial_r_test PRIVATE .)
+TARGET_LINK_LIBRARIES(radial_polynomial_r_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(radial_polynomial_r_test)
+
+ADD_EXECUTABLE(reciprocal_gamma_test reciprocal_gamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(reciprocal_gamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(reciprocal_gamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(reciprocal_gamma_test)
+
+ADD_EXECUTABLE(riemann_zeta_test riemann_zeta_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(riemann_zeta_test PRIVATE .)
+TARGET_LINK_LIBRARIES(riemann_zeta_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(riemann_zeta_test)
+
+ADD_EXECUTABLE(rising_factorial_test rising_factorial_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(rising_factorial_test PRIVATE .)
+TARGET_LINK_LIBRARIES(rising_factorial_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(rising_factorial_test)
+
+ADD_EXECUTABLE(sin_pi_test sin_pi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(sin_pi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(sin_pi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(sin_pi_test)
+
+ADD_EXECUTABLE(sinc_pi_test sinc_pi_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(sinc_pi_test PRIVATE .)
+TARGET_LINK_LIBRARIES(sinc_pi_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(sinc_pi_test)
+
+ADD_EXECUTABLE(sine_integral_si_test sine_integral_si_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(sine_integral_si_test PRIVATE .)
+TARGET_LINK_LIBRARIES(sine_integral_si_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(sine_integral_si_test)
+
+ADD_EXECUTABLE(spherical_bessel_j_test spherical_bessel_j_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_bessel_j_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_bessel_j_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_bessel_j_test)
+
+ADD_EXECUTABLE(spherical_bessel_y_test spherical_bessel_y_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_bessel_y_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_bessel_y_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_bessel_y_test)
+
+ADD_EXECUTABLE(spherical_hankel_h_1_test spherical_hankel_h_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_hankel_h_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_hankel_h_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_hankel_h_1_test)
+
+ADD_EXECUTABLE(spherical_hankel_h_2_test spherical_hankel_h_2_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_hankel_h_2_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_hankel_h_2_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_hankel_h_2_test)
+
+ADD_EXECUTABLE(spherical_harmonic_y_test spherical_harmonic_y_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_harmonic_y_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_harmonic_y_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_harmonic_y_test)
+
+ADD_EXECUTABLE(spherical_legendre_y_test spherical_legendre_y_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_legendre_y_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_legendre_y_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_legendre_y_test)
+
+ADD_EXECUTABLE(spherical_modified_bessel_i_test spherical_modified_bessel_i_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_modified_bessel_i_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_modified_bessel_i_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_modified_bessel_i_test)
+
+ADD_EXECUTABLE(spherical_modified_bessel_k_test spherical_modified_bessel_k_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(spherical_modified_bessel_k_test PRIVATE .)
+TARGET_LINK_LIBRARIES(spherical_modified_bessel_k_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(spherical_modified_bessel_k_test)
+
+ADD_EXECUTABLE(stirling_number_1_test stirling_number_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(stirling_number_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(stirling_number_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(stirling_number_1_test)
+
+ADD_EXECUTABLE(stirling_number_2_test stirling_number_2_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(stirling_number_2_test PRIVATE .)
+TARGET_LINK_LIBRARIES(stirling_number_2_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(stirling_number_2_test)
+
+ADD_EXECUTABLE(theta_1_test theta_1_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(theta_1_test PRIVATE .)
+TARGET_LINK_LIBRARIES(theta_1_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(theta_1_test)
+
+ADD_EXECUTABLE(theta_2_test theta_2_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(theta_2_test PRIVATE .)
+TARGET_LINK_LIBRARIES(theta_2_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(theta_2_test)
+
+ADD_EXECUTABLE(theta_3_test theta_3_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(theta_3_test PRIVATE .)
+TARGET_LINK_LIBRARIES(theta_3_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(theta_3_test)
+
+ADD_EXECUTABLE(theta_4_test theta_4_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(theta_4_test PRIVATE .)
+TARGET_LINK_LIBRARIES(theta_4_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(theta_4_test)
+
+ADD_EXECUTABLE(upper_incomplete_gamma_test upper_incomplete_gamma_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(upper_incomplete_gamma_test PRIVATE .)
+TARGET_LINK_LIBRARIES(upper_incomplete_gamma_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(upper_incomplete_gamma_test)
+
+ADD_EXECUTABLE(zernike_polynomial_z_test zernike_polynomial_z_test.cpp)
+TARGET_INCLUDE_DIRECTORIES(zernike_polynomial_z_test PRIVATE .)
+TARGET_LINK_LIBRARIES(zernike_polynomial_z_test mmath GTest::gtest_main)
+GTEST_DISCOVER_TESTS(zernike_polynomial_z_test)

@@ -1,14 +1,29 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/Dispatch.h>
-#include <ATen/Generator.h>
-#include <ATen/MemoryOverlap.h>
-#include <ATen/Parallel.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/Math.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/UnaryOps.h>
 #include <ATen/native/special_functions/shifted_chebyshev_polynomial_v.h>
+#include <ATen/native/UnaryOps.h>
+
+#include <cmath>
+#include <limits>
+#include <type_traits>
+
+#include <ATen/Config.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/cpu/zmath.h>
+#include <ATen/OpMathType.h>
+
+#include <c10/util/math_compat.h>
+#include <c10/util/MathConstants.h>
+#include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -21,7 +36,5 @@ void shifted_chebyshev_polynomial_v_kernel(TensorIteratorBase &iterator) {
   });
 } // static void shifted_chebyshev_polynomial_v_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
-
-REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
 } // namespace native
 } // namespace at

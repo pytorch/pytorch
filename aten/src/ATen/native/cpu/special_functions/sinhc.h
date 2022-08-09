@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/native/special_functions/airy_ai.h>
+#include <ATen/native/special_functions/sinhc.h>
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
@@ -37,7 +37,5 @@ static void sinhc_kernel(TensorIteratorBase &iterator) {
   });
 } // static void sinhc_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
-
-REGISTER_DISPATCH(special_sinhc_stub, &CPU_CAPABILITY::sinhc_kernel);
 } // namespace native
 } // namespace at

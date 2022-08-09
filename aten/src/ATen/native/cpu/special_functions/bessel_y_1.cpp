@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/native/special_functions/airy_ai.h>
+#include <ATen/native/special_functions/bessel_y_1.h>
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
@@ -37,7 +37,5 @@ static void bessel_y_1_kernel(TensorIteratorBase &iterator) {
   });
 } // static void bessel_y_1_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
-
-REGISTER_DISPATCH(special_bessel_y_1_stub, &CPU_CAPABILITY::bessel_y_1_kernel);
 } // namespace native
 } // namespace at

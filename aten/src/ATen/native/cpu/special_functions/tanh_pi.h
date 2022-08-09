@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/native/special_functions/airy_ai.h>
+#include <ATen/native/special_functions/tanh_pi.h>
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
@@ -37,7 +37,5 @@ static void tanh_pi_kernel(TensorIteratorBase &iterator) {
   });
 } // static void tanh_pi_kernel(TensorIteratorBase &iterator)
 } // namespace CPU_CAPABILITY
-
-REGISTER_DISPATCH(special_tanh_pi_stub, &CPU_CAPABILITY::tanh_pi_kernel);
 } // namespace native
 } // namespace at

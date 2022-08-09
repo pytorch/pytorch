@@ -1,11 +1,13 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/numeric_t.h>
+#include <c10/util/numbers.h>
+
 namespace at {
 namespace native {
 namespace special_functions {
 namespace detail {
 template<typename T1>
-inline constexpr
 T1
 sin_pi(T1 x) {
   using T2 = numeric_t<T1>;
@@ -15,45 +17,36 @@ sin_pi(T1 x) {
   } else if (x < T1(0)) {
     return -sin_pi(-x);
   } else if (x < T1(0.5L)) {
-    return std::sin(x * c10::pi<T2>);
+    return std::sin(x * c10::numbers::pi_v<T2>);
   } else if (x < T1(1)) {
-    return std::sin((T1(1) - x) * c10::pi<T2>);
+    return std::sin((T1(1) - x) * c10::numbers::pi_v<T2>);
   } else {
-    const auto floor_x = std::floor(x);
-
-    const auto x_negative_floor_x = x - floor_x;
-
-    if ((int(floor_x) & 1) == 1) {
-      if (x_negative_floor_x < T1(0.5L)) {
-        return -1 * sin_pi(x_negative_floor_x);
+    if ((int(std::floor(x)) & 1) == 1) {
+      if (x - std::floor(x) < T1(0.5L)) {
+        return -1 * sin_pi(x - std::floor(x));
       } else {
-        return -1 * sin_pi(T1(1) - x_negative_floor_x);
+        return -1 * sin_pi(T1(1) - (x - std::floor(x)));
       }
     } else {
-      if (x_negative_floor_x < T1(0.5L)) {
-        return +1 * sin_pi(x_negative_floor_x);
+      if (x - std::floor(x) < T1(0.5L)) {
+        return +1 * sin_pi(x - std::floor(x));
       } else {
-        return +1 * sin_pi(T1(1) - x_negative_floor_x);
+        return +1 * sin_pi(T1(1) - (x - std::floor(x)));
       }
     }
   }
-} // T1 sin_pi(T1 x)
+}
 
 template<typename T1>
-inline constexpr
 std::complex<T1>
 sin_pi(std::complex<T1> z) {
   using T2 = T1;
   using T3 = numeric_t<T2>;
 
-  const auto pi_v = c10::pi<T3>;
-
-  const auto real_z = std::real(z);
-  const auto imag_z = std::imag(z);
-
-  return sin_pi(real_z) * std::cosh(pi_v * imag_z) + std::complex<T1>{0, 1} * cos_pi(real_z) * std::sinh(pi_v * imag_z);
-} // std::complex<T1> sin_pi(std::complex<T1> z)
-} // namespace detail
-} // namespace special_functions
-} // namespace native
-} // namespace at
+  return sin_pi(std::real(z)) * std::cosh(c10::numbers::pi_v<T3> * std::imag(z))
+      + std::complex<T1>{0, 1} * cos_pi(std::real(z)) * std::sinh(c10::numbers::pi_v<T3> * std::imag(z));
+}
+}
+}
+}
+}

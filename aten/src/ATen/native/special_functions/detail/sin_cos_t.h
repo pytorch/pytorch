@@ -8,8 +8,8 @@ template<typename T1>
 struct sin_cos_t {
   T1 sin_v;
   T1 cos_v;
-}; // struct sin_cos_t
-} // namespace detail
-} // namespace special_functions
-} // namespace native
-} // namespace at
+};
+}
+}
+}
+}
