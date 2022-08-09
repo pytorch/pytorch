@@ -302,6 +302,28 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 for tensor in xs:
                     self.assertEqual(tensor, expected_tensor)
 
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_broadcast_oop_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        def _broadcast_oop(y, x, rootRank, rootTensor):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            work = pg._broadcast_oop(y, x, opts)
+            work.wait()
+            return work.result()
+
+        # Every rank is root once
+        for i in range(self.world_size):
+            # Run with 1 input tensor
+            x = torch.tensor([self.rank]).cuda(self.rank_to_GPU[self.rank][0])
+            y = torch.tensor([self.rank]).fill_(-1).cuda(self.rank_to_GPU[self.rank][0])
+            _ = _broadcast_oop(y, x, i, 0)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(torch.tensor([i]), y)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")

@@ -1014,6 +1014,19 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "_broadcast_oop",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& y,
+                 at::Tensor& x,
+                 const ::c10d::BroadcastOptions& opts) {
+                return ::c10d::ops::_broadcast_oop(self, {y}, {x}, opts);
+              },
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,

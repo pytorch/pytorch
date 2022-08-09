@@ -1823,6 +1823,59 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
       "nccl:broadcast");
 }
 
+// _broadcast_oop exposes an out-of-place reduce from PGNCCL
+// Custom collectives may be implemented by coalescing broadcast operations
+// One use-case is implementing a vector all_gather (all_gather_v)
+// where unevenly sized inputs are gathered among participating ranks
+// Since all_gather provides an out-of-place API, an all_gather_v
+// semantic implemented inside dist.all_gather also needs to support
+// out-of-place, for which an out-of-place broadcast is required to be exposed
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_broadcast_oop(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const BroadcastOptions& opts) {
+  check_gpu_tensors_different_devices(outputTensors);
+  check_gpu_tensors_different_devices(inputTensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = outputTensors.back();
+  // @lint-ignore CLANGTIDY
+  auto in_tensor = inputTensors.back();
+  if (tensor.numel() != in_tensor.numel()) {
+    TORCH_CHECK(
+        false,
+        "Tensor input and output of _reduce must have the same number of elements ");
+  }
+  RECORD_PARAM_COMMS(
+      rank_, // rank
+      "broadcast", // colName
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>()); // outSplitSizes
+
+  return collective(
+      inputTensors,
+      outputTensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank * inputTensors.size() + opts.rootTensor;
+        return ncclBroadcast(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
+      },
+      OpType::_BROADCAST_OOP,
+      "nccl:_broadcast_oop");
+}
+
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {

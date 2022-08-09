@@ -48,6 +48,7 @@ enum class OpType : std::uint8_t {
   RECVANYSOURCE = 14,
   BARRIER = 15,
   _REDUCE_SCATTER_BASE = 16,
+  _BROADCAST_OOP = 18,
   UNKNOWN = 100,
 };
 
@@ -223,6 +224,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
+      const BroadcastOptions& /* opts */ = BroadcastOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support broadcast"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
         false,

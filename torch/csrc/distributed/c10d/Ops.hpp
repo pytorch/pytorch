@@ -16,6 +16,12 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> broadcast(
     at::TensorList tensors,
     const BroadcastOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+    const c10::intrusive_ptr<ProcessGroup> &process_group,
+    const std::vector<at::Tensor> &output_tensors,
+    const std::vector<at::Tensor> &input_tensors,
+    const BroadcastOptions &opts = {});
+
 TORCH_API c10::intrusive_ptr<ProcessGroup::Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,

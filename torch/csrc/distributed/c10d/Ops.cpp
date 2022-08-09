@@ -18,6 +18,20 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  return process_group->_broadcast_oop(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      BroadcastOptions{
+          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -150,6 +164,9 @@ TORCH_LIBRARY(c10d, m) {
       "broadcast_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
   m.def(
+      "_broadcast_oop_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _broadcast_oop_));
+  m.def(
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
   m.def(
@@ -197,6 +214,32 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast(
   // as it is now.
   return op.call(
       tensors,
+      process_group,
+      opts.rootRank,
+      opts.rootTensor,
+      opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const BroadcastOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::_broadcast_oop_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const std::vector<at::Tensor>&,
+                           const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t,
+                           int64_t)>();
+  // It's awakward to unbox the opts here and box them again in the custom C++
+  // op. But it's also complicated to make opts as a CustomClassHolder. Leave it
+  // as it is now.
+  return op.call(
+      output_tensors,
+      input_tensors,
       process_group,
       opts.rootRank,
       opts.rootTensor,

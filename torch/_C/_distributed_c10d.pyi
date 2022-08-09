@@ -172,6 +172,12 @@ class ProcessGroup:
         tensor: Tensor,
         root: int,
     ) -> Work: ...
+    def _broadcast_oop(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        opts=BroadcastOptions(),
+    ) -> Work: ...
     @overload
     def allreduce(
         self,

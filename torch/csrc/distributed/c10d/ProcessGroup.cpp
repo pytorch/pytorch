@@ -10,6 +10,8 @@ std::string opTypeToString(OpType opType) {
   switch (opType) {
     case OpType::BROADCAST:
       return "BROADCAST";
+    case OpType::_BROADCAST_OOP:
+      return "_BROADCAST_OOP";
     case OpType::ALLREDUCE:
       return "ALLREDUCE";
     case OpType::ALLREDUCE_COALESCED:
