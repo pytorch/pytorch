@@ -1,4 +1,5 @@
 import builtins
+import copy
 import functools
 import inspect
 import math
@@ -721,6 +722,20 @@ class Tracer(TracerBase):
         finally:
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
+
+    def __deepcopy__(self, memo):
+        # _autowrap_search contains modules, which cannot be deepcopied.
+        new_tracer = Tracer.__new__(Tracer)
+
+        for k, v in self.__dict__.items():
+            if k in {'_autowrap_search'}:
+                new_obj = copy.copy(v)
+            else:
+                new_obj = copy.deepcopy(v, memo)
+
+            new_tracer.__dict__[k] = new_obj
+
+        return new_tracer
 
 
 # List of pairs of (global dict, function name) functions
