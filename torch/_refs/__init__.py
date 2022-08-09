@@ -2997,6 +2997,8 @@ def diag_embed(
         z = torch.zeros(t_shape, dtype=t.dtype, device=t.device, requires_grad=False)
         pair = (z, t) if offset > 0 else (t, z)
         t = torch.cat(pair, dim=-1)
+        # make sure the diagonal always has the same size
+        last_dim += builtins.abs(offset)
 
     # preserve original data, but place 1 at dim1 and move last dim to dim2
     # # TODO: use movedim here once it's available:
@@ -3007,13 +3009,8 @@ def diag_embed(
     t_dims.pop()
     t = torch.permute(t, t_dims)
 
-    # generate last_dim eye mask, shifted by offset
-    if offset != 0:
-        # make sure the diagonal always has the same size
-        last_dim += builtins.abs(offset)
-
     # generate ranges shifting indices based on offset
-    a_range = torch.arange(0, last_dim, device=t.device, dtype=torch.int64)
+    a_range = torch.arange(last_dim, device=t.device, dtype=torch.int64)
     b_range = torch.arange(
         offset, last_dim + offset, device=t.device, dtype=torch.int64
     )
