@@ -124,6 +124,11 @@ NestedTensorImpl::NestedTensorImpl(
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
+  auto storage_device = storage_.device();
+  TORCH_INTERNAL_ASSERT(
+      storage_device.is_cpu() || storage_device.is_cuda(),
+      "NestedTensorImpl storage must be either CUDA or CPU but got ",
+      storage_device);
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
@@ -158,10 +163,6 @@ NestedTensorImpl::NestedTensorImpl(
       "NestedTensorImpl buffer is required to be 1 dimensional but got a buffer with ",
       buffer.dim(),
       " dimensions.");
-  TORCH_INTERNAL_ASSERT(
-      buffer.is_cuda() || buffer.is_cpu(),
-      "NestedTensorImpl buffer must be either CUDA or CPU but got ",
-      buffer.device());
 }
 
 // assume contiguous, `nested_stride_tensor` and `offsets`

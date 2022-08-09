@@ -481,7 +481,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt.is_cuda, is_cuda)
 
     @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
