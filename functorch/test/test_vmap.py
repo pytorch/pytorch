@@ -335,21 +335,6 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out["sin"], expected["sin"])
         self.assertEqual(out["cos"], expected["cos"])
 
-    # temporary test for _odict_flatten and _odict_unflatten
-    def test_pytest_odict_flatten_unflatten(self):
-
-        from functorch._src.vmap import _odict_flatten, _odict_unflatten
-
-        x = torch.randn(2, 3)
-        inpt = OrderedDict([("sin", x.sin()), ("cos", x.cos())])
-
-        out = _odict_flatten(inpt)
-        self.assertEqual(out[0], list(inpt.values()))
-        self.assertEqual(out[1], list(inpt.keys()))
-
-        recon_inpt = _odict_unflatten(*out)
-        self.assertEqual(recon_inpt, inpt)
-
     def test_pytree_returns_outdims(self):
         x = torch.randn(2, 3)
 
