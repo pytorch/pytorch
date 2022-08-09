@@ -89,14 +89,16 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
             self.defineRecord(
-                new nvfuser::OutputRecord<Nvf::Val>({output->index}));
+                new nvfuser::OutputRecord<Nvf::Val>(
+                    {*static_cast<nvfuser::State*>(output)}));
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
             self.defineRecord(
-                new nvfuser::OutputRecord<Nvf::TensorView>({output->index}));
+                new nvfuser::OutputRecord<Nvf::TensorView>(
+                    {*static_cast<nvfuser::State*>(output)}));
           })
       .def(
           "define_tensor",
@@ -110,7 +112,7 @@ void initNvFuserPythonBindings(PyObject* module) {
 
             nvfuser::Tensor* out = self.defineTensor();
             self.defineRecord(new nvfuser::InputTensorRecord(
-                {out->index},
+                {*static_cast<nvfuser::State*>(out)},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
                 dtype));
@@ -165,7 +167,7 @@ void initNvFuserPythonBindings(PyObject* module) {
 
             nvfuser::Tensor* out = self.defineTensor();
             self.defineRecord(new nvfuser::InputTensorRecord(
-                {out->index},
+                {*static_cast<nvfuser::State*>(out)},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
                 dtype));
@@ -182,7 +184,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (double)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Double, double>(
-                {out->index}, val));
+                {*static_cast<nvfuser::State*>(out)}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -195,7 +197,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             self.defineRecord(
                 new nvfuser::
                     ConstantRecord<Nvf::ComplexDouble, c10::complex<double>>(
-                        {out->index}, val));
+                        {*static_cast<nvfuser::State*>(out)}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -205,7 +207,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (bool)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Bool, bool>(
-                {out->index}, val));
+                {*static_cast<nvfuser::State*>(out)}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -215,7 +217,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (int)");
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Int, int64_t>(
-                {out->index}, val));
+                {*static_cast<nvfuser::State*>(out)}, val));
             return out;
           },
           py::return_value_policy::reference)
@@ -225,7 +227,8 @@ void initNvFuserPythonBindings(PyObject* module) {
              Nvf::DataType dtype = Nvf::DataType::Double) -> nvfuser::Scalar* {
             FUSER_PERF_SCOPE("FusionDefinition.define_scalar");
             nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(new nvfuser::ScalarRecord({out->index}, dtype));
+            self.defineRecord(new nvfuser::ScalarRecord(
+                {*static_cast<nvfuser::State*>(out)}, dtype));
             return out;
           },
           py::arg("dtype") = Nvf::DataType::Double,
@@ -254,8 +257,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
         self.fusion_definition->defineRecord(                             \
             new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>(    \
-                {input->index},                                           \
-                {output->index},                                          \
+                {*static_cast<nvfuser::State*>(input)},                   \
+                {*static_cast<nvfuser::State*>(output)},                  \
                 op_str,                                                   \
                 static_cast<Nvf::TensorView* (*)(Nvf::TensorView*)>(      \
                     Nvf::op_name)));                                      \
@@ -270,8 +273,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar(); \
         self.fusion_definition->defineRecord(                             \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(                  \
-                {input->index},                                           \
-                {output->index},                                          \
+                {*static_cast<nvfuser::State*>(input)},                   \
+                {*static_cast<nvfuser::State*>(output)},                  \
                 op_str,                                                   \
                 static_cast<Nvf::Val* (*)(Nvf::Val*)>(Nvf::op_name)));    \
         return output;                                                    \
@@ -335,8 +338,9 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,              \
                                              Nvf::TensorView*,              \
                                              Nvf::TensorView*>(             \
-            {arg1->index, arg2->index},                                     \
-            {output->index},                                                \
+            {*static_cast<nvfuser::State*>(arg1),                           \
+             *static_cast<nvfuser::State*>(arg2)},                          \
+            {*static_cast<nvfuser::State*>(output)},                        \
             op_str,                                                         \
             static_cast<                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*)>(  \
@@ -355,8 +359,9 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,              \
                                              Nvf::TensorView*,              \
                                              Nvf::Val*>(                    \
-            {arg1->index, arg2->index},                                     \
-            {output->index},                                                \
+            {*static_cast<nvfuser::State*>(arg1),                           \
+             *static_cast<nvfuser::State*>(arg2)},                          \
+            {*static_cast<nvfuser::State*>(output)},                        \
             op_str,                                                         \
             static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>( \
                 Nvf::op_name)));                                            \
@@ -374,8 +379,9 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,              \
                                              Nvf::Val*,                     \
                                              Nvf::TensorView*>(             \
-            {arg1->index, arg2->index},                                     \
-            {output->index},                                                \
+            {*static_cast<nvfuser::State*>(arg1),                           \
+             *static_cast<nvfuser::State*>(arg2)},                          \
+            {*static_cast<nvfuser::State*>(output)},                        \
             op_str,                                                         \
             static_cast<Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*)>( \
                 Nvf::op_name)));                                            \
@@ -391,8 +397,9 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*>(         \
-                {arg1->index, arg2->index},                                 \
-                {output->index},                                            \
+                {*static_cast<nvfuser::State*>(arg1),                       \
+                 *static_cast<nvfuser::State*>(arg2)},                      \
+                {*static_cast<nvfuser::State*>(output)},                    \
                 op_str,                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*)>(           \
                     Nvf::op_name)));                                        \
@@ -436,8 +443,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                       \
                                              Nvf::TensorView*,                       \
                                              Nvf::Val*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
+            {*static_cast<nvfuser::State*>(arg1),                                    \
+             *static_cast<nvfuser::State*>(arg2),                                    \
+             *static_cast<nvfuser::State*>(arg3)},                                   \
+            {*static_cast<nvfuser::State*>(output)},                                 \
             op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::                                                                \
@@ -459,8 +468,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                       \
                                              Nvf::Val*,                              \
                                              Nvf::Val*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
+            {*static_cast<nvfuser::State*>(arg1),                                    \
+             *static_cast<nvfuser::State*>(arg2),                                    \
+             *static_cast<nvfuser::State*>(arg3)},                                   \
+            {*static_cast<nvfuser::State*>(output)},                                 \
             op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(       \
@@ -481,8 +492,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                              \
                                              Nvf::TensorView*,                       \
                                              Nvf::Val*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                 \
-            {output->index},                                                         \
+            {*static_cast<nvfuser::State*>(arg1),                                    \
+             *static_cast<nvfuser::State*>(arg2),                                    \
+             *static_cast<nvfuser::State*>(arg3)},                                   \
+            {*static_cast<nvfuser::State*>(output)},                                 \
             op_str,                                                                  \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(       \
@@ -500,8 +513,10 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();            \
         self.fusion_definition->defineRecord(                                        \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(       \
-                {arg1->index, arg2->index, arg3->index},                             \
-                {output->index},                                                     \
+                {*static_cast<nvfuser::State*>(arg1),                                \
+                 *static_cast<nvfuser::State*>(arg2),                                \
+                 *static_cast<nvfuser::State*>(arg3)},                               \
+                {*static_cast<nvfuser::State*>(output)},                             \
                 op_str,                                                              \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(         \
                     Nvf::op_name)));                                                 \
@@ -524,8 +539,10 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();                   \
         self.fusion_definition->defineRecord(                                               \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(              \
-                {arg1->index, arg2->index, arg3->index},                                    \
-                {output->index},                                                            \
+                {*static_cast<nvfuser::State*>(arg1),                                       \
+                 *static_cast<nvfuser::State*>(arg2),                                       \
+                 *static_cast<nvfuser::State*>(arg3)},                                      \
+                {*static_cast<nvfuser::State*>(output)},                                    \
                 op_str,                                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                \
                     Nvf::op_name)));                                                        \
@@ -545,8 +562,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                              \
                                              Nvf::TensorView*,                              \
                                              Nvf::TensorView*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -568,8 +587,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                              \
                                              Nvf::TensorView*,                              \
                                              Nvf::Val*>(                                    \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -591,8 +612,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                              \
                                              Nvf::Val*,                                     \
                                              Nvf::TensorView*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -614,8 +637,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                     \
                                              Nvf::TensorView*,                              \
                                              Nvf::TensorView*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -637,8 +662,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                     \
                                              Nvf::Val*,                                     \
                                              Nvf::TensorView*>(                             \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*)>(              \
@@ -659,8 +686,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                              \
                                              Nvf::Val*,                                     \
                                              Nvf::Val*>(                                    \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(              \
@@ -681,8 +710,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                     \
                                              Nvf::TensorView*,                              \
                                              Nvf::Val*>(                                    \
-            {arg1->index, arg2->index, arg3->index},                                        \
-            {output->index},                                                                \
+            {*static_cast<nvfuser::State*>(arg1),                                           \
+             *static_cast<nvfuser::State*>(arg2),                                           \
+             *static_cast<nvfuser::State*>(arg3)},                                          \
+            {*static_cast<nvfuser::State*>(output)},                                        \
             op_str,                                                                         \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(              \
@@ -706,8 +737,10 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
         self.fusion_definition->defineRecord(                                  \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>( \
-                {arg1->index, arg2->index, arg3->index},                       \
-                {output->index},                                               \
+                {*static_cast<nvfuser::State*>(arg1),                          \
+                 *static_cast<nvfuser::State*>(arg2),                          \
+                 *static_cast<nvfuser::State*>(arg3)},                         \
+                {*static_cast<nvfuser::State*>(output)},                       \
                 op_str,                                                        \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(   \
                     Nvf::op_name)));                                           \
@@ -727,8 +760,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                 \
                                              Nvf::Val*,                        \
                                              Nvf::Val*>(                       \
-            {arg1->index, arg2->index, arg3->index},                           \
-            {output->index},                                                   \
+            {*static_cast<nvfuser::State*>(arg1),                              \
+             *static_cast<nvfuser::State*>(arg2),                              \
+             *static_cast<nvfuser::State*>(arg3)},                             \
+            {*static_cast<nvfuser::State*>(output)},                           \
             op_str,                                                            \
             static_cast<                                                       \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>( \
@@ -757,8 +792,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                                \
                                              Nvf::Val*,                                                \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                            \
@@ -781,8 +819,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                                         \
                                              Nvf::TensorView*,                                         \
                                              Nvf::TensorView*>(                                        \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -806,8 +847,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                                         \
                                              Nvf::Val*,                                                \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -831,8 +875,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                                \
                                              Nvf::TensorView*,                                         \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -856,8 +903,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                                         \
                                              Nvf::TensorView*,                                         \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -881,8 +931,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                                \
                                              Nvf::TensorView*,                                         \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -906,8 +959,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::Val*,                                                \
                                              Nvf::Val*,                                                \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -931,8 +987,11 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              Nvf::TensorView*,                                         \
                                              Nvf::Val*,                                                \
                                              Nvf::Val*>(                                               \
-            {arg1->index, arg2->index, arg3->index, arg4->index},                                      \
-            {output->index},                                                                           \
+            {*static_cast<nvfuser::State*>(arg1),                                                      \
+             *static_cast<nvfuser::State*>(arg2),                                                      \
+             *static_cast<nvfuser::State*>(arg3),                                                      \
+             *static_cast<nvfuser::State*>(arg4)},                                                     \
+            {*static_cast<nvfuser::State*>(output)},                                                   \
             op_str,                                                                                    \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -956,8 +1015,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         FUSER_PERF_SCOPE("Operators." op_str);                               \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
         self.fusion_definition->defineRecord(new nvfuser::ReductionOpRecord( \
-            {arg->index},                                                    \
-            {output->index},                                                 \
+            {*static_cast<nvfuser::State*>(arg)},                            \
+            {*static_cast<nvfuser::State*>(output)},                         \
             op_str,                                                          \
             Nvf::op_name,                                                    \
             axes,                                                            \
@@ -986,8 +1045,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(  \
-                {arg->index},                                               \
-                {output->index},                                            \
+                {*static_cast<nvfuser::State*>(arg)},                       \
+                {*static_cast<nvfuser::State*>(output)},                    \
                 op_str,                                                     \
                 static_cast<                                                \
                     Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>( \
@@ -1005,8 +1064,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
         self.fusion_definition->defineRecord(                               \
             new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(                \
-                {arg->index},                                               \
-                {output->index},                                            \
+                {*static_cast<nvfuser::State*>(arg)},                       \
+                {*static_cast<nvfuser::State*>(output)},                    \
                 op_str,                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::DataType, Nvf::Val*)>(       \
                     Nvf::op_name),                                          \
@@ -1028,7 +1087,9 @@ void initNvFuserPythonBindings(PyObject* module) {
         FUSER_PERF_SCOPE("Operators.var");
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
-            {arg->index}, {output->index}, axes, correction, keepdim));
+            {*static_cast<nvfuser::State*>(arg)},
+            {*static_cast<nvfuser::State*>(output)},
+            axes, correction, keepdim));
         return output;
       },
       py::return_value_policy::reference);
@@ -1045,7 +1106,9 @@ void initNvFuserPythonBindings(PyObject* module) {
             "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::BroadcastOpRecord(
-            {arg->index}, {output->index}, "broadcast_in_dim", output_shape, broadcast_dims));
+            {*static_cast<nvfuser::State*>(arg)},
+            {*static_cast<nvfuser::State*>(output)},
+            "broadcast_in_dim", output_shape, broadcast_dims));
         return output;
       },
       py::return_value_policy::reference);
