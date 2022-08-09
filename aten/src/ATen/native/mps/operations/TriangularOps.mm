@@ -6,12 +6,11 @@
 
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/mps/MPSGraph+CoolMethods.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 namespace at {
 namespace native {

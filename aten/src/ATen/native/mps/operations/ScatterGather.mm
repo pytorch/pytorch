@@ -7,11 +7,10 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraph+CoolMethods.h>
 #include <torch/library.h>
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 namespace at {
 namespace native {
@@ -279,7 +278,7 @@ void scatter_mps_general
             getSrc = srcTensor;
 
           // Use in case input needs to be smaller to get scatter
-          NSMutableArray<NSNumber*>* scatterInputShape = nil;
+          NSArray<NSNumber*>* scatterInputShape = nil;
 
           // Slice into the input tensor IF NEEDED
           if(inputNeedSlice) {
@@ -287,7 +286,7 @@ void scatter_mps_general
             NSMutableArray<NSNumber*> *ends = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
             NSMutableArray<NSNumber*> *strides = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
 
-            scatterInputShape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
+            auto rc = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
 
             for(int i = 0; i < num_input_dims; i++) {
               // All strides are 1
@@ -296,13 +295,14 @@ void scatter_mps_general
               starts[i] = @0;
               if(i != dim) {
                 ends[i] = index_shape[i];
-                scatterInputShape[i] = index_shape[i];
+                rc[i] = index_shape[i];
               }
               else {
                 ends[i] = input_shape[i];
-                scatterInputShape[i] = input_shape[i];
+                rc[i] = input_shape[i];
               }
             }
+            scatterInputShape = rc;
 
             getInput = [mpsGraph sliceTensor:inputTensor
                                       starts:starts
