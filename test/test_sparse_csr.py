@@ -2588,17 +2588,7 @@ class TestSparseCSR(TestCase):
             for i in range(batch_len):
                 batch_idx = tuple(np.unravel_index(i, batch_shape))
                 _test_matrix(pt_tensor[batch_idx], dense[batch_idx], layout, blocksize)
-            # todo: check whole conversion once to_dense impl for n-d batched-bsr
-            # take 3d slices of dense/sparse to convert/compare for now
-            if dense.dim() > 3:
-                part_dim = dense.dim() - 3
-                part_shape = batch_shape[:part_dim]
-                len_partition = functools.reduce(lambda x, y: x * y, part_shape, 1)
-                for i in range(len_partition):
-                    part_idx = tuple(np.unravel_index(i, part_shape))
-                    self.assertEqual(dense[part_idx], pt_tensor[part_idx].to_dense())
-            else:
-                self.assertEqual(dense, pt_tensor.to_dense())
+            self.assertEqual(dense, pt_tensor.to_dense())
 
         # Verify exception when given 0 sized batch
         for shape, blocksize in itertools.product(shapes, blocksizes):
