@@ -67,17 +67,10 @@ struct TORCH_API KinetoEvent {
   int64_t sequenceNr() const;
 
   bool hasStack() const {
-    return stack_ != c10::nullopt;
+    return !stack().empty();
   }
 
-  const std::vector<std::string>& stack() const {
-    return *stack_;
-  }
-
-  KinetoEvent& stack(const std::vector<std::string>& st) {
-    stack_ = st;
-    return *this;
-  }
+  const c10::ArrayRef<std::string> stack() const;
 
   uint8_t scope() const;
   bool hasModuleHierarchy() const;
@@ -194,6 +187,7 @@ struct TORCH_API KinetoEvent {
   torch::profiler::impl::ProfilerEventStub fallbackEnd() const;
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
+  std::vector<std::string> python_stack_;
 };
 
 // Consolidating events returned directly from Kineto
