@@ -63,10 +63,10 @@ def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
 def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
-def _odict_flatten(d):
+def _odict_flatten(d: OrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
-def _odict_unflatten(values, context):
+def _odict_unflatten(values: List[Any], context: Context) -> OrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
