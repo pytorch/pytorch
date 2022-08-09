@@ -5,13 +5,13 @@ views on the same data in different processes. Once the tensor/storage is moved
 to shared_memory (see :func:`~torch.Tensor.share_memory_`), it will be possible
 to send it to other processes without making any copies.
 
-The API is 100% compatible with the original module - it's enough to change
+The API is 100% compatible with the original module - it is enough to change
 ``import multiprocessing`` to ``import torch.multiprocessing`` to have all the
 tensors sent through the queues or shared via other mechanisms, moved to shared
 memory.
 
-Because of the similarity of APIs we do not document most of this package
-contents, and we recommend referring to very good docs of the original module.
+Because of the similarity of APIs, we do not document most of this package
+contents and we recommend referring to very good docs of the original module.
 """
 import torch
 import sys
