@@ -12,7 +12,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, is_iterabl
 import torch
 from torch import Tensor
 import functools
-import contextlib
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -365,6 +364,8 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+
+        xfail('nn.functional.rrelu')  # in-place test fails
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
