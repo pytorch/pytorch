@@ -22,33 +22,9 @@ using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 struct TORCH_API KinetoEvent {
   explicit KinetoEvent(std::shared_ptr<const torch::profiler::impl::Result>);
 
-  uint64_t startThreadId() const {
-    return start_thread_id_;
-  }
-
-  KinetoEvent& startThreadId(uint64_t start_thread_id) {
-    start_thread_id_ = start_thread_id;
-    return *this;
-  }
-
-  uint64_t endThreadId() const {
-    return end_thread_id_;
-  }
-
-  KinetoEvent& endThreadId(uint64_t end_thread_id) {
-    end_thread_id_ = end_thread_id;
-    return *this;
-  }
-
-  uint8_t activityType() const {
-    return activity_type_;
-  }
-
-  KinetoEvent& activityType(uint8_t activity_type) {
-    activity_type_ = activity_type;
-    return *this;
-  }
-
+  uint64_t startThreadId() const;
+  uint64_t endThreadId() const;
+  uint8_t activityType() const;
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
@@ -85,23 +61,8 @@ struct TORCH_API KinetoEvent {
     return debug_handle_;
   }
 
-  std::string name() const {
-    return name_;
-  }
-
-  KinetoEvent& name(const std::string& evt_name) {
-    name_ = evt_name;
-    return *this;
-  }
-
-  c10::DeviceType deviceType() const {
-    return (c10::DeviceType)device_type_;
-  }
-
-  KinetoEvent& deviceType(c10::DeviceType device_type) {
-    device_type_ = (int8_t)device_type;
-    return *this;
-  }
+  std::string name() const;
+  c10::DeviceType deviceType() const;
 
   uint8_t deviceIndex() const {
     return device_index_;
@@ -113,15 +74,7 @@ struct TORCH_API KinetoEvent {
   }
 
   int64_t nBytes() const;
-
-  uint64_t startUs() const {
-    return start_us_;
-  }
-
-  KinetoEvent& startUs(uint64_t start_us) {
-    start_us_ = start_us;
-    return *this;
-  }
+  uint64_t startUs() const;
 
   uint64_t durationUs() const {
     return duration_us_;
@@ -133,15 +86,7 @@ struct TORCH_API KinetoEvent {
   }
 
   bool isAsync() const;
-
-  uint64_t correlationId() const {
-    return correlation_id_;
-  }
-
-  KinetoEvent& correlationId(uint64_t correlation_id) {
-    correlation_id_ = correlation_id;
-    return *this;
-  }
+  uint64_t correlationId() const;
 
   uint64_t linkedCorrelationId() const {
     return linked_correlation_id_;
@@ -165,19 +110,10 @@ struct TORCH_API KinetoEvent {
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
 
-  uint64_t start_thread_id_ = 0;
-  uint64_t end_thread_id_ = 0;
-
-  uint8_t activity_type_ = 0;
-  c10::optional<std::vector<std::string>> stack_;
   uint64_t flops_ = 0;
 
-  std::string name_;
   uint8_t device_index_ = 0;
-  int8_t device_type_ = 0;
-  uint64_t start_us_ = 0;
   uint64_t duration_us_ = 0;
-  uint64_t correlation_id_ = 0;
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
   int64_t debug_handle_{-1};
