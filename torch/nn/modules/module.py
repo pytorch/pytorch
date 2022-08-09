@@ -1947,7 +1947,7 @@ class Module:
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
-
+        tmp_group = []
         for p in self.parameters():
             if p.grad is not None:
                 if set_to_none:
@@ -1957,7 +1957,9 @@ class Module:
                         p.grad.detach_()
                     else:
                         p.grad.requires_grad_(False)
-                    p.grad.zero_()
+                    tmp_group.append(p)
+        if tmp_group:
+            torch._foreach_zero_(tmp_group)
 
     def share_memory(self: T) -> T:
         r"""See :meth:`torch.Tensor.share_memory_`"""
