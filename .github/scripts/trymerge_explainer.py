@@ -9,7 +9,8 @@ CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 
 OFFICE_HOURS_LINK = "https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours"
-CONTACT_US = f"If you have any questions or feedback, reach out to the [Pytorch DevX Team]({OFFICE_HOURS_LINK})!"
+CONTACT_US = f"Please reach out to the [PyTorch DevX Team]({OFFICE_HOURS_LINK}) with feedback or questions!"
+ALTERNATIVES = f"If this is not what you meant to do, try some of the other [flags]({BOT_COMMANDS_WIKI})."
 
 
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
@@ -70,38 +71,29 @@ class TryMergeExplainer(object):
             return (
                 " and land check "
                 + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})."
-                + f"\n For other forms of merge, please refer to our [wiki]({BOT_COMMANDS_WIKI})."
             )
         else:
             return ""
 
     def _get_flag_explanation_message(self) -> str:
         if self.force:
-            return "This means your PR will be merged immediately, bypassing any CI signals."
+            return "This means your PR will be merged **immediately**, bypassing any CI checks (ETA: 1-5 minutes)."
         elif self.on_green:
-            return (
-                "This means that your PR will be merged once all signals have passed."
-            )
+            return "This means that your PR will be merged once all checks have passed (ETA: 0-4 Hours)."
         elif self.land_checks:
             if self.has_trunk_label:
-                land_check_msg_suffix = (
-                    "have run since you have added the ciflow/trunk label to your PR."
-                )
+                land_check_msg_suffix = "have passed since you have added the ciflow/trunk label to your PR (ETA 0-4 Hours)."
             else:
-                land_check_msg_suffix = "and the land checks have run (ETA 4 Hours)."
+                land_check_msg_suffix = "and the land checks have passed (ETA 4 Hours)."
             return (
                 "This means that your PR will be merged once all signals on your PR "
                 + land_check_msg_suffix
             )
-
         else:
-            if self.has_ciflow_label:
-                return "Since your PR has a ciflow label, we will wait for all checks to be green."
-            else:
-                return "This means only we will only wait for mandatory checks to be green."
+            return "This means that your PR will be merged once all checks have passed (ETA: 0-4 Hours)."
 
     def get_merge_message(self, commit: Optional[str] = None) -> str:
-        message_prefix = "@pytorchbot successfully started a merge job."
+        message_prefix = "@bot successfully started a merge job."
         progress_links = f"Check the current status [here]({os.getenv('GH_RUN_URL')}){self._get_land_check_progress(commit)}."
         flag_message = f"The merge job was triggered with{self._get_flag_msg()} flag."
         explanation_message = self._get_flag_explanation_message()
@@ -109,7 +101,8 @@ class TryMergeExplainer(object):
         msg = message_prefix + " "
         msg += progress_links + "\n"
         msg += flag_message + " "
-        msg += explanation_message + "\n"
+        msg += explanation_message + " "
+        msg += ALTERNATIVES + "\n"
         msg += CONTACT_US
         return msg
 
@@ -117,8 +110,9 @@ class TryMergeExplainer(object):
 def get_revert_message(org: str, project: str, pr_num: int) -> str:
     msg = (
         "@pytorchbot successfully started a revert job."
-        + f" Check the current status [here]({os.getenv('GH_RUN_URL')})\n"
+        + f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
     )
+    msg += ALTERNATIVES + "\n"
     msg += CONTACT_US
     return msg
 
@@ -126,7 +120,7 @@ def get_revert_message(org: str, project: str, pr_num: int) -> str:
 def get_land_check_troubleshooting_message() -> str:
     return (
         " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`"
-        + ' (optionally with the "ciflow/trunk" to get land signals)'
+        + ' (optionally with the "ciflow/trunk" to get land checks)'
         + ' or use `@pytorchbot merge -f "some reason here"`.'
         + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}). \n"
         + CONTACT_US
