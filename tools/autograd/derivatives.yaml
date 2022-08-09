@@ -1951,7 +1951,7 @@
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
 
-- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
+- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   self: _masked_softmax_backward(grad, result, mask, dim)
   mask: non_differentiable
 
