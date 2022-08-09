@@ -135,6 +135,7 @@ jobs:
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64
+    if: false # see https://github.com/pytorch/pytorch/issues/82890
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64
@@ -148,6 +149,7 @@ jobs:
 
   ios-12-5-1-arm64-coreml:
     name: ios-12-5-1-arm64-coreml
+    if: false # see https://github.com/pytorch/pytorch/issues/82890
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-coreml
@@ -161,6 +163,7 @@ jobs:
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
+    if: false # see https://github.com/pytorch/pytorch/issues/82890
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-custom-ops
@@ -174,6 +177,7 @@ jobs:
 
   ios-12-5-1-arm64-metal:
     name: ios-12-5-1-arm64-metal
+    if: false # see https://github.com/pytorch/pytorch/issues/82890
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-metal
