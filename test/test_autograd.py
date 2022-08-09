@@ -4587,15 +4587,7 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
-    def test_checkpointing_without_reentrant_custom_function_raises(self):
-        """
-        Accessing ctx.saved_tensors multiple times in a custom function
-        backward pass with non-reentrant checkpoint currently throws due to
-        saved tensors not being recomputed in between the accesses.
-        """
-        # For verifying first access to ctx.saved_tensors succeeded.
-
-        _first_saved_tensor_access_succeeded = False
+    def test_checkpointing_without_reentrant_custom_function_works(self):
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -4608,12 +4600,11 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
-                nonlocal _first_saved_tensor_access_succeeded
-                _first_saved_tensor_access_succeeded = True
-                # Raises issue in non-reentrant checkpointing where
-                # second access to saved tensors raises because they were
-                # not recomputed.
+                # Accessing the saved Tensors a second time is fine
+                # as they get cleared only when the SavedVariable
+                # get cleared which happens after this function returns
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+                return x, y, z
 
         x = torch.tensor(1., requires_grad=True)
         y = torch.tensor(2., requires_grad=True)
@@ -4627,20 +4618,10 @@ for shape in [(1,), ()]:
             return out
 
         out = checkpoint(foo, x, y, z, use_reentrant=False)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Attempt to retrieve a tensor saved by autograd multiple times"
-        ):
-            out.sum().backward()
+        out.sum().backward()
 
-        self.assertTrue(_first_saved_tensor_access_succeeded)
+    def test_access_saved_tensor_twice_without_recomputation_works(self):
 
-    def test_access_saved_tensor_twice_without_recomputation_raises(self):
-        """
-        If using saved tensor hooks based checkpointing and a saved tensor
-        is accessed multiple times without triggering recomputation in the
-        middle, error is raised indicating so.
-        """
         def foo(a):
             b = a * a
             c = a * b
@@ -4651,10 +4632,14 @@ for shape in [(1,), ()]:
         d = checkpoint(foo, a, use_reentrant=False)
         # First access
         d.grad_fn._saved_result
-        # Second access raises error
+        # Second access still works as the saved variable was not cleared
+        d.grad_fn._saved_result
+        # Backward clears the saved variable
+        d.sum().backward()
+        # Now it raises an error
         with self.assertRaisesRegex(
             RuntimeError,
-            "Attempt to retrieve a tensor saved by autograd multiple times"
+            "or directly access saved tensors after they have already been freed"
         ):
             d.grad_fn._saved_result
 
