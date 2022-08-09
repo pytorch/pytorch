@@ -393,4 +393,3 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
 }
 
 }}}  // namespace at::native::<anonymous>
-
