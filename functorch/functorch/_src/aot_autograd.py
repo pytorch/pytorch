@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
 from torch.fx import immutable_collections, Interpreter
-from torch.fx.proxy import RetracingMode
+import torch.fx.traceback as fx_traceback
 from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -660,7 +660,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         ):
             if isinstance(mod, torch.fx.GraphModule):
                 interpreter = Interpreter(mod)
-                with RetracingMode.preserve_stack_trace(interpreter):
+                with fx_traceback.override_stack_trace(interpreter):
                     out = interpreter.run(*args[params_len:], **kwargs)
             else:
                 out = mod(*args[params_len:], **kwargs)

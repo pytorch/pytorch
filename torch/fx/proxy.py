@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 import dis
 import torch
 import inspect
@@ -10,8 +9,9 @@ from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
+import torch.fx.traceback as fx_traceback
 
-__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy', 'RetracingMode']
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
@@ -44,12 +44,6 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-
-        # Preserve the original node's stack trace when retracing a graph
-        if not self.record_stack_traces:
-            retracing_node = RetracingMode.current_node()
-            if retracing_node:
-                node.stack_trace = retracing_node.stack_trace
 
         return node
 
@@ -84,7 +78,9 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if self.record_stack_traces:
+        if fx_traceback.is_stack_trace_overridden():
+            proxy.node.stack_trace = fx_traceback.current_stack_trace()
+        elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
@@ -412,23 +408,3 @@ def _define_reflectable(orig_method_name):
 
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
-
-@compatibility(is_backward_compatible=False)
-class RetracingMode:
-    active_interpreter = None
-
-    @classmethod
-    @contextmanager
-    def preserve_stack_trace(cls, interpreter):
-        saved_intepreter = cls.active_interpreter
-        try:
-            cls.active_interpreter = interpreter
-            yield
-        finally:
-            cls.active_interpreter = saved_intepreter
-
-    @classmethod
-    def current_node(cls):
-        if cls.active_interpreter:
-            return getattr(cls.active_interpreter, "current_node", None)
-        return None
