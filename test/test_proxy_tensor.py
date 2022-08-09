@@ -253,6 +253,23 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
 
+    def test_make_fx_reentrant_dispatch(self):
+        def f(x):
+            return torch.ops.aten.norm.Scalar(x, 2.0)
+
+        def norm_decomp(x, p=2.0):
+            if p != 2.0:
+                raise RuntimeError("can't handle with p != 2")
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        decomp = {torch.ops.aten.norm.Scalar: norm_decomp}
+
+        traced = make_fx(f, decomposition_table=decomp, tracing_mode=self.tracing_mode)(torch.rand(3))
+
+        for n in traced.graph.nodes:
+            self.assertTrue("square" not in str(n.target))
+            self.assertTrue("norm" not in str(n.target))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
