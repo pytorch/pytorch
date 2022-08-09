@@ -195,6 +195,8 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  USE_DEPLOY           : ${USE_DEPLOY}")
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")
+  message(STATUS "  Public CUDA Deps.    : ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS}")
+  message(STATUS "  Private CUDA Deps.   : ${Caffe2_CUDA_DEPENDENCY_LIBS}")
   # coreml
   message(STATUS "  USE_COREML_DELEGATE     : ${USE_COREML_DELEGATE}")
   message(STATUS "  BUILD_LAZY_TS_BACKEND   : ${BUILD_LAZY_TS_BACKEND}")
