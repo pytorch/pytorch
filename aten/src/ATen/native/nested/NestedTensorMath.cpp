@@ -9,7 +9,9 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorMath.h>
-
+#include <ATen/EmptyTensor.h>
+#include <c10/core/Allocator.h>
+#include <c10/core/DeviceType.h>
 namespace at {
 namespace native {
 
@@ -816,6 +818,54 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
                mat2_buffer.as_strided(mat2_sizes[i], mat2_strides[i], mat2_offsets[i]));
   }
   return output;
+}
+
+Tensor empty_like_nested(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+
+  TORCH_CHECK(
+      !(options_.has_memory_format() && optional_memory_format.has_value()),
+      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+      "the redundant setter.");
+  TensorOptions options = self.options().merge_in(options_).merge_memory_format(
+      optional_memory_format);
+
+  auto memory_format =
+      options_.memory_format_opt().value_or(MemoryFormat::Preserve);
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Preserve,
+      "empty_like_nested only supports memory format Preserve, but got ",
+      memory_format,
+      " instead.");
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided && optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
+  auto* allocator = self.is_cuda() ? GetAllocator(kCUDA) : GetAllocator(kCPU);
+
+  auto self_impl = get_nested_tensor_impl(self);
+  size_t size_bytes = detail::computeStorageNbytesContiguous(
+      {self_impl->get_buffer_size()}, options.dtype().itemsize());
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizeable=*/true);
+
+  auto tensor = detail::make_tensor_base<NestedTensorImpl>(
+      std::move(storage_impl), self.key_set(), options.dtype());
+  return tensor;
 }
 
 // utilities support _NestedTensor_GeneralizedBMM

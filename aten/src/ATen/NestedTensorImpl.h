@@ -43,6 +43,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const std::vector<int64_t>& get_offsets() const {
     return offsets_;
   }
+
+  int64_t get_buffer_size() const {
+    return buffer_size_;
+  }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
