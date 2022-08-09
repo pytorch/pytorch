@@ -715,7 +715,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -775,6 +775,7 @@ def t(g, self):
 
 def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
+    assert ndim is not None
     perm = list(reversed(range(0, ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
@@ -2499,7 +2500,9 @@ def bucketize(g, self, boundaries, out_int32=False, right=False):
     new_shape = g.op("Concat", g.op("Shape", boundaries), g.op("Shape", self), axis_i=0)
     # Unsqueeze step is performed to respect ONNX's numpy style broadcasting for comparison ops
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
-    unsqueeze_axes = list(range(1, symbolic_helper._get_tensor_rank(self) + 1))
+    tensor_rank = symbolic_helper._get_tensor_rank(self)
+    assert tensor_rank is not None
+    unsqueeze_axes = list(range(1, tensor_rank + 1))
     expanded_boundaries = expand(
         g,
         symbolic_helper._unsqueeze_helper(g, boundaries, unsqueeze_axes),
@@ -5216,6 +5219,7 @@ def movedim(g, self, source, destination):
         return self
 
     self_rank = symbolic_helper._get_tensor_rank(self)
+    assert self_rank is not None
 
     perm = list(range(self_rank))
 
@@ -5359,6 +5363,7 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # Currently we ignore the 'compute_mode' variable as we use default to
     # using matrix multiplication to calculate the euclidean distance
     rank = symbolic_helper._get_tensor_rank(x1)
+    assert rank is not None
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
     broadcasted_x2 = symbolic_helper._unsqueeze_helper(g, x2, [rank - 2])
     return pairwise_distance(

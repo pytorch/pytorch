@@ -167,7 +167,7 @@ class TestONNXExport(common_utils.TestCase):
         tm = TraceMe()
         tm = torch.jit.trace(tm, torch.rand(3, 4))
         f = io.BytesIO()
-        torch.onnx._export(tm, (torch.rand(3, 4),), f)
+        torch.onnx.export(tm, (torch.rand(3, 4),), f)
 
     def test_export_tensoroption_to(self):
         def foo(x):
