@@ -12092,7 +12092,7 @@ op_db: List[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)}),
-                   'TestCommon', 'TestCompositeCompliance',
+                   'TestCompositeCompliance', 'test_forward_ad',
                    active_if=IS_ARM64
                ),
                DecorateInfo(
