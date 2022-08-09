@@ -98,6 +98,13 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(bar)()
 
+    def test_func_with_no_tensors(self):
+        def foo(x):
+            return torch.randn(3)
+
+        with self.assertRaisesRegex(ValueError, 'at least one Tensor'):
+            vmap(foo, (None,))(1)
+
     def test_constant_function(self):
         output = vmap(lambda x: torch.tensor(3.14))(torch.ones(3))
         self.assertEqual(output, torch.tensor([3.14, 3.14, 3.14]))
