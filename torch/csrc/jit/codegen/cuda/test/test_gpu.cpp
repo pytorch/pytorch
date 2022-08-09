@@ -4242,21 +4242,8 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
     // TODO: why the rand_like test is failing for complex? Is it because each
     // complex needs to draw 2 random numbers from the RNG? We need to enable
     // this
-    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
-      test_op(
-          /*blocks*/ 128,
-          /*threads*/ 64,
-          /*name*/ "rand_like",
-          /*Aten Func   */
-          [](std::array<IValue, 1>& vals) {
-            return at::rand_like(vals[0].toTensor());
-          },
-          /*JIT  Func   */
-          [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-          /*Output      */ std::make_pair(ValType::TensorView, dtype),
-          /*Inputs Tuple*/
-          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
-    }
+    // TODO:
+    //  Randlike testing is moved to test_gpu_rng.cu
   }
 
   dtypes = {DataType::Int, DataType::Int32, DataType::Bool};
