@@ -752,7 +752,6 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       " needs to be divisible by blocksize[1] ",
       blocksize[1]);
 
-  auto block_size_0 = self.size(-2) / blocksize[0];
   auto n_batch_dim = self.dim() - 2;
 
   auto values = _batch_tile_tensor(self, blocksize);
@@ -771,73 +770,53 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
         not_zero_mask.size(0) > 0,
         "to_sparse_bsr: Expected product of batch dimensions to be non-zero.");
 
-    // If the input is ND we assert that the same sparsity pattern
-    // is used across matrices. That means the same number of materialized
-    // values and *at the same location*.
-    // This requirement is not included in Pearu's blog post on BSR invariants.
-    // He specifically states that different batches may have different sparsity
-    // patterns as long as the number of specified elements is the same for all
+    // If the input is n-d we require that nnz is the same for all
     // batches.
-
     auto not_zero_mask_0 = not_zero_mask.select(0, 0);
     auto nse_per_batch = not_zero_mask_0.sum().repeat(not_zero_mask.size(0));
     TORCH_CHECK(
         not_zero_mask.sum({-2, -1}).equal(nse_per_batch),
         "Expect the same number of specified elements per batch.");
+
+    // We join batches into a matrix shape extending the numer of rows.
+    values = values.flatten(0, 1);
+    not_zero_mask = not_zero_mask.flatten(0, 1);
   }
 
   Tensor col_indices;
   Tensor row_indices;
   std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
       not_zero_mask, at::kLong, not_zero_mask.device());
-  Tensor crow_indices;
 
-  if (n_batch_dim > 0) {
-    // reshape to put the (flattened) batch dims back in
-    col_indices = col_indices.reshape({not_zero_mask.size(0), -1});
-    row_indices = row_indices.reshape({not_zero_mask.size(0), -1});
-    crow_indices = at::empty(
-        {not_zero_mask.size(0), block_size_0 + 1}, col_indices.options());
-    // For each batch compute crow_indices
-    for (auto batch : c10::irange(not_zero_mask.size(0))) {
-      Tensor batch_crow_indices = crow_indices[batch];
-      at::_convert_indices_from_coo_to_csr_out(
-          batch_crow_indices,
-          row_indices[batch],
-          block_size_0,
-          false /* out_int32 */);
-    }
-    // At this point, we have constructed col_indices and crow_indices
-    // such that they are 2d with dim0 of length B = product(batchdims). We can
-    // now reshape them to the correct shapes.
-    auto batch_shape = self.sizes().slice(0, n_batch_dim);
-    crow_indices = crow_indices.unflatten(0, batch_shape);
-    col_indices = col_indices.unflatten(0, batch_shape);
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, not_zero_mask.size(0), false /*out_int32*/);
 
-    // Mask is also leading dim B, but we can't masked select wit it (see below)
-    // unless it is flat, then we can partially faltten values, index it along
-    // and unfold the result to batchdims + (nnz(per batch), )
-    auto batch_sizes_nnz = DimVector(batch_shape);
-    batch_sizes_nnz.push_back(-1); // we can infer nnz
-    not_zero_mask = not_zero_mask.flatten();
-    // TODO: masked_select does not support some form of broadcasting, so we're
-    // using the mask to construct indices that are then passed into
-    // index_select. This isn't ideal.
-    values = values.flatten(0, -3)
-                 .index_select(0, _mask_to_indices(not_zero_mask))
-                 .unflatten(0, batch_sizes_nnz);
-
-  } else {
-    crow_indices = at::_convert_indices_from_coo_to_csr(
-        row_indices.view({-1}), block_size_0, false /* out_int32 */);
-    not_zero_mask = not_zero_mask.reshape({-1});
-    // TODO: masked_select does not support some form of broadcasting, so we're
-    // using the mask to construct indices that are then passed into
-    // index_select. This isn't ideal.
-    values = values.reshape({-1, values.size(-2), values.size(-1)})
-                 .index_select(0, _mask_to_indices(not_zero_mask));
+  {
+    auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
+    values = values.flatten(0, -3).index_select(0, mask_indices);
   }
 
+  if (n_batch_dim > 0) {
+    auto batch_shape = self.sizes().slice(0, n_batch_dim);
+    auto n_batch = std::accumulate(
+        batch_shape.begin(),
+        batch_shape.end(),
+        int64_t{1},
+        std::multiplies<int64_t>());
+    crow_indices = at::_compressed_to_batched_compressed_indices(
+        crow_indices, n_batch, false);
+
+    auto batchsize_infer_last = DimVector(batch_shape);
+    // we can infer nnz/ncol+1
+    batchsize_infer_last.push_back(-1);
+    // -1 dim is nnz (per batch)
+    col_indices = col_indices.reshape(batchsize_infer_last);
+    // -1 dim is ncols (per batch) + 1
+    crow_indices = crow_indices.reshape(batchsize_infer_last);
+    // -1 dim is nnz (per batch) blocksize dims already included (hence
+    // unflatten)
+    values = values.unflatten(0, batchsize_infer_last);
+  }
   return at::native::_sparse_bsr_tensor_unsafe(
       crow_indices,
       col_indices,
