@@ -311,9 +311,8 @@ class TestOperators(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        # TODO: test in-place
         if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            self.skipTest("Skipped for redundancy. test_vjp handles in-place testing.")
             return
 
         for sample in samples:
@@ -448,13 +447,10 @@ class TestOperators(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-
-        def _test(_op):
+        def _test(_op, inplace=False):
             for sample in samples:
+                if inplace and not is_valid_inplace_sample_input(sample, op, op.inplace_variant):
+                    continue
                 fn, primals = normalize_op_input_output(_op, sample)
                 result = fn(*primals)
                 cotangents = tree_map(lambda x: torch.randn_like(x), result)
@@ -471,6 +467,10 @@ class TestOperators(TestCase):
         _test(op)
         for a_op in op.aliases:
             _test(a_op)
+        if op.inplace_variant:
+            def f(inp, *args, **kwargs):
+                return op.inplace_variant(inp.clone(), *args, **kwargs)
+            _test(f, inplace=True)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
