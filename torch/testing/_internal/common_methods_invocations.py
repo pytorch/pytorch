@@ -32,7 +32,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
-    torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
+    torch_to_numpy_dtype_dict, TEST_WITH_ASAN, IS_ARM64,
     GRADCHECK_NONDET_TOL, slowTest, freeze_rng_state,
 )
 
@@ -12089,6 +12089,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)}),
+                   'TestCommon', 'TestCompositeCompliance',
+                   active_if=IS_ARM64
                ),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
