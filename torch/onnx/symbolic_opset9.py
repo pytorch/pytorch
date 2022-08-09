@@ -17,7 +17,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch, symbolic_helper  # noqa: F401
+from torch.onnx import _patch_torch, _type_utils, symbolic_helper  # noqa: F401
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -412,7 +412,7 @@ def _trunc_divide(g, self, other):
     # (eg. -0.1 should become -0 )
     # - if scalar_type information are not available, assume that
     # we need to call floor (treat as float)
-    out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.INT64)
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
@@ -427,13 +427,15 @@ def _trunc_divide(g, self, other):
             and other.type().scalarType() is not None
             and symbolic_helper._is_fp(other)
         ):
-            out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+            out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         else:
             out = g.op(
-                "Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx[scalar_type]
+                "Cast",
+                out,
+                to_i=_type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
             )
     else:
-        out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return out
 
 
@@ -487,10 +489,10 @@ def true_divide(g, self, other):
     # Case 2: neither is floating
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
-    onnx_scalar_type = symbolic_helper.cast_pytorch_to_onnx["Float"]
+    onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
     assert scalar_type is torch.float or scalar_type is torch.double
     if torch.get_default_dtype() is torch.double:
-        onnx_scalar_type = symbolic_helper.cast_pytorch_to_onnx["Double"]
+        onnx_scalar_type = _C_onnx.TensorProtoDataType.DOUBLE
 
     self = g.op("Cast", self, to_i=onnx_scalar_type)
     other = g.op("Cast", other, to_i=onnx_scalar_type)
@@ -500,7 +502,7 @@ def true_divide(g, self, other):
 def reciprocal(g, self):
     # torch.reciprocal implicitly casts to float, so we do the same.
     if not symbolic_helper._is_fp(self):
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return g.op("Reciprocal", self)
 
 
@@ -558,10 +560,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return v is not None and v != u
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-        dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
 
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
@@ -570,12 +569,16 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         beta = symbolic_helper._scalar(beta)
 
         if alpha != 1:
-            alpha = g.op("Constant", value_t=torch.tensor(alpha, dtype=dtype))
+            alpha = g.op(
+                "Constant", value_t=torch.tensor(alpha, dtype=scalar_type.dtype())
+            )
             res1 = g.op("Mul", res1, alpha)
         if beta != 1:
             beta = g.op(
                 "Constant",
-                value_t=torch.tensor(symbolic_helper._scalar(beta), dtype=dtype),
+                value_t=torch.tensor(
+                    symbolic_helper._scalar(beta), dtype=scalar_type.dtype()
+                ),
             )
             res2 = g.op("Mul", res2, beta)
 
@@ -704,7 +707,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -717,7 +720,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -738,7 +741,7 @@ prod = _reduce_with_dtype("ReduceProd", "prod", allow_multi_dim_support=False)
 def cumsum(g, input, dim, dtype):
     if symbolic_helper.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
-            return symbolic_helper._unimplemented(name, "dtype")
+            return symbolic_helper._unimplemented("cumsum", "dtype")
         return g.at("cumsum", input, dim_i=dim)
     else:
         symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11)
@@ -787,7 +790,7 @@ def expand(g, self, size, implicit):
         size = symbolic_helper._reshape_helper(
             g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
         )
-    dtype = symbolic_helper.ScalarType.INT64
+    dtype = _type_utils.JitScalarType.INT64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
     size = where(g, g.op("Equal", size, neg_ones), ones, size)
@@ -1137,13 +1140,17 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
                 inputs[i] = g.op(
                     "Cast",
                     input,
-                    to_i=symbolic_helper.cast_pytorch_to_onnx[target_float_t],
+                    to_i=_type_utils.JitScalarType.from_name(
+                        target_float_t
+                    ).onnx_type(),
                 )
 
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype_0])
+        self = g.op(
+            "Cast", self, to_i=_type_utils.JitScalarType.from_name(dtype_0).onnx_type()
+        )
 
     return self
 
@@ -1239,7 +1246,9 @@ def softmax(g, input, dim, dtype=None):
         if dtype and dtype.node().kind() != "prim::Constant":
             parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
             softmax = g.op(
-                "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+                "Cast",
+                softmax,
+                to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type(),
             )
 
         if is_transpose_required:
@@ -1255,7 +1264,7 @@ def softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", softmax, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     return softmax
 
@@ -1271,7 +1280,9 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     sizes = symbolic_helper._get_tensor_sizes(input)
     dim = sizes[-len(padding) :] if sizes is not None else None
     if dim is None or any([i is None for i in dim]):
-        return symbolic_helper._unimplemented(name, "input size not accessible")
+        return symbolic_helper._unimplemented(
+            "get_pool_ceil_padding", "input size not accessible"
+        )
     ceiled_output_dim = [
         int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
         + 1
@@ -1461,6 +1472,8 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         try:
             output_size = symbolic_helper._parse_arg(output_size, "is")
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             return symbolic_helper._onnx_unsupported(
                 "adaptive pooling, since output_size is not constant."
             )
@@ -1470,6 +1483,8 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         try:
             dim = sizes[2:]
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             dim = None
         if dim is None or any([i is None for i in dim]):
             if output_size == [1] * len(output_size):
@@ -1549,6 +1564,8 @@ def _convert_padding_node(padding):
                 symbolic_helper._get_const(v, "i", "padding") for v in input_list
             ]
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "Pad", 9, 11, "The sizes of the padding must be constant"
             )
@@ -1560,6 +1577,8 @@ def constant_pad_nd(g, input, padding, value):
     try:
         value = symbolic_helper._get_const(value, "f", "value")
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Pad", 9, 11, "The value for the padding must be constant"
         )
@@ -1748,8 +1767,8 @@ def gt_impl(g, input, other):
         and other.type().scalarType() is not None
         and other.type().scalarType() == "Bool"
     ):
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Greater", input, other)
 
 
@@ -1764,8 +1783,8 @@ def lt_impl(g, input, other):
         and other.type().scalarType() is not None
         and other.type().scalarType() == "Bool"
     ):
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Less", input, other)
 
 
@@ -1831,18 +1850,20 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -1855,18 +1876,20 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1876,9 +1899,7 @@ def __lshift_(g, self, other):
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
-        condition = g.op(
-            "Cast", condition, to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"]
-        )
+        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = nonzero(g, condition)
         return symbolic_helper._unbind_helper(
@@ -1912,7 +1933,7 @@ def log_softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
@@ -1922,7 +1943,7 @@ def log_softmax(g, input, dim, dtype=None):
 @symbolic_helper.parse_args("v", "i", "i")
 def _log_softmax(g, input, dim, half_to_float):
     if half_to_float and input.type().scalarType() == "Half":
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return log_softmax(g, input, dim)
 
 
@@ -1949,6 +1970,8 @@ def _convolution(
     try:
         kernel_shape = weight_size[2:]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         kernel_shape = None
 
     if kernel_shape is None or any([i is None for i in kernel_shape]):
@@ -2364,6 +2387,8 @@ def unfold(g, input, dimension, size, step):
     try:
         sizedim = sizes[dimension]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         sizedim = None
     if sizedim is not None:
         low_indices = range(0, sizedim, step)
@@ -2503,7 +2528,9 @@ def type_as(g, self, other):
         return self
     if other_dtype is not None:
         return g.op(
-            "Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[other_dtype]
+            "Cast",
+            self,
+            to_i=_type_utils.JitScalarType.from_name(other_dtype).onnx_type(),
         )
     else:
         if symbolic_helper.is_caffe2_aten_fallback():
@@ -2581,10 +2608,14 @@ def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not symbolic_helper._is_fp(self):
         f_dtype = "Float"
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[f_dtype])
+        self = g.op(
+            "Cast", self, to_i=_type_utils.JitScalarType.from_name(f_dtype).onnx_type()
+        )
     if not symbolic_helper._is_fp(exponent):
         exponent = g.op(
-            "Cast", exponent, to_i=symbolic_helper.cast_pytorch_to_onnx[f_dtype]
+            "Cast",
+            exponent,
+            to_i=_type_utils.JitScalarType.from_name(f_dtype).onnx_type(),
         )
     pow = g.op("Pow", self, exponent)
     return pow
@@ -2619,7 +2650,9 @@ def clamp_min(g, self, min):
         )
     else:
         dtype = self.type().scalarType()
-        min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        min = g.op(
+            "Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+        )
         return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
@@ -2631,7 +2664,9 @@ def clamp_max(g, self, max):
         )
     else:
         dtype = self.type().scalarType()
-        max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        max = g.op(
+            "Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+        )
         return op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
@@ -2791,12 +2826,46 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
         symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11)
 
 
-# TODO(justinchuby): Clean up this function generation magic by defining the functions
-# explicitly.
-for k, v in symbolic_helper.cast_pytorch_to_onnx.items():  # type: ignore[has-type]
-    name = f"_cast_{k}"
-    globals()[name] = symbolic_helper.parse_args("v", "i")(
-        functools.partial(symbolic_helper._cast_func_template, v)
+def _cast_func_template(to_i, g, input, non_blocking):
+    """Template for creating a cast function."""
+    return g.op("Cast", input, to_i=to_i)
+
+
+# Metaprogram symbolics for each ATen native specialized cast operator.
+# For e.g. we specify a function named `_cast_Byte` that instantiates an
+# ONNX cast node with `to` attribute "UINT8"
+# def _cast_Byte
+# def _cast_Char
+# def _cast_Short
+# def _cast_Int
+# def _cast_Long
+# def _cast_Half
+# def _cast_Float
+# def _cast_Double
+# def _cast_ComplexFloat
+# def _cast_ComplexDouble
+# def _cast_Bool
+# def _cast_BFloat16
+for scalar_type in (
+    "Byte",
+    "Char",
+    "Short",
+    "Int",
+    "Long",
+    "Half",
+    "Float",
+    "Double",
+    "ComplexFloat",
+    "ComplexDouble",
+    "Bool",
+    "BFloat16",
+):
+    func_name = f"_cast_{scalar_type}"
+    globals()[func_name] = symbolic_helper.parse_args("v", "i")(
+        functools.partial(
+            _cast_func_template,
+            _type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
+        )
     )
 
 
@@ -2816,17 +2885,15 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
 
 def scalar_tensor(g, scalar, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    scalar = g.op("Cast", scalar, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        dtype = _type_utils.JitScalarType.FLOAT
+    scalar = g.op("Cast", scalar, to_i=_type_utils.JitScalarType(dtype).onnx_type())
     return scalar
 
 
@@ -2834,30 +2901,26 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
+            scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
             # TODO(justinchuby): Remove type ignore after #81112 is checked in.
-            dtype = symbolic_helper.scalar_type_to_onnx.index(
-                symbolic_helper.cast_pytorch_to_onnx[dtype]
-            )
+            dtype = _type_utils.JitScalarType.from_name(scalar_name)
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
-            t = g.op("Cast", t, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+            t = g.op("Cast", t, to_i=_type_utils.JitScalarType(dtype).onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            dtype = data.type().scalarType()
-            dtype = symbolic_helper.scalar_type_to_onnx.index(
-                symbolic_helper.cast_pytorch_to_onnx[dtype]
-            )
+            scalar_name = data.type().scalarType()
+            dtype = _type_utils.JitScalarType.from_name(scalar_name)
         if symbolic_helper._is_list(data) and (
             symbolic_helper._is_tensor_list(data)
             or symbolic_helper._is_scalar_list(data)
         ):
             data = g.op("ConcatFromSequence", data, axis_i=0, new_axis_i=1)
-    return g.op("Cast", data, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+    return g.op("Cast", data, to_i=_type_utils.JitScalarType(dtype).onnx_type())
 
 
 def as_tensor(g, data, dtype=None, device=None):
@@ -2868,16 +2931,16 @@ def as_tensor(g, data, dtype=None, device=None):
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
     return g.op(
         "ConstantOfShape",
         sizes,
-        value_t=torch.tensor(
-            [0], dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
 
@@ -2887,39 +2950,36 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
         shape,
-        value_t=torch.tensor(
-            [0], dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
 
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
-        dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(self_dtype)
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
     return g.op(
         "ConstantOfShape",
         sizes,
-        value_t=torch.tensor(
-            [1], dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor([1], dtype=scalar_type.dtype()),
     )
 
 
@@ -2929,13 +2989,13 @@ def ones_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
         shape,
-        value_t=torch.tensor(
-            [1], dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor([1], dtype=scalar_type.dtype()),
     )
 
 
@@ -2943,30 +3003,29 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
-        dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
+        dtype = _type_utils.JitScalarType.FLOAT if dtype is None else dtype
         tmp = zeros(g, sizes, dtype, layout, device)
         return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-        dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
+        if dtype is None:
+            scalar_type = _type_utils.JitScalarType.FLOAT
+        else:
+            scalar_type = _type_utils.JitScalarType(dtype)
         sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
         if isinstance(sizes_, list) and len(sizes_) == 0:
             sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
         return g.op(
             "ConstantOfShape",
             sizes,
-            value_t=const_value.view(1).to(
-                symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
+            value_t=const_value.view(1).to(scalar_type.dtype()),
         )
 
 
@@ -2982,21 +3041,20 @@ def full_like(
 ):
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-    dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
         tmp = zeros_like(g, input, dtype, layout, device)
-        fill_value = g.op(
-            "Cast", fill_value, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
-        )
+        fill_value = g.op("Cast", fill_value, to_i=scalar_type.onnx_type())
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         shape = g.op("Shape", input)
         return g.op(
             "ConstantOfShape",
             shape,
-            value_t=torch.tensor([fill_value]).to(
-                symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
+            value_t=torch.tensor([fill_value], dtype=scalar_type.dtype()),
         )
 
 
@@ -3004,9 +3062,7 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
@@ -3133,16 +3189,12 @@ def tanhshrink(g, self):
 def hardshrink(g, self, lambd):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
     )
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
     return g.op(
@@ -3151,9 +3203,7 @@ def hardshrink(g, self, lambd):
         self,
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
 
@@ -3162,16 +3212,12 @@ def hardshrink(g, self, lambd):
 def softshrink(g, self, lambd):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
     )
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
@@ -3180,9 +3226,7 @@ def softshrink(g, self, lambd):
         sub(g, self, lambd_op),
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
@@ -3192,9 +3236,7 @@ def softshrink(g, self, lambd):
         add(g, self, lambd_op),
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
     return add(g, gt_out, lt_out)
@@ -3239,6 +3281,8 @@ def sort(g, self, dim, decending, out=None):
     try:
         dim_size = self_sizes[dim]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         dim_size = None
 
     if dim_size is None:
@@ -3310,32 +3354,36 @@ def to(g, self, *args):
         if symbolic_helper._is_value(dtype) or isinstance(dtype, torch.Tensor):
             # aten::to(Tensor, Tensor, bool, bool, memory_format)
             dtype = args[0].type().scalarType()
-            return g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+            return g.op(
+                "Cast",
+                self,
+                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+            )
         else:
             # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             # memory_format is ignored
-            return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+            return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
     elif len(args) == 5:
         # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
         dtype = symbolic_helper._get_const(args[1], "i", "dtype")
         # memory_format is ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
     elif len(args) == 6:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = symbolic_helper._get_const(args[0], "i", "dtype")
         # Layout, device and memory_format are ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
     elif len(args) == 7:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
         dtype = symbolic_helper._get_const(args[0], "i", "dtype")
         # Layout, device and memory_format are ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
     else:
         return symbolic_helper._onnx_unsupported("Unknown aten::to signature")
 
 
 def repeat(g, self, repeats):
-    dtype = symbolic_helper.ScalarType.INT64
+    dtype = _type_utils.JitScalarType.INT64
     shape_ = ones_like(g, repeats, dtype)
     self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
@@ -4017,50 +4065,50 @@ def _pad_packed_sequence(
 def randn(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
             "ConstantOfShape",
             shapes,
-            value_t=torch.tensor(
-                [0], dtype=symbolic_helper.scalar_type_to_pytorch_type[6]
-            ),
+            value_t=torch.tensor([0], dtype=torch.float),
         )
         return g.op(
             "RandomNormalLike",
             shape_const,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=scalar_type.onnx_type(),
         )
     return g.op(
         "RandomNormal",
         shape_i=shape,
-        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        dtype_i=scalar_type.onnx_type(),
     )
 
 
 def rand(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
             "ConstantOfShape",
             shapes,
-            value_t=torch.tensor(
-                [0], dtype=symbolic_helper.scalar_type_to_pytorch_type[6]
-            ),
+            value_t=torch.tensor([0], dtype=torch.float),
         )
         return g.op(
             "RandomUniformLike",
             shape_const,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=scalar_type.onnx_type(),
         )
     return g.op(
         "RandomUniform",
         shape_i=shape,
-        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        dtype_i=scalar_type.onnx_type(),
     )
 
 
@@ -4069,10 +4117,10 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    return g.op(
-        "RandomNormalLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
-    )
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
 
 
 def rand_like(
@@ -4080,9 +4128,9 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        dtype = _type_utils.JitScalarType.FLOAT
     return g.op(
-        "RandomUniformLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
+        "RandomUniformLike", self, dtype_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
 
 
@@ -4113,10 +4161,12 @@ def bernoulli(g, input, generator=None, out=None):
         input,
         high_f=1.0,
         low_f=0.0,
-        dtype_i=symbolic_helper.cast_pytorch_to_onnx[dtype],
+        dtype_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
     )
     output = g.op("Less", p, input)
-    return g.op("Cast", output, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    return g.op(
+        "Cast", output, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+    )
 
 
 @symbolic_helper.parse_args("v")
@@ -4227,28 +4277,26 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.JitScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter_add(g, self, dim, index, src):
-    dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None:
+    scalar_name = symbolic_helper._try_get_scalar_type(self)
+    if scalar_name is None:
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible"
         )
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+    scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
-        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=scalar_type.dtype()))
     else:
-        dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
-        to_add = zeros_like(g, self, dtype)
+        to_add = zeros_like(g, self, scalar_type)
     to_add = symbolic_helper._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -4280,10 +4328,8 @@ def __isnot_(g, self, other):
 def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
-    if num_classes.type().scalarType() in ("Byte", "Char", "Int", "Short"):
-        num_classes = g.op(
-            "Cast", num_classes, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
-        )
+    if num_classes.type().scalarType() in {"Byte", "Char", "Int", "Short"}:
+        num_classes = g.op("Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
 
@@ -4299,7 +4345,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op(
         "Cast",
         g.op("OneHot", index, depth, values, axis_i=dim),
-        to_i=symbolic_helper.cast_pytorch_to_onnx[dtype],
+        to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
     )
     mul = g.op("Mul", symbolic_helper._unsqueeze_helper(g, self, [dim + 1]), index)
     return symbolic_helper._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
@@ -4332,7 +4378,7 @@ def _var_mean(g, input, dim, correction, keepdim):
         correction = 1
     if correction != 0:
         num_elements = g.op(
-            "Cast", num_elements, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"]
+            "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
         )
         one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
         mul = g.op("Mul", var, num_elements)
@@ -4385,7 +4431,7 @@ def arange(g, *args):
             range_tensor = g.op(
                 "Cast",
                 g.op("Ceil", range_tensor),
-                to_i=symbolic_helper.scalar_type_to_onnx[4],
+                to_i=_type_utils.JitScalarType.INT64.onnx_type(),
             )
         return range_tensor
 
@@ -4405,7 +4451,7 @@ def arange(g, *args):
             g, nonzero(g, ones(g, range_tensor, dtype, None, None)), [1]
         )
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.JitScalarType(dtype).onnx_type()
         )
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
@@ -4426,7 +4472,7 @@ def arange(g, *args):
         )
         arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.JitScalarType(dtype).onnx_type()
         )
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
@@ -4445,7 +4491,7 @@ def arange(g, *args):
             start,
         )
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.JitScalarType(dtype).onnx_type()
         )
     else:
         raise NotImplementedError(
@@ -4796,7 +4842,7 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op(
         "Multinomial",
         log_input,
-        dtype_i=symbolic_helper.cast_pytorch_to_onnx["Long"],
+        dtype_i=_C_onnx.TensorProtoDataType.INT64,
         sample_size_i=num_samples,
     )
 
@@ -4807,10 +4853,14 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     mul_a = mul(
         g,
         batch_mul,
-        g.op("Cast", alpha, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype]),
+        g.op(
+            "Cast", alpha, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+        ),
     )
     mul_b = mul(
-        g, self, g.op("Cast", beta, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        g,
+        self,
+        g.op("Cast", beta, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()),
     )
     return add(g, mul_a, mul_b)
 
@@ -5089,7 +5139,7 @@ def __derive_index(g, index, start, step):
 def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
-    return g.op("Cast", div, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    return g.op("Cast", div, to_i=_C_onnx.TensorProtoDataType.INT64)
 
 
 def linear(g, input, weight, bias):
@@ -5112,20 +5162,22 @@ def hann_window(
     g,
     window_length,
     periodic=True,
-    dtype=None,
+    dtype: Optional[int] = None,
     layout=None,
     device=None,
     pin_memory=None,
     requires_grad=False,
 ):
     if dtype is None:
-        dtype = torch.get_default_dtype()
-        if not dtype or not dtype.is_floating_point:
-            dtype = torch.float
-        dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
+        dtype_ = torch.get_default_dtype()
+        if not dtype_ or not dtype_.is_floating_point:
+            dtype_ = torch.float
+        scalar_type = _type_utils.JitScalarType.from_dtype(dtype_)
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
 
     n_array = arange(g, window_length, 4, None, None, None)
-    output = g.op("Cast", n_array, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    output = g.op("Cast", n_array, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     output = mul(
         g, g.op("Constant", value_t=torch.tensor(math.pi, dtype=torch.float)), output
     )
@@ -5138,7 +5190,7 @@ def hann_window(
     output = g.op(
         "Cast",
         square(g, sin(g, output)),
-        to_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        to_i=scalar_type.onnx_type(),
     )
 
     return output
@@ -5188,11 +5240,9 @@ def movedim(g, self, source, destination):
 def fill(g, self, value):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        dtype = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.JitScalarType.from_name(dtype)
 
     return full_like(g, self, value, dtype)
 
@@ -5430,19 +5480,20 @@ class Prim:
 
     @staticmethod
     def dtype(g, self):
-        dtype = symbolic_helper._try_get_scalar_type(self)
-        if dtype is None:
-            dtype = "Float"
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-        return g.op("Constant", value_t=torch.tensor(dtype))
+        scalar_name = symbolic_helper._try_get_scalar_type(self)
+        if scalar_name is None:
+            scalar_name = "Float"
+        scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
+        # This node records a torch dtype as int
+        return g.op("Constant", value_t=torch.tensor(scalar_type))
 
-    # tolist is currently supported only for 1D input tensors.
-    # dim_val and elem_ty_val represent dimension and type annotations
-    # that need to match dimension and type of the input tensor.
     @staticmethod
     def tolist(g, input, dim_val, elem_ty_val):
+        """tolist is currently supported only for 1D input tensors.
+
+        dim_val and elem_ty_val represent dimension and type annotations
+        that need to match dimension and type of the input tensor.
+        """
         dim = symbolic_helper._maybe_get_const(dim_val, "i")
         if dim > 1:
             return symbolic_helper._unimplemented("prim::tolist", "dim_val > 1")
