@@ -198,10 +198,17 @@ bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
 
 bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
-  for (auto& kv : kernels_) {
-    if (k == kv.first) return true;
-  }
-  return false;
+  auto it = kernels_.find(k);
+  if (it == kernels_.end()) return false;
+  return it->second.size() > 0;
+}
+
+const KernelFunction& OperatorEntry::kernelForDispatchKey(DispatchKey k) const {
+  auto it = kernels_.find(k);
+  TORCH_CHECK(it != kernels_.end() && it->second.size(), "no kernel for ", k, " on ", name_);
+  auto jt = it->second.begin();
+  TORCH_INTERNAL_ASSERT(jt->kernel.isValid())
+  return jt->kernel;
 }
 
 const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
