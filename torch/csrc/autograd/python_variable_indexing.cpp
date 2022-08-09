@@ -66,7 +66,8 @@ static inline int64_t count_specified_dimensions(
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(
         index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!skip_torch_function && !THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    if (!skip_torch_function && (
+            !THPVariable_CheckExact(obj) && check_has_torch_function(obj))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
@@ -335,7 +336,8 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   const bool skip_torch_function = should_skip_torch_function();
-  if (!skip_torch_function && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (!skip_torch_function &&
+      (!THPVariable_CheckExact(self) && check_has_torch_function(self))) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -441,7 +443,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   const bool skip_torch_function = should_skip_torch_function();
   if (!skip_torch_function &&
       ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-       (!THPVariable_CheckExact(py_value) && check_has_torch_function(py_value)))) {
+       (!THPVariable_CheckExact(py_value) &&
+        check_has_torch_function(py_value)))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;

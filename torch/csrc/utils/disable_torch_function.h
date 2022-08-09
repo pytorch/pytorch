@@ -36,7 +36,7 @@ struct TorchFunctionChecker {
     return false;
   }
 
-private:
+ private:
   TorchFunctionChecker() = default;
 
   template <typename FCheck, typename FHandle, typename FDefault>
@@ -44,7 +44,10 @@ private:
 };
 
 template <typename FCheck, typename FHandle, typename FDefault>
-auto with_torch_function(FCheck check, FHandle handle_torch_function, FDefault default_impl) {
+auto with_torch_function(
+    FCheck check,
+    FHandle handle_torch_function,
+    FDefault default_impl) {
   TorchFunctionChecker checker;
   if (!should_skip_torch_function() && check(checker)) {
     return handle_torch_function();
