@@ -414,7 +414,7 @@ __global__ void computeBlockwiseWithinKCounts(
   uint32_t slice_idx = block_idx / blocks_per_slice;
 
   // The grid is computed from `getGridFromTiles`, when there are lots of
-  // elements, we will use both blockIdx.x and blockIdx.y, and maybe blockIdx.y
+  // elements, we will use both blockIdx.x and blockIdx.y, and maybe blockIdx.z
   // when this is the case, the number of blocks that we are launching can be
   // more than the number of blocks we need. So we need to check the range of
   // `block_idx`.
