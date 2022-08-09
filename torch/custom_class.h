@@ -421,23 +421,6 @@ class class_ : public ::torch::detail::class_base {
     registerCustomClassMethod(std::move(method));
     return method_val;
   }
-
-  // Wrapper function to force method deregistration on shutdown.
-  static void registerCustomClassMethod(std::unique_ptr<jit::Function> method) {
-    c10::QualifiedName method_name = method->qualname();
-    torch::registerCustomClassMethod(std::move(method));
-
-    struct CustomClassMethodDeregistrator {
-      ~CustomClassMethodDeregistrator() {
-        for (const auto& name : names)
-          torch::deregisterCustomClassMethod(name);
-      }
-      std::vector<c10::QualifiedName> names;
-    };
-
-    static CustomClassMethodDeregistrator deregistator;
-    deregistator.names.emplace_back(std::move(method_name));
-  }
 };
 
 /// make_custom_class() is a convenient way to create an instance of a

@@ -290,9 +290,12 @@ auto handle_torch_function_no_python_arg_parser(
   PyObject* mode_obj = nullptr;
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  const auto& maybe_mode = is_torch_function
-      ? at::impl::PythonTorchFunctionTLS::get_mode()
-      : at::impl::TorchDispatchModeTLS::get_state();
+  auto get_mode = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
+                             : at::impl::TorchDispatchModeTLS::get_state();
+  };
+
+  const auto& maybe_mode = get_mode();
   if (maybe_mode) {
     mode_obj = maybe_mode->ptr(getPyInterpreter());
     TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
@@ -388,8 +391,9 @@ auto handle_torch_function_no_python_arg_parser(
       // If a user forcibly changes the mode in a non-lexical way
       // in the inner context, the mode could be invalid here.  So just be
       // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-      TORCH_INTERNAL_ASSERT(mode_obj == maybe_mode->ptr(getPyInterpreter()));
+      const auto& maybe_mode = get_mode();
+      TORCH_INTERNAL_ASSERT(
+          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
       ss << " nor was it found on the currently active mode "
          << py::repr(mode_obj);
     }
