@@ -2358,6 +2358,13 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
+        # If x or y are tensors and nested then we unbind them to a list of tensors this should allow us to compare
+        # a nested tensor to a nested tensor and a nested tensor to a list of expected tensors
+        if isinstance(x, torch.Tensor) and x.is_nested:
+            x = x.unbind()
+        if isinstance(y, torch.Tensor) and y.is_nested:
+            y = y.unbind()
+
         assert_equal(
             x,
             y,
