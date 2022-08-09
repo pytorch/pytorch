@@ -237,7 +237,7 @@ set_property(
 # cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
 # library.
 add_library(torch::cudart INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CUDA_USE_STATIC_CUDA_RUNTIME)
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_cudart_static_LIBRARY}")
