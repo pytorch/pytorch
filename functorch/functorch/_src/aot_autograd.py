@@ -658,9 +658,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         with _stateless.reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            interpreter = Interpreter(mod)
-            with RetracingMode.preserve_stack_trace(interpreter):
-                out = interpreter.run(*args[params_len:], **kwargs)
+            if isinstance(mod, torch.fx.GraphModule):
+                interpreter = Interpreter(mod)
+                with RetracingMode.preserve_stack_trace(interpreter):
+                    out = interpreter.run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(

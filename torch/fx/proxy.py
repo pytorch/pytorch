@@ -45,9 +45,11 @@ class TracerBase:
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
-        retracing_node = RetracingMode.current_node()
-        if retracing_node:
-            node.stack_trace = retracing_node.stack_trace
+        # Preserve the original node's stack trace when retracing a graph
+        if not self.record_stack_traces:
+            retracing_node = RetracingMode.current_node()
+            if retracing_node:
+                node.stack_trace = retracing_node.stack_trace
 
         return node
 
