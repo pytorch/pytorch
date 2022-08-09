@@ -106,6 +106,9 @@ class Adam(Optimizer):
         capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
+        fused (bool, optional): whether fused implementation of optimizer is used.
+            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
+            are supported. (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -139,8 +142,11 @@ class Adam(Optimizer):
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            if not all(p.is_cuda for pg in self.param_groups for p in pg['params']):
-                raise RuntimeError("FusedAdam requires all the params to be hosted on CUDA device")
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
 
     def __setstate__(self, state):
         super().__setstate__(state)
