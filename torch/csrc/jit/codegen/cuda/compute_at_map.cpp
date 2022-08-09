@@ -178,6 +178,8 @@ void IterDomainGraph::build(Fusion* fusion) {
             BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map);
 
         const auto& permissive_c2p_map = permissive_replay_PasC.getReplay();
+        const auto permissive_disjoint_sets =
+            permissive_replay_PasC.getDisjointSets();
 
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
@@ -213,6 +215,17 @@ void IterDomainGraph::build(Fusion* fusion) {
           auto p_id = entry.second;
           if (idIsAComputeAtLeafDomain(p_id, p_tv)) {
             loop_nodes_.mapEntries(c_id, p_id);
+          } else {
+            // When there are trivial reductions merged with other dims, `p_id`
+            // might not be a compute at leaf domain of `p_tv`, but it actually
+            // has an equivalent compute at leaf domain. For that case, we map
+            // the equivalent compute at leaf domain.
+            for (int i = 0; i < p_tv->getComputeAtPosition(); i++) {
+              auto id = p_tv->axis(i);
+              if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
+                loop_nodes_.mapEntries(c_id, id);
+              }
+            }
           }
           permissive_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
@@ -225,8 +238,8 @@ void IterDomainGraph::build(Fusion* fusion) {
           mapMaybeSwizzleOp(permissive_nodes_, c_id);
         }
 
-        // Make sure we always get root mapping for the permissive map. Because
-        // of forwarding we could otherwise miss some root mappings.
+        // Make sure we always get root mapping for the permissive map.
+        // Because of forwarding we could otherwise miss some root mappings.
         for (auto entry : permissive_c2p_root_map) {
           auto c_id = entry.first;
           auto p_id = entry.second;

@@ -327,7 +327,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   auto scheduler_entry = schedulers()[group_id].get();
 
   // Check that the heuristics are matched, in the case of segmented fusion
-  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristc() == sg->heuristic());
+  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristic() == sg->heuristic());
 
   if (!executors_[group_id].compiled()) {
     FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::Compile");
@@ -341,32 +341,16 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     options.index_mode = scheduler_entry->indexMode();
     FusionGuard fg(fusion_to_run.get());
     scheduler_entry->schedule(fusion_to_run.get());
-    // Load launch params for reduction and normalization kernels
-    if (scheduler_entry->hasReductionParam()) {
-      launch_params = scheduler_entry->reductionParams().lparams;
-    } else {
-      launch_params = scheduler_entry->pointwiseParams().lparams;
-    }
+    launch_params = scheduler_entry->params()->lparams;
     executors_[group_id].compileFusion(
         fusion_to_run.get(), inputs, launch_params, options);
   } else {
-    // Load launch params for reduction and normalization kernels
-    if (scheduler_entry->hasReductionParam()) {
-      launch_params = scheduler_entry->reductionParams().lparams;
-    } else {
-      launch_params = scheduler_entry->pointwiseParams().lparams;
-    }
+    launch_params = scheduler_entry->params()->lparams;
   }
 
   if (profiling_) {
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
-    if (scheduler_entry->hasReductionParam()) {
-      most_recent_executor_log_.reduction_params =
-          scheduler_entry->reductionParams();
-    } else {
-      most_recent_executor_log_.pointwise_params =
-          scheduler_entry->pointwiseParams();
-    }
+    most_recent_executor_log_.params = scheduler_entry->params()->clone();
   }
 
   auto& executor = executors_[group_id];
@@ -395,11 +379,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
       }
     }
     std::cout << "Compiler log: " << executor.compilerLog() << "\n";
-    if (scheduler_entry->hasReductionParam()) {
-      std::cout << scheduler_entry->reductionParams().toString() << "\n";
-    } else {
-      std::cout << scheduler_entry->pointwiseParams().toString() << "\n";
-    }
+    std::cout << scheduler_entry->params()->toString() << "\n";
     std::cout << "With arguments: " << executor.lastLaunchParams().toString();
     std::cout << executor.kernelName() << " " << executor.bytesProcessed()
               << " bytes/ " << std::setprecision(3) << executor.kernelTimeMs()
@@ -604,13 +584,8 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
       update_heuristics->heuristicsList().size() == scheduler_list_length);
   for (const auto i : c10::irange(scheduler_list_length)) {
     auto& schedulerPtr = heuristics_->heuristicsList()[i];
-    if (schedulerPtr->hasReductionParam()) {
-      schedulerPtr->updateLaunchConstraint(
-          update_heuristics->heuristicsList()[i]->reductionParams().lparams);
-    } else {
-      schedulerPtr->updateLaunchConstraint(
-          update_heuristics->heuristicsList()[i]->pointwiseParams().lparams);
-    }
+    schedulerPtr->updateLaunchConstraint(
+        update_heuristics->heuristicsList()[i]->params()->lparams);
   }
 }
 

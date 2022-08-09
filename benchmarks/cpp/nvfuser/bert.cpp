@@ -133,8 +133,8 @@ static void MagicScheduler_DivMaxSoftDropFwd(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  schedulePersistentKernel(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  schedulePersistentKernel(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -143,7 +143,7 @@ static void MagicScheduler_DivMaxSoftDropFwd(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
-    cg_outputs = fe.runFusion({t0, t1}, norm_params.value().lparams);
+    cg_outputs = fe.runFusion({t0, t1}, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
@@ -193,8 +193,8 @@ static void MagicScheduler_DivMaxSoftDropBwd(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  schedulePersistentKernel(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  schedulePersistentKernel(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -203,7 +203,7 @@ static void MagicScheduler_DivMaxSoftDropBwd(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
-    cg_outputs = fe.runFusion({t0, t1, t2, t3}, norm_params.value().lparams);
+    cg_outputs = fe.runFusion({t0, t1, t2, t3}, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
@@ -308,8 +308,8 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  schedulePersistentKernel(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  schedulePersistentKernel(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -319,7 +319,7 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
-    cg_outputs = fe.runFusion(at_inputs, norm_params.value().lparams);
+    cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
@@ -423,8 +423,8 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getReductionHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleReduction(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  scheduleReduction(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -434,7 +434,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     clearL2Cache();
-    cg_outputs = fe.runFusion(at_inputs, norm_params.value().lparams);
+    cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
@@ -534,8 +534,8 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  schedulePersistentKernel(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  schedulePersistentKernel(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -545,7 +545,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
-    cg_outputs = fe.runFusion(at_inputs, norm_params.value().lparams);
+    cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
@@ -625,8 +625,8 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
   std::vector<at::Tensor> cg_outputs;
 
   auto norm_params = getReductionHeuristics(&fusion, at_inputs);
-  TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleReduction(&fusion, norm_params.value());
+  TORCH_CHECK(norm_params != nullptr, "Norm scheduler can't be used!");
+  scheduleReduction(&fusion, *norm_params);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -636,7 +636,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
-    cg_outputs = fe.runFusion(at_inputs, norm_params.value().lparams);
+    cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the

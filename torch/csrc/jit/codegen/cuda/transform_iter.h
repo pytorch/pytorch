@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -306,6 +307,8 @@ class TORCH_CUDA_CU_API BestEffortReplay {
         [](std::pair<IterDomain*, size_t> entry) { return entry.first; });
     return leaf_vec_;
   }
+
+  DisjointSets<IterDomain*> getDisjointSets();
 
   // Runs a best effort replay that ignores broadcast axes that appear in
   // consumer that are not mapped to producer in root_map.

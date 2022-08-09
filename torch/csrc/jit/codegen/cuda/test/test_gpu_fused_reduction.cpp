@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -45,29 +46,6 @@ using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
-
-// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder()
-      .ndims(ndims)
-      .dtype(dtype)
-      .contiguity(std::vector<bool>(ndims, true))
-      .build();
-}
-
-// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
-}
-
-// Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder().shape(shape).dtype(dtype).build();
-}
 
 class KernelExprVisitor : private kir::IrVisitor {
  public:
@@ -144,7 +122,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   tv3->axis(0)->parallelize(ParallelType::BIDy);
   tv3->axis(2)->parallelize(ParallelType::BIDx);
   tv3->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   // Just to make sure fused_reduction and work buffers are allocated
   // uniquely
@@ -247,7 +225,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce3_CUDA) {
 
   tv3->axis(1)->parallelize(ParallelType::BIDx);
   tv3->axis(2)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   GpuLower gpulw(&fusion);
   validateNoParallelBroadcastExist(gpulw.kernel());
@@ -293,7 +271,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce4_CUDA) {
 
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv4);
 
   GpuLower gpulw(&fusion);
   validateNoParallelBroadcastExist(gpulw.kernel());
@@ -352,7 +330,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce5_CUDA) {
 
   tv4->axis(1)->parallelize(ParallelType::BIDx);
   tv4->axis(2)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv4);
 
   tv6->axis(0)->parallelize(ParallelType::BIDy);
   tv6->axis(1)->parallelize(ParallelType::BIDx);
@@ -410,7 +388,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce6_CUDA) {
   tv1->axis(2)->parallelize(ParallelType::BIDx);
   tv1->axis(3)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   tv1->axis(4)->parallelize(ParallelType::Vectorize);
 
@@ -456,7 +434,7 @@ TEST_F(NVFuserTest, FusionGridAllreduceWelford1_CUDA) {
 
   tv5->axis(0)->parallelize(ParallelType::BIDx);
   tv5->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   GpuLower gpulw(&fusion);
   validateNoParallelBroadcastExist(gpulw.kernel());
@@ -506,7 +484,7 @@ TEST_F(NVFuserTest, FusionGridAllreduceWelford2_CUDA) {
 
   tv3->axis(1)->parallelize(ParallelType::BIDx);
   tv3->axis(2)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   // There must be no parallel broadcast
   GpuLower gpulw(&fusion);
@@ -610,7 +588,7 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   TransformPropagator propagator(tv0);
   MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
 
-  auto tvs_rf = tvs.rFactor({-5, -4, -3, -2, -1});
+  ir_utils::rfactorHelper(tvs.avg, {-5, -4, -3, -2, -1});
 
   tv0->computeAt(tv29, 2);
   tv1->computeAt(tv29, 2);
@@ -622,7 +600,7 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   tv29->axis(2)->parallelize(ParallelType::BIDy);
   tv29->axis(3)->parallelize(ParallelType::TIDz);
   tv29->axis(4)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv29, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv29);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   auto options_half = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
@@ -696,7 +674,7 @@ TEST_F(NVFuserTest, FusionGroupedReduction1_CUDA) {
 
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   std::vector<int64_t> shape({99, 999});
 
@@ -872,7 +850,7 @@ TEST_F(NVFuserTest, FusionGroupedReduction6_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(1)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   std::vector<int64_t> shape({99, 999});
 
@@ -937,7 +915,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionRfactor1_CUDA) {
   tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
   tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1_rf);
 
   std::vector<int64_t> shape({12345});
 
@@ -982,7 +960,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionRfactor2_CUDA) {
   tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
   tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1_rf);
 
   std::vector<int64_t> shape({12345});
 
@@ -1028,7 +1006,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionAfterComputeAt_CUDA) {
   groupReductions({tv2, tv3});
 
   tv2->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   std::vector<int64_t> shape({3, 1234});
 
@@ -1068,7 +1046,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce1_CUDA) {
 
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   std::vector<int64_t> shape({999});
 
@@ -1117,7 +1095,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
   tv1->axis(0)->parallelize(ParallelType::BIDy);
   tv1->axis(1)->parallelize(ParallelType::BIDx);
   tv1->axis(2)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   std::vector<int64_t> shape({10, 999});
 
@@ -1169,7 +1147,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce3_CUDA) {
 
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   std::vector<int64_t> shape({999});
 
@@ -1221,7 +1199,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce4_CUDA) {
 
   reduction_tv->axis(0)->parallelize(ParallelType::BIDx);
   reduction_tv->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(reduction_tv, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(reduction_tv);
 
   std::vector<int64_t> shape({999});
 
@@ -1281,7 +1259,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
 
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   std::vector<int64_t> shape({999});
 
@@ -1445,7 +1423,7 @@ TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
   }
 
   // Parallelization
-  scheduler_utils::parallelizeAllLike(grad_input, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(grad_input);
   input_cache->axis(-1)->parallelize(ParallelType::Vectorize);
   grad_output_cache->axis(-1)->parallelize(ParallelType::Vectorize);
 
@@ -1559,7 +1537,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionReEntrant1_CUDA) {
   tv2->axis(2)->parallelize(ParallelType::BIDx);
   tv2->axis(3)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   std::vector<int64_t> shape({99, 999});
 
@@ -1670,7 +1648,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
   ref->axis(4)->parallelize(ParallelType::Serial);
   ref->axis(5)->parallelize(ParallelType::Serial);
 
-  scheduler_utils::parallelizeAllLike(ref, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(ref);
 
   tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
   tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
@@ -1799,7 +1777,7 @@ TEST_F(
   ref->axis(4)->parallelize(ParallelType::Serial);
   ref->axis(5)->parallelize(ParallelType::Serial);
 
-  scheduler_utils::parallelizeAllLike(ref, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(ref);
 
   tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
   tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
@@ -1866,7 +1844,7 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduce1_CUDA) {
   tv1->axis(2)->parallelize(ParallelType::BIDx);
   tv1->axis(3)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   tv2->axis(4)->parallelize(ParallelType::Group);
 
@@ -1944,7 +1922,7 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduce2_CUDA) {
   tv1->axis(2)->parallelize(ParallelType::BIDx);
   tv1->axis(3)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   tv2->axis(4)->parallelize(ParallelType::Group);
   tv2->axis(5)->parallelize(ParallelType::Group);
@@ -2030,7 +2008,7 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduce3_CUDA) {
   tv1->axis(2)->parallelize(ParallelType::BIDx);
   tv1->axis(3)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   tv2->axis(4)->parallelize(ParallelType::Group);
 

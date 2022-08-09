@@ -19,7 +19,7 @@ void ExpressionEvaluator::bind(
   TORCH_CHECK(
       value->definition() == nullptr,
       "Tried to bind to a value that is computed in the kernel IR: ",
-      value->toString(),
+      value->toInlineString(),
       " with ",
       concrete_value);
   known_values_[value] = concrete_value;

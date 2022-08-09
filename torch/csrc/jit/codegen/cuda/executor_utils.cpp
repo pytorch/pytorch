@@ -799,7 +799,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }
@@ -925,9 +925,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
+    std::stringstream ss;
+    ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
@@ -974,11 +977,13 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     args.push_back("--fmad=true");
   }
 #endif
-
-#ifndef NDEBUG
   // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
+  if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
+    args.push_back("-lineinfo");
+    args.push_back("-G");
+    args.push_back("--dopt=on");
+  }
+#ifdef NDEBUG
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif

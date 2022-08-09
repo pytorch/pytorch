@@ -630,7 +630,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init,
-    MmaOptions options)
+    OptionsInMma options)
     : MmaOp(passkey, out, in_a, in_b, init) {
   options_ = options;
 }
@@ -1293,7 +1293,8 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
 std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
     Swizzle2DType swizzle_type,
     IterDomain* in_x,
-    IterDomain* in_y) {
+    IterDomain* in_y,
+    SwizzleMode swizzle_mode) {
   TORCH_CHECK(
       !in_x->extent()->isZeroInt() && !in_y->extent()->isZeroInt(),
       "Invalid swizzling of a empty dimension.");
@@ -1319,7 +1320,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
   IterDomain* out_y = IterDomainBuilder(in_y).build();
 
   IrBuilder::create<Swizzle2D>(
-      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type);
+      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type, swizzle_mode);
 
   return std::make_pair(out_x, out_y);
 }
@@ -1790,7 +1791,11 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   return reordered_domain;
 }
 
-void TensorDomain::swizzle(Swizzle2DType swizzle_type, int x, int y) {
+void TensorDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    int x,
+    int y,
+    SwizzleMode swizzle_mode) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
 
   TORCH_CHECK(
@@ -1808,7 +1813,7 @@ void TensorDomain::swizzle(Swizzle2DType swizzle_type, int x, int y) {
   IterDomain* axis_out_y = nullptr;
 
   std::tie(axis_out_x, axis_out_y) =
-      IterDomain::swizzle(swizzle_type, axis_x, axis_y);
+      IterDomain::swizzle(swizzle_type, axis_x, axis_y, swizzle_mode);
 
   domain_.erase(domain_.begin() + x);
   domain_.insert(domain_.begin() + x, axis_out_x);
@@ -2039,13 +2044,15 @@ Swizzle2D::Swizzle2D(
     IterDomain* out_y,
     IterDomain* in_x,
     IterDomain* in_y,
-    Swizzle2DType swizzle_type)
+    Swizzle2DType swizzle_type,
+    SwizzleMode swizzle_mode)
     : Expr(passkey, ExprType::Swizzle2D),
       out_x_{out_x},
       out_y_{out_y},
       in_x_{in_x},
       in_y_{in_y},
-      swizzle_type_(swizzle_type) {
+      swizzle_type_(swizzle_type),
+      swizzle_mode_(swizzle_mode) {
   addOutput(out_x);
   addOutput(out_y);
   addInput(in_x);
@@ -2071,7 +2078,8 @@ Swizzle2D::Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner)
       out_y_(ir_cloner->clone(src->out_y_)),
       in_x_(ir_cloner->clone(src->in_x_)),
       in_y_(ir_cloner->clone(src->in_y_)),
-      swizzle_type_(src->swizzle_type_) {}
+      swizzle_type_(src->swizzle_type_),
+      swizzle_mode_(src->swizzle_mode_) {}
 
 NamedScalar::NamedScalar(
     IrBuilderPasskey passkey,

@@ -529,8 +529,8 @@ ForwardNormResult batch_norm(
     auto invstd_bcast = broadcast(unbiased_invstd, broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
-    mean = TensorViewBuilder().shape({0}).build();
-    invstd = TensorViewBuilder().shape({0}).build();
+    mean = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
+    invstd = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
     y = mul(x_sub_mean, invstd_bcast);
   }
 
@@ -782,8 +782,8 @@ ForwardNormResult instance_norm(
         broadcast(unbiased_invstd, channels_only_broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
-    mean = TensorViewBuilder().shape({0}).build();
-    invstd = TensorViewBuilder().shape({0}).build();
+    mean = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
+    invstd = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
     y = mul(x_sub_mean, invstd_bcast);
   }
 
