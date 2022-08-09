@@ -11,7 +11,7 @@ from torch.ao.quantization.fx._model_report.detector import (
 from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
-
+from torch.ao.quantization.qconfig_mapping import QConfigMapping
 
 class ModelReport:
     r"""
@@ -71,6 +71,7 @@ class ModelReport:
             - Table
             - Histogram
             - Line plot
+    8.) Call model_report.generate_qconfigs to generate the qconfigs based on the report suggestions
 
     Example (with QuantizationTracer):
         >>> # get the necessary qconfig
@@ -94,6 +95,9 @@ class ModelReport:
 
         >>> # finally we generate the reports and optionally remove the observers we inserted
         >>> reports = tracer_reporter.generate_model_report(remove_inserted_observers=True)
+
+        >>> # Optional: we can generate the qconfigs based on the suggestions
+        >>> qconfigs = model_report.generate_qconfigs()
 
         >>> # Optional: we get a ModelReportVisualizer instance to do any visualizations desired
         >>> model_report_visualizer = tracer_reporter.generate_visualizer()
@@ -415,3 +419,21 @@ class ModelReport:
         visualizer: ModelReportVisualizer = ModelReportVisualizer(module_fqns_to_features)
 
         return visualizer
+
+    def generate_qconfigs(self) -> Dict[str, QConfigMapping]:
+        r"""
+        Generates a dictionary mapping each QConfig type name to a type of
+        configuration that can be generated based on the suggestions of the
+        ModelReport API.
+
+        Currently supported types:
+        - Quantization QConfig
+        - Equalization Config
+
+        These configs are based on the suggestions provided by the ModelReport API
+        and can only be generated once the reports have been generated.
+
+        Returns a dictionary mapping names of configurations to:
+            - A QConfigMapping for the respective configuration type
+        """
+        pass
