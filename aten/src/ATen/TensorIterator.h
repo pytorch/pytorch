@@ -473,10 +473,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
 
   bool has_contiguous_first_dim() const {
-    if (ndim() == 0) {
-      return true;
-    }
-
     int num_tensors = ntensors();
     for (const auto i : c10::irange(num_tensors)) {
       if (strides(i)[0] != element_size(i)) {
