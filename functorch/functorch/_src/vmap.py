@@ -24,20 +24,7 @@ in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 
-# Temporary OrderedDict registration as pytree
-def _odict_flatten(d):
-    return list(d.values()), list(d.keys())
-
-
-def _odict_unflatten(values, context):
-    return OrderedDict((key, value) for key, value in zip(context, values))
-
-
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
-
-
 # Checks that all args-to-be-batched have the same batch dim size
-
 def _validate_and_get_batch_size(
         flat_in_dims: List[Optional[int]],
         flat_args: List) -> int:
