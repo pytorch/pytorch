@@ -113,7 +113,7 @@ class TestQuantizationDocs(QuantizationTestCase):
     def test_quantization_doc_ptdq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTDQ API Example::"
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext:
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
             code = self._get_code(path_from_pytorch, unique_identifier)
             self._test_code(code)
 
@@ -121,7 +121,7 @@ class TestQuantizationDocs(QuantizationTestCase):
     def test_quantization_doc_ptsq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTSQ API Example::"
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext:
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
             code = self._get_code(path_from_pytorch, unique_identifier)
             self._test_code(code)
 
@@ -135,7 +135,7 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         input_fp32 = torch.randn(1, 1, 1, 1)
         global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext:
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
             code = self._get_code(path_from_pytorch, unique_identifier)
             self._test_code(code, global_inputs)
 
@@ -146,7 +146,7 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         input_fp32 = SingleLayerLinearModel().get_example_inputs()
         global_inputs = {"UserModel": SingleLayerLinearModel, "input_fp32": input_fp32}
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext:
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
             code = self._get_code(path_from_pytorch, unique_identifier)
             self._test_code(code, global_inputs)
 
@@ -156,6 +156,6 @@ class TestQuantizationDocs(QuantizationTestCase):
         unique_identifier = "Custom API Example::"
 
         global_inputs = {"nnq": torch.nn.quantized}
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext:
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
             code = self._get_code(path_from_pytorch, unique_identifier)
             self._test_code(code, global_inputs)

@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 import os
+import contextlib
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -7222,7 +7223,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.assertEqual(out.device.type, device_after)
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_model_dropout(self):
         from torchvision import models
         m = models.mobilenet_v3_small()
@@ -7230,8 +7230,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 224, 224),)
         mp = prepare_qat_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mp(*example_inputs)
-        mq = convert_fx(mp)
-        res = mq(*example_inputs)
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+            mq = convert_fx(mp)
+        mq(*example_inputs)
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
