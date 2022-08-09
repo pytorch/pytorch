@@ -180,6 +180,38 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
   return self;
 }
 
+Tensor& transpose__batching_rule(Tensor& self, int64_t dim0, int64_t dim1) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.transpose_(dim0, dim1);
+  }
+  auto* batched = maybeGetBatchedImpl(self);
+  auto logical_dim = self.dim();
+
+  // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
+  // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(lambda x: x.transpose_(0, -1), x)
+  // then we replicate this behavior.
+  if (logical_dim == 0 &&
+      is_allowed_dim_on_scalar_tensor(dim0) &&
+      is_allowed_dim_on_scalar_tensor(dim1)) {
+    // No transposing happened :P
+    return self;
+  }
+
+  dim0 = maybe_wrap_dim(dim0, logical_dim);
+  dim1 = maybe_wrap_dim(dim1, logical_dim);
+
+  dim0 = dim0 >= batched->bdim() ? dim0 + 1 : dim0;
+  dim1 = dim1 >= batched->bdim() ? dim1 + 1 : dim1;
+  batched->value().transpose_(dim0, dim1);
+
+  // Also need to change some metadata...
+  batched->refreshTensorMetadata();
+  return self;
+}
+
 Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -708,6 +740,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // still legacy b/c needs special inplace rules
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
+  m.impl("transpose_", transpose__batching_rule);
 
   // still legacy because these are ridiculously complicated
   m.impl("as_strided", as_strided_batching_rule);

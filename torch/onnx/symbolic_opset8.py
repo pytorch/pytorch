@@ -33,7 +33,7 @@ Updated operators:
 import warnings
 
 import torch
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
 
 block_listed_operators = [
     "nonzero",
@@ -198,8 +198,11 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
+    ty = symbolic_helper._try_get_scalar_type(self, other)
+    assert ty is not None
+    lower_type = ty.lower()
+    # TODO(justinchuby): Remove the g.constant method
+    C = g.constant(0, [1], lower_type)
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
         return _cast_to_type(
@@ -264,25 +267,25 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
-def _constant_fill(g, sizes, dtype, const_value):
+def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    if not symbolic_helper.scalar_type_to_pytorch_type[dtype].is_floating_point:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.cast_pytorch_to_onnx["Float"],
+            dtype_i=_type_utils.JitScalarType.FLOAT.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )
-        return symbolic_helper._cast_func_template(
-            symbolic_helper.scalar_type_to_onnx[dtype], g, result, None
-        )
+        return g.op("Cast", result, to_i=scalar_type.onnx_type())
     else:
         return g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=scalar_type.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )

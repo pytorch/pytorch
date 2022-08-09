@@ -204,9 +204,9 @@ void handle_tensor_scalar_binary_op(const at::Tensor& self, const at::Scalar& ot
     [commandEncoder setBuffer:outBuf offset:output.storage_offset()*output.itemsize() atIndex:1];
     [commandEncoder setBuffer:selfBuf offset:self.storage_offset()*self.itemsize()  atIndex:2];
     [commandEncoder setBytes:&sval length:sizeof(sval) atIndex:3];
-    [commandEncoder dispatchThreadgroups:MTLSizeMake((length + 511) / 512, 1, 1)
-                    threadsPerThreadgroup:MTLSizeMake(512, 1, 1)];
+    dispatch1DJob(commandEncoder, cplState, length);
     [commandEncoder endEncoding];
+    stream->commit(true);
   });
 }
 
