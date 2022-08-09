@@ -373,15 +373,6 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
     ))
     def test_jvp(self, device, dtype, op):
-        # I don't know why this list is necessary, in-place forward-mode AD formulas
-        # should get generated from their out-of-place variants.
-        inplace_notimplemented = {
-            'nn.functional.celu',
-            'nn.functional.rrelu',
-            'nn.functional.selu',
-            'nn.functional.elu',
-        }
-
         # TODO: get rid of vjp_decomp when we add decomposition support to
         # PyTorch's forward-mode ad. Currently the decomposition support only
         # works for functorch.jvp
@@ -411,15 +402,10 @@ class TestOperators(TestCase):
                                      clone_inputs=False,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
-                if op.name in inplace_notimplemented:
-                    ctx = self.assertRaises(NotImplementedError)
-                else:
-                    ctx = contextlib.nullcontext()
-                with ctx:
-                    self.jvp_opinfo_test(inplace_variant, args, kwargs,
-                                         sample.output_process_fn_grad,
-                                         clone_inputs=True,
-                                         fixme_ref_jvp_local=fixme_ref_jvp_local)
+                self.jvp_opinfo_test(inplace_variant, args, kwargs,
+                                     sample.output_process_fn_grad,
+                                     clone_inputs=True,
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
 
     def jvp_opinfo_test(self, fn, args, kwargs, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
