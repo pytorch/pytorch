@@ -30,6 +30,7 @@ from common_utils import (
     opsToleranceOverride,
     check_vmap_fallback,
     is_batch_norm_training,
+    is_valid_inplace_sample_input,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
@@ -359,6 +360,8 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+
+        xfail('nn.functional.rrelu')  # in-place test fails
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -367,35 +370,65 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
     ))
     def test_jvp(self, device, dtype, op):
-        # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
+        # TODO: get rid of vjp_decomp when we add decomposition support to
+        # PyTorch's forward-mode ad. Currently the decomposition support only
+        # works for functorch.jvp
         VJP_DECOMP = {
             'nn.functional.logsigmoid',
         }
         if op.name in VJP_DECOMP:
-            ref_jvp_local = simulate_jvp
+            fixme_ref_jvp_local = simulate_jvp
         else:
-            ref_jvp_local = ref_jvp
+            fixme_ref_jvp_local = ref_jvp
 
         if not op.supports_forward_ad and op.name not in VJP_DECOMP:
             self.skipTest("Skipped! Forward AD not supported.")
             return
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
+
+        outplace_variant = op if not is_inplace(op, op.get_op()) else None
+        inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
 
         for sample in samples:
-            # NB: we used requires_grad=True to determine where the primals are,
-            # but don't need that information otherwise
-            fn, primals = normalize_op_input_output(op, sample, requires_grad=True)
-            primals = tree_map(lambda x: x.detach(), primals)
-            tangents = tree_map(lambda x: torch.randn_like(x), primals)
-            primal_outs, tangent_outs = jvp(fn, primals, tangents)
-            expected_primal_outs, expected_tangent_outs = ref_jvp_local(fn, primals, tangents)
-            self.assertEqual(primal_outs, expected_primal_outs)
-            self.assertEqual(tangent_outs, expected_tangent_outs)
+            args = (sample.input,) + sample.args
+            kwargs = sample.kwargs
+            if outplace_variant:
+                self.jvp_opinfo_test(outplace_variant, args, kwargs,
+                                     sample.output_process_fn_grad,
+                                     clone_inputs=False,
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+            if is_valid_inplace_sample_input(sample, op, inplace_variant):
+                self.jvp_opinfo_test(inplace_variant, args, kwargs,
+                                     sample.output_process_fn_grad,
+                                     clone_inputs=True,
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+
+    def jvp_opinfo_test(self, fn, args, kwargs, output_process_fn,
+                        clone_inputs, fixme_ref_jvp_local):
+        # NB: we used requires_grad=True to determine where the primals are,
+        # but don't need that information otherwise
+        fn, primals = normalize_op_input_output2(
+            fn, args, kwargs, output_process_fn, requires_grad=True)
+        orig_primals = tree_map(lambda x: x.detach(), primals)
+        orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+
+        def maybe_clone_inputs():
+            if clone_inputs:
+                primals = tree_map(torch.clone, orig_primals)
+                tangents = tree_map(torch.clone, orig_tangents)
+                return primals, tangents
+            return orig_primals, orig_tangents
+
+        primals, tangents = maybe_clone_inputs()
+        expected_primal_outs, expected_tangent_outs = \
+            fixme_ref_jvp_local(fn, primals, tangents)
+
+        primals, tangents = maybe_clone_inputs()
+        primal_outs, tangent_outs = jvp(fn, primals, tangents)
+
+        self.assertEqual(primal_outs, expected_primal_outs)
+        self.assertEqual(tangent_outs, expected_tangent_outs)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
