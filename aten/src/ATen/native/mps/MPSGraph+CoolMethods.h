@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // ScatterGather.mm and TriangularOps.mm call to those
 // But they can not be found in https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph?language=objc
-// Nor in acOSX12.3.sdk headers
+// Nor in MacOSX12.3.sdk headers
 // TODO: Do not call to undocumented methods
 
 @interface MPSGraph(CoolMethods)
@@ -16,8 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
                                                 name:(NSString * _Nullable)name;
 
 -(MPSGraphTensor *) getCoordinateValueWithShapeTensor:(MPSGraphTensor *) shapeTensor
-                                                   axisTensor:(MPSGraphTensor *) axisTensor
-                                                         name:(NSString * _Nullable) name;
+                                           axisTensor:(MPSGraphTensor *) axisTensor
+                                                 name:(NSString * _Nullable) name;
 
 -(MPSGraphTensor *) scatterAlongAxisWithDataTensor:(MPSGraphTensor *) dataTensor
                                      updatesTensor:(MPSGraphTensor *) updatesTensor
