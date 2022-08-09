@@ -68,12 +68,7 @@ using torch::profiler::impl::stacksToStr;
 
 struct MetadataBase {
   MetadataBase(const std::shared_ptr<Result>& result)
-      : kineto_activity_{result->kineto_activity_} {
-    result->visit(*this);
-  }
-
-  template <typename T>
-  void operator()(const T&) {}
+      : kineto_activity_{result->kineto_activity_} {}
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty()) {
@@ -94,6 +89,7 @@ struct AddTensorboardFields : public MetadataBase {
       const std::shared_ptr<Result>& result,
       KinetoEvent& kineto_event)
       : MetadataBase(result) {
+    result->visit(*this);
     const auto module_hierarchy = kineto_event.moduleHierarchy();
     addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
     addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
@@ -116,10 +112,13 @@ struct AddTensorboardFields : public MetadataBase {
       addMetadata("Python module id", std::to_string(py_call.module_->id_));
     }
   }
+
+  void operator()(const auto&) {}
 };
 
 struct AddGenericMetadata : public MetadataBase {
   AddGenericMetadata(std::shared_ptr<Result>& result) : MetadataBase(result) {
+    result->visit(*this);
     result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
       this->addMetadata("Python thread", std::to_string(i.python_tid_));
     });
@@ -178,6 +177,8 @@ struct AddGenericMetadata : public MetadataBase {
   void operator()(const ExtraFields<EventType::Kineto>& e) {
     TORCH_INTERNAL_ASSERT(hasKinetoActivity());
   }
+
+  void operator()(const auto&) {}
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
