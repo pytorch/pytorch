@@ -671,17 +671,14 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Helper to convert 1d tensors or scalar tensor to an nd tensor that broadcasts with input
+  // Weight should be a 1d or scalar tensor
+  // Reshape it to an nd tensor that broadcasts with input
   // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1), strides(input_ndim, 0);
-  auto as_nd = [&](const Tensor& t) {
-    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
-    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-    return t.as_strided(sizes, strides);
-  };
-
-  auto qw_nd = as_nd(qw);
+  DimVector sizes(input_ndim, 1);
+  if (input_ndim > 1) {
+    sizes[1] = qw.numel();
+  }
+  auto qw_nd = qw.reshape(sizes);
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
@@ -2805,7 +2802,7 @@ void quantized_normalize_kernel(
 
 void qmean_inner_dim_kernel(
     const Tensor& self,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype,
     Tensor& result) {
@@ -2813,7 +2810,8 @@ void qmean_inner_dim_kernel(
   ScalarType dtype = self.scalar_type();
   auto in_dims = self.sizes().vec();
   auto out_dims = in_dims;
-  size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  size_t num_dims_to_squeeze = is_all_reduce ? self.dim() : opt_dim.value().size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
   for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {

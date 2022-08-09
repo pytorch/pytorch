@@ -134,8 +134,6 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.backend_config
-    "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
@@ -321,7 +319,7 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymbolicIntNode"
+    "SymIntNode"
 ]
 
 # The suffix(es) of source filenames.

@@ -11582,31 +11582,33 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
     def test_log_softmax_cpu(self, dtype=torch.bfloat16):
-        inputf = torch.rand(32, 100, device="cpu", dtype=torch.float, requires_grad=True)
-        input = inputf.to(dtype).detach().requires_grad_(True)
-        outf = F.log_softmax(inputf, dim=-1)
-        out = F.log_softmax(input, dim=-1)
-        self.assertEqual(out.dtype, dtype)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0)
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.log_softmax(inputf, dim=dim)
+            out = F.log_softmax(input, dim=dim)
+            self.assertEqual(out.dtype, dtype)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0)
 
-        out.sum().backward()
-        outf.sum().backward()
-        self.assertEqual(input.grad.dtype, dtype)
-        self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
     def test_softmax_cpu(self, dtype=torch.bfloat16):
-        inputf = torch.rand(32, 100, device="cpu", dtype=torch.float, requires_grad=True)
-        input = inputf.to(dtype).detach().requires_grad_(True)
-        outf = F.softmax(inputf, dim=-1)
-        out = F.softmax(input, dim=-1)
-        self.assertEqual(out.dtype, dtype)
-        self.assertEqualIgnoreType(out, outf, atol=1e-3, rtol=0)
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.softmax(inputf, dim=dim)
+            out = F.softmax(input, dim=dim)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqualIgnoreType(out, outf, atol=1e-3, rtol=0)
 
-        out.sum().backward()
-        outf.sum().backward()
-        self.assertEqual(input.grad.dtype, dtype)
-        self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
     def test_adaptive_log_softmax(self):
         # args validation
@@ -13200,9 +13202,8 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            # TODO: fix numerical issue. See #44863
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
             output.backward(torch.randn_like(output))
             if output.is_cuda:
@@ -13219,9 +13220,8 @@ class TestNNDeviceType(NNTestCase):
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
             var = out_normed_reshaped.var(-1, unbiased=False)
-            # TODO: fix numerical issue. See #44863
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
         bad_shape_g = {
             (1, 2, 3, 4): 3,
@@ -19513,12 +19513,12 @@ torch.cuda.synchronize()
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, weight_memory_format):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, input_format, weight_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
-                .to(memory_format=torch.channels_last)
+                .to(memory_format=input_format)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=weight_memory_format)
+                .to(device='cpu', dtype=dtype, memory_format=weight_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
@@ -19545,16 +19545,29 @@ torch.cuda.synchronize()
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         with torch.backends.mkldnn.flags(enabled=False):
-            for mf in [torch.contiguous_format, torch.channels_last]:
+            formats = [[torch.channels_last, torch.channels_last],
+                       [torch.channels_last, torch.contiguous_format],
+                       [torch.contiguous_format, torch.channels_last]]
+            for input_format, weight_format in formats:
                 # non-dilated conv: thnn_conv2d normal path (with im2col)
-                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
-                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
+                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8,
+                       input_format=input_format, weight_format=weight_format)
+                # test when input chanels is 1 and not converted to channels last
+                helper(2, 1, 10, 10, out_channels=8, kernel_size=3, dilation=1, groups=1,
+                       input_format=torch.contiguous_format, weight_format=torch.channels_last)
                 # non-dilated conv: thnn_conv2d fast path (skip im2col)
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                # ic == oc == 1 here, so need to stick input to CL to activate channels last
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16,
+                       input_format=torch.channels_last, weight_format=weight_format)
                 # dilated conv: slow_conv_dilated2d
-                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1, weight_memory_format=mf)
-                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16, weight_memory_format=mf)
+                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16,
+                       input_format=input_format, weight_format=weight_format)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))

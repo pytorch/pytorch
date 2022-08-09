@@ -55,7 +55,7 @@ class AdamW(Optimizer):
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
-        amsgrad (boolean, optional): whether to use the AMSGrad variant of this
+        amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
         maximize (bool, optional): maximize the params based on the objective, instead of
@@ -109,7 +109,7 @@ class AdamW(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         self._cuda_graph_capture_health_check()
@@ -257,6 +257,12 @@ def _single_tensor_adamw(params: List[Tensor],
         if capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)
+
         # update step
         step_t += 1
 
@@ -337,6 +343,11 @@ def _multi_tensor_adamw(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
+    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
+    params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
+
     # update steps
     torch._foreach_add_(state_steps, 1)
 
@@ -369,7 +380,7 @@ def _multi_tensor_adamw(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
@@ -397,7 +408,7 @@ def _multi_tensor_adamw(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
