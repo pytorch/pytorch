@@ -917,7 +917,6 @@ libtorch_python_core_sources = [
     "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
-    "torch/csrc/profiler/execution_graph_observer.cpp",
     "torch/csrc/profiler/python/init.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
