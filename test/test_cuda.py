@@ -4,7 +4,7 @@ from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
 import contextlib
-import copy
+from copy import deepcopy
 import ctypes
 import gc
 import io
@@ -2358,7 +2358,7 @@ torch.cuda.synchronize()
         (
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
         ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
-        kwargs = copy.deepcopy(optimizer_kwargs)
+        kwargs = deepcopy(optimizer_kwargs)
         kwargs["fused"] = False
         opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
 
