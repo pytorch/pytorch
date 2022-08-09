@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
-import unittest
 import contextlib
 from pathlib import Path
 
