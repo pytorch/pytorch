@@ -135,8 +135,8 @@ def _parse_arg(
                 element_node = v.node()
                 if element_node.kind() != "onnx::Constant":
                     raise errors.SymbolicValueError(
-                        f"Failed to export an ONNX attribute '{element_node.kind()}' "
-                        f"(node '{element_node}' in list node {node}) "
+                        f"Failed to export a node '{element_node}' "
+                        f"(in list node {node}) "
                         f"because it is not constant. "
                         f"Please try to make things (e.g. kernel sizes) static if possible.",
                         value,
@@ -144,7 +144,7 @@ def _parse_arg(
             return [int(_node_get(v.node(), "value")) for v in value.node().inputs()]
         else:
             raise errors.SymbolicValueError(
-                f"ONNX symbolic does not know to unpack the ListConstruct node that "
+                f"ONNX symbolic does not know how to unpack the ListConstruct node that "
                 f"is not a list of integers: '{node}'",
                 value,
             )
@@ -175,7 +175,8 @@ def _is_onnx_constant(value: _C.Value):
 
 
 def _maybe_get_const(value: _C.Value, descriptor: _ValueDescriptor):
-    # FIXME(justinchuby): Can we get prim::Constant?
+    # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
+    # otherwise it'd be converted to onnx::Constant
     if _is_value(value) and _is_onnx_constant(value):
         return _parse_arg(value, descriptor)
     return value
@@ -482,7 +483,7 @@ def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     return x_type.dim()
 
 
-def _get_tensor_sizes(x: _C.Value, allow_nonstatic=True):
+def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     if not _is_tensor(x) or x.type() is None:
         return None
     x_type = x.type()
@@ -496,7 +497,7 @@ def _get_tensor_sizes(x: _C.Value, allow_nonstatic=True):
     return x_type.sizes()
 
 
-def _get_tensor_dim_size(x: _C.Value, dim: int):
+def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
     sizes = _get_tensor_sizes(x)
     return sizes[dim] if sizes else None
 
