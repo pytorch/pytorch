@@ -839,7 +839,7 @@ def forward(self, a_1):
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(_to_copy_default, a_1);  _to_copy_default = a_1 = None
     return add_tensor
-    """)
+    """)  # noqa: B950
 
         reinplaced_logs = self.get_logs(f, torch.ones(2, dtype=torch.long), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -868,7 +868,7 @@ def forward(self, a_1):
     expand_copy_default = torch.ops.aten.expand_copy.default(_to_copy_default, [2]);  _to_copy_default = None
     add_tensor = torch.ops.aten.add.Tensor(expand_copy_default, a_1);  expand_copy_default = a_1 = None
     return add_tensor
-    """)
+    """)  # noqa: B950
 
         reinplaced_logs = self.get_logs(f, torch.ones(1, dtype=torch.long), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
