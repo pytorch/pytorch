@@ -97,6 +97,47 @@ struct RecordFunctor {
   //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) {}
 
+  virtual std::ostream& print(std::ostream& os) {
+    bool first_output = true;
+    for (auto &output : outputs_) {
+      if (first_output) {
+        first_output = false;
+      } else {
+        os << ", ";
+      }
+      if (output.stype == StateType::Scalar) {
+        os << "S";
+      } else if(output.stype == StateType::Tensor) {
+        os << "T";
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
+      }
+      os << output.index;
+    }
+    if (outputs_.size() > 0) {
+      os << " = " << name_ << "(";
+    } else {
+      os << name_ << "(";
+    }
+    bool first_arg = true;
+    for (auto &arg : args_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      if (arg.stype == StateType::Scalar) {
+        os << "S";
+      } else if(arg.stype == StateType::Tensor) {
+        os << "T";
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
+      }
+      os << arg.index;
+    }
+    return os << ")";
+  }
+
  protected:
   //! Inputs that are indices into the FusionDefinition's Recorded State.
   std::vector<State> args_;
@@ -370,7 +411,7 @@ struct CastOpRecord : RecordFunctor {
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
   ConstantRecord(std::vector<State> _outputs, ValueType val)
-      : RecordFunctor({}, std::move(_outputs), "scalar", RecordType::Constant),
+      : RecordFunctor({}, std::move(_outputs), "constant", RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
 

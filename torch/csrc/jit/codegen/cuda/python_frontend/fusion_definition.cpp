@@ -49,6 +49,11 @@ void FusionDefinition::exit() {
     }
     fusion_manager_->traverseFusionCache(end_record_);
   }
+
+  for (auto &rec : recording_) {
+    rec->print(std::cout);
+    std::cout << "\n";
+  }
 }
 
 Scalar* FusionDefinition::defineScalar() {
