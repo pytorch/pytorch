@@ -157,9 +157,9 @@ uint64_t TORCH_API computeFlops(
     const std::unordered_map<std::string, c10::IValue>& extra_args);
 
 template <typename T>
-class GlobalStateManager {
+class TORCH_API GlobalStateManager {
  public:
-  TORCH_API static GlobalStateManager& singleton() {
+  static GlobalStateManager& singleton() {
     static GlobalStateManager singleton_;
     return singleton_;
   }
