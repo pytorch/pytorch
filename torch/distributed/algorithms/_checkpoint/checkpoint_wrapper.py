@@ -144,12 +144,18 @@ def checkpoint_wrapper(
         checkpoint_impl (Optional[CheckpointImpl]):
             The checkpointing implementation to use. Currently only
             CheckpointImpl.REENTRANT is supported. Note that this will only
-            be passed into the `torch.utils.checkpoint.checkpoint`
+            be passed into the ``torch.utils.checkpoint.checkpoint``
             implementation, and is ignored if a custom ``checkpoint_fn`` is
             specified.
         offload_to_cpu (Optional[bool]):
             Whether to offload outer activations to CPU. Note that this
             currently only works with CheckpointImpl.REENTRANT.
+        checkpoint_fn (Optional[Callable]):
+            Functional checkpoint implementation to use. If this is specified,
+            it will be used over the default ``torch.utils.checkpoint.checkpoint``
+            implementation and the `checkpoint_impl` argument will be ignored.
+        *checkpoint_fn_args: (Sequence[Any]): Arguments to pass into `checkpoint_fn`.
+        **checkpoint_fn_kwargs: (Dict[str, Any]): Keyword arguments to pass into `checkpoint_fn`.
 
     Returns:
         (nn.Module):
