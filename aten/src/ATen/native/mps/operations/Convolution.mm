@@ -128,8 +128,11 @@ Tensor _mps_convolution(
 
     if (is_channels_last) {
       const auto inputSizes = input_t.sizes();
-      IntArrayRef input_nhwc = {inputSizes[0], inputSizes[2], inputSizes[3], inputSizes[1]};
-      inputShape = native_mps::getMPSShape(input_nhwc);
+      const NSUInteger N = inputSizes[0];
+      const NSUInteger C = inputSizes[1];
+      const NSUInteger H = inputSizes[2];
+      const NSUInteger W = inputSizes[3];
+      inputShape = @[@(N), @(H), @(W), @(C)];
     } else {
       inputShape = native_mps::getMPSShape(input_t);
     }

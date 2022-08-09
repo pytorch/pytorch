@@ -1106,8 +1106,7 @@ class TestMPS(TestCase):
         model_mps = model_cpu.to("mps")
         out_mps = model_mps(a_mps)
 
-        torch.testing.assert_allclose(out_cpu.shape, out_mps.shape)
-        torch.testing.assert_allclose(out_cpu, out_mps.cpu())
+        self.assertEqual(out_cpu, out_mps.cpu(), rtol=2.6e-05, atol=2e-04)
 
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
@@ -1118,8 +1117,8 @@ class TestMPS(TestCase):
         model_mps = model_cpu.to("mps")
         out_mps = model_mps(a_mps)
 
-        torch.testing.assert_allclose(out_cpu.shape, out_mps.shape)
-        torch.testing.assert_allclose(out_cpu, out_mps.cpu())
+        self.assertEqual(out_cpu.shape, out_mps.shape)
+        self.assertEqual(out_cpu, out_mps.cpu())
 
     # Test sigmoid
     def test_sigmoid(self):
