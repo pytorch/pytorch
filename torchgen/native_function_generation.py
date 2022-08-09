@@ -1,4 +1,6 @@
 from collections import defaultdict
+from dataclasses import dataclass
+import dataclasses
 
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -283,6 +285,23 @@ def add_generated_native_functions(
     # The main code for gnerating new NativeFunctions
     # First we group of NaitveFunctions by schema kind,
     # then we detect which ones are missing and generate them.
+
+
+    # TODO figure out what to do with autograd
+    symint_overloads = []
+    for f in rs:
+        if "symint_ver_needed" in f.tags:
+            new_schema = f.func.replace_with_base_type(BaseType(BaseTy.int), BaseType(BaseTy.SymInt))
+            new_name = dataclasses.replace(new_schema.name, overload_name='SymInt')
+            new_schema = dataclasses.replace(new_schema, name=new_name)
+            new_func = dataclasses.replace(f, func=new_schema)
+            dataclasses.replace(new_func, tags=f.tags + ["generated"])
+            symint_overloads.append(new_func)
+
+    rs.extend(symint_overloads)
+
+
+
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for k, d in pre_grouped_native_functions.items():
         has_functional = SchemaKind.functional in d

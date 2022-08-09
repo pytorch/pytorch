@@ -138,6 +138,31 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 """
 
 
+@with_native_function_and
+def gen_symint_kernel(int_kernel: NativeFunction, symint_kernel: NativeFunction):
+    
+
+    assert "generated" not in int_kernel.tags and "symint_ver_needed" in int_kernel.tags
+    assert "generated" in symint_kernel.tags and "symint_ver_needed" in symint_kernel.tags
+
+    int_kernel_sig = DispatcherSignature(int_kernel.func)
+    symint_kernel_sig = DispatcherSignature(symint_kernel.func)
+
+    exprs = ", ".join(
+        [
+            e.expr
+            for e in translate(
+                symint_kernel_sig.arguments(), int_kernel_sig.arguments()
+            )
+        ]
+    )
+
+    return f"""
+{symint_kernel_sig.defn()} {{
+  return at::{symint_kernel.func.name.unambiguous_name()}({exprs});
+}}
+"""
+
 # For symint view copy kernels, we want to generate them to call into
 # their concrete view_copy counterparts.
 @with_native_function_and

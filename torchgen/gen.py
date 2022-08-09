@@ -37,6 +37,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    gen_symint_kernel,
     gen_symint_view_copy_kernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
@@ -2445,6 +2446,15 @@ def gen_source_files(
                     )
                 )
 
+    symint_overloads = defaultdict(list)
+    for f in native_functions:
+        if "symint_ver_needed" in f.tags:
+            # original int kernel will come first
+            symint_overloads[f.func.name].append(f)
+            assert len(symint_overloads[f.func.name]) <= 2
+
+    symint_overloads_pairs = [ (v[0], v[1]) for (_, v) in symint_overloads]
+        
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
     # needs to have a corresponding non-aliasing {view}_copy variant.
@@ -2488,6 +2498,12 @@ def gen_source_files(
                 mapMaybe(
                     lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
                     view_copy_with_symint_pairs,
+                )
+            ),
+            "SymIntKernel_Definitions": list(
+                mapMaybe(
+                    lambda pair: gen_symint_kernel(pair[0], pair[1]),
+                    symint_overloads_pairs,
                 )
             ),
             "GeneratedCompositeFunctional_Definitions": list(

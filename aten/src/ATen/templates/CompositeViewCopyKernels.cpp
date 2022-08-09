@@ -57,6 +57,8 @@ ${CompositeViewCopyKernel_Definitions}
 
 ${SymIntViewCopyKernel_Definitions}
 
+${SymIntKernel_Definitions}
+
 ${GeneratedCompositeFunctional_Definitions}
 
 ${GeneratedCompositeOut_Definitions}

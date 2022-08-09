@@ -1212,6 +1212,13 @@ class FunctionSchema:
     def symints_to_ints(self) -> "FunctionSchema":
         return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
 
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "FunctionSchema":
+        return dataclasses.replace(self, arguments=self.arguments.replace_with_base_type(orig, ty))
+
+    def symints_to_ints(self, type) -> "FunctionSchema":
+        return dataclasses.replace(self, arguments=self.replace_with_base_type(type))
+
+
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
         # We should probably get a proper parser here
@@ -1651,9 +1658,11 @@ class Type:
     def is_list_like(self) -> Optional["ListType"]:
         raise NotImplementedError
 
-    def symint_to_int(self) -> "Type":
+    def replace_with_base_type(self, orig: "Type", ty: "Type") -> "Type":
         raise NotImplementedError
 
+    def replace_with_base_type(_) -> "Type":
+        raise NotImplementedError
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum(
@@ -1699,6 +1708,11 @@ class BaseType(Type):
             return BaseType(BaseTy.int)
         return self
 
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "Type":
+        if self == orig:
+            return ty
+        return self
+
     def is_list_like(self) -> Optional["ListType"]:
         return None
 
@@ -1719,6 +1733,9 @@ class OptionalType(Type):
 
     def symint_to_int(self) -> "Type":
         return dataclasses.replace(self, elem=self.elem.symint_to_int())
+
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "Type":
+        return dataclasses.replace(self, elem=self.elem.replace_with_base_type(orig,ty))
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1745,6 +1762,9 @@ class ListType(Type):
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
+
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "ListType":
+        return ListType(self.elem.replace_with_base_type(orig, ty), self.size)
 
     def symint_to_int(self) -> "ListType":
         return ListType(self.elem.symint_to_int(), self.size)
@@ -1824,6 +1844,9 @@ class Argument:
 
     def symint_to_int(self) -> "Argument":
         return dataclasses.replace(self, type=self.type.symint_to_int())
+
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "Argument":
+        return  dataclasses.replace(self, type=self.type.replace_with_base_type(orig, ty))
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -2013,6 +2036,39 @@ class Arguments:
             for a in self.flat_all
             if a.annotation is not None and a.annotation.is_write
         ]
+
+
+    def replace_with_base_type(self, orig: "BaseType", ty: "BaseType") -> "Arguments":
+        arguments = self
+
+        if arguments.self_arg:
+            arguments = dataclasses.replace(
+                arguments,
+                pre_self_positional=[
+                    x.replace_with_base_type(orig, ty) for x in arguments.pre_self_positional
+                ],
+            )
+
+        if self.tensor_options:
+            arguments = dataclasses.replace(
+                arguments,
+                post_tensor_options_kwarg_only=[
+                    x.replace_with_base_type(orig, ty) for x in arguments.post_tensor_options_kwarg_only
+                ],
+            )
+
+        arguments = dataclasses.replace(
+            arguments,
+            post_self_positional=[
+                x.replace_with_base_type(orig, ty) for x in arguments.post_self_positional
+            ],
+            pre_tensor_options_kwarg_only=[
+                x.replace_with_base_type(orig, ty) for x in arguments.pre_tensor_options_kwarg_only
+            ],
+        )
+
+        return arguments
+
 
     def symints_to_ints(self) -> "Arguments":
         arguments = self
