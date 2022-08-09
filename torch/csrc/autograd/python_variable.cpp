@@ -263,6 +263,10 @@ c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
 
+c10::SymInt concrete_sym_numel_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
+
 class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
@@ -277,7 +281,8 @@ class PyInterpreterHolder {
             &concrete_strides_fn,
             &concrete_sizes_fn,
             &concrete_sym_sizes_fn,
-            &concrete_layout_fn)) {}
+            &concrete_layout_fn,
+            &concrete_sym_numel_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2420,9 +2425,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
+    auto si = py::cast<c10::SymInt>(elm);
     // TODO: the buffer will need to be made owning later
     symints.append(si.as_int_unchecked());
   }
@@ -2459,6 +2462,33 @@ c10::Layout concrete_layout_fn(
       ", expected Layout");
 
   return toLayout(out.ptr());
+}
+
+c10::SymInt concrete_sym_numel_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_numel",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_numel")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call numel on a tensor with symbolic shapes/strides");
+    return self->sym_numel_default();
+  }
+  return torch::is_symint_node(out)
+      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
+      : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 } // anonymous namespace
