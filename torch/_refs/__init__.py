@@ -2964,7 +2964,7 @@ def diagonal(
 
 @register_decomposition(torch.ops.aten.diag_embed)
 def diag_embed(
-    self: TensorLikeType,
+    t: TensorLikeType,
     offset: int = 0,
     dim1: int = -2,
     dim2: int = -1,
@@ -2979,7 +2979,7 @@ def diag_embed(
         offset = -offset
 
     # convert from negative dims
-    rank = self.ndim + 1
+    rank = t.ndim + 1
     dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
     dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
 
@@ -2987,39 +2987,44 @@ def diag_embed(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    # insert padding if offset is not 0, increase the size of last dim, then
-    # roll to align the data to match 1s in eye
-    if offset != 0:
-        z_shape = list(self.shape)
-        z_shape[-1] = builtins.abs(offset)
-        z = torch.zeros(
-            z_shape, dtype=self.dtype, device=self.device, requires_grad=False
-        )
-        self = torch.cat((self, z), dim=-1)
-        self = torch.roll(self, self.size(-1) if offset < 0 else offset, dims=-1)
-
     # as per the docs, the size of last dim is placed at dim1 and dim2
-    last_dim = self.size(-1)
+    last_dim = t.size(-1)
+
+    if offset != 0:
+        # add padding to match the new size
+        t_shape = list(t.shape)
+        t_shape[-1] = builtins.abs(offset)
+        z = torch.zeros(t_shape, dtype=t.dtype, device=t.device, requires_grad=False)
+        pair = (z, t) if offset > 0 else (t, z)
+        t = torch.cat(pair, dim=-1)
 
     # preserve original data, but place 1 at dim1 and move last dim to dim2
-    # TODO: use movedim here once it's available:
-    # a = self.unsqueeze(dim1).movedim(-1, dim2)
-    a = self.unsqueeze(dim1)
-    a_dims = list(range(a.ndim))
-    a_dims.insert(dim2, a_dims[-1])
-    a_dims.pop()
-    a = torch.permute(a, a_dims)
+    # # TODO: use movedim here once it's available:
+    # t = t.unsqueeze(dim1).movedim(-1, dim2)
+    t = t.unsqueeze(dim1)
+    t_dims = list(range(t.ndim))
+    t_dims.insert(dim2, t_dims[-1])
+    t_dims.pop()
+    t = torch.permute(t, t_dims)
 
-    # generate square eye, shift the diagonal, then reshape to be broadcastable
-    # with a
-    b_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(a.shape))]
-    b = torch.eye(last_dim, dtype=torch.int64, device=a.device)
-    b = _maybe_convert_to_dtype(
-        torch.roll(b, offset, dims=-1).reshape(b_shape), a.dtype
-    )  # type: ignore[assignment]
+    # generate last_dim eye mask, shifted by offset
+    if offset != 0:
+        # make sure the diagonal always has the same size
+        last_dim += builtins.abs(offset)
 
-    # broadcast and compute the result
-    return a * b
+    # generate ranges shifting indices based on offset
+    a_range = torch.arange(0, last_dim, device=t.device, dtype=torch.int64)
+    b_range = torch.arange(
+        offset, last_dim + offset, device=t.device, dtype=torch.int64
+    )
+
+    # broadcast
+    cond = a_range == b_range.unsqueeze(-1)
+    cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
+    cond = cond.reshape(cond_shape)
+
+    result = where(cond, t, 0)
+    return _maybe_convert_to_dtype(result, t.dtype)  # type: ignore[return-value,arg-type]
 
 
 # CompositeImplicitAutograd - don't register decomp
