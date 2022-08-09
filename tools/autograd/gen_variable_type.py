@@ -944,7 +944,7 @@ def emit_body(
 
     differentiable_inputs = gen_differentiable_inputs(f)
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    differentiable_outputs = gen_differentiable_outputs(fn)
+    differentiable_outputs = gen_differentiable_outputs(fn, key)
 
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (
         name in DONT_REQUIRE_DERIVATIVE

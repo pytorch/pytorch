@@ -143,7 +143,12 @@ def load_derivatives(
             # Ensure that the old derivatives.yaml schema with no dispatch key can be loaded.
             if "dispatch" not in defn_dict:
                 specification = defn_dict.pop("name")
+                output_differentiability = defn_dict.pop(
+                    "output_differentiability", None
+                )
                 defn_dict = {"name": specification, "dispatch": {"Default": defn_dict}}
+                if output_differentiability:
+                    defn_dict["output_differentiability"] = output_differentiability
             name, per_dispatch_diffinfos = create_differentiability_info(
                 defn_dict,
                 functions_by_signature,
@@ -599,6 +604,24 @@ def create_differentiability_info(
     # NB: Removes 'name' from defn dictionary
     specification = defn_dict.pop("name")
     defn_name, _ = split_name_params(specification)
+    # NB: Removes 'output_differentiability' from defn dictionary
+    #     `None` means all differentiable.
+    output_differentiability = defn_dict.pop("output_differentiability", None)
+    output_differentiability_conditions = None
+    if output_differentiability and any(
+        [isinstance(diff, str) for diff in output_differentiability]
+    ):
+        if len(output_differentiability) != 1:
+            raise RuntimeError(
+                f"Not supported: for {specification},"
+                f"output_differentiability must either be "
+                f"List[bool] or a List[str] where each str is a "
+                f"condition. In the case where it is a condition, "
+                f"we only support single-output functions. "
+                f"Please file us an issue. "
+            )
+        output_differentiability_conditions = output_differentiability
+        output_differentiability = [True]
 
     schema_function = functions_by_schema.get(specification)
     if not schema_function:
@@ -651,26 +674,6 @@ def create_differentiability_info(
             )
         if key not in used_dispatch_keys:
             used_dispatch_keys.add(key)
-        # NB: Removes 'output_differentiability' from defn dictionary
-        #     `None` means all differentiable.
-        output_differentiability = defn.pop("output_differentiability", None)
-        if key != "Default":
-            print(key, specification, output_differentiability, "\n\n\n")
-        output_differentiability_conditions = None
-        if output_differentiability and any(
-            [isinstance(diff, str) for diff in output_differentiability]
-        ):
-            if len(output_differentiability) != 1:
-                raise RuntimeError(
-                    f"Not supported: for {specification} with dispatch {key},"
-                    f"output_differentiability must either be "
-                    f"List[bool] or a List[str] where each str is a "
-                    f"condition. In the case where it is a condition, "
-                    f"we only support single-output functions. "
-                    f"Please file us an issue. "
-                )
-            output_differentiability_conditions = output_differentiability
-            output_differentiability = [True]
 
         (
             derivatives,

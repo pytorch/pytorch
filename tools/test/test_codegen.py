@@ -141,14 +141,13 @@ class TestGenAutogradFunctions(unittest.TestCase):
                     "Default": {
                         "a": "grad_x",
                         "b": "grad_z",
-                        "output_differentiability": [True, False, True],
                     },
                     "AutogradNestedTensor": {
                         "a": "grad_z",
                         "b": "grad_x",
-                        "c": "grad_x",
                     },
                 },
+                "output_differentiability": [True, False, True],
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
@@ -168,11 +167,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
             differentiability_info["AutogradNestedTensor"],
             gen_autograd_functions.FUNCTION_DEFINITION,
         )
-        # output_differentiability of one key (Default) should not affect
-        # that of another (AutogradNestedTensor)
-        assert "grad_z = grads[0]" in nested_tensor_definition
-        assert "grad_x = grads[1]" in nested_tensor_definition
-        assert "grad_x = grads[2]" in nested_tensor_definition
+        assert "grad_z = grads[2]" not in nested_tensor_definition
+        assert "grad_z = grads[1]" in nested_tensor_definition
 
     def test_register_bogus_dispatch_key(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
