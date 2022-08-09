@@ -43,9 +43,7 @@ class TracerBase:
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
-        node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-
-        return node
+        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':
