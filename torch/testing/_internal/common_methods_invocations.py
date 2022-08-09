@@ -12762,8 +12762,6 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x, alpha=1.0:
             torch.nn.functional.elu(x, alpha, inplace=True),
         decorators=[
-            # Not implemented yet
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
@@ -12817,8 +12815,6 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x, alpha=1.0:
             torch.nn.functional.celu(x, alpha, inplace=True),
         decorators=[
-            # Not implemented yet
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
@@ -12881,8 +12877,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.selu(x, inplace=True),
         decorators=[
-            # Not implemented yet (depends on 'elu_')
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-2, rtol=1.8e-2),
