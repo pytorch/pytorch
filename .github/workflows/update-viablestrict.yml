@@ -12,6 +12,7 @@ concurrency:
 jobs:
   do_update_viablestrict:
     runs-on: ubuntu-20.04
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
