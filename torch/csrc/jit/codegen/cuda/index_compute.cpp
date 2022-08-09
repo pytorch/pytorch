@@ -1866,6 +1866,36 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   return strided_inds;
 }
 
+std::vector<Val*> Index::getRandomTensorStridedIndices(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  // Use domain guard to ignore the contiguity of
+  //  consumer tv.
+  TensorDomain* consumer_tv_no_contiguity_domain = nullptr;
+  auto contiguity_vector =
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), true);
+  if (consumer_tv->hasRFactor()) {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->getRFactorDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  } else {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  }
+
+  ir_utils::TVDomainGuard domain_guard(
+      consumer_tv, consumer_tv_no_contiguity_domain);
+
+  // TODO:
+  //  More optimization on the underlying tensor layout
+  //   will be done in a follow up.
+  return getGlobalConsumerStridedIndices(consumer_tv, loops);
+}
+
 std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {

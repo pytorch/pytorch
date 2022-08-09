@@ -82,8 +82,8 @@ class KernelIrScanner : private IrVisitor {
 
   void handle(UnaryOp* unary_op) final {
     if (unary_op->getUnaryOpType() == UnaryOpType::RandLike) {
-      // This kernel is using random numbers
-      summary_.is_stochastic = true;
+      summary_.max_rng_offsets =
+          std::max<int>(summary_.max_rng_offsets, unary_op->getRNGOffset());
     }
   }
 

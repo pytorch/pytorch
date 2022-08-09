@@ -37,7 +37,12 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
+  UnaryOp(
+      IrBuilderPasskey,
+      UnaryOpType type,
+      Val* out,
+      Val* in,
+      int rng_offset = -1);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -52,12 +57,23 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  // TODO: pull RNG op out of Unary ops
+  // https://github.com/csarofeen/pytorch/pull/1892
+  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs

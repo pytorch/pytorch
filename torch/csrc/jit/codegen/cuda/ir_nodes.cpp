@@ -182,11 +182,17 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
-UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
+UnaryOp::UnaryOp(
+    IrBuilderPasskey passkey,
+    UnaryOpType type,
+    Val* out,
+    Val* in,
+    int rng_offset)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
       out_{out},
-      in_{in} {
+      in_{in},
+      rng_offset_(rng_offset) {
   addOutput(out);
   addInput(in);
 }
@@ -195,7 +201,8 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       unary_op_type_(src->unary_op_type_),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      rng_offset_(src->rng_offset_) {}
 
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
