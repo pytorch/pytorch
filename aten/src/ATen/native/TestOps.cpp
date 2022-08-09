@@ -74,5 +74,13 @@ Tensor _test_warn_in_autograd(const Tensor &self) {
   return self.clone();
 }
 
+Tensor _test_autograd_multiple_dispatch(const Tensor &self) {
+  return self.clone();
+}
+
+Tensor _test_autograd_multiple_dispatch_two(const Tensor &self, bool b) {
+  return self.clone();
+}
+
 } // namespace native
 } // namespace at
