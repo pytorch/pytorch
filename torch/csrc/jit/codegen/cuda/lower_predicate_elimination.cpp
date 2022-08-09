@@ -191,7 +191,7 @@ class PredicateChcker : public IterVisitor {
         predicateMisalignedVectorize(expr) || predicateShift(expr) ||
         predicateSharedMemAccess(expr) || predicateProducerConsumerPair(expr) ||
         predicateNonDivisibleRootDomains(expr) ||
-        predicateNonDivisibleSplit(expr);
+        predicateNonDivisibleSplit(expr) || predicateExpandReduce(expr);
 
     // A cp.async op would need a predicate for either the global
     //  input or its shared mem output, or both.
@@ -230,6 +230,54 @@ class PredicateChcker : public IterVisitor {
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::Mod ||
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::Remainder ||
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::CeilDiv));
+  }
+
+  // If we're reducing an expanded domain, we need to be careful to predicate it
+  // or we could end up reducing a broadcasted value too many times.
+  bool predicateExpandReduce(Expr* expr) const {
+    if (!ir_utils::isReductionOp(expr)) {
+      return false;
+    }
+    auto tv_inputs = ir_utils::getTvs(expr->inputs());
+    TORCH_INTERNAL_ASSERT(
+        tv_inputs.size() > 0,
+        "Should never have a reduction op without a tensor view input.");
+    bool found_expand = false;
+    for (auto tv_input : tv_inputs) {
+      found_expand |= std::any_of(
+          tv_input->getMaybeRFactorDomain().begin(),
+          tv_input->getMaybeRFactorDomain().end(),
+          [](IterDomain* id) { return id->hasExpandedExtent(); });
+    }
+
+    if (!found_expand) {
+      return false;
+    }
+
+    auto tv_outputs = ir_utils::getTvs(expr->outputs());
+    if (expr->isA<WelfordOp>() && tv_inputs.size() != tv_outputs.size()) {
+      tv_outputs = std::vector<TensorView*>(tv_inputs.size(), tv_outputs[0]);
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        tv_outputs.size() == tv_inputs.size(),
+        "Was expecting matching number of inputs and outputs for expression: ",
+        expr->toString());
+
+    for (auto i : c10::irange(tv_inputs.size())) {
+      const auto root_p2c =
+          PairwiseRootDomainMap(tv_inputs[i], tv_outputs[i])
+              .mapProducerToConsumer(
+                  tv_inputs[i]->domain(), tv_outputs[i]->domain());
+      for (auto entry : root_p2c) {
+        auto p_id = entry.first;
+        auto c_id = entry.second;
+        if (p_id->hasExpandedExtent() && c_id->isReduction()) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // Skip if MisalignedVectorize is involved for now. This could be
@@ -837,7 +885,7 @@ bool PredicateElimination::setReductionInitValue(
 bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   // Predicate elimination can be disabled with
   // PYTORCH_NVFUSER_DISABLE=predicate_elimination
-  if (isDisabled(DisableOption::PredicateElimination)) {
+  if (isOptionDisabled(DisableOption::PredicateElimination)) {
     assertOnWarpOps(expr);
     return false;
   }

@@ -646,7 +646,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
       global_buffers.zero_init.push_back(false);
     }
     // Remember the tensor buffer used for storing kernel profile
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         tv == kernel->profile().getBuffer()) {
       global_buffers.profile_buffer = global_buffers.buffers.back();
     }
@@ -1088,7 +1088,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  if (isEnabled(EnableOption::KernelProfile)) {
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
     std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 

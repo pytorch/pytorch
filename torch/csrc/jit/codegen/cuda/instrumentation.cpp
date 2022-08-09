@@ -32,7 +32,7 @@ Trace::Trace() {
     logEvent('I', "TRACE_START");
   }
 
-  if (isDisabled(DisableOption::Nvtx)) {
+  if (isOptionDisabled(DisableOption::Nvtx)) {
     record_nvtx_range_ = false;
   }
 }

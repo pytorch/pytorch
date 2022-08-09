@@ -1261,7 +1261,8 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
     const TensorView* tv,
     const IndexCompute& indexing,
     Val* index) {
-  if (isDisabled(DisableOption::IndexHoist) || index->definition() == nullptr) {
+  if (isOptionDisabled(DisableOption::IndexHoist) ||
+      index->definition() == nullptr) {
     return c10::nullopt;
   }
 
@@ -2826,7 +2827,7 @@ std::pair<Val*, Val*> hoistPredicates(
     TensorView* predicated_consumer_tv) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
 
-  if (isDisabled(DisableOption::IndexHoist)) {
+  if (isOptionDisabled(DisableOption::IndexHoist)) {
     return same_indices;
   }
 

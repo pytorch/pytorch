@@ -1189,6 +1189,25 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
     itype = IterType::Iteration;
   }
 
+  Val* expanded_extent = nullptr;
+  if (outer->hasExpandedExtent() || inner->hasExpandedExtent()) {
+    if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      expanded_extent = mul(outer->expandedExtent(), inner->expandedExtent());
+    } else if (outer->hasExpandedExtent() && !inner->hasExpandedExtent()) {
+      if (inner->isBroadcast()) {
+        expanded_extent = outer->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->expandedExtent(), inner->extent());
+      }
+    } else if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      if (outer->isBroadcast()) {
+        expanded_extent = inner->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->extent(), inner->expandedExtent());
+      }
+    }
+  }
+
   // Merging trivial reduction with iter domain, that's fine, just make it an
   // iter domain.
   if ((outer->isReduction() || inner->isReduction()) &&
@@ -1200,6 +1219,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       IterDomainBuilder(
           outer->container()->zeroVal(), merged_id_size->as<Int>())
           .parallel_type(outer->getParallelType())
+          .expanded_extent(expanded_extent)
           .iter_type(itype)
           .build();
 
@@ -1241,6 +1261,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop size
   Val* remainder =
       ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+  Val* expanded_remainder = nullptr;
+  if (in->hasExpandedExtent()) {
+    expanded_remainder = ceilDiv(
+        Split::extent(in->expandedExtent(), start_offset, stop_offset), factor);
+  }
 
   if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
       (stop_offset != nullptr && !stop_offset->isZeroInt())) {
@@ -1249,20 +1274,28 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Partial split is only allowed with root domains");
   }
   // outer loop IterDomain
-  IterDomain* ido = IterDomainBuilder(
-                        in->container()->zeroVal(),
-                        inner_split ? remainder->as<Int>() : factor)
-                        .parallel_type(in->getParallelType())
-                        .iter_type(in->getIterType())
-                        .build();
+  IterDomain* ido =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? remainder->as<Int>() : factor)
+          .expanded_extent(
+              in->hasExpandedExtent() && inner_split ? expanded_remainder
+                                                     : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   // inner loop IterDomain
-  IterDomain* idi = IterDomainBuilder(
-                        in->container()->zeroVal(),
-                        inner_split ? factor : remainder->as<Int>())
-                        .parallel_type(in->getParallelType())
-                        .iter_type(in->getIterType())
-                        .build();
+  IterDomain* idi =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? factor : remainder->as<Int>())
+          .expanded_extent(
+              in->hasExpandedExtent() && !inner_split ? expanded_remainder
+                                                      : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1890,10 +1923,9 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
   return false;
 }
 
-TensorDomain* TensorDomain::view(
-    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+TensorDomain* TensorDomain::view(const AnalyzeViewResult& view_analysis) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
-  return transformView(this, transforms);
+  return transformView(this, view_analysis);
 }
 
 TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {

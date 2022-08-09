@@ -795,6 +795,10 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
 
 const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
     disjointSetOf(IterDomain* id, IdMappingMode mode) const {
+  TORCH_INTERNAL_ASSERT(
+      idExistsInMap(id),
+      id->toString(),
+      " has not been processed in this Compute At Map, yet the disjoint set for it was requested.");
   return getIdSets(mode).disjointSetMap().at(id);
 }
 
@@ -809,6 +813,11 @@ const DisjointSets<IterDomain*>& ComputeAtMap::getIdSets(
       return id_graph_.loopNodes();
   }
   TORCH_INTERNAL_ASSERT(false, "Error with mapping mode provided.");
+}
+
+bool ComputeAtMap::idExistsInMap(IterDomain* id) const {
+  return getIdSets(IdMappingMode::EXACT).disjointSetMap().find(id) !=
+      getIdSets(IdMappingMode::EXACT).disjointSetMap().end();
 }
 
 } // namespace cuda

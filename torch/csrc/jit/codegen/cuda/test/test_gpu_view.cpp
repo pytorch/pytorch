@@ -311,33 +311,64 @@ void reductionViewAddFusion(
   }
 }
 
+typedef std::vector<int64_t> shape;
+typedef std::pair<shape, shape> view_example;
+
+// TODO: View examples with just 333 elements are failing validation in
+// normalization. This might just be because our tolerances aren't tuned well
+// for small sizes and the parallelization could be limited which could be
+// detected as a validation issue, though it might not actually be a correctness
+// issue. Using 3333 instead of 333 in those cases but should validate what's
+// going on in the 333 case.
+std::vector<view_example> all_view_examples = {
+    {{1, 19, 1, 3 * 4, 7, 1, 99}, {1, 19, -1, 3, 4 * 7 * 99}},
+    {{1, 19, 1, 3 * 4, 7, 1, 99}, {1, 19, 1, 3, 4 * 7 * 99}},
+    {{19, 3 * 4, 7, 99}, {19, 3, 4 * 7 * 99}},
+
+    {{3, 17, 2 * 4 * 10, 1}, {3 * 17, 1, 2, 4, -1}},
+    {{3, 17, 2 * 4 * 10, 1}, {3 * 17, 1, 2, 4, 10}},
+    {{3, 17, 2 * 4 * 10, 1}, {3 * 17, 2, 4, 1, 10}},
+
+    {{3, 17, 2 * 4 * 10, 1, 9}, {-1, 1, 2, 4, 10, 9}},
+    {{3, 17, 2 * 4 * 10, 1, 9}, {3 * 17, 1, 2, 4, 10, 9}},
+    {{3, 17, 2 * 4 * 10, 1, 9}, {3 * 17, 2, 4, 1, 10, 9}},
+
+    {{2, 3, 2 * 2, 5}, {1, 2 * 3, 1, -1, 2, 5, 1}},
+
+    {{22, 11 * 2, 2}, {22, -1, 1, 1, 2 * 2}},
+    {{22, 1, 22, 1}, {-1}},
+    {{22, 11 * 2, 2}, {22, 11, 1, 1, 2 * 2}},
+    {{22, 1, 22, 1}, {22 * 22}},
+
+    {{37, 9, 7, 3 * 2, 5 * 2}, {37 * 9, 2, -1, 3, 7 * 5}},
+    {{37, 9, 7, 3 * 2, 5 * 2}, {37 * 9, 2, 2, 3, 7 * 5}},
+
+    {{1, 1, 3333, 1}, {1, 1, -1, 1}},
+    {{1, 1111 * 3}, {1, 1, 1, -1, 1, 3}},
+    {{1, 3333, 1}, {-1}},
+    {{1, 1, 3333, 1}, {1, 1, 3333, 1}},
+    {{1, 303 * 11, 1}, {1, 303, -1, 1}},
+    {{1, 3333, 1}, {1, 303, 11, 1}},
+    {{1, 3333}, {1, 1, 1, 1111, 1, 3}},
+    {{1, 3333, 1}, {3333}},
+
+    {{1, 3922 * 7, 1, 2}, {1, 3922 * 2, 1, -1}},
+    {{1, 3922 * 2, 1, 7}, {1, -1, 2}},
+    {{1, 3922 * 7, 2}, {1, 3922 * 2, 7}},
+    {{1, 3922 * 2, 1, 7}, {1, 3922 * 7, 2}},
+    {{1, 3922 * 7, 1, 2}, {1, 3922 * 2, 1, 7}},
+
+    {{8, 1, 1, 2 * 4, 1, 8}, {8, 2, 4, 1, -1}},
+    {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
+
+    {{2, 3, 2 * 2, 5}, {1, 6, 1, 2, 2, 5, 1}},
+};
+
 TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> view_before_examples = {
-      {{19, 12, 7, 99}, {19, 3, 2772}},
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
-      {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
-      {{22, 22, 2}, {22, 11, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, 333, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
-      {{1, 333, 1}, {1, 37, 9, 1}},
-      {{1, 333}, {1, 1, 1, 111, 1, 3}},
-      {{22, 1, 22, 1}, {484}},
-      {{1, 333, 1}, {333}},
-      // Incorrect Result - Broadcast Issue - Reduction
-      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (auto e : view_before_examples) {
+  for (auto e : all_view_examples) {
     reductionViewAddFusion(e.first, e.second, true /* view_before_reduction */);
   }
-
-  std::vector<view_example> view_after_examples = {
+  std::vector<view_example> view_after_reduce_examples = {
       {{19, 12, 7, 99}, {19, 3, 28}},
       {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 28}},
       {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
@@ -353,7 +384,7 @@ TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
       {{1, 27454, 1, 2}, {1, 3922, 1, 7}},
       {{1, 7844, 1, 7}, {1, 1961, 4}}};
 
-  for (auto e : view_after_examples) {
+  for (auto e : view_after_reduce_examples) {
     reductionViewAddFusion(
         e.first, e.second, false /* view_before_reduction */);
   }
@@ -365,15 +396,20 @@ void persistentViewAddFusion(
     bool view_before_persistent) {
   constexpr int kAxis = -1;
 
-  auto bias_shape = (view_before_persistent) ? input_shape : output_shape;
+  // Support -1 sizes in the inputs
+  auto inferred_shapes = inferViewShapes(input_shape, output_shape);
+  auto inferred_input = inferred_shapes.first;
+  auto inferred_output = inferred_shapes.second;
+
+  auto bias_shape = view_before_persistent ? inferred_input : inferred_output;
   for (auto has_implicit_broadcast : {false, true}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
     Fusion& fusion = *fusion_ptr.get();
     FusionGuard fg(&fusion);
 
     TensorView* x = (has_implicit_broadcast)
-        ? makeConcreteTensor(input_shape)
-        : makeSymbolicTensor(input_shape.size());
+        ? makeConcreteTensor(inferred_input)
+        : makeSymbolicTensor(inferred_input.size());
     TensorView* bias = (has_implicit_broadcast)
         ? makeConcreteTensor(bias_shape)
         : makeSymbolicTensor(bias_shape.size());
@@ -381,13 +417,13 @@ void persistentViewAddFusion(
     fusion.addInput(bias);
 
     auto tv1 = (view_before_persistent) ? add(x, bias) : softmax(x, kAxis);
-    auto x_view = view(tv1, input_shape, output_shape);
+    auto x_view = view(tv1, inferred_input, inferred_output);
     auto y =
         (view_before_persistent) ? softmax(x_view, kAxis) : add(x_view, bias);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_x = at::randn(inferred_input, options);
     at::Tensor at_bias = at::randn(bias_shape, options);
     std::vector<IValue> aten_inputs = {at_x, at_bias};
 
@@ -397,7 +433,7 @@ void persistentViewAddFusion(
     auto at_tv1 = (view_before_persistent)
         ? (at_x + at_bias)
         : at::_softmax(at_x, kAxis, false /* half_to_float */);
-    auto at_x_view = at::native::view(at_tv1, output_shape);
+    auto at_x_view = at::native::view(at_tv1, inferred_output);
     auto at_y = (view_before_persistent)
         ? at::_softmax(at_x_view, kAxis, false /* half_to_float */)
         : at::add(at_x_view, at_bias);
@@ -407,34 +443,12 @@ void persistentViewAddFusion(
 }
 
 TEST_F(NVFuserTest, FusionViewPersistentShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> view_examples = {
-      {{19, 12, 7, 99}, {19, 3, 2772}},
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
-      {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
-      {{22, 22, 2}, {22, 11, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, 333, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
-      {{1, 333, 1}, {1, 37, 9, 1}},
-      // TODO Validation Error - Absolute Tolerance
-      // {{1, 333}, {1, 1, 1, 111, 1, 3}},
-      {{22, 1, 22, 1}, {484}},
-      {{1, 333, 1}, {333}},
-      // TODO Incorrect Result - Broadcast Issue - Reduction
-      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (auto e : view_examples) {
+  for (auto e : all_view_examples) {
     persistentViewAddFusion(
         e.first, e.second, true /* view_before_persistent */);
   }
 
-  for (auto e : view_examples) {
+  for (auto e : all_view_examples) {
     persistentViewAddFusion(
         e.first, e.second, false /* view_before_persistent */);
   }
@@ -499,51 +513,7 @@ TEST_F(NVFuserTest, FusionViewMerge_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionViewAllShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
-      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
-      {{22, 22, 2}, {22, 11, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, 333, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
-      {{1, 333, 1}, {1, 37, 9, 1}},
-      {{1, 333}, {1, 1, 1, 111, 1, 3}},
-      {{22, 1, 22, 1}, {484}},
-      {{1, 333, 1}, {333}},
-      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (auto e : examples) {
-    addViewGeluFusion(e.first, e.second);
-  }
-}
-
-TEST_F(NVFuserTest, FusionViewInferShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, -1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 1, 2, 4, -1}},
-      {{3, 17, 80, 1, 9}, {-1, 1, 2, 4, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, -1, 2, 5, 1}},
-      {{22, 22, 2}, {22, -1, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, -1, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, -1, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, -1}},
-      {{1, 333, 1}, {1, 37, -1, 1}},
-      {{1, 333}, {1, 1, 1, -1, 1, 3}},
-      {{22, 1, 22, 1}, {-1}},
-      {{1, 333, 1}, {-1}},
-      {{1, 27454, 1, 2}, {1, 7844, 1, -1}},
-      {{1, 7844, 1, 7}, {1, -1, 2}}};
-
-  for (auto e : examples) {
+  for (auto e : all_view_examples) {
     addViewGeluFusion(e.first, e.second);
   }
 }
@@ -551,27 +521,32 @@ TEST_F(NVFuserTest, FusionViewInferShmoo_CUDA) {
 void geluViewAddFusion(
     std::vector<int64_t> input_shape,
     std::vector<int64_t> output_shape) {
+  // Support -1 sizes in the inputs
+  auto inferred_shapes = inferViewShapes(input_shape, output_shape);
+  auto inferred_input = inferred_shapes.first;
+  auto inferred_output = inferred_shapes.second;
+
   for (auto hasImplicitBroadcast : {false, true}) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
     TensorView* x = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape)
-        : makeSymbolicTensor(input_shape.size());
+        ? makeConcreteTensor(inferred_input)
+        : makeSymbolicTensor(inferred_input.size());
     TensorView* bias = (hasImplicitBroadcast)
-        ? makeConcreteTensor(output_shape)
-        : makeSymbolicTensor(output_shape.size());
+        ? makeConcreteTensor(inferred_output)
+        : makeSymbolicTensor(inferred_output.size());
     fusion.addInput(x);
     fusion.addInput(bias);
 
     auto x_gelu = gelu(x);
-    auto x_view = view(x_gelu, input_shape, output_shape);
+    auto x_view = view(x_gelu, inferred_input, inferred_output);
     auto y = add(x_view, bias);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor at_x = at::randn(input_shape, options);
-    at::Tensor at_bias = at::randn(output_shape, options);
+    at::Tensor at_x = at::randn(inferred_input, options);
+    at::Tensor at_bias = at::randn(inferred_output, options);
     std::vector<IValue> aten_inputs = {at_x, at_bias};
 
     auto lparams = schedulePointwise(&fusion, aten_inputs);
@@ -581,7 +556,7 @@ void geluViewAddFusion(
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
     auto at_x_gelu = at::gelu(at_x);
-    auto at_x_view = at::native::view(at_x_gelu, output_shape);
+    auto at_x_view = at::native::view(at_x_gelu, inferred_output);
     auto at_y = at_x_view + at_bias;
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
@@ -589,15 +564,7 @@ void geluViewAddFusion(
 }
 
 TEST_F(NVFuserTest, FusionViewStride_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 27454, 2}, {1, 7844, 7}},
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (const auto& e : examples) {
+  for (const auto& e : all_view_examples) {
     geluViewAddFusion(e.first, e.second);
   }
 }
@@ -978,6 +945,218 @@ TEST_F(NVFuserTest, FusionExpandRepro_CUDA) {
   // second run to verify cached output allocation
   outputs = fe.runFusion(aten_inputs, {}, l_params, 0);
   testValidate(&fusion, outputs, aten_inputs, {out}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandView1_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({4, 1, 8});
+  fusion->addInput(tv0);
+
+  auto tv1 = makeConcreteTensor({12, 8});
+  fusion->addInput(tv1);
+
+  auto tv2 = expand(
+      tv0,
+      {IrBuilder::create<Int>(4),
+       IrBuilder::create<Int>(3),
+       IrBuilder::create<Int>(8)});
+
+  auto tv3 = view(tv2, {4, 3, 8}, {12, 8});
+  auto tv4 = add(tv3, tv1);
+  fusion->addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({4, 1, 8}, options);
+  auto t1 = at::randn({12, 8}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
+
+  auto ref = at::native::reshape(t0.expand({4, 3, 8}), {12, 8}) + t1;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandView2_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({1, 8});
+  fusion->addInput(tv0);
+
+  auto tv1 = makeConcreteTensor({3, 4, 8});
+  fusion->addInput(tv1);
+
+  auto tv2 =
+      expand(tv0, {IrBuilder::create<Int>(12), IrBuilder::create<Int>(8)});
+
+  auto tv3 = view(tv2, {12, 8}, {3, 4, 8});
+  auto tv4 = add(tv3, tv1);
+  fusion->addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1, 8}, options);
+  auto t1 = at::randn({3, 4, 8}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
+
+  auto ref = at::native::reshape(t0.expand({12, 8}), {3, 4, 8}) + t1;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
+  auto assert_matches = [](view_example example_0, view_example example_1) {
+    TORCH_INTERNAL_ASSERT(
+        analyzeViewConstraint(example_0.first, example_0.second) ==
+            analyzeViewConstraint(example_1.first, example_1.second),
+        "View: ",
+        example_0.first,
+        " -> ",
+        example_0.second,
+        "  Does not match:",
+        example_1.first,
+        " -> ",
+        example_1.second);
+  };
+
+  auto assert_does_not_match = [](view_example example_0,
+                                  view_example example_1) {
+    TORCH_INTERNAL_ASSERT(
+        !(analyzeViewConstraint(example_0.first, example_0.second) ==
+          analyzeViewConstraint(example_1.first, example_1.second)),
+        "View: ",
+        example_0.first,
+        " -> ",
+        example_0.second,
+        "  Should not match:",
+        example_1.first,
+        " -> ",
+        example_1.second);
+  };
+
+  // Splits are done as splitting out left hand side, so left hand side
+  // split changes can't reuse view, but right hand side split changes can.
+  // Merges, since they don't bury hard values in can always be reshared.
+  // Need to make sure trivial reduction, and broadcast changes don't try to
+  // reuse view. What matches and what doesn't is very specific to the
+  // implementation of how the splits/merges are generated. This could be
+  // changed over time as there isn't a single set of transformations to
+  // potentially make a view. For example we could always merge all dimensions,
+  // then split out all dimensions. This would always be valid but would not be
+  // efficient for indexing.
+
+  // "Same"
+  assert_matches(
+      {{1, 1, 3333, 1}, {1, 1, 3333, 1}}, {{1, 1, 3333, 1}, {1, 1, -1, 1}});
+  assert_matches(
+      {{8, 1, 1, 2 * 4, 1, 8}, {8, 2, 4, 1, 8}},
+      {{8, 1, 1, 2 * 4, 1, 8}, {8, 2, 4, 1, -1}});
+
+  // Trivial reduce matching
+  assert_matches({{1, 3333, 1}, {-1}}, {{1, 24, 1}, {-1}});
+
+  // Trivial reduce not matching
+  assert_does_not_match({{1, 3333, 1}, {-1}}, {{1, 3333}, {-1}});
+
+  // Broadcast matching
+  assert_matches({{3333}, {1, -1, 1}}, {{24}, {1, -1, 1}});
+
+  // Broadcast not matching
+  assert_does_not_match({{3333}, {1, -1, 1}}, {{24}, {1, -1}});
+
+  // RHS split
+  assert_matches(
+      {{3, 17, 2 * 4 * 10, 1}, {3 * 17, 1, 2, 4, -1}},
+      {{3, 17, 2 * 4 * 10 * 7, 1}, {3 * 17, 1, 2, 4, -1}});
+  assert_matches(
+      {{1, 303 * 11, 1}, {1, 303, -1, 1}},
+      {{1, 303 * 11 * 4, 1}, {1, 303, -1, 1}});
+  assert_matches(
+      {{2, 3, 2 * 2 * 3, 5}, {1, 2 * 3, 1, 2, -1, 5, 1}},
+      {{2, 3, 2 * 2 * 4, 5}, {1, 2 * 3, 1, 2, -1, 5, 1}});
+  assert_matches(
+      {{22, 11 * 2, 2}, {22, 11, 1, 1, -1}},
+      {{22, 11 * 2 * 4, 2 * 3}, {22, 11, 1, 1, -1}});
+  assert_matches(
+      {{1, 1111 * 3}, {1, 1, 1, 1111, 1, -1}},
+      {{1, 1111 * 3 * 7}, {1, 1, 1, 1111, 1, -1}});
+  assert_matches(
+      {{1, 303 * 11 * 2, 1}, {1, 303, -1, 1}},
+      {{1, 303 * 11 * 3, 1}, {1, 303, -1, 1}});
+  assert_matches(
+      {{8, 1, 1, 2 * 4, 1, 8}, {8, 2, -1, 1, 8}},
+      {{8, 1, 1, 2 * 4 * 6, 1, 8}, {8, 2, -1, 1, 8}});
+
+  // LHS split not matching
+  assert_does_not_match(
+      {{3, 17, 2 * 4 * 10, 1}, {3 * 17, 1, 2, -1, 10}},
+      {{3, 17, 2 * 4 * 3 * 10, 1}, {3 * 17, 1, 2, -1, 10}});
+  assert_does_not_match(
+      {{1, 303 * 11, 1}, {1, -1, 11, 1}},
+      {{1, 303 * 11 * 2, 1}, {1, -1, 11, 1}});
+  assert_does_not_match(
+      {{2, 3, 2 * 2, 5}, {1, 2 * 3, 1, -1, 2, 5, 1}},
+      {{2, 3, 3 * 2, 5}, {1, 2 * 3, 1, -1, 2, 5, 1}});
+  assert_does_not_match(
+      {{22, (11 + 1) * 2, 2}, {22, -1, 1, 1, 2 * 2}},
+      {{22, 11 * 2, 2}, {22, -1, 1, 1, 2 * 2}});
+  assert_does_not_match(
+      {{1, 1111 * 3}, {1, 1, 1, -1, 1, 3}},
+      {{1, 1111 * 2 * 3}, {1, 1, 1, -1, 1, 3}});
+  assert_does_not_match(
+      {{1, 303 * 11, 1}, {1, -1, 11, 1}},
+      {{1, (303 + 1) * 11, 1}, {1, -1, 11, 1}});
+  assert_does_not_match(
+      {{8, 1, 1, 2 * 4, 1, 8}, {8, -1, 4, 1, 8}},
+      {{8, 1, 1, 3 * 4, 1, 8}, {8, -1, 4, 1, 8}});
+
+  // Merge matching
+  assert_matches(
+      {{3, 17, 2 * 4 * 10, 1, 9}, {-1, 1, 2, 4, 10, 9}},
+      {{4, 18, 2 * 4 * 10, 1, 9}, {-1, 1, 2, 4, 10, 9}});
+  assert_matches({{22, 1, 23, 1}, {-1, 1}}, {{23, 1, 22, 1}, {-1, 1}});
+
+  // Merge not matching
+  assert_does_not_match({{2, 3, 4}, {-1, 4}}, {{2, 3, 4}, {2, -1}});
+  assert_does_not_match(
+      {{22, 1, 23, 1, 24}, {-1, 24}}, {{22, 1, 23, 1, 24}, {22, -1}});
+
+  // Split->Merge matching
+  assert_matches(
+      {{22, 11 * 2, 3}, {22, 11, 1, 1, -1}},
+      {{22, 11 * 3, 2}, {22, 11, 1, 1, -1}});
+  assert_matches(
+      {{1, 3922 * 3 * 7, 1, 2 * 2}, {1, 3922 * 2, 1, -1}},
+      {{1, 3922 * 7, 1, 2}, {1, 3922 * 2, 1, -1}});
+
+  // Split->Merge not matching
+  assert_does_not_match(
+      {{22, 11 * 2, 2}, {22, -1, 1, 1, 4}},
+      {{22, 11 * 2 * 3, 2}, {22, -1, 1, 1, 4}});
+  assert_does_not_match(
+      {{1, 3922 * 7, 1, 2}, {1, -1, 1, 7}},
+      {{1, 3922 * 7 * 2, 1, 2}, {1, -1, 1, 7}});
+
+  // Merge->Split matching
+  assert_matches(
+      {{1, 3922 * 2, 1, 7}, {1, 3922 * 7, -1}},
+      {{1, 3922 * 2 * 3, 1, 7}, {1, 3922 * 7, -1}});
+  assert_matches(
+      {{19, 3 * 4, 7, 99}, {19, 3, -1}}, {{19, 3 * 3, 8, 10}, {19, 3, -1}});
+
+  // Merge->Split not matching
+  assert_does_not_match(
+      {{1, 3922 * 2, 1, 7}, {1, -1, 2}}, {{1, 3922, 1, 7}, {1, -1, 2}});
+  assert_does_not_match(
+      {{19, 3 * 4, 7, 99}, {19, -1, 3}}, {{19, 3 * 5, 7, 99}, {19, -1, 3}});
 }
 
 } // namespace jit

@@ -1451,7 +1451,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         kernel_->profile().isProfiled(expr)) {
       const auto& buffer_indices =
           kernel_->profile().getIndicesInProfileBuffer(expr);
