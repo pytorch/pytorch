@@ -209,6 +209,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
   };
 
+  virtual void startCoalescing() {
+    // no-op for backends that have not implemented startCoalescing
+  }
+
+  virtual void endCoalescing(
+      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& /* reqs */) {
+    // no-op for backends that have not implemented endCoalescing
+  }
+
   // Consider using ops in Ops.hpp instead of the below, which route things
   // to the dispatcher.
   // TODO: Find a way to force the above rule programmatically.

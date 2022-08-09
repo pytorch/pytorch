@@ -547,6 +547,7 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
+    _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -967,11 +968,19 @@ _qtype_vtype_map = {
 }
 
 
-def unpack_quantized_tensor(value):
+def unpack_quantized_tensor(value, cast_onnx_accepted=True):
     if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
         q_value_dequantize = value.dequantize()
-        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
-        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_scale = (
+            torch.tensor(value.q_scale(), dtype=torch.double)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_scale(), dtype=torch.float32)
+        )
+        q_zero_point = (
+            torch.tensor(value.q_zero_point(), dtype=torch.int64)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_zero_point(), dtype=_qtype_vtype_map[value.dtype])
+        )
         q_value = q_value_dequantize / q_scale + q_zero_point
         q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
         return q_value, q_scale, q_zero_point

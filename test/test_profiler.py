@@ -36,7 +36,8 @@ from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              SynchronizedDataLoaderPattern,
                                              GradNotSetToNonePattern,
                                              Conv2dBiasFollowedByBatchNorm2dPattern,
-                                             MatMulDimInFP16Pattern)
+                                             MatMulDimInFP16Pattern,
+                                             report_all_anti_patterns)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -280,6 +281,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -309,6 +311,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -344,6 +347,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -352,6 +356,40 @@ class TestExecutionGraph(TestCase):
                 loop_count += 1
         assert found_root_node
         assert loop_count == expected_loop_events
+
+    def test_execution_graph_repeat_in_loop(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        iter_list = {3, 4, 6, 8}
+        expected_loop_events = len(iter_list)
+        output_files = []
+        for idx in range(10):
+            if idx in iter_list:
+                # Create a temp file to save execution graph data.
+                fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+                fp.close()
+                output_files.append(fp.name)
+                eg = ExecutionGraphObserver()
+                eg.register_callback(fp.name)
+                eg.start()
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+            if idx in iter_list:
+                eg.stop()
+                eg.unregister_callback()
+
+        event_count = 0
+        for eg_file in output_files:
+            nodes = self.get_execution_graph_root(eg_file)
+            found_root_node = False
+            for n in nodes:
+                assert "name" in n
+                if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                    assert n["id"] == 1
+                    found_root_node = True
+                if n["name"].startswith("## LOOP "):
+                    event_count += 1
+            assert found_root_node
+        assert event_count == expected_loop_events
 
     def test_execution_graph_no_capture(self):
         fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
@@ -1161,6 +1199,22 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+    def test_nested_tensor_with_shapes(self):
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        inp = torch.nested_tensor([a, b])
+        with torch.profiler.profile(record_shapes=True) as prof:
+            torch.nn.functional.linear(inp, c, None)
+        for e in prof.events():
+            if e.name in ("aten::mm", "aten::addmm"):
+                # intentionally vague tests to protect against possible future changes
+                # of mm to addmm or other impl, or changing internal order of args
+                self.assertTrue(len(e.input_shapes) > 0)
+                self.assertTrue(len(e.input_shapes[0]) > 0)
+
+
+
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1214,6 +1268,25 @@ class TestTorchTidyProfiler(TestCase):
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
+    def test_scalar_ins(self):
+        x = torch.ones(5, 5)
+        alpha = 0.9
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = torch.add(x, 9.1, alpha=alpha)
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        # The second argument to the add gets promotoed to a zerodim Tensor
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
+        self.assertEqual(input_info.shapes, [[5, 5], [], []])
+        self.assertEqual(input_info.ivalues, [None, None, alpha])
 
 
 @dataclass(frozen=True)
@@ -1564,6 +1637,9 @@ aten::mm""")
             (1, lambda: torch.rand((100, 100)).cuda()),
             (1, lambda: torch.randn((100, 100)).cuda()),
             (1, lambda: torch.full((100, 100), 10).cuda()),
+            (0, lambda: torch.rand((100, 100)).to(dtype=torch.float16)),
+            (0, lambda: torch.rand((100, 100)).half()),
+            (0, lambda: torch.rand((100, 100), device="cuda").half()),
         )
         num_matched = []
         for _, fn in cases:
@@ -1728,6 +1804,32 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    def test_profiler_pattern_matcher_json_report(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+        optimizer = torch.optim.Adam(model.parameters())
+        with profile(with_stack=True, record_shapes=True) as prof:
+            y_hat = model(x)
+            loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
+        try:
+            with open("./torchtidy_report.json") as f:
+                report = json.load(f)
+            self.assertTrue("test_profiler.py" in report)
+            self.assertTrue(len(report["test_profiler.py"]) > 0)
+            expected_fields = sorted(["line_number", "name", "url", "message"])
+            for event in report["test_profiler.py"]:
+                actual_fields = sorted(event.keys())
+                self.assertEqual(expected_fields, actual_fields)
+        finally:
+            os.remove("torchtidy_report.json")
 
 if __name__ == '__main__':
     run_tests()
