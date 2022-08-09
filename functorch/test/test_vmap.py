@@ -3243,7 +3243,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'squeeze',
             't',
             'transpose',
-            'unsqueeze',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
@@ -3404,7 +3403,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'tril',
             'triu',
             'trunc',
-            'unsqueeze',
             'xlogy',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True,
