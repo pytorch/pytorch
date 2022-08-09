@@ -4945,8 +4945,8 @@ class TestCudaFuser(JitTestCase):
         device = "cuda"
         x0 = torch.randn(10, 12, device=device)
         x1 = torch.randn(10, 4, device=device)
-        w0 = torch.randn(10, 12, device=device)
-        w1 = torch.randn(10, 4, device=device)
+        w0 = torch.randn(12, device=device)
+        w1 = torch.randn(4, device=device)
 
         def t(x, y, w0, w1):
             ih = torch.layer_norm(x, (12,), w0)
