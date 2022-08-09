@@ -12273,6 +12273,21 @@
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
 
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.one(Tensor self) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _test_autograd_multiple_dispatch
+    # this is necessary because NestedTensor has ben removed from the CompositeExplicitAutograd keyset
+    # see Note [NestedTensor Not Included in Backend Keys]
+    NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch
+  tags: view_copy
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.two(Tensor self, bool b) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: _test_autograd_multiple_dispatch_two
+    NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch_two
+
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:

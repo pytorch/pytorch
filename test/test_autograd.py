@@ -8887,6 +8887,81 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn, [inp_c, inp_r], check_forward_ad=True)
 
+class TestAutogradMultipleDispatch(TestCase):
+    def test_autograd_multiple_dispatch_registrations(self, device):
+        t = torch.randn(3, 3, device=device, requires_grad=True)
+        out = torch._test_autograd_multiple_dispatch(t)
+        grad = torch.randn(3, 3, device=device)
+        out.backward(grad)
+
+        if 'cuda' not in device:
+            # bogus default gradient registered for AutogradCUDA is grad + 1
+            self.assertEqual(t.grad, grad + 1)
+        else:
+            # bogus gradient registered for AutogradCUDA is grad * 2
+            self.assertEqual(t.grad, grad * 2)
+
+        # test registered AutogradNestedTensor formula
+        a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
+        b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
+        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
+
+        nt_out = torch._test_autograd_multiple_dispatch(nt)
+        c = torch.randn(2, 3, device=device)
+        d = torch.randn(2, 4, device=device)
+        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_out.backward(nt_grad)
+
+        # bogus gradient for AutogradNestedTensor is grad * grad
+        self.assertEqual(a.grad, c * c)
+        self.assertEqual(b.grad, d * d)
+
+    def test_autograd_composite_implicit_and_dispatch_registration(self, device):
+        t = torch.randn(3, 3, device=device, requires_grad=True)
+        out = torch._test_autograd_multiple_dispatch(t, True)
+        grad = torch.randn(3, 3, device=device)
+        out.backward(grad)
+
+        # t.grad is just out.grad by composite op since _test_autograd_multiple_dispatch is just a clone
+        self.assertEqual(t.grad, grad)
+
+        # test registered AutogradNestedTensor formula
+        a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
+        b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
+        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
+
+        nt_out = torch._test_autograd_multiple_dispatch(nt, True)
+        c = torch.randn(2, 3, device=device)
+        d = torch.randn(2, 4, device=device)
+        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_out.backward(nt_grad)
+
+        # bogus gradient for AutogradNestedTensor is grad * grad + grad
+        self.assertEqual(a.grad, c * c + c)
+        self.assertEqual(b.grad, d * d + d)
+
+
+    def test_view_copy(self, device):
+        # tests that view_copy formulas are also generated per dispatch key in derivatives.yaml
+        a = torch.randn(4, device=device, requires_grad=True)
+        a_ref = a.clone().detach().requires_grad_()
+        a_view = a_ref.view(2, 2)
+        a_view_copy = torch.view_copy(a, (2, 2))
+
+        out_view_copy = torch._test_autograd_multiple_dispatch(a_view_copy)
+        out_view = torch._test_autograd_multiple_dispatch(a_view)
+        grad = torch.randn(2, 2, device=device)
+        out_view_copy.backward(grad)
+        out_view.backward(grad.clone())
+
+        # forward and backward give the same shape + result
+        self.assertEqual(a_view_copy, a_view)
+        if 'cuda' in device:
+            self.assertEqual(a.grad, (grad * 2).view(-1))
+        else:
+            self.assertEqual(a.grad, (grad + 1).view(-1))
+        self.assertEqual(a.grad, a_ref.grad)
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -8897,6 +8972,12 @@ from autograd.test_functional import TestAutogradFunctional  # noqa: F401
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(
     TestAutogradDeviceType,
+    globals(),
+    except_for=None
+)
+
+instantiate_device_type_tests(
+    TestAutogradMultipleDispatch,
     globals(),
     except_for=None
 )

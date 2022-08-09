@@ -271,6 +271,10 @@ def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
+    # fn is derived as long as any of its per-key differentiability infos
+    # has_derivatives. dispatch_strategy() is used to guard generation of fns in VariableType
+    # and ADInplaceOrViewType. We want to generate these functions as long as a
+    # derivative is defined for ANY dispatch key.
     if fn.func.is_abstract or (
         fn.info is not None and any(info.has_derivatives for info in fn.info.values())
     ):
