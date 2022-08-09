@@ -679,12 +679,8 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
-#if ENABLE_UPGRADERS
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
-#else
-  c10::optional<size_t> graph_version = c10::nullopt;
-#endif
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
