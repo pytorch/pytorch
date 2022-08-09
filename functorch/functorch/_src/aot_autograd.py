@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
 from torch.fx import immutable_collections, Interpreter
-from torch.fx.experimental.proxy_tensor import RetracingMode
+from torch.fx.proxy import RetracingMode
 from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack

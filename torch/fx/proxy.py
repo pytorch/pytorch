@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import dis
 import torch
 import inspect
@@ -10,7 +11,7 @@ from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 
-__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy', 'RetracingMode']
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
@@ -44,7 +45,7 @@ class TracerBase:
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
-        retracing_node = torch.fx.experimental.proxy_tensor.RetracingMode.current_node()
+        retracing_node = RetracingMode.current_node()
         if retracing_node:
             node.stack_trace = retracing_node.stack_trace
 
@@ -409,3 +410,23 @@ def _define_reflectable(orig_method_name):
 
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
+
+@compatibility(is_backward_compatible=False)
+class RetracingMode:
+    active_interpreter = None
+
+    @classmethod
+    @contextmanager
+    def preserve_stack_trace(cls, interpreter):
+        saved_intepreter = cls.active_interpreter
+        try:
+            cls.active_interpreter = interpreter
+            yield
+        finally:
+            cls.active_interpreter = saved_intepreter
+
+    @classmethod
+    def current_node(cls):
+        if cls.active_interpreter:
+            return getattr(cls.active_interpreter, "current_node", None)
+        return None
