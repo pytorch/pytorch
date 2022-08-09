@@ -250,7 +250,7 @@ set_property(
 
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CUDA_USE_STATIC_CUDA_RUNTIME)
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cudart_static)
