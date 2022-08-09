@@ -50,6 +50,10 @@ struct TorchOpBasicFields {
 
 struct TensorMetadata {
   void* ptr_;
+  // Device is separated into DeviceType and DeviceIndex as Device
+  // doesn't have a default initializer (which the std::array initializer needs)
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
   c10::ScalarType dtype_;
   uint32_t dim_;
   c10::Layout layout_;
