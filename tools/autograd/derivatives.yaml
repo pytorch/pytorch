@@ -912,11 +912,11 @@
 
 - name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
-  other: grad * at::where(other.isnan() | (self != 0), self / other, zeros_like(other))
+  other: grad * at::where(other.isnan() | (self != 0), self / other, 0)
   result: self_t * at::xlogy((self_p != 0), other_p) + other_t * self_p / other_p
 
 - name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, zeros_like(other))
+  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, 0)
   result: auto_element_wise
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
@@ -1002,7 +1002,7 @@
 
 - name: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   self: grad.masked_fill(mask, 0)
-  value: at::where(mask, grad, zeros_like(grad)).sum()
+  value: at::where(mask, grad, 0).sum()
   mask: non_differentiable
   result: self_t.masked_fill(mask, value_t)
 
@@ -1740,8 +1740,8 @@
 
 - name: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
-  self: where(condition, grad, zeros_like(grad))
-  other: where(condition, zeros_like(grad), grad)
+  self: where(condition, grad, 0)
+  other: where(condition, 0, grad)
   result: where(condition, self_t, other_t)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
