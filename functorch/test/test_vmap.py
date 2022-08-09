@@ -98,13 +98,6 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(bar)()
 
-    def test_func_with_no_tensors(self):
-        def foo(x):
-            return torch.randn(3)
-
-        with self.assertRaisesRegex(ValueError, 'at least one Tensor'):
-            vmap(foo, (None,))(1)
-
     def test_constant_function(self):
         output = vmap(lambda x: torch.tensor(3.14))(torch.ones(3))
         self.assertEqual(output, torch.tensor([3.14, 3.14, 3.14]))
@@ -3156,18 +3149,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule, skip_inplace=()):
         def test():
-            # Error inputs check
-            if op.error_inputs_func is not None:
-                error_inputs = op.error_inputs(device)
-                for error_input in error_inputs:
-                    sample_input = error_input.sample_input
-                    args = (sample_input.input,) + tuple(sample_input.args)
-                    kwargs = sample_input.kwargs
-                    for args, in_dims, _ in generate_vmap_inputs(args, {}):
-                        with self.assertRaises(Exception):
-                            vmap(op, in_dims)(*args, **kwargs)
-
-            # Sample inputs check
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
@@ -3259,6 +3240,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = (
+            'squeeze',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
@@ -3412,6 +3394,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             'scatter_add',
             'scatter',
             'square',
+            'squeeze',
             'sub',
             'tril',
             'triu',
