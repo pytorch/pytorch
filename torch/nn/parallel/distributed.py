@@ -664,6 +664,9 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
+        _module_to_run = (self._replicated_tensor_module if self._use_replicated_tensor_module else self.module)
+        self._module_to_run_forward = _module_to_run.forward
+
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:
             # Create a module with ReplicatedTensor without copying tensors. Avoid
@@ -958,7 +961,6 @@ class DistributedDataParallel(Module, Joinable):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
 
         if self.device_ids:
             inputs, kwargs = _to_kwargs(
@@ -967,9 +969,9 @@ class DistributedDataParallel(Module, Joinable):
                 self.device_ids[0],
                 self.use_side_stream_for_tensor_copies
             )
-            return module_to_run(*inputs[0], **kwargs[0])
+            return self._module_to_run_forward(*inputs[0], **kwargs[0])
         else:
-            return module_to_run(*inputs, **kwargs)
+            return self._module_to_run_forward(*inputs, **kwargs)
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
