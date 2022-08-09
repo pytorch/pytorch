@@ -983,7 +983,7 @@ class TestBinaryUfuncs(TestCase):
             [1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
             dtype=dtype,
         )
-        # Divide by zero is tested seperately
+        # Divide by zero is tested separately
         denom = num[num != 0]
 
         a, b = num[None, :].clone(), denom[:, None].clone()

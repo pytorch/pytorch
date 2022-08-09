@@ -867,7 +867,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         # store modules input weight equalization info
         input_weight_equalization_info: Dict[str, Dict] = {}
 
-        # for each module we add seperate set of suggestions
+        # for each module we add separate set of suggestions
         for module_fqn in input_info:
 
             # get relavent info for this module
