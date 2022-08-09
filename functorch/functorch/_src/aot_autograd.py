@@ -135,11 +135,6 @@ def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=
     return torch.full(size, value, dtype=inp.dtype, device=inp.device)
 
 
-# @register_decomposition(torch.ops.aten.zeros_like, aot_autograd_decompositions)
-# def zeros_like(inp, dtype=None, layout=None, device=None, pin_memory=None):
-#     return inp * 0
-
-
 import torch.fx as fx
 import typing
 class ListCodeGen(fx.CodeGen):
