@@ -1330,8 +1330,6 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif self.device.type == "cpu":
             device_type = DLDeviceType.kDLCPU
-        elif self.device.type == "xpu":
-            device_type = DLDeviceType.kDLOneAPI
         else:
             raise ValueError(
                 "Unknown device type {} for Dlpack".format(self.device.type)

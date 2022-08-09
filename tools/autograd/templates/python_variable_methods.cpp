@@ -222,7 +222,6 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
-#include <iostream>
 static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
