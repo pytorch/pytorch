@@ -22,8 +22,9 @@ exclude =
     ./docs/caffe2,
     ./docs/cpp/src,
     ./docs/src,
-    # See NOTE: [Impending functorch move]
-    ./functorch,
+    ./functorch/docs,
+    ./functorch/examples,
+    ./functorch/notebooks,
     ./scripts,
     ./test/generated_type_hints_smoketest.py,
     ./third_party,

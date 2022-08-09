@@ -662,12 +662,10 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
-#if ENABLE_UPGRADERS
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
     // Therefore, we replace such ops with its' valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
-#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted

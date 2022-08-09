@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -25,6 +25,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -40,7 +41,53 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
-class TestSparse(TestCase):
+class CrossRefSparseFakeMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        def on_tensor(f):
+            def go(t):
+                if isinstance(t, torch.Tensor):
+                    return f(t)
+                else:
+                    return t
+            return go
+
+        # empty_like excluded for now due to sparse complex
+        # aten._to_dense.default this one is getting called with csc
+        if (
+            func not in [
+                torch.ops.aten.lift_fresh.default,
+                torch.ops.aten.empty_like.default,
+                torch.ops.aten.set_.source_Storage_storage_offset,
+                torch.ops.aten.sspaddmm.out,
+                torch.ops.aten._spdiags.default,
+                torch.ops.aten._to_dense.default
+            ]
+            and torch.Tag.dynamic_output_shape not in func.tags
+            and torch.Tag.inplace_view not in func.tags
+        ):
+            from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
+            from torch.utils._pytree import tree_map
+            try:
+                with FakeTensorMode(allow_meta=True) as fake_mode:
+                    fake_args, fake_kwargs = tree_map(on_tensor(fake_mode.from_tensor), (args, kwargs))
+                    fake_r = func(*fake_args, **fake_kwargs)
+            except UnsupportedFakeTensorException:
+                pass
+
+        r = func(*args, **kwargs)
+        return r
+
+class TestSparseBase(TestCase):
+    def run(self, result=None):
+        if TEST_WITH_CROSSREF:
+            with CrossRefSparseFakeMode():
+                return super().run(result)
+        else:
+            return super().run(result)
+
+class TestSparse(TestSparseBase):
 
     def setUp(self):
         TestCase.setUp(self)
@@ -1023,6 +1070,21 @@ class TestSparse(TestCase):
             for i in range(sizes[d]):
                 test_shape(1, 10, sizes, d, i)
 
+    @dtypes(*integral_types())
+    def test_select_no_type_promotion(self, device, dtype):
+        # see https://github.com/pytorch/pytorch/issues/82150
+        idx = torch.tensor([[0, 0, 0, 1, 1, 1], [0, 0, 0, 1, 1, 1]])
+        val = torch.ones(6, dtype=dtype)
+        s = torch.sparse_coo_tensor(idx, val, size=(3, 3))
+
+        for t in (s, s * torch.tensor(0, dtype=dtype)):
+            # empty checks
+            self.assertEqual(t.dtype, t[2].dtype)
+            self.assertEqual(t.dtype, t[0, 1].dtype)
+            # sum should not promote
+            self.assertEqual(t.dtype, t[0, 0].dtype)
+            self.assertEqual(t.dtype, t[1, 1].dtype)
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select(self, device, dtype, coalesced):
@@ -1626,6 +1688,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
     def test_sparse_sum(self, device, dtype, coalesced):
 
         def run_tests(S, td=None):
@@ -3383,6 +3446,13 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2], coalesced)
         test_op(4, 100, [3, 4, 2, 3, 5, 2], coalesced)
 
+
+    @dtypes(torch.double)
+    def test_softmax_zero_nnz(self, device, dtype):
+        t = torch.sparse_coo_tensor([[]], [], (3,), device=device, dtype=dtype)
+        out = torch.sparse.softmax(t, 0)
+        self.assertEqual(out.to_dense(), torch.zeros_like(t))
+
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
@@ -3391,6 +3461,7 @@ class TestSparse(TestCase):
                                       *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
                                       *[torch.complex64] if CUDA11OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+    @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
@@ -3842,6 +3913,37 @@ class TestSparseMaskedReductions(TestCase):
 
             expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
             self.assertEqual(actual, expected)
+
+
+class TestSparseMeta(TestCase):
+    exact_dtype = True
+
+    def test_basic(self):
+        r = torch.empty(4, 4, layout=torch.sparse_coo, device='meta')
+        self.assertTrue(r.is_meta)
+        self.assertEqual(r.device.type, "meta")
+        r2 = torch.empty_like(r)
+        self.assertTrue(r2.is_meta)
+        self.assertEqual(r, r2)
+        r3 = torch.sparse_coo_tensor(size=(4, 4), device='meta')
+        self.assertTrue(r3.is_meta)
+        self.assertEqual(r, r3)
+        r.sparse_resize_((4, 4), 1, 1)
+        r.sparse_resize_and_clear_((4, 4, 4), 2, 1)
+        self.assertEqual(r.sparse_dim(), 2)
+        self.assertEqual(r.dense_dim(), 1)
+        self.assertEqual(r._dimV(), 1)
+        self.assertEqual(r._nnz(), 0)
+        # TODO: nnz zero sparse tensors should always be coalesced...
+        self.assertEqual(r.is_coalesced(), False)
+        r._coalesced_(True)
+        self.assertEqual(r.is_coalesced(), True)
+        # TODO: this sort of aliasing will need to be handled by
+        # functionalization
+        self.assertEqual(r._indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
+        self.assertEqual(r._values(), torch.empty(0, 4, device='meta'))
+        self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
+        self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

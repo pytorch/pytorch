@@ -68,7 +68,7 @@ Shape MakeSelectShape(
 
 int64_t GetStride(int64_t start, int64_t end, int64_t stride) {
   if (stride == 0) {
-    CHECK_EQ(start, end);
+    TORCH_CHECK_EQ(start, end);
     stride = 1;
   }
   return stride;

@@ -4,15 +4,19 @@ from functools import lru_cache
 from warnings import warn
 
 import torch
+import torch.overrides
+from torch._prims_common import getnvFuserDtype, Number
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-from torch._prims.utils import getnvFuserDtype, Number
-import torch.overrides
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+    from torch._C._nvfuser import (  # type: ignore[import]
+        DataType,
+        Fusion,
+        FusionDefinition,
+    )
 else:
     DataType = None
 
@@ -81,11 +85,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
-                fd.add_input(x)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
-                fd.add_input(x)
                 return x
             else:
                 return arg
@@ -113,7 +115,8 @@ def nvfuser_execute(gm: GraphModule, *args):
     nv_template_args = to_nvfuser_template_args(flat_args)
     fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
+    # Inputs to fusion.execute correspond to the same template/symbolic inputs
+    # marked with `define_tensor/scalar`
     concrete_fusion_inputs = tuple(
         arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
     )

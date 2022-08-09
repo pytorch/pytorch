@@ -1,12 +1,13 @@
+import inspect
+from collections import defaultdict
+from functools import wraps
+from itertools import chain
+from typing import Callable, Dict, NamedTuple, Sequence, Tuple, Union
+
 import torch
 import torch._ops
 import torch.library
-from functools import wraps
-from itertools import chain
-from typing import Callable, Union, Dict, Sequence, Tuple, NamedTuple
 from torch.utils._pytree import tree_map
-from collections import defaultdict
-import inspect
 
 __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
 
@@ -115,6 +116,20 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                     and "CompositeImplicitAutograd" not in torch._C._dispatch_dump(name)
                     and not torch._C._dispatch_has_kernel_for_dispatch_key(name, "Meta")
                 ):
+                    if any(
+                        a.alias_info is not None and not a.alias_info.is_write
+                        for a in op_overload._schema.arguments
+                    ):
+                        raise RuntimeError(
+                            f"""
+Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
+We shouldn't do this, because the output will report as not having aliased storages.
+All view ops have meta kernels in C++ today, so we should use those instead.
+
+If you're registering an operator through the `@register_decomposition` decorator,
+Please set `disable_meta=True`.
+                        """
+                        )
                     meta_lib.impl(op_overload, fn)
 
         # To handle allowing multiple aten_ops at once
