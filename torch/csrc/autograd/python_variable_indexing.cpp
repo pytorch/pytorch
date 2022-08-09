@@ -66,8 +66,8 @@ static inline int64_t count_specified_dimensions(
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(
         index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!skip_torch_function && (
-            !THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    if (!skip_torch_function &&
+        (!THPVariable_CheckExact(obj) && check_has_torch_function(obj)))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
