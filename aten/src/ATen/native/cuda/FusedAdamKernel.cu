@@ -12,31 +12,6 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename T>
-struct sqrt_functor {
-  C10_DEVICE inline T operator()(const T x) { return std::sqrt(x); }
-};
-
-template<typename T>
-struct pow_functor {
-  static_assert(std::is_same<T, float>::value || std::is_same<T, double>::value, "opmath_t must be either float or double");
-};
-
-template<>
-struct pow_functor<double> {
-  C10_DEVICE inline double operator()(const double x, const float step) { return std::pow(x, static_cast<int>(step)); }
-};
-
-template<>
-struct pow_functor<float> {
-  C10_DEVICE inline double operator()(const float x, const float step) { return std::pow(x, static_cast<int>(step)); }
-};
-
-template<typename T>
-struct max_functor {
-  C10_DEVICE inline T operator()(const T x, const T y) { return std::max(x, y); }
-};
-
 constexpr uint8_t kParamIdx = 0;
 constexpr uint8_t kGradIdx = 1;
 constexpr uint8_t kExpAvgIdx = 2;
@@ -84,15 +59,15 @@ C10_DEVICE __forceinline__ void adam_math(
         exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
 
         if (amsgrad) {
-            max_exp_avg_sq = max_functor<opmath_t>()(max_exp_avg_sq, exp_avg_sq);
+            max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
         }
 
-        const opmath_t bias_correction1 = 1 - pow_functor<opmath_t>()(beta1, *step_count);
-        const opmath_t bias_correction2 = 1 - pow_functor<opmath_t>()(beta2, *step_count);
+        const opmath_t bias_correction1 = 1 - std::pow(beta1, *step_count);
+        const opmath_t bias_correction2 = 1 - std::pow(beta2, *step_count);
 
         const opmath_t step_size = lr / bias_correction1;
 
-        const opmath_t bias_correction2_sqrt = sqrt_functor<opmath_t>()(bias_correction2);
+        const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
 
         opmath_t denom;
         if (amsgrad) {
