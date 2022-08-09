@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, is_iterabl
 import torch
 from torch import Tensor
 import functools
+import contextlib
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -413,7 +414,7 @@ class TestOperators(TestCase):
                 if op.name in inplace_notimplemented:
                     ctx = self.assertRaises(NotImplementedError)
                 else:
-                    ctx = contextlib.nullcontext
+                    ctx = contextlib.nullcontext()
                 with ctx:
                     self.jvp_opinfo_test(inplace_variant, args, kwargs,
                                          sample.output_process_fn_grad,
