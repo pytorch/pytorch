@@ -1143,7 +1143,7 @@ Tensor zeros_like(
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
-    auto res = at::empty({0}, options); // to be resized
+    auto res = at::empty({0}, self.options().merge_in(options)); // to be resized
 
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
