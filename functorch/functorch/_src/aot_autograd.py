@@ -135,14 +135,6 @@ def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=
     return torch.full(size, value, dtype=inp.dtype, device=inp.device)
 
 
-# This is a hack to remove aten.zeros_like from the FX graph.
-# it cannot be fused by NVFuser, and it sometimes block fusible operators to
-# be fused. It is not entirely correct because float('nan') * 0 = nan instead of 0.
-@register_decomposition(torch.ops.aten.zeros_like, aot_autograd_decompositions)
-def zeros_like(inp, dtype=None, layout=None, device=None, pin_memory=None):
-    return inp * 0
-
-
 graph_being_compiled: str = None
 nth_graph: int = 0
 model_name: str = "model"
