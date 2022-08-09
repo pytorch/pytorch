@@ -125,8 +125,8 @@ THIRD_PARTY_LIBS = {
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
     "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
-    "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
-    "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
+    "flatbuffers-api": ["//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//third_party:flatbuffers-api"],
+    "flatc": ["//third-party/flatbuffers/fbsource_namespace:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
@@ -1497,8 +1497,6 @@ def define_buck_targets(
             # "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
             # "torch/csrc/jit/serialization/unpickler.cpp",
             "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
-            "torch/csrc/jit/serialization/pickle.cpp",
-            "torch/csrc/jit/serialization/pickler.cpp",
         ],
         header_namespace = "",
         exported_headers = [
@@ -1714,7 +1712,7 @@ def define_buck_targets(
             "-fexceptions",
             "-frtti",
             "-Wno-deprecated-declarations",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         visibility = ["PUBLIC"],
         deps = [
             ":torch_mobile_module",
@@ -1743,7 +1741,7 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
