@@ -864,7 +864,13 @@ Tensor empty_like_nested(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      std::move(storage_impl), self.key_set(), options.dtype());
+      self_impl->get_buffer_size(),
+      std::move(storage_impl),
+      self.key_set(),
+      options.dtype(),
+      self_impl->get_nested_size_tensor().clone(),
+      self_impl->get_nested_stride_tensor().clone(),
+      self_impl->get_offsets());
   return tensor;
 }
 
