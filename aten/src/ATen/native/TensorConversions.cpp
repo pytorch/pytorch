@@ -586,16 +586,6 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
-// Sparse layout conversions Start
-
-Tensor dense_to_sparse_csr(const Tensor& self) {
-  return self.to_sparse().to_sparse_csr();
-}
-
-Tensor dense_to_sparse_csc(const Tensor& self) {
-  return self.to_sparse().to_sparse_csc();
-}
-
 Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   // This code turns a matrix into a sequence of blocks
   //
@@ -668,6 +658,80 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
           .expand_as(not_zero_mask)
           .masked_select(not_zero_mask);
   return std::pair<Tensor, Tensor>(col_indices, row_indices);
+}
+
+// Sparse layout conversions Start
+
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  auto n_batch_dim = self.dim() - 2;
+  auto values = self;
+  auto not_zero_mask = self != 0;
+
+  if (n_batch_dim > 0) {
+    if (n_batch_dim > 1) {
+      not_zero_mask = not_zero_mask.flatten(0, n_batch_dim - 1);
+      values = values.flatten(0, n_batch_dim - 1);
+    }
+
+    TORCH_CHECK(
+        not_zero_mask.size(0) > 0,
+        "to_sparse_csr: Expected product of batch dimensions to be non-zero.");
+
+    // If the input is n-d we require that nnz is the same for all
+    // batches.
+    auto not_zero_mask_0 = not_zero_mask.select(0, 0);
+    auto nse_per_batch = not_zero_mask_0.sum().repeat(not_zero_mask.size(0));
+    TORCH_CHECK(
+        not_zero_mask.sum({-2, -1}).equal(nse_per_batch),
+        "Expect the same number of specified elements per batch.");
+
+    // We join batches into a matrix shape extending the numer of rows.
+    values = values.flatten(0, 1);
+    not_zero_mask = not_zero_mask.flatten(0, 1);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, not_zero_mask.size(0), false /*out_int32*/);
+  {
+    auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
+    values = values.flatten().index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    auto batch_shape = self.sizes().slice(0, n_batch_dim);
+    auto n_batch = std::accumulate(
+        batch_shape.begin(),
+        batch_shape.end(),
+        int64_t{1},
+        std::multiplies<int64_t>());
+    crow_indices = at::_compressed_to_batched_compressed_indices(
+        crow_indices, n_batch, false);
+    auto batchsize_infer_last = DimVector(batch_shape);
+    // we can infer nnz/ncol+1
+    batchsize_infer_last.push_back(-1);
+    // -1 dim is nnz (per batch)
+    col_indices = col_indices.reshape(batchsize_infer_last);
+    // -1 dim is ncols (per batch) + 1
+    crow_indices = crow_indices.reshape(batchsize_infer_last);
+    // -1 dim is nnz (per batch)
+    values = values.reshape(batchsize_infer_last);
+  }
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseCsr,
+      values.device());
+}
+
+Tensor dense_to_sparse_csc(const Tensor& self) {
+  return self.to_sparse().to_sparse_csc();
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {

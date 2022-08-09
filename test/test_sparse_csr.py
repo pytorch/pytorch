@@ -2556,8 +2556,8 @@ class TestSparseCSR(TestCase):
         """
 
         # adjust this block as support is added
-        supports_batched_from_sparse = (torch.sparse_bsr, torch.sparse_bsc)
-        supports_batched_to_sparse = (torch.sparse_bsr, torch.sparse_bsc)
+        supports_batched_from_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr)
+        supports_batched_to_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr)
         supports_hybrid_from_sparse = ()
         supports_hybrid_to_sparse = ()
 
@@ -2708,10 +2708,7 @@ class TestSparseCSR(TestCase):
             mask = torch.stack([(mask_0, mask_1, mask_2)[i % 3] for i in range(n_batch)], dim=0).reshape(batch_shape + mask_0.shape)
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense * mask
-            if layout in blocked_layouts:
-                msg = "Expect the same number of specified elements per batch."
-            else:
-                msg = "Expect the same sparsity pattern across matrices for ND input."
+            msg = "Expect the same number of specified elements per batch."
             with self.assertRaisesRegex(RuntimeError, msg):
                 self._convert_to_layout(dense, layout, blocksize)
 
