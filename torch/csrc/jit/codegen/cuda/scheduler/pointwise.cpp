@@ -149,7 +149,7 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
         "Error inferring size for pointwise scheduler: ",
         ref_root[ref_i]->extent()->toInlineString());
     elem_counts[ref_i] = inferred_val.value();
-    n_elems *= inferred_val.value();
+    n_elems *= elem_counts[ref_i];
   }
 
   // If zero dimensional or zero size, return default parameters

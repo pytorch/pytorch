@@ -372,6 +372,17 @@ TEST_F(NVFuserTest, FusionExprEvalConstants_CUDA) {
   checkIntValue(evaluator, ceilDiv(a, b), 3);
 }
 
+TEST_F(NVFuserTest, FusionExprEvalDouble_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+  auto ten = IrBuilder::create<Double>(10);
+  auto two = IrBuilder::create<Double>(2);
+  auto three = IrBuilder::create<Double>(3);
+  auto val = castOp(DataType::Int, ceilDiv(sub(ten, two), three));
+  auto reference = static_cast<int64_t>(std::ceil((10.0 - 2.0) / 3.0));
+  TORCH_CHECK(reference == val->evaluateInt());
+}
+
 // Evaluate basic scalar operations with bound values
 TEST_F(NVFuserTest, FusionExprEvalBindings_CUDA) {
   Fusion fusion;
