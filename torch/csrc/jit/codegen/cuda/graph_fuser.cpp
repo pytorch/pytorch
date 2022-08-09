@@ -571,7 +571,8 @@ struct CudaGraphFuser {
         [&](Value* producer_for_chunk) {
           return fuser::cuda::isFusibleCudaFusionGroup(
                      consumer, producer_for_chunk->node()) &&
-              allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
+              isElementWiseNode(consumer) &&
+              allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk) ;
         });
     if (it == chunk->inputs().end()) {
       return false;
