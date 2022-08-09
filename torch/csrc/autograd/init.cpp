@@ -41,6 +41,17 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
+struct EnableTorchFunction {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+  }
+  ~EnableTorchFunction() {
+    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+  }
+  bool old_;
+};
+
 } // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
@@ -219,34 +230,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def(
-          "shapes",
-          [](const KinetoEvent& e) {
-            if (e.hasShapes()) {
-              return e.shapes();
-            } else {
-              return std::vector<std::vector<int64_t>>();
-            }
-          })
-      .def(
-          "dtypes",
-          [](const KinetoEvent& e) {
-            if (e.hasTypes()) {
-              return e.dtypes();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
-      .def(
-          "stack",
-          [](const KinetoEvent& e) {
-            if (e.hasStack()) {
-              return e.stack();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) { return e.scope(); })
@@ -286,15 +273,32 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
-        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
-        .def_readonly("dtypes", &Inputs::dtypes_);
+        .def_readonly("dtypes", &Inputs::dtypes_)
+        .def_property_readonly(
+            "ivalues",
+            [](const Inputs& inputs) {
+              py::list list;
+              for (auto& v : inputs.ivalues_) {
+                list.append(torch::jit::toPyObject(v));
+              }
+              return list;
+            })
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
     py::class_<TensorMetadata>(m, "_TensorMetadata")
-        .def_property_readonly("layout", [](const TensorMetadata& metadata) {
-          PyObject* layout_obj = torch::autograd::utils::wrap(metadata.layout_);
-          return py::reinterpret_borrow<py::object>(layout_obj);
+        .def_property_readonly(
+            "layout",
+            [](const TensorMetadata& metadata) {
+              PyObject* layout_obj =
+                  torch::autograd::utils::wrap(metadata.layout_);
+              return py::reinterpret_borrow<py::object>(layout_obj);
+            })
+        .def_property_readonly("device", [](const TensorMetadata& metadata) {
+          // Have to pull a copy of the existing Python Device object.
+          PyObject* thp_device = THPDevice_New(
+              c10::Device(metadata.device_type_, metadata.device_index_));
+          return py::reinterpret_borrow<py::object>(thp_device);
         });
-
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
@@ -467,6 +471,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
+  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
