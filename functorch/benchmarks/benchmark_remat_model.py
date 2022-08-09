@@ -46,10 +46,10 @@ models_to_run = [
     # "dcgan",
     # "densenet121",
     "hf_Albert",
-    "hf_Bart",
-    "hf_Bert",
+    # "hf_Bart",
+    # "hf_Bert",
     "hf_GPT2",
-    "hf_T5",
+    # "hf_T5",
     "mnasnet1_0",
     "mobilenet_v2",
     # "mobilenet_v3_large",
@@ -81,6 +81,9 @@ def main():
     parser.add_argument(
         "--eager", action="store_true", help="run model in eager mode"
     )
+    # parser.add_argument(
+    #     "--mem", action="store_true", help="run model in eager mode to benchmark memory"
+    # )
 
     parser.add_argument(
         "--info", action="store_true", help="only print out info without benchmarking"
@@ -114,6 +117,9 @@ def main():
                 if args.eager:
                     profile_model_eager(name, model, example_inputs)
                 else:
+                    # if args.mem:
+                    #     profile_model_memory(name, model, example_inputs)
+                    # else:
                     profile_model(name, model, example_inputs)
 
     else:

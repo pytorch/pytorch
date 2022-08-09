@@ -436,7 +436,7 @@ def get_num_fused_group(gm):
     return num_fusion_group
 
 
-def profile_fused_graph(fused_graph, inp, list_inp, overload_dict = None, itr = 5):
+def profile_fused_graph(fused_graph, inp, list_inp, overload_dict = None, itr = 50):
     """
     Return the average cuda time of the jit.scripted version of `fused_graph` on input `inp`, 
     and the number of fusion groups in `fused_graph`
@@ -593,11 +593,40 @@ def profile_model(name, model, inputs):
     stat = {}
     fused_graph = rematerialize_stat(csed_graph_copy, stat)
     num_remat_group = stat["num_group_remat"]
-    memory_reduced = stat["memory_reduced"]
+    memory_reduced = stat["memory_reduced"]  / 1e9
     num_node_pairs = stat["num_node_pairs"]
     avg_cuda_time_h, _, remat_memory = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
 
     print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
+
+# def profile_model_memory(name, model, inputs):
+#     """
+#     Profile a model on inputs
+#     """
+
+#     eager_time, eager_memory = 0, 0
+#     avg_cuda_time_f = 0 #benchmark_GPU_time(script_f, arg_list, True)# profile_scripted_graph(traced_graph, inp, True)
+
+#     traced_graph, params = trace_model(model, inputs)
+#     arg_list, spec  = pytree.tree_flatten([params, inputs])
+#     traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
+#     csed = fx_graph_cse(traced_graph.graph)
+#     csed_graph =  fx.GraphModule(traced_graph, csed)
+#     # overload_dict = strip_overloads_save(csed_graph)
+#     csed_graph.recompile()
+#     csed_graph_copy = copy.deepcopy(csed_graph)
+    
+#     fused_graph = get_fused_graph(csed_graph)
+#     _, fused_memory = benchmark_GPU_time(fused_graph, arg_list, True)
+
+#     stat = {}
+#     fused_graph = rematerialize_stat(csed_graph_copy, stat)
+#     num_remat_group = stat["num_group_remat"]
+#     memory_reduced = stat["memory_reduced"]  / 1e9
+#     num_node_pairs = stat["num_node_pairs"]
+#     _, remat_memory = benchmark_GPU_time(fused_graph, arg_list, True)
+
+#     print(f"{name}, {eager_time}, {avg_cuda_time_f}, 0, 0, 0, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
 
 
 def profile_model_eager(name, model, inputs):
@@ -621,7 +650,7 @@ def check_remat_info(name, traced_graph, inputs):
     stat = {}
     fused_graph = rematerialize_stat(csed_graph, stat)
     num_remat_group = stat["num_group_remat"]
-    memory_reduced = stat["memory_reduced"]
+    memory_reduced = stat["memory_reduced"] / 1e9
     num_node_pairs = stat["num_node_pairs"]
     num_fusion_group = get_num_fused_group(fused_graph)
     print(f" '{name}',  {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}", flush=True)
