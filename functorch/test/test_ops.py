@@ -453,7 +453,7 @@ class TestOperators(TestCase):
 
         def _test(_op, inplace=False):
             for sample in samples:
-                if inplace and not is_valid_inplace_sample_input(sample, op, True):
+                if inplace and not is_valid_inplace_sample_input(sample, op, op.inplace_variant):
                     continue
                 fn, primals = normalize_op_input_output(_op, sample)
                 result = fn(*primals)
