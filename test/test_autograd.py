@@ -8890,12 +8890,13 @@ class TestMultithreadAutograd(TestCase):
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
+        # using _test_autograd_multiple_dispatch.one
         out = torch._test_autograd_multiple_dispatch(t)
         grad = torch.randn(3, 3, device=device)
         out.backward(grad)
 
         if 'cuda' not in device:
-            # bogus default gradient registered for AutogradCUDA is grad + 1
+            # bogus default gradient registered for Autograd is grad + 1
             self.assertEqual(t.grad, grad + 1)
         else:
             # bogus gradient registered for AutogradCUDA is grad * 2
@@ -8918,6 +8919,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
     def test_autograd_composite_implicit_and_dispatch_registration(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
+        # using _test_autograd_multiple_dispatch.two
         out = torch._test_autograd_multiple_dispatch(t, True)
         grad = torch.randn(3, 3, device=device)
         out.backward(grad)
@@ -8940,6 +8942,24 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(a.grad, c * c + c)
         self.assertEqual(b.grad, d * d + d)
 
+    def test_foward_mode_AD(self, device):
+        # check that forward mode AD is only registered for the Default
+        # dispatch for _test_autograd_multiple_dispatch.one and not AutogradCUDA
+
+        primal = torch.randn(3, device=device)
+        tangent = torch.randn(3, device=device)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(primal, tangent)
+
+            err_msg = r"Trying to use forward AD with .* that does not support it"
+            hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
+
+            if 'cuda' in device:
+                with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
+                    torch._test_autograd_multiple_dispatch(dual_input)
+            else:
+                torch._test_autograd_multiple_dispatch(dual_input)
 
     def test_view_copy(self, device):
         # tests that view_copy formulas are also generated per dispatch key in derivatives.yaml
@@ -8948,6 +8968,7 @@ class TestAutogradMultipleDispatch(TestCase):
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 
+        # using _test_autograd_multiple_dispatch.one
         out_view_copy = torch._test_autograd_multiple_dispatch(a_view_copy)
         out_view = torch._test_autograd_multiple_dispatch(a_view)
         grad = torch.randn(2, 2, device=device)

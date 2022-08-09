@@ -738,7 +738,7 @@ def gen_variable_type(
         },
     )
 
-    # helper that generates a TORCH_LIBRARY_IMPL wrapper for each
+    # helper that generates a TORCH_LIBRARY_IMPL macro for each
     # dispatch key that appears in derivatives.yaml
     def wrapper_registrations(used_keys: Set[str]) -> str:
         library_impl_macro_list: List[str] = []
