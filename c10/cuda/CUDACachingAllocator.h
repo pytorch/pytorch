@@ -130,7 +130,7 @@ struct SegmentInfo {
   int64_t total_size = 0;
   int64_t allocated_size = 0;
   int64_t active_size = 0;
-  int64_t stream = 0;
+  cudaStream_t stream = 0;
   bool is_large = false;
   std::vector<BlockInfo> blocks;
 };

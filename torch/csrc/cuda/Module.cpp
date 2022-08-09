@@ -583,7 +583,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[total_size_s] = segmentInfo.total_size;
     segmentDict[allocated_size_s] = segmentInfo.allocated_size;
     segmentDict[active_size_s] = segmentInfo.active_size;
-    segmentDict[stream_s] = segmentInfo.stream;
+    // we want the python objects to pickle easily so use an int to
+    // represent the stream rather than a torch.cuda.stream object
+    segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
 
     py::list blocks;

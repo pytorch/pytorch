@@ -4412,13 +4412,21 @@ class TestCudaComm(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history(True)
-            x = torch.rand(311, 411).cuda()
-            ss = torch.cuda.memory._snapshot()
+            x = torch.rand(311, 411, device='cuda')
 
+            # create a bunch of tensors that all will tile into the
+            # same segment to  exercise the history merging code
+            # 512B is the minimum block size,
+            # so we allocate all the tensors to this size to make sure
+            # they tile evenly
             tensors = [torch.rand(128, device='cuda') for _ in range(1000)]
             while tensors:
                 del tensors[randint(0, len(tensors) - 1)]
+
+            # exercise the history trimming code
             torch.rand(128 * 5, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:

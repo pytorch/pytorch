@@ -936,7 +936,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<int64_t>(head_block->ptr);
-      segment_info.stream = (int64_t)head_block->stream;
+      segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
 
       const Block* block = head_block;
