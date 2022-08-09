@@ -149,14 +149,14 @@ class WithDevice(nn.Module):
         device(:class:`torch.device`): The device to run the module on.
 
     Example::
-        >>> fc1 = nn.Linear(16, 8).cuda(0)
-        >>> fc2 = nn.Linear(8, 4).cuda(1)
-        >>> dropout = nn.Dropout()
-        >>>
-        >>> # Dropout does not have any parameters/buffers, but we want to
-        >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
-        >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
-        >>> model = Pipe(model, chunks=8)
+            fc1 = nn.Linear(16, 8).cuda(0)
+            fc2 = nn.Linear(8, 4).cuda(1)
+            dropout = nn.Dropout()
+
+            # Dropout does not have any parameters/buffers, but we want to
+            # run it on cuda:1 to avoid any GPU to CPU transfers.
+            model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
+            model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):
         super(WithDevice, self).__init__()
@@ -269,20 +269,20 @@ class Pipe(Module):
     Example::
         Pipeline of two FC layers across GPUs 0 and 1.
 
-        # Need to initialize RPC framework first.
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '29500'
-        # Here we use one Python proccess to build a pipe over two GPUs. 
-        # The world_size refers to the one process.
-        torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
-        
-        # Build pipe on two GPUs.
-        fc1 = nn.Linear(16, 8).cuda(0)
-        fc2 = nn.Linear(8, 4).cuda(1)
-        model = nn.Sequential(fc1, fc2)
-        model = Pipe(model, chunks=8)
-        input = torch.rand(16, 16).cuda(0)
-        output_rref = model(input)
+            # Need to initialize RPC framework first.
+            os.environ['MASTER_ADDR'] = 'localhost'
+            os.environ['MASTER_PORT'] = '29500'
+            # Here we use one Python proccess to build a pipe over two GPUs.
+            # The world_size refers to the one process.
+            torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
+
+            # Build pipe on two GPUs.
+            fc1 = nn.Linear(16, 8).cuda(0)
+            fc2 = nn.Linear(8, 4).cuda(1)
+            model = nn.Sequential(fc1, fc2)
+            model = Pipe(model, chunks=8)
+            input = torch.rand(16, 16).cuda(0)
+            output_rref = model(input)
 
     .. note::
         You can wrap a :class:`Pipe` model with
