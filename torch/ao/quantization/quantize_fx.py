@@ -330,19 +330,103 @@ def prepare_fx(
     Example::
 
         import torch
-        from torch.ao.quantization import get_default_qconfig
+        from torch.ao.quantization import get_default_qconfig_mapping
         from torch.ao.quantization import prepare_fx
 
-        float_model.eval()
-        qconfig = get_default_qconfig('fbgemm')
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Submodule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x) + x
+                return x
+
+        # initialize a floating point model
+        float_model = M().eval()
+
+        # define calibration function
         def calibrate(model, data_loader):
             model.eval()
             with torch.no_grad():
                 for image, target in data_loader:
                     model(image)
 
-        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # qconfig is the configuration for how we insert observers for a particular
+        # operator
+        # qconfig = get_default_qconfig("fbgemm")
+        # Example of customizing qconfig:
+        # qconfig = torch.ao.quantization.QConfig(
+        #    activation=MinMaxObserver.with_args(dtype=torch.qint8),
+        #    weight=MinMaxObserver.with_args(dtype=torch.qint8))
+        # `activation` and `weight` are constructors of observer module
+
+        # qconfig_mapping is a collection of quantization configurations, user can
+        # set the qconfig for each operator (torch op calls, functional calls, module calls)
+        # in the model through qconfig_mapping
+        # the following call will get the qconfig_mapping that works best for models
+        # that target "fbgemm" backend
+        qconfig_mapping = get_default_qconfig_mapping("fbgemm")
+
+        # We can customize qconfig_mapping in different ways.
+        # e.g. set the global qconfig, which means we will use the same qconfig for
+        # all operators in the model
+        # qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # e.g. quantize the linear submodule with a specific qconfig
+        # qconfig_mapping = QConfigMapping().set_module_name("linear", qconfig)
+        # e.g. quantize all nn.Linear modules with a specific qconfig
+        # qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+        # for a more complete list, please see the docstring for `qconfig_mapping`
+        # argument
+
+        # example inputs is a tuple of inputs, that is used to infer the type of the
+        # outputs in the model
+        # currently it's not used, but please make sure model(*example_inputs) runs
         example_inputs = (torch.randn(1, 3, 224, 224),)
+
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        # `prepare_fx` inserts observers in the model based on qconfig_mapping and
+        # backend_config, if the configuration for an operator in qconfig_mapping
+        # is supported in the backend_config (meaning it's supported by the target
+        # hardware), we'll insert observer modules according to the qconfig_mapping
+        # otherwise the configuration in qconfig_mapping will be ignored
+        #
+        # Example:
+        # in qconfig_mapping, user sets linear module to be quantized with int8 for
+        # both activation and weight:
+        # qconfig = torch.ao.quantization.QConfig(
+        #     observer=MinMaxObserver.with_args(dtype=torch.quint8),
+        #     weight=MinMaxObserver.with-args(dtype=torch.qint8))
+        # Note: current qconfig api does not support setting output observer, but
+        # we may have extend this to support these more fine grained control in the
+        # future
+        #
+        # qconfig_mapping = QConfigMapping.set_object_type(torch.nn.Linear, qconfig)
+        # in backend config, linear module also supports in this configuration:
+        # weighted_int8_dtype_config = DTypeConfig(
+        #   input_dtype=torch.quint8,
+        #   output_dtype=torch.quint8,
+        #   weight_dtype=torch.qint8,
+        #   bias_type=torch.float)
+
+        # linear_pattern_config = BackendPatternConfig(torch.nn.Linear) \
+        #    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+        #    .add_dtype_config(weighted_int8_dtype_config) \
+        #    ...
+
+        # backend_config = BackendConfig().set_backend_pattern_config(linear_pattern_config)
+        #
         prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)
         # Run calibration
         calibrate(prepared_model, sample_inference_data)
@@ -382,19 +466,76 @@ def prepare_qat_fx(
     Example::
 
         import torch
-        from torch.ao.quantization import get_default_qat_qconfig
+        from torch.ao.quantization import get_default_qat_qconfig_mapping
         from torch.ao.quantization import prepare_fx
 
-        qconfig = get_default_qat_qconfig('fbgemm')
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Submodule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x) + x
+                return x
+
+
+        # initialize a floating point model
+        float_model = M().train()
+        # (optional, but preferred) load the weights from pretrained model
+        # float_model.load_weights(...)
+
+        # define the training loop for quantization aware training
         def train_loop(model, train_data):
             model.train()
             for image, target in data_loader:
                 ...
 
-        float_model.train()
-        qconfig_mapping = QConfigMapping().set_global(qconfig)
-        prepared_model = prepare_fx(float_model, qconfig_mapping)
-        # Run calibration
+        # qconfig is the configuration for how we insert observers for a particular
+        # operator
+        # qconfig = get_default_qconfig("fbgemm")
+        # Example of customizing qconfig:
+        # qconfig = torch.ao.quantization.QConfig(
+        #    activation=FakeQuantize.with_args(observer=MinMaxObserver.with_args(dtype=torch.qint8)),
+        #    weight=FakeQuantize.with_args(observer=MinMaxObserver.with_args(dtype=torch.qint8)))
+        # `activation` and `weight` are constructors of observer module
+
+        # qconfig_mapping is a collection of quantization configurations, user can
+        # set the qconfig for each operator (torch op calls, functional calls, module calls)
+        # in the model through qconfig_mapping
+        # the following call will get the qconfig_mapping that works best for models
+        # that target "fbgemm" backend
+        qconfig_mapping = get_default_qat_qconfig("fbgemm")
+
+        # We can customize qconfig_mapping in different ways, please take a look at
+        # the doctring for :func:`~torch.ao.quantization.prepare_fx` for different ways
+        # to configure this
+
+        # example inputs is a tuple of inputs, that is used to infer the type of the
+        # outputs in the model
+        # currently it's not used, but please make sure model(*example_inputs) runs
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        # `prepare_qat_fx` inserts observers in the model based on qconfig_mapping and
+        # backend_config, if the configuration for an operator in qconfig_mapping
+        # is supported in the backend_config (meaning it's supported by the target
+        # hardware), we'll insert fake_quantize modules according to the qconfig_mapping
+        # otherwise the configuration in qconfig_mapping will be ignored
+        # see :func:`~torch.ao.quantization.prepare_fx` for a detailed explanation of
+        # how qconfig_mapping interacts with backend_config
+        prepared_model = prepare_qat_fx(float_model, qconfig_mapping, example_inputs)
+        # Run training
         train_loop(prepared_model, train_loop)
 
     """
@@ -498,6 +639,17 @@ def convert_fx(
     Example::
 
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
+        # convert_fx converts a calibrated/trained model to a quantized model for the
+        # target hardware, this includes converting the model first to a reference
+        # quantized model, and then lower the reference quantized model to a backend
+        # Currently, the supported backends are fbgemm (onednn), qnnpack (xnnpack) and
+        # they share the same set of quantized operators, so we are using the same
+        # lowering procedure
+        #
+        # backend_config defines the corresponding reference quantized module for
+        # the weighted modules in the model, e.g. nn.Linear
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
         quantized_model = convert_fx(prepared_model)
 
     """
@@ -544,7 +696,16 @@ def convert_to_reference_fx(
     Example::
 
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
-        reference_model = convert_to_reference_fx(prepared_model)
+        # convert_to_reference_fx converts observer/fake_quant modules in the model to
+        # quantize and dequantize operators, and produces a reference quantized model
+        # see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md
+        # for more information about reference quantized model
+        # The reference quantized model is a standard format for a quantized model provided
+        # by fx graph mode quantization, it can be further lowered to run on the target
+        # hardware
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        reference_quantized_model = convert_to_reference_fx(prepared_model)
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_to_reference_fx")
