@@ -491,27 +491,31 @@ class TestOperators(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
+        def test(_op, inplace=False):
+            for sample in samples:
+                if inplace and not is_valid_inplace_sample_input(sample, op, op.inplace_variant):
+                    continue
+                fn, args = get_vjpfull_variant(_op, sample)
+                result = fn(*args)
+                cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
-        for sample in samples:
-            fn, args = get_vjpfull_variant(op, sample)
-            result = fn(*args)
-            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+                # Compute vjp of vjp
+                _, vjp_fn = vjp(fn, *args)
+                result_vjps = vjp_fn(cotangents)
 
-            # Compute vjp of vjp
-            _, vjp_fn = vjp(fn, *args)
-            result_vjps = vjp_fn(cotangents)
+                # Compute ref_vjp of vjp. We could have done ref_vjp of ref_vjp,
+                # but since we're confident that vjp works by itself, this is
+                # an equivalent way to test that.
+                _, vjp_fn = ref_vjp(fn, *args)
+                expected_vjps = vjp_fn(cotangents)
 
-            # Compute ref_vjp of vjp. We could have done ref_vjp of ref_vjp,
-            # but since we're confident that vjp works by itself, this is
-            # an equivalent way to test that.
-            _, vjp_fn = ref_vjp(fn, *args)
-            expected_vjps = vjp_fn(cotangents)
+                self.assertEqual(result_vjps, expected_vjps)
 
-            self.assertEqual(result_vjps, expected_vjps)
+        test(op)
+        if op.inplace_variant:
+            def fn(inp, *args, **kwargs):
+                return op.inplace_variant(inp.clone(), *args, **kwargs)
+            test(fn, inplace=True)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
