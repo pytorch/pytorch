@@ -563,13 +563,18 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 @out_wrapper()
 def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     dim = utils.canonicalize_dims(a.ndim, dim)
-    if a.shape[dim] % 2:
-        raise RuntimeError(
-            f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}"
-        )
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
     b, c = torch.tensor_split(a, 2, dim)
 
     return b * torch.sigmoid(c)
+# Comment only commit to trigger CI

@@ -5,7 +5,6 @@ from torch import Tensor
 import torch.autograd
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
-from torch._prims.context import TorchRefsMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
@@ -159,8 +158,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
-        (torch.float16, torch.ops.aten.glu.default): 1e-2,
-        (torch.bfloat16, torch.ops.aten.glu.default): 1e-2,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -282,7 +279,7 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
-
+    (None, None, "meshgrid"),
 }
 
 all_decomposed = set()
@@ -418,9 +415,7 @@ class TestDecomp(TestCase):
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
-
-                with TorchRefsMode():
-                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
