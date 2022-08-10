@@ -1,86 +1,114 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
-# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
-/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
+# Core Maintainers
+/** @soumith @gchanan @ezyang @dzhulgakov
 
-# Not there to strictly require the approval, but to be tagged as a reviewer
-# on the PRs to push them into a high priority inbox.
-/torch/csrc/autograd/ @albanD @soulitzer
-/torch/autograd/ @albanD @soulitzer
-/tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser @saketh-are
-/torch/optim/ @albanD
-/test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD @anjali411
-/docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @anjali411
+# PyTorch -> ONNX
+/.jenkins/caffe2/* @BowenBao @abock
+/aten/src/ATen/core/interned_strings.h @BowenBao @abock
+/docs/source/onnx.rst @BowenBao @abock
+/docs/source/scripts/onnx/** @BowenBao @abock
+/scripts/onnx/** @BowenBao @abock
+/test/jit/test_export_modes.py @BowenBao @abock
+/test/onnx/** @BowenBao @abock
+/tools/onnx/** @BowenBao @abock
+/torch/_C/__init__.pyi.in @BowenBao @abock
+/torch/csrc/jit/passes/onnx.* @BowenBao @abock
+/torch/csrc/jit/passes/onnx/** @BowenBao @abock
+/torch/csrc/jit/serialization/export.* @BowenBao @abock
+/torch/csrc/jit/serialization/onnx.* @BowenBao @abock
+/torch/csrc/onnx/** @BowenBao @abock
+/torch/onnx/** @BowenBao @abock
 
-# Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+# NVIDIA
+/test/test_jit_cuda_fuser.py @csarofeen @ngimel @jjsjann123 @ptrblck
+/torch/csrc/jit/codegen/fuser/cuda/** @csarofeen @ngimel @jjsjann123 @ptrblck
+/torch/csrc/jit/codegen/cuda/** @csarofeen @ngimel @jjsjann123 @ptrblck
+/benchmarks/cpp/nvfuser/** @csarofeen @ngimel @jjsjann123 @ptrblck
 
-# Distributed package
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+# OSS CI
+/.github/** @alband @dagitses @pytorch/pytorch-dev-infra
+/.circleci/** @alband @dagitses @pytorch/pytorch-dev-infra
+/.jenkins/** @alband @dagitses @pytorch/pytorch-dev-infra
+/scripts/** @alband @dagitses @pytorch/pytorch-dev-infra
+/tools/** @alband @dagitses @pytorch/pytorch-dev-infra
+/.github/ci_commit_pins/* @alband @dagitses @pytorch/pytorch-dev-infra
 
-# Distributed tests
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+# Documentation
+/docs/** @svekars
+/torch/*docs.py svekars
 
-# ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
-/torch/onnx/ @bowenbao @shubhambhokare1
-/test/onnx/ @bowenbao @shubhambhokare1
+# Mobile
+/ios/** @linbinyu @xta0 @IvanKobzarev @dreiss
+/android/** @linbinyu @xta0 IvanKobzarev @dreiss
+/test/mobile/** @linbinyu @xta0 IvanKobzarev @dreiss
 
-# Docker
-/.circleci/docker/ @jeffdaily
+# Linear Algebra
+/aten/src/ATen/native/cuda/linalg/** @mruberry Lezcano @IvanYashchuk
+/aten/src/ATen/LinalgBackend.h @mruberry Lezcano @IvanYashchuk
+/aten/src/ATen/native/**LinearAlgebra* @mruberry Lezcano @IvanYashchuk
+/docs/source/linalg.rst @mruberry Lezcano @IvanYashchuk
+/torch/linalg/** @mruberry Lezcano @IvanYashchuk
+/torch/_linalg_utils.py @mruberry Lezcano @IvanYashchuk
+/torch/**python_linalg_functions.* @mruberry Lezcano @IvanYashchuk
+/torch/**linalg.h @mruberry Lezcano @IvanYashchuk
+/tools/autograd/templates/python_linalg_functions.cpp @mruberry Lezcano @IvanYashchuk
+/test/test_linalg.py @mruberry Lezcano @IvanYashchuk
 
-# Github Actions
-# This list is for people wanting to be notified every time there's a change
-# related to Github Actions
-/.github/ @pytorch/pytorch-dev-infra
+# FFT
+/aten/src/ATen/native/cuda/*FFT*.h @mruberry @peterbell10
+/aten/src/ATen/native/SpectralOps.cpp @mruberry @peterbell10
+/aten/src/ATen/native/mkl/SpectralOps.cpp @mruberry @peterbell10
+/aten/src/ATen/native/cuda/SpectralOps.* @mruberry @peterbell10
+/docs/source/fft.rst @mruberry @peterbell10
+/torch/fft/** @mruberry @peterbell10
+/torch/csrc/api/include/torch/fft.h @mruberry @peterbell10
+/torch/**python_fft_functions.* @mruberry @peterbell10
+/tools/autograd/templates/python_fft_functions.cpp @mruberry @peterbell10
+/test/cpp/api/fft.cpp @mruberry @peterbell10
 
-# Custom Test Infrastructure
-/test/run_test.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/common_device_type.py @mruberry
-/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+# Sparse
+/benchmarks/sparse @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/c10/util/sparse_bitset.h @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/docs/source/sparse.rst @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/**sparse/** @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/**sparse* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/optim/sparse* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/ao/nn/sparse/** @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/utils/benchmark/**sparse* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/aten/src/ATen/native/ao_sparse/** @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/aten/src/ATen/native/sparse/** @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/aten/src/ATen/**Sparse* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/aten/src/ATen/*Sparse* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/torch/_masked/** @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/test/*_masked* @nikitaved @cpuhrsch @pearu @IvanYashchuk
+/test/**sparse*" @nikitaved @cpuhrsch @pearu @IvanYashchuk
 
-# Parametrizations
-/torch/nn/utils/parametriz*.py @lezcano
+# MPS
+/test/test_mps.py @kulinseth @alband @malfet
+/aten/src/ATen/native/native_functions.yaml @kulinseth @alband @malfet
+/aten/src/ATen/mps/** @kulinseth @alband @malfet
+/aten/src/ATen/native/mps/** @kulinseth @alband @malfet
 
-# torch.linalg
-# docs
-/torch/linalg/ @lezcano @IvanYashchuk
-# code
-/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
-# tests
-/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+# Distributions
+/torch/distributions/** @fritzo @neerajprad @alicanb
+/test/distributions/** @fritzo @neerajprad @alicanb
 
-# OpInfo-related files
-/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
-/torch/testing/_internal/common_device_type.py @mruberry @ngimel
-test/test_ops.py @mruberry @ngimel
-test/test_ops_gradients.py @mruberry @ngimel
-test/test_unary_ufuncs.py @mruberry @ngimel
-test/test_binary_ufuncs.py @mruberry @ngimel
-test/test_reductions.py @mruberry @ngimel
-test/test_type_promotion.py @mruberry @ngimel
-
-# torch MPS
-test/test_mps.py @kulinseth
-aten/src/ATen/mps/ @kulinseth
-aten/src/ATen/native/mps/ @kulinseth
-
-# Profiler
-torch/csrc/autograd/profiler* @robieta
-torch/autograd/profiler* @robieta
-torch/csrc/profiler/ @robieta
-torch/profiler/ @robieta
+# Distributed
+/docs/source/pipeline.rst @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/distributed* @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/rpc.rst @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/rpc/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/_static/img/rpc* @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/_static/img/*distributed* @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/docs/source/elastic/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+benchmarks/distributed/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/torch/distributed/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/torch/nn/parallel/distributed* @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/torch/_C/_distributed* @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/torch/csrc/distributed/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/torch/testing/_internal/distributed/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/test/distributed/**
+/test/cpp/dist_autograd/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
+/test/cpp/rpc/** @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @wanchaol @fduwjj @H-Huang @d4l3k @kiukchung @aazzolini @kwen2501
