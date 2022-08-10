@@ -309,10 +309,19 @@ class ProxyTensor(torch.Tensor):
             assert kwargs is None or not kwargs
             pred, true_fn, false_fn, *operands = args
 
-            g_true_fn = get_isolated_graphmodule(true_fn, *operands, {})
-            g_false_fn = get_isolated_graphmodule(false_fn, *operands, {})
-            args = (pred, g_true_fn, g_false_fn, *operands)
-            func_overload.seen = True
+            true_graph = get_isolated_graphmodule(true_fn, *operands, {})
+            false_graph = get_isolated_graphmodule(false_fn, *operands, {})
+            
+            # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now
+            proxy_mode.tracer.root.register_module("true_graph", true_graph)
+            proxy_mode.tracer.root.register_module("false_graph", false_graph)
+
+            # For a smaller graph that esentially does the same thing, comment out these two lines and replace args with 
+            # true_graph / false_graph
+            get_true_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})
+            get_false_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})            
+            
+            args = (pred, get_true_proxy, get_false_proxy, *operands)
             proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name="conditional") # Does this need random slug appended so as not to collide?
 

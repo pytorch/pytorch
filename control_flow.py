@@ -187,8 +187,7 @@ def python_fallback(op):
     def inner(*args, **kwargs):
         # Get all tensors. For each tensor, try their torch_dispatch
         # until one returns something other than NotImplemented
-        mode = torch._C._get_torch_dispatch_mode()
-        with mode.restore():
+        def extract():
             tensors = get_tensors(args, kwargs)
             for tensor in tensors:
                 ret = tensor.__torch_dispatch__(op, None, args, kwargs)
@@ -196,6 +195,14 @@ def python_fallback(op):
                     continue
                 return ret
             return NotImplemented
+
+        mode = torch._C._get_torch_dispatch_mode()
+        if mode is not None:
+            with mode.restore():
+                return extract()
+        else:
+            return extract()
+
     return inner
 
 
@@ -241,6 +248,15 @@ graph = make_fx(f)(x, False)
 print("graph.code:")
 print(graph.code)
 graph.graph.print_tabular()
+print("Invoking:")
+result_false = graph.forward(x, False)
+print("False:", result_false)
+result_true = graph(x, True)
+print("True:", result_true())
+# result_true()
+# print(graph.forward())
+
+exit(0)
 
 """
 def forward(self, x_1, pred_1):
@@ -288,6 +304,7 @@ graph = make_fx(f)(x, False, True)
 print("graph.code:")
 print(graph.code)
 graph.graph.print_tabular()
+
 """
 def forward(self, x_1, pred_1, pred2_1):
     _tensor_constant0 = self._tensor_constant0
