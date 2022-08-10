@@ -114,6 +114,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_event_record(
+          reinterpret_cast<uintptr_t>(event_),
+          reinterpret_cast<uintptr_t>(stream.stream())
+      );
+    }
     was_recorded_ = true;
   }
 
@@ -123,6 +130,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+      const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+      if (interp) {
+        interp->trace_cuda_event_wait(
+            reinterpret_cast<uintptr_t>(event_),
+            reinterpret_cast<uintptr_t>(stream.stream())
+        );
+      }
     }
   }
 

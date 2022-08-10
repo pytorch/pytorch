@@ -85,6 +85,12 @@ static c10::SymInt noop_sym_numel_fn(const PyInterpreter*, const TensorImpl*) {
 static void noop_trace_cuda_event_creation_fn(const PyInterpreter*, uintptr_t) {
 }
 
+static void noop_trace_cuda_event_record_fn(const PyInterpreter*, uintptr_t, uintptr_t) {
+}
+
+static void noop_trace_cuda_event_wait_fn(const PyInterpreter*, uintptr_t, uintptr_t) {
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -99,6 +105,8 @@ void PyInterpreter::disarm() noexcept {
   layout_fn_ = &noop_layout_fn;
   sym_numel_fn_ = &noop_sym_numel_fn;
   trace_cuda_event_creation_fn_ = &noop_trace_cuda_event_creation_fn;
+  trace_cuda_event_record_fn_ = &noop_trace_cuda_event_record_fn;
+  trace_cuda_event_wait_fn_ = &noop_trace_cuda_event_wait_fn;
 }
 
 // Defined out-of-line because it needs access to the definition of TensorImpl.

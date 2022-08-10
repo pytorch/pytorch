@@ -144,6 +144,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       createEvent(&cuda_event, flag);
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_event_record(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream())
+      );
+    }
     *event = cuda_event;
 
     // Resets device
@@ -161,6 +168,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_stream,
         cuda_event,
         /*flags (must be zero)=*/0));
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_event_wait(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream())
+      );
+    }
     setDevice(orig_device);
   }
 
