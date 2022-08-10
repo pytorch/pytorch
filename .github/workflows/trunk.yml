@@ -75,7 +75,6 @@ jobs:
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
-    if: ${{ false }}
     with:
       build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
