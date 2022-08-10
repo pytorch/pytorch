@@ -635,16 +635,6 @@ def col2im_backward(
     return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
 
 
-@register_decomposition(aten.masked_fill.Scalar)
-def masked_fill_Scalar(self: Tensor, mask: Tensor, value: float) -> Tensor:
-    return torch.where(mask, utils.dtype_to_type(self.dtype)(value), self)
-
-
-@register_decomposition(aten.masked_fill.Tensor)
-def masked_fill_Tensor(self: Tensor, mask: Tensor, value: Tensor) -> Tensor:
-    return torch.where(mask, value, self)
-
-
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
@@ -747,7 +737,7 @@ def embedding(
     for d in weight.shape[1:]:
         size.append(d)
 
-    return weight.index_select(0, indices.flatten()).view(size)
+    return weight.index_select(0, indices.reshape(-1)).view(size)
 
 
 # TODO: Correct the type promotion semantics
@@ -760,9 +750,9 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.reshape((numel, grad_output.size(-1)))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.flatten()
+    indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
@@ -853,7 +843,7 @@ def native_group_norm(
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     orig_shape = input.shape
-    input = input.view((N, group, C // group, HxW))
+    input = input.view(N, group, C // group, HxW)
     reduction_dims = [2, 3]
     out, mean, rstd = normalize(input, reduction_dims, eps)
     mean = _squeeze_multiple(mean, reduction_dims)
