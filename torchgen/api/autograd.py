@@ -311,7 +311,6 @@ def match_differentiability_info(
     is no in-place specific derivative.
     """
 
-    info_by_schema = differentiability_infos
     functional_info_by_signature = {
         schema.signature(strip_default=True): info_dict
         for schema, info_dict in differentiability_infos.items()
@@ -327,8 +326,8 @@ def match_differentiability_info(
         f: NativeFunction,
     ) -> Tuple[Optional[Dict[str, DifferentiabilityInfo]], bool]:
         # (1) Check for an exact match
-        if f.func in info_by_schema:
-            return info_by_schema[f.func], True
+        if f.func in differentiability_infos:
+            return differentiability_infos[f.func], True
 
         # (2) If no exact match, check if the out-of-place variant
         # of this operator has a match.

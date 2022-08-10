@@ -8890,7 +8890,8 @@ class TestMultithreadAutograd(TestCase):
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
-        # using _test_autograd_multiple_dispatch.one
+        # using _test_autograd_multiple_dispatch.fullcoverage which has
+        # registrations in derivatives.yaml for Default, AutogradCUDA and NestedTensorAutograd
         out = torch._test_autograd_multiple_dispatch(t)
         grad = torch.randn(3, 3, device=device)
         out.backward(grad)
@@ -8919,7 +8920,8 @@ class TestAutogradMultipleDispatch(TestCase):
 
     def test_autograd_composite_implicit_and_dispatch_registration(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
-        # using _test_autograd_multiple_dispatch.two
+        # using _test_autograd_multiple_dispatch.ntonly
+        # which has registrations in derivatives.yaml for NestedTensorAutograd and otherwise is CompositeImplicit
         out = torch._test_autograd_multiple_dispatch(t, True)
         grad = torch.randn(3, 3, device=device)
         out.backward(grad)
@@ -8962,26 +8964,28 @@ class TestAutogradMultipleDispatch(TestCase):
                 torch._test_autograd_multiple_dispatch(dual_input)
 
     def test_view_copy(self, device):
-        # tests that view_copy formulas are also generated per dispatch key in derivatives.yaml
-        a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
-        a_view = a_ref.view(2, 2)
-        a_view_copy = torch.view_copy(a, (2, 2))
+        # tests that view_copy derivative formulas are also generated per dispatch key
+        # from their respective view ops in derivatives.yaml
+        t = torch.randn(2, 2, device=device, requires_grad=True)
+        t_ref = t.clone().detach().requires_grad_()
+        # _test_autograd_multiple_dispatch_view does a .view(-1) on the input
+        t_view = torch._test_autograd_multiple_dispatch_view(t_ref)
+        t_view_copy = torch._test_autograd_multiple_dispatch_view_copy(t)
 
-        # using _test_autograd_multiple_dispatch.one
-        out_view_copy = torch._test_autograd_multiple_dispatch(a_view_copy)
-        out_view = torch._test_autograd_multiple_dispatch(a_view)
-        grad = torch.randn(2, 2, device=device)
-        out_view_copy.backward(grad)
-        out_view.backward(grad.clone())
+        grad = torch.randn(4, device=device)
+        t_view_copy.backward(grad)
+        t_view.backward(grad.clone())
 
         # forward and backward give the same shape + result
-        self.assertEqual(a_view_copy, a_view)
+        self.assertEqual(t_view_copy, t_view)
+        self.assertEqual(t.grad, t_ref.grad)
+        # backward results are per-dispatch-key in derivatives.yaml
         if 'cuda' in device:
-            self.assertEqual(a.grad, (grad * 2).view(-1))
+            # gradient registered to autogradCUDA is grad.reshape_as(self) + 1
+            self.assertEqual(t.grad, grad.reshape_as(t) + 1)
         else:
-            self.assertEqual(a.grad, (grad + 1).view(-1))
-        self.assertEqual(a.grad, a_ref.grad)
+            # Default gradient registered is grad.reshape_as(self)
+            self.assertEqual(t.grad, grad.reshape_as(t))
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
@@ -9000,7 +9004,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradMultipleDispatch,
     globals(),
-    except_for=None
+    only_for=('cpu', 'cuda')
 )
 
 instantiate_parametrized_tests(TestAutograd)

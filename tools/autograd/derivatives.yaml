@@ -2802,7 +2802,7 @@
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
   self: warn_backwards(grad)
 
-- name: _test_autograd_multiple_dispatch.one(Tensor self) -> Tensor
+- name: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
   dispatch:
     Default:
       self: grad.expand(self.sizes()) + 1
@@ -2812,11 +2812,17 @@
     AutogradCUDA:
       self: grad.expand(self.sizes()) * 2
 
-- name: _test_autograd_multiple_dispatch.two(Tensor self, bool b) -> Tensor
+- name: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
   dispatch:
     AutogradNestedTensor:
       self: grad.mul(grad).add(grad)
-  output_differentiability: [True]
+
+- name: _test_autograd_multiple_dispatch_view(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    Default:
+      self: grad.reshape_as(self)
+    AutogradCUDA:
+      self: grad.reshape_as(self) + 1
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
