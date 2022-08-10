@@ -80,7 +80,9 @@ C10_DEVICE __forceinline__ void adam_math(
 
         // Store results.
         r_args[kParamIdx][ii] = param;
-        r_args[kGradIdx][ii] = grad_to_store;
+        if (grad_scale_ptr) {
+          r_args[kGradIdx][ii] = grad_to_store;
+        }
         r_args[kExpAvgIdx][ii] = exp_avg;
         r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
         if (amsgrad) {
