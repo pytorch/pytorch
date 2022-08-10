@@ -176,6 +176,19 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"strided"):
             y.__dlpack__()
 
+    @skipMeta
+    def test_dlpack_normalize_strides(self):
+        x = torch.rand(16)
+        y = x[::3][:1]
+        assert(y.shape == (1,))
+        assert(y.stride() == (3,))
+        z = from_dlpack(y)
+        assert(z.shape == (1,))
+        # gh-83069, to_dlpack should normalize strides
+        assert(z.stride() == (1,))
+        # TODO: are there more complicated cases that are still not handled?
+
+
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
 

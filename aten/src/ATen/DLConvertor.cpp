@@ -209,6 +209,7 @@ struct ATenDLMTensor {
 };
 
 void deleter(DLManagedTensor* arg) {
+  delete [] arg->dl_tensor.strides;
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
 }
 
@@ -227,12 +228,23 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
+  // Normalize the strides to 1 wherever shape < 2
+  auto shape = src.sizes().data();
+  int64_t *strides = new int64_t[src.dim()];
+  for (int i=0; i<src.dim(); i++) {
+    if (shape[i] < 2) {
+      strides[i] = 1;
+    }
+    else {
+      strides[i] = src.strides()[i];
+    }
+  }
   atDLMTensor->tensor.dl_tensor.shape =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.sizes().data());
+      const_cast<int64_t*>(shape);
   atDLMTensor->tensor.dl_tensor.strides =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.strides().data());
+      const_cast<int64_t*>(strides);
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }
