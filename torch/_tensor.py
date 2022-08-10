@@ -895,8 +895,10 @@ class Tensor(torch._C._TensorBase):
         return iter(self.unbind(0))
 
     def __hash__(self):
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__hash__, (self,), self)
+        # Do NOT handle __torch_function__ here as user's default
+        # implementation that handle most functions will most likely do it wrong.
+        # It can be easily overridden by defining this method on the user
+        # subclass if needed.
         return id(self)
 
     def __dir__(self):

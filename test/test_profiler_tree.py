@@ -898,13 +898,11 @@ class TestProfilerTree(TestCase):
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/optim/sgd.py(...): sgd
@@ -938,10 +936,8 @@ class TestProfilerTree(TestCase):
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                     torch/autograd/grad_mode.py(...): __init__
                       <built-in function is_grad_enabled>
