@@ -937,7 +937,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split", 9, 11, "Dynamic number of outputs not supported"
         )
-    split_val = split_size_or_sizes.node()["value"]
+    split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
         return split_with_sizes(g, self, split_size_or_sizes, dim, _outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
@@ -3343,7 +3343,7 @@ def to(g, self, *args):
             symbolic_helper._is_value(args[0])
             and args[0].node().kind() == "onnx::Constant"
         ):
-            tval = args[0].node()["value"]
+            tval = symbolic_helper._node_get(args[0].node(), "value")
             if isinstance(tval, torch.Tensor):
                 if len(tval.shape) == 0:
                     tval = tval.item()
@@ -5596,7 +5596,7 @@ class Prim:
             # %14 : Bool(device=cpu) = onnx::Equal(%13, %8)
             # %15 : Bool(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
             # %16 : Long(1, strides=[1], device=cpu) = onnx::Shape(%input.1)
-            input_flag = inputs[0].node()["value"].tolist()
+            input_flag = symbolic_helper._node_get(inputs[0].node(), "value").tolist()
             const_value = (
                 all(input_flag) if isinstance(input_flag, list) else bool(input_flag)
             )
@@ -5659,13 +5659,15 @@ class Prim:
         if isinstance(n.output().type(), _C.DeviceObjType):
             return None
         if n.kindOf("value") == "t":
-            return g.op("Constant", value_t=n["value"])
+            return g.op("Constant", value_t=symbolic_helper._node_get(n, "value"))
         if n.kindOf("value") == "s":
-            return g.op("Constant", value_s=n["value"])
+            return g.op("Constant", value_s=symbolic_helper._node_get(n, "value"))
         elif n.output().type().isSubtypeOf(
             _C.ListType.ofInts()
         ) or n.output().type().isSubtypeOf(_C.ListType.ofFloats()):
-            return g.op("Constant", value_t=torch.tensor(n["value"]))
+            return g.op(
+                "Constant", value_t=torch.tensor(symbolic_helper._node_get(n, "value"))
+            )
         else:
             raise RuntimeError(
                 f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. Send a bug report."
