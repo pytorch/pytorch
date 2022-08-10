@@ -2760,10 +2760,13 @@ class TestVmapOperators(Namespace.TestVmapBase):
 instantiate_parametrized_tests(TestVmapOperators)
 
 
-def construct_v(output, batch_size):
-    return torch.randn(batch_size, *output.shape,
-                       dtype=output.dtype, device=output.device)
-
+def construct_v(output, batch_size, contig=False):
+    if contig:
+        return torch.randn(batch_size, *output.shape,
+                           dtype=output.dtype, device=output.device)
+    result = torch.randn(*output.shape, batch_size,
+                         dtype=output.dtype, device=output.device)
+    return result.movedim(-1, 0)
 
 def as_tuple(x):
     if isinstance(x, tuple):
@@ -2802,13 +2805,15 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             kwargs = {}
         outputs = op(*args, **kwargs)
         outputs = differentiable(output_process_fn(outputs))
-        batched_vectors = tuple(construct_v(out, batch_size) for out in outputs)
+        for contig in [True, False]:
+            batched_vectors = tuple(construct_v(out, batch_size, contig)
+                                    for out in outputs)
 
-        def vector_jacobian_product(*vectors):
-            return torch.autograd.grad(outputs, differentiable(args), vectors,
-                                       retain_graph=True)
-        self._vmap_test(vector_jacobian_product, batched_vectors,
-                        check_propagates_grad=False)
+            def vector_jacobian_product(*vectors):
+                return torch.autograd.grad(outputs, differentiable(args), vectors,
+                                           retain_graph=True)
+            self._vmap_test(vector_jacobian_product, batched_vectors,
+                            check_propagates_grad=False)
 
     # Tests batched second grad computation of outputs = op(*args, **kwargs).
     # by comparing it to a sequential map+stack fallback.
@@ -2836,17 +2841,19 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertNotEqual(
             len(first_grads), 0, "None of the first grads depend on the input!")
 
-        batched_vectors = tuple(construct_v(grad, batch_size) for grad in first_grads)
+        for contig in [True, False]:
+            batched_vectors = tuple(construct_v(grad, batch_size, contig)
+                                    for grad in first_grads)
 
-        def vector_hessian_product(*vectors):
-            outputs = torch.autograd.grad(first_grads, differentiable(args), vectors,
-                                          retain_graph=True, allow_unused=True)
-            outputs = tuple(out for out in outputs if out is not None)
-            assert len(outputs) > 0
-            return outputs
+            def vector_hessian_product(*vectors):
+                outputs = torch.autograd.grad(first_grads, differentiable(args), vectors,
+                                              retain_graph=True, allow_unused=True)
+                outputs = tuple(out for out in outputs if out is not None)
+                assert len(outputs) > 0
+                return outputs
 
-        self._vmap_test(vector_hessian_product, batched_vectors,
-                        check_propagates_grad=False)
+            self._vmap_test(vector_hessian_product, batched_vectors,
+                            check_propagates_grad=False)
 
     def _test_arithmetic(self, op, device, test_grad_grad=True):
         x = torch.randn(2, 3, requires_grad=True, device=device)
@@ -3618,6 +3625,31 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(2, 5, device=device)
         y = torch.randn(2, 3, device=device)
         self.assertTrue(isinstance(vmap(f)(x, y), Point))
+
+    def test_inplace_on_view(self, device):
+        def func(leaf):
+            base = leaf * leaf
+            view = base.transpose(0, 1)
+            view[2:4, 2:4] *= 2
+            view[0:2, 0:2].diagonal().sin_()
+            view = view[1:3, 1:3]
+            view.cos_()
+            return view
+
+        def push_vjp(leaf, gout):
+            _, vjp_fn = vjp(func, leaf)
+            result, = vjp_fn(gout)
+            return result
+
+        leaf = torch.randn(4, 4, device=device)
+        gout = torch.randn(2, 2, device=device)
+        args = (leaf, gout)
+
+        for args, in_dims, _, in generate_vmap_inputs(args, {}):
+            if in_dims[1] is None:
+                # triggers some composite compliance problem
+                continue
+            self.vmap_outplace_test(push_vjp, args, {}, in_dims)
 
     def test_advanced_indexing(self, device):
         def test(f, args):
