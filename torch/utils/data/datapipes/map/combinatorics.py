@@ -2,7 +2,7 @@ import random
 
 import torch
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
-from typing import List, Optional, TypeVar
+from typing import Iterator, List, Optional, TypeVar
 
 __all__ = ["ShufflerIterDataPipe", ]
 

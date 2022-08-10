@@ -1560,27 +1560,22 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             shuffle_dp = input_dp.shuffle(buffer_size=0)
 
-        # Functional Test: 
-        shuffler_dp = input_dp.shuffle()
-        self.assertEqual(set(range(10)), set(shuffler_dp))
-
         # Functional Test: No seed
         shuffler_dp = input_dp.shuffle()
-        self.assertEqual(list(shuffler_dp), list(shuffler_dp))
+        self.assertEqual(set(range(10)), set(shuffler_dp))
 
         # Functional Test: With global seed
         torch.manual_seed(123)
         shuffler_dp = input_dp.shuffle()
-        res1 = list(shuffler_dp)
-        self.assertEqual(list(shuffler_dp), res1)
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
         # Functional Test: Set seed
-        torch.manual_seed(123)
-        seed = int(torch.empty((), dtype=torch.int64).random_().item())
-        shuffler_dp = input_dp.shuffle().set_seed(seed)
-        res2 = list(shuffler_dp)
-        self.assertEqual(list(shuffler_dp), res2)
-        self.assertEqual(res1, res2)
+        shuffler_dp = input_dp.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
         # Functional Test: deactivate shuffling via set_shuffle
         unshuffled_dp = input_dp.shuffle().set_shuffle(False)
@@ -1802,23 +1797,18 @@ class TestFunctionalMapDataPipe(TestCase):
         shuffler_dp = input_dp2.shuffle(indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
-        # Functional Test: No seed
-        shuffler_dp = input_dp1.shuffle()
-        self.assertEqual(list(shuffler_dp), list(shuffler_dp))
-
         # Functional Test: With global seed
         torch.manual_seed(123)
         shuffler_dp = input_dp1.shuffle()
-        res1 = list(shuffler_dp)
-        self.assertEqual(list(shuffler_dp), res1)
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
         # Functional Test: Set seed
-        torch.manual_seed(123)
-        seed = int(torch.empty((), dtype=torch.int64).random_().item())
-        shuffler_dp = input_dp1.shuffle().set_seed(seed)
-        res2 = list(shuffler_dp)
-        self.assertEqual(list(shuffler_dp), res2)
-        self.assertEqual(res1, res2)
+        shuffler_dp = input_dp1.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
         # Functional Test: deactivate shuffling via set_shuffle
         unshuffled_dp = input_dp1.shuffle().set_shuffle(False)
