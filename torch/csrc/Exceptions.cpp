@@ -13,7 +13,7 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_CUDAOutOfMemoryError;
+    *THPException_OutOfMemoryError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -53,11 +53,11 @@ could not be completed because the input matrix is singular.",
       0);
 
   ASSERT_TRUE(
-      THPException_CUDAOutOfMemoryError = PyErr_NewException(
-          "torch.cuda.CUDAOutOfMemoryError", nullptr, nullptr));
+      THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
+          "torch.cuda.OutOfMemoryError", "Exception raised when CUDA is out of memory", PyExc_RuntimeError, nullptr));
   ASSERT_TRUE(
       PyModule_AddObject(
-          module, "_CUDAOutOfMemoryError", THPException_CUDAOutOfMemoryError) ==
+          module, "_OutOfMemoryError", THPException_OutOfMemoryError) ==
       0);
 
   return true;

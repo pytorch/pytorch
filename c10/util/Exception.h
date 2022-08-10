@@ -235,7 +235,7 @@ class C10_API LinAlgError : public Error {
   using Error::Error;
 };
 
-class C10_API CUDAOutOfMemoryError : public Error {
+class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
