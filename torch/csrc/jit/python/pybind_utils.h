@@ -852,7 +852,8 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return py::cast(si);
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl())
+                            : py::cast(si.expect_int());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
