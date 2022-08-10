@@ -5692,8 +5692,11 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    shapes1d = ((0,), (1,))
     shapes2d = ((L, M),)
     shapes3d = ((L, M, S),)
+
+    kwargs1d = dict()
 
     kwargs2d = (
         # dim1 > dim2 is allowed
@@ -5710,17 +5713,25 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
         dict(offset=-1, dim1=0, dim2=2),
     )
 
+    samples1d = product(shapes1d, kwargs1d)
     samples2d = product(shapes2d, kwargs2d)
     samples3d = product(shapes3d, kwargs3d)
 
-    for shape, kwargs in chain(samples2d, samples3d):
+    for shape, kwargs in chain(samples1d, samples2d, samples3d):
+        if op_info.name in ('diagonal', '_refs.diagonal'):
+            # these are error inputs for diagonal
+            if shape in ((0,), (1,)):
+                continue
         yield SampleInput(input=make_arg(shape), kwargs=kwargs)
 
 def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    shapes1d = (0, 1, (0,), (1,))
     shapes2d = ((M, L),)
     shapes3d = ((M, S, L),)
+
+    kwargs1d = dict()
 
     kwargs2d = (
         # dim1 == dim2 is not allowed
@@ -5732,10 +5743,11 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
 
     kwargs3d = kwargs2d
 
+    samples1d = product(shapes1d, kwargs1d)
     samples2d = product(shapes2d, kwargs2d)
     samples3d = product(shapes3d, kwargs3d)
 
-    for shape, kwargs in chain(samples2d, samples3d):
+    for shape, kwargs in chain(samples1d, samples2d, samples3d):
         arg = make_arg(shape)
         sample = SampleInput(input=arg, kwargs=kwargs)
 
@@ -5745,6 +5757,9 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
         if op_info.name in ('diagonal', '_refs.diagonal'):
             num_dim = arg.dim()
         elif op_info.name in ('diag_embed', '_refs.diag_embed'):
+            # these are valid inputs for diag_embed
+            if shape in ((0,), (1,)):
+                continue
             num_dim = arg.dim() + 1
         else:
             raise RuntimeError("should be unreachable")
