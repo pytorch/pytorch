@@ -18,7 +18,7 @@ enum class RecordType {
   CastOp,
   Constant,
   End,
-  InputTensor,
+  Tensor,
   Output,
   ReductionOp,
   Scalar,
@@ -46,7 +46,7 @@ struct RecordFunctor {
       RecordType _record_type)
       : args_(std::move(_args)),
         outputs_(std::move(_outputs)),
-        name_(_name),
+        name_(std::move(_name)),
         record_type_(_record_type) {}
   virtual ~RecordFunctor() = default;
 
@@ -97,7 +97,7 @@ struct RecordFunctor {
   //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) {}
 
-  virtual std::ostream& print(std::ostream& os) {
+  virtual void print(std::ostream& os, bool close_function=true) const {
     bool first_output = true;
     for (auto &output : outputs_) {
       if (first_output) {
@@ -115,9 +115,9 @@ struct RecordFunctor {
       os << output.index;
     }
     if (outputs_.size() > 0) {
-      os << " = " << name_ << "(";
+      os << " = " << "fd." << name_ << "(";
     } else {
-      os << name_ << "(";
+      os << "fd." << name_ << "(";
     }
     bool first_arg = true;
     for (auto &arg : args_) {
@@ -135,7 +135,9 @@ struct RecordFunctor {
       }
       os << arg.index;
     }
-    return os << ")";
+    if (close_function) {
+      os << ")";
+    }
   }
 
  protected:
@@ -339,6 +341,10 @@ struct BroadcastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+  }
+
  private:
   //! Represents the tensor dimensions of the output tensor.
   std::vector<int64_t> output_shape_;
@@ -411,7 +417,7 @@ struct CastOpRecord : RecordFunctor {
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
   ConstantRecord(std::vector<State> _outputs, ValueType val)
-      : RecordFunctor({}, std::move(_outputs), "constant", RecordType::Constant),
+      : RecordFunctor({}, std::move(_outputs), "define_constant", RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
 
@@ -435,6 +441,19 @@ struct ConstantRecord : RecordFunctor {
   virtual void operator()(FusionDefinition& fd) final {
     Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+ 
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    if(std::is_same<ValueType, bool>::value) {
+      os << (value_ ? "True" : "False");
+    } else {
+      os << std::showpoint << value_;
+    }
+ 
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
@@ -469,17 +488,17 @@ struct EndRecord : RecordFunctor {
 
 //! Specialized Record Functor for recording FusionDefinition input tensors.
 
-struct InputTensorRecord : RecordFunctor {
-  InputTensorRecord(
+struct TensorRecord : RecordFunctor {
+  TensorRecord(
       std::vector<State> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
       Nvf::DataType _dtype)
-      : RecordFunctor({}, std::move(_outputs), "tensor", RecordType::InputTensor),
+      : RecordFunctor({}, std::move(_outputs), "define_tensor", RecordType::Tensor),
         symbolic_sizes_(std::move(_symbolic_sizes)),
         contiguous_info_(std::move(_contiguous_info)),
         dtype_(_dtype) {}
-  virtual ~InputTensorRecord() = default;
+  virtual ~TensorRecord() = default;
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 --- 24 | 23 --------- 12 | 11 ---------  0 |
@@ -505,7 +524,7 @@ struct InputTensorRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const InputTensorRecord*>(&other)) {
+    if (auto child_ptr = dynamic_cast<const TensorRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       result = result && (dtype_ == child_ptr->dtype_);
       if (result) {
@@ -544,6 +563,38 @@ struct InputTensorRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, tv);
     fd.addInput(tv);
   }
+  
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    os << "symbolic_sizes=[";
+    bool first_arg = true;
+    for (auto ss : symbolic_sizes_) {
+      if (first_arg) {
+        first_arg = false; 
+      } else {
+        os << ", ";
+      }
+      os << ss;
+    }
+    os << "], contiguous=[";
+    first_arg = true;
+    for (auto ci : contiguous_info_) {
+      if (first_arg) {
+        first_arg = false; 
+      } else {
+        os << ", ";
+      }
+      if (ci) {
+        os << "True";
+      } else {
+        os << "False";
+      }
+    }
+    os << "], dtype=DataType." << dtype_;
+    if (close_function) {
+      os << ")";
+    }
+  }
 
  private:
   //! A vector of tensor dimension sizes.
@@ -562,7 +613,7 @@ struct InputTensorRecord : RecordFunctor {
 template <class OutputType>
 struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<State> _args)
-      : RecordFunctor(std::move(_args), {}, "output", RecordType::Output) {}
+      : RecordFunctor(std::move(_args), {}, "add_output", RecordType::Output) {}
   virtual ~OutputRecord() = default;
 
   //! Nothing extra necessary in hash
@@ -692,7 +743,7 @@ struct ReductionOpRecord : RecordFunctor {
 
 struct ScalarRecord : RecordFunctor {
   ScalarRecord(std::vector<State> _outputs, Nvf::DataType dtype)
-      : RecordFunctor({}, std::move(_outputs), "scalar", RecordType::Scalar),
+      : RecordFunctor({}, std::move(_outputs), "define_scalar", RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
 
@@ -728,6 +779,14 @@ struct ScalarRecord : RecordFunctor {
     }
     fd.addInput(output);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+  
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    os << "dtype=DataType." << dtype_;
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
@@ -773,7 +832,7 @@ struct VarianceOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "var",
+            "ops.var",
             RecordType::VarianceOp),
         axes_(axes),
         correction_(correction),

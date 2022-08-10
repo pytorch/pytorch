@@ -50,10 +50,17 @@ void FusionDefinition::exit() {
     fusion_manager_->traverseFusionCache(end_record_);
   }
 
+  print(std::cout);
+}
+  
+void FusionDefinition::print(std::ostream& os) const {
+  os << "\ndef nvfuser_fusion(fd : FusionDefinition) -> None :\n";
   for (auto &rec : recording_) {
-    rec->print(std::cout);
-    std::cout << "\n";
+    os << "    ";
+    rec->print(os);
+    os  << "\n";
   }
+  os << "\n";
 }
 
 Scalar* FusionDefinition::defineScalar() {

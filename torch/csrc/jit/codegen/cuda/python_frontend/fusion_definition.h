@@ -78,6 +78,8 @@ class FusionDefinition {
   FusionDefinition* enter();
   //! Exit Python Context Manager -- Triggers cache lookup
   void exit();
+  //! Prints a python function representing the definition
+  void print(std::ostream& os) const;
 
   //! These methods are used to record the FusionDefinition for cache lookup
 
