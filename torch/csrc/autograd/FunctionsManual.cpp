@@ -613,7 +613,7 @@ Tensor sum_backward(
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim) {
   return sum_backward(grad, self.sizes(), dims, keepdim) *
       self.isnan().logical_not();
