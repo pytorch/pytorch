@@ -1,16 +1,8 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/native/UnaryOps.h>
-#include <ATen/Dispatch.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DistributionTemplates.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -198,11 +190,6 @@ Tensor& normal_mps_out(const Tensor& mean, double std, c10::optional<Generator> 
 }
 
 Tensor& normal_mps_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  TORCH_CHECK(
-    std.min().ge(0).item<bool>(),
-    "normal expects all elements of std >= 0.0");
-
-
   Tensor mean_t = empty_mps(
                       output.sizes(),
                       output.scalar_type(),
@@ -218,7 +205,6 @@ Tensor& normal_mps_out(double mean, const Tensor& std, c10::optional<Generator> 
 
 Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
-  TORCH_CHECK(std.numel() == 0 || std.min().ge(0).item<bool>(), "normal expects all elements of std >= 0.0");
   // Check that mean and std have same number of elements
   TORCH_CHECK(mean.numel() == std.numel(), "normal_mps_out: mean and std must have same number of elements")
 
