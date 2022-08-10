@@ -129,6 +129,11 @@ def _mps_tag(obj):
         return 'mps'
 
 
+def _meta_tag(obj):
+    if obj.device.type == 'meta':
+        return 'meta'
+
+
 def _cpu_deserialize(obj, location):
     if location == 'cpu':
         return obj
@@ -165,10 +170,15 @@ def _mps_deserialize(obj, location):
     if location == 'mps':
         return obj.mps()
 
+def _meta_deserialize(obj, location):
+    if location == 'meta':
+        return torch.UntypedStorage(obj.nbytes(), device='meta')
+
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(20, _cuda_tag, _cuda_deserialize)
 register_package(21, _mps_tag, _mps_deserialize)
+register_package(22, _meta_tag, _meta_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
