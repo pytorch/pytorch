@@ -85,6 +85,13 @@ void initNvFuserPythonBindings(PyObject* module) {
             Nvf::inst::Trace::instance()->endEvent(nullptr);
           })
       .def(
+          "__str__",
+          [](nvfuser::FusionDefinition& self) {
+            std::stringstream ss;
+            self.print(ss);
+            return ss.str();
+          })
+      .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
