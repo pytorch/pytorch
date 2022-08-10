@@ -1367,7 +1367,7 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
     return;
   }
   // full check includes strict shape inference check
-  onnx::checker::check_model(model, full_check=full_check);
+  onnx::checker::check_model(model, full_check);
 }
 
 } // namespace jit
