@@ -7,7 +7,7 @@ if "%BUILD_ENVIRONMENT%"=="" (
 
 :: Be conservative here when rolling out the new AMI with conda. This will try
 :: to install conda as before if it couldn't find the conda installation. This
-:: can be removed eventually after we gain enough confident in the AMI
+:: can be removed eventually after we gain enough confidence in the AMI
 if not exist %CONDA_PARENT_DIR%\Miniconda3 (
   set INSTALL_FRESH_CONDA=1
 )
@@ -22,11 +22,11 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
   if not errorlevel 0 exit /b
 )
 
-:: Activate conda so that we can use its commands, i.e. conda, pip
+:: Activate conda so that we can use its commands, i.e. conda, python, pip
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 
 if "%INSTALL_FRESH_CONDA%"=="1" (
-  call conda install -y -q python=%PYTHON_VERSION% numpy"<1.23" cffi pyyaml boto3 libuv
+  call conda install -y -q numpy"<1.23" cffi pyyaml boto3 libuv
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
 
