@@ -2,7 +2,7 @@
 # Each line is a file pattern followed by one or more owners.
 
 # Core Maintainers
-/** @soumith @gchanan @ezyang @dzhulgakov
+# @soumith @gchanan @ezyang @dzhulgakov
 
 # PyTorch -> ONNX
 /.jenkins/caffe2/* @BowenBao @abock
