@@ -139,6 +139,16 @@ If it is desired to take the code path for ROCm/HIP:
 If it is desired to take the code path for ROCm/HIP only for specific HIP versions:
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 40300)
 
+Enabling kernel asserts
+-----------------------
+
+Kernel asserts are supported on ROCm, but they are disabled due to performance overhead. It can be enabled
+by recompiling the pyTorch from source.
+
+Please add below line as an argument to cmake command parameters::
+
+    -DROCM_ENABLE_KERNEL_ASSERTS:BOOL=TRUE
+
 
 Refer to CUDA Semantics doc
 ---------------------------
