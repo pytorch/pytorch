@@ -302,7 +302,7 @@ def create_aot_autograd_function(
             old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
             contiguous_args = [t.contiguous() for t in flat_args]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
-            ctx.clear_saved()
+            ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(compiled_bw, all_args, own_args=True)
 
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
