@@ -719,7 +719,7 @@ def maybe_insert_input_observers_for_node(
             node_name_to_target_dtype,
             qhandler,
             prepare_custom_config,
-            backend_config
+            backend_config,
             weight_index_dict,
             bias_index_dict,)
         new_kwargs[k] = new_kwarg
