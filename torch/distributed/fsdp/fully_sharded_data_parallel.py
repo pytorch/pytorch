@@ -1296,7 +1296,7 @@ class FullyShardedDataParallel(nn.Module):
         cpu_device = torch.device("cpu")
         for param in params:
             if self.device_id is not None:
-                self._check_param_device_with_device_id(param)
+                self._check_param_device_with_device_id(param, self.device_id)
                 if param.device == cpu_device:
                     param = param.to(self.device_id)
             elif param.device == cpu_device and not warned:
