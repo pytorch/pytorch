@@ -2,7 +2,10 @@
 
 import torch
 from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
     make_tensor,
+    instantiate_parametrized_tests,
 )
 
 from torch.testing._internal.common_methods_invocations import (
@@ -72,3 +75,15 @@ def _generate_sample_data(
             data = data.sparse_mask(mask)
         inputs.append(SampleInput(data, kwargs={"mask": mask}))
     return inputs
+
+
+class TestBasics(TestCase):
+    def sample_test(self):
+        return
+
+
+instantiate_parametrized_tests(TestBasics)
+
+
+if __name__ == '__main__':
+    run_tests()
