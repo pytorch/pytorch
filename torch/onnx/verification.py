@@ -89,7 +89,7 @@ def _run_ort(ort_session, inputs):
             )
         ort_inputs[ort_session_inputs[i].name] = input
     ort_outs = ort_session.run(None, ort_inputs)
-    return _inline_flatten_list(ort_outs, [])
+    return ort_outs
 
 
 def _ort_session(
@@ -122,10 +122,13 @@ def _compare_ort_pytorch_outputs(
     atol: float,
     check_shape: bool,
     check_dtype: bool,
-):
-    pt_outs, _ = torch.jit._flatten(pt_outs)
+    flatten: bool):
+    if flatten:
+        pt_outs, _ = torch.jit._flatten(pt_outs)
+    else:
+        pt_outs = _inline_flatten_list([pt_outs], [])
     pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
-
+    ort_outs = _inline_flatten_list(ort_outs, [])
     assert len(ort_outs) == len(
         pt_outs
     ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
@@ -265,8 +268,7 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs, pt_outs, rtol, atol, check_shape, check_dtype
-        )
+            ort_outs, pt_outs, rtol, atol, check_shape, check_dtype, flatten)
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
 
