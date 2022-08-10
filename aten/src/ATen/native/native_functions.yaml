@@ -4506,6 +4506,8 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice
+# NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
+# that if adding specific implementations here!
 
 - func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function
