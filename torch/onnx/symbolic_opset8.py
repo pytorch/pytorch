@@ -198,18 +198,26 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other)
-    assert ty is not None
-    lower_type = ty.lower()
-    # TODO(justinchuby): Remove the g.constant method
-    C = g.constant(0, [1], lower_type)
+    scalar_type = symbolic_helper._try_get_scalar_type(self, other)
+    if scalar_type is None:
+        raise ValueError("mm can only operate on tensors with known types")
+    zero_constant = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
+        ),
+    )
+
     if symbolic_helper._try_get_scalar_type(self):
-        old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
-        return _cast_to_type(
-            g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type
+        old_type, self, other, zero_constant = _try_cast_integer_to_float(
+            g, self, other, zero_constant
         )
-    else:
-        return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
+        return _cast_to_type(
+            g,
+            g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0),
+            old_type,
+        )
+    return g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0)
 
 
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
