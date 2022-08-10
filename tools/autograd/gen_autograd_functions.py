@@ -362,6 +362,19 @@ MISC_GETTER_DEFS = {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
+def get_infos_with_derivatives_list(
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
+) -> List[DifferentiabilityInfo]:
+
+    diff_info_list = [
+        info
+        for diffinfo_dict in differentiability_infos.values()
+        for info in diffinfo_dict.values()
+    ]
+
+    return list(filter(lambda info: info.args_with_derivatives, diff_info_list))
+
+
 def gen_autograd_functions_lib(
     out: str,
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
@@ -375,13 +388,7 @@ def gen_autograd_functions_lib(
 
     # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
     # infos with the diff dispatchkeys but the same name will still be in the same shard.
-    diff_info_list = [
-        info
-        for diffinfo_dict in differentiability_infos.values()
-        for info in diffinfo_dict.values()
-    ]
-    # only create an autograd function if we are actually going to calculate a derivative
-    infos = list(filter(lambda info: info.args_with_derivatives, diff_info_list))
+    infos = get_infos_with_derivatives_list(differentiability_infos)
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
 
@@ -424,12 +431,7 @@ def gen_autograd_functions_python(
 
     # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
     # infos with the diff dispatchkeys but the same name will still be in the same shard.
-    diff_info_list = [
-        info
-        for diffinfo_dict in differentiability_infos.values()
-        for info in diffinfo_dict.values()
-    ]
-    infos = list(filter(lambda info: info.args_with_derivatives, diff_info_list))
+    infos = get_infos_with_derivatives_list(differentiability_infos)
     fm.write_sharded(
         "python_functions.cpp",
         infos,

@@ -71,8 +71,7 @@ def add_view_copy_derivatives(
         maybe_view_group = None
         view_copy_differentiability_infos = dict()
         for dispatch_key, info in info_dispatch_dict.items():
-            if maybe_view_group is None:
-                maybe_view_group = view_name_to_group.get(info.func.func.name, None)
+            maybe_view_group = view_name_to_group.get(info.func.func.name, None)
             if maybe_view_group is not None and maybe_view_group.view_copy is not None:
                 view_copy_info = info.create_view_copy_from_view_derivative(
                     maybe_view_group
