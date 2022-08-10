@@ -132,3 +132,9 @@
 
 - name: sub(Tensor self, Scalar alpha, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   aten: sub_out(out, self, other, alpha)
+
+- name: split(Tensor(a -> *) self, *, int split_size_or_sections, int dim=0) -> Tensor(a)[]
+  aten: split(self, split_size_or_sections, dim)
+
+- name: split(Tensor(a -> *) self, *, int[] split_size_or_sections, int dim=0) -> Tensor(a)[]
+  aten: split(self, split_size_or_sections, dim)

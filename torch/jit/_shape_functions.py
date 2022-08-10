@@ -153,8 +153,12 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
     return view(self, sizes)
 
 
-def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
+def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
+    if opt_dims is None:
+        dims: List[int] = []
+    else:
+        dims = opt_dims
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
@@ -168,7 +172,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     return out
 
 def max_dim(self: List[int], dim: int, keep_dim: bool):
-    out = mean_dim(self, [dim], keep_dim, None)
+    out = sum_mean_dim(self, [dim], keep_dim, None)
     return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
@@ -1003,8 +1007,8 @@ add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
-add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
-add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
+add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
 add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", max_dim)
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
