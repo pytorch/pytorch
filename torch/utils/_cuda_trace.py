@@ -18,7 +18,7 @@ class CallbackRegistry(Generic[P]):
     def fire_callbacks(self, *args: P.args, **kwargs: P.kwargs) -> None:
         for cb in self.callback_list:
             try:
-                return cb(*args, **kwargs)
+                cb(*args, **kwargs)
             except Exception as e:
                 logger.exception(
                     f"Exception in callback for {self.name} registered with CUDA trace"
