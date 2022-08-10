@@ -298,7 +298,10 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        raise RuntimeError("No longer needed as we always trace with modes")
+        raise RuntimeError(
+            "Should not be needed as we always trace with modes. May have entered this due to redispatching from"
+            "__torch_dispatch__ into another op without restoring dispatch mode"
+        )
 
 
 class PythonKeyTracer(Tracer):

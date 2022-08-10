@@ -3094,8 +3094,7 @@ def forward(self, x_1) -> torch.Tensor:
 
         fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.arange(4, device=device, dtype=torch.float32))
-        self.assertExpectedInline(out.code,
-"""\
+        self.assertExpectedInline(out.code, """\
 
 
 
