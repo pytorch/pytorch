@@ -96,10 +96,6 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
 std::vector<at::Tensor> NestedTensor_unbind(
     const at::Tensor& self,
     int64_t dim) {
@@ -119,14 +115,15 @@ std::vector<at::Tensor> NestedTensor_unbind(
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   const std::vector<int64_t>& offsets = self_ptr->get_offsets();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const int64_t i: c10::irange(ntensors)){
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets[i]);
   }
   return result_tensors;
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  at::relu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()));
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  at::relu_(buffer);
   return self;
 }
 
@@ -135,7 +132,8 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  at::gelu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()), approximate);
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  at::gelu_(buffer, approximate);
   return self;
 }
 
@@ -1006,24 +1004,18 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
     // some negative sizes remain to be infered
     if (ndims_underlying < ndims_underlying_reshaped) {
       // replace negative sizes for old dimensions with old sizes
-      int64_t numel = 1, numel_reshaped = 1;
       for (int64_t idim = 0; idim < ndims_underlying; idim++) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
         TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
         if (size_reshaped == -1) {
           size_reshaped = size[idim];
         }
-        numel *= size[idim];
-        numel_reshaped *= size_reshaped;
       }
       // infer negative size for new dimension
       int64_t infer_index = -1;
       for (int64_t idim = ndims_underlying; idim < ndims_underlying_reshaped; idim++) {
         const int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped >= 0) {
-          numel_reshaped *= size_reshaped;
-        }
-        else if (size_reshaped == -1) {
+        if (size_reshaped == -1) {
           if (infer_index > -1) {
             throw std::runtime_error("only one dimension can be inferred");
           }
@@ -1031,7 +1023,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
             infer_index = idim;
           }
         }
-        else {
+        else if (size_reshaped < 0) {
           AT_ERROR("invalid shape dimension ", size_reshaped);
         }
       }
