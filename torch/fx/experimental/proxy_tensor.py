@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 import contextlib
 import functools
-from typing import Any, Dict, Optional, Tuple, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
@@ -164,11 +164,15 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        flat_args, args_spec = pytree.tree_flatten(args[0])
-
-        for i, a in enumerate(flat_args):
-            a.proxy = proxy_res[0][i]
-            proxy_res[0][i].node.meta['tensor_meta'] = _extract_tensor_metadata(a)
+        if isinstance(args[0], List):
+            # e.g., c10d::allreduce_ returns a list of tensors as the first element
+            # in the output.
+            for i, a in enumerate(args[0]):
+                a.proxy = proxy_res[0][i]
+                proxy_res[0][i].node.meta['tensor_meta'] = _extract_tensor_metadata(a)
+        else:
+            args[0].proxy = proxy_res
+            proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
     inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
 

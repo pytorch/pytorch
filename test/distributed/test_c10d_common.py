@@ -1418,11 +1418,18 @@ class CompilerTest(MultiProcessTestCase):
 
         xx = x.clone()
 
-        fx_fn = make_fx(fn)(xx)
+        # trace fn into a GraphModule
+        traced_fn = make_fx(fn)(xx)
+
+        # ensure that y * 2 uses the output from wait_comm
+        for node in traced_fn.graph.nodes:
+            if node.op == "call_function" and node.name == "mul_tensor":
+                self.assertEqual(node.args[0].name, "wait_comm")
 
         y = fn(x)
-        yy = fx_fn(xx).elem
+        yy = traced_fn(xx).elem
 
+        # check correctness
         self.assertEqual(y, yy)
 
 
