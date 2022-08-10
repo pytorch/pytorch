@@ -121,7 +121,7 @@ def get_weight_and_bias_index_dicts(backend_config):
     pattern_to_input_type_to_index = get_pattern_to_input_type_to_index(backend_config)
     for pattern, input_type_to_index in pattern_to_input_type_to_index.items():
         for input_type, index in input_type_to_index.items():
-            index_dicts = {"weight": {}, "bias": {}, "input": {}}  # not used right now
+            index_dicts: Dict[str, Dict[str, List[int]]] = {"weight": {}, "bias": {}, "input": {}}  # not used right now
             assert (
                 input_type in index_dicts.keys()
             ), f"input type must be one of {index_dicts.keys()} but got: {input_type}"
@@ -297,7 +297,7 @@ def is_pattern_dtype_config_supported_by_backend(
             )
         for k, arg in input_node.kwargs.items():
             supported = supported and is_input_arg_dtype_supported_by_backend(
-                arg, input_node, node_name_to_target_dtype, dtype_config
+                arg, input_node, node_name_to_target_dtype, dtype_config, weight_index_dict, bias_index_dict
             )
         # check if output dtype is supported
         supported = supported and is_output_dtype_supported_by_backend(
@@ -594,6 +594,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 qhandler,
                 prepare_custom_config,
                 backend_config,
+                weight_index_dict,
+                bias_index_dict
             )
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
@@ -1365,7 +1367,7 @@ def insert_observers_for_model(
                 matched_node_pattern,
                 node_name_to_target_dtype,
                 backend_config,
-                weight_index,
+                weight_index_dict,
                 bias_index_dict,
             )
 
@@ -1778,7 +1780,7 @@ def prepare(
     matches_without_qconfig = find_matches(
         model.graph,
         modules,
-        patterns,
+        pattern_to_quantize_handler,
         root_node_getter_mapping,
         standalone_module_names,
         standalone_module_classes,
