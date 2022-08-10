@@ -655,7 +655,22 @@ static void bindGetAllocFreeEvents(PyObject* module) {
       .def_readwrite(
           "ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
       .def_readwrite(
-          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size);
+          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size)
+      .def_readwrite(
+          "raw_alloc",
+          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::raw_alloc)
+      .def_readwrite(
+          "served_by_cached",
+          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::served_by_cached)
+      .def_readwrite(
+          "served_by_new_block",
+          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::served_by_new_block)
+      .def_readwrite(
+          "served_by_new_block_retry",
+          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::
+              served_by_new_block_retry)
+      .def_readwrite(
+          "defrag", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::defrag);
   m.def(
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,

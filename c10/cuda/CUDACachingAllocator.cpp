@@ -597,6 +597,9 @@ class DeviceCachingAllocator {
         // Trigger callbacks and retry search
         || (trigger_free_memory_callbacks(params) && get_free_block(params));
 
+    memory_tracker.alloc_free_events[device].back().served_by_cached =
+        block_found;
+
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
       // Do garbage collection if the flag is set.
@@ -606,14 +609,26 @@ class DeviceCachingAllocator {
         garbage_collect_cached_blocks();
       }
       // Attempt allocate
-      block_found = alloc_block(params, false)
-          // Free enough available cached blocks to satisfy alloc and retry
-          // alloc.
-          || (release_available_cached_blocks(params) &&
-              alloc_block(params, false))
-          // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
-              alloc_block(params, true));
+      block_found = alloc_block(params, false);
+      memory_tracker.alloc_free_events[device].back().served_by_new_block =
+          block_found;
+      if (!block_found) {
+        // Free enough available cached blocks to satisfy alloc and retry
+        // alloc.
+        block_found =
+            (release_available_cached_blocks(params) &&
+             alloc_block(params, false));
+        memory_tracker.alloc_free_events[device]
+            .back()
+            .served_by_new_block_retry = block_found;
+      }
+      if (!block_found) {
+        // Free all non-split cached blocks and retry alloc.
+        block_found =
+            (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
+             alloc_block(params, true));
+        memory_tracker.alloc_free_events[device].back().defrag = block_found;
+      }
     }
 
     if (!block_found) {
@@ -1627,6 +1642,7 @@ class THCCachingAllocator {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
         device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
+        memory_tracker.alloc_free_events[i].resize(1);
       }
     }
   }
@@ -1638,12 +1654,16 @@ class THCCachingAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    // if allocation fails we still record the event with a nullptr. ptr is
-    // modified if allocation succeeds
-    memory_tracker.append_alloc_free_event(
-        reinterpret_cast<intptr_t>(nullptr), // ptr
-        size, // size: of allocation in bytes
-        device);
+    // if raw_alloc appended an event, do not append one more
+    if (memory_tracker.alloc_free_events[device].back().ptr !=
+        reinterpret_cast<intptr_t>(nullptr)) {
+      // if allocation fails we still record the event with a nullptr. ptr is
+      // modified if allocation succeeds
+      memory_tracker.append_alloc_free_event(
+          reinterpret_cast<intptr_t>(nullptr), // ptr
+          size, // size: of allocation in bytes
+          device);
+    }
     Block* block = device_allocator[device]->malloc(device, size, stream);
     memory_tracker.alloc_free_events[device].back().ptr =
         reinterpret_cast<intptr_t>(block->ptr);
@@ -1920,6 +1940,11 @@ void* raw_alloc(size_t nbytes) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
+  memory_tracker.append_alloc_free_event(
+      reinterpret_cast<intptr_t>(nullptr), // ptr
+      nbytes, // size: of allocation in bytes
+      device);
+  memory_tracker.alloc_free_events[device].back().raw_alloc = true;
   caching_allocator.malloc(
       &r, device, nbytes, cuda::getCurrentCUDAStream(device));
   return r;
@@ -1932,6 +1957,11 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
+  memory_tracker.append_alloc_free_event(
+      reinterpret_cast<intptr_t>(nullptr), // ptr
+      nbytes, // size: of allocation in bytes
+      device);
+  memory_tracker.alloc_free_events[device].back().raw_alloc = true;
   caching_allocator.malloc(&r, device, nbytes, stream);
   return r;
 }

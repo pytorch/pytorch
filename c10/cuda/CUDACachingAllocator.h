@@ -121,6 +121,14 @@ struct SegmentInfo {
 struct AllocFreeEvent {
   intptr_t ptr; // start location in memory
   int size; // size in bytes, negative size for free
+  bool raw_alloc = false; // if it is a raw allocation
+  bool served_by_cached = false; // if served by a cached block
+  bool served_by_new_block =
+      false; // if served after allocating a new block of sufficient size
+  bool served_by_new_block_retry =
+      false; // if served with a new block after freeing one cached block of
+             // sufficient size
+  bool defrag = false; // if allocated after defragmentation
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
