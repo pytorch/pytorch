@@ -46,6 +46,10 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     try {
       if (is_created_) {
         CUDAGuard guard(device_index_);
+        const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+        if (interp) {
+          interp->trace_cuda_event_deletion(reinterpret_cast<uintptr_t>(event_));
+        }
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }

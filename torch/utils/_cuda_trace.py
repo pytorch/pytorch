@@ -23,12 +23,18 @@ class CallbackRegistry:
 
 
 CUDAEventCreationCallbacks = CallbackRegistry()
+CUDAEventDeletionCallbacks = CallbackRegistry()
 CUDAEventRecordCallbacks = CallbackRegistry()
 CUDAEventWaitCallbacks = CallbackRegistry()
 CUDAMemoryAllocationCallbacks = CallbackRegistry()
+CUDAMemoryDeallocationCallbacks = CallbackRegistry()
+CUDAStreamAllocationCallbacks = CallbackRegistry()
 
 def register_callback_for_cuda_event_creation(cb: Callable[[int], None]) -> None:
     CUDAEventCreationCallbacks.add_callback(cb)
+
+def register_callback_for_cuda_event_deletion(cb: Callable[[int], None]) -> None:
+    CUDAEventDeletionCallbacks.add_callback(cb)
 
 def register_callback_for_cuda_event_record(cb: Callable[[int, int], None]) -> None:
     CUDAEventRecordCallbacks.add_callback(cb)
@@ -39,3 +45,8 @@ def register_callback_for_cuda_event_wait(cb: Callable[[int, int], None]) -> Non
 def register_callback_for_cuda_memory_allocation(cb: Callable[[int], None]) -> None:
     CUDAMemoryAllocationCallbacks.add_callback(cb)
 
+def register_callback_for_cuda_memory_deallocation(cb: Callable[[int], None]) -> None:
+    CUDAMemoryDeallocationCallbacks.add_callback(cb)
+
+def register_callback_for_cuda_stream_allocation(cb: Callable[[int], None]) -> None:
+    CUDAStreamAllocationCallbacks.add_callback(cb)

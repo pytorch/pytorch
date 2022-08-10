@@ -41,7 +41,6 @@
 
 #include <ATen/ATen.h>
 
-#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
@@ -288,9 +287,12 @@ class PyInterpreterHolder {
             &concrete_sym_numel_fn,
             new c10::impl::CUDATraceFunctionWrapper(
               &concrete_trace_cuda<c10::impl::trace_cuda_event_creation_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_event_deletion_fn_name>,
               &concrete_trace_cuda<c10::impl::trace_cuda_event_record_fn_name>,
               &concrete_trace_cuda<c10::impl::trace_cuda_event_wait_fn_name>,
-              &concrete_trace_cuda<c10::impl::trace_cuda_memory_allocation_fn_name>
+              &concrete_trace_cuda<c10::impl::trace_cuda_memory_allocation_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_memory_deallocation_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_stream_allocation_fn_name>
             )
             )) {}
   // NB: intentionally leaks the memory
@@ -2510,9 +2512,12 @@ void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts... args) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  py::module mod = py::module::import("torch.utils._cuda_trace");
-  py::object hook = mod.attr(func_name).attr("fire_callbacks");
-  hook(args...);
+  try {
+    py::module mod = py::module::import("torch.utils._cuda_trace");
+    py::object hook = mod.attr(func_name).attr("fire_callbacks");
+    hook(args...);
+  }
+  catch (const py::error_already_set& e) {}
 }
 
 } // anonymous namespace

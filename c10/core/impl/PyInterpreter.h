@@ -252,11 +252,17 @@ struct C10_API PyInterpreter {
 
   __ubsan_ignore_function__ void trace_cuda_event_creation(uintptr_t) const;
 
+  __ubsan_ignore_function__ void trace_cuda_event_deletion(uintptr_t) const;
+
   __ubsan_ignore_function__ void trace_cuda_event_record(uintptr_t, uintptr_t) const;
 
   __ubsan_ignore_function__ void trace_cuda_event_wait(uintptr_t, uintptr_t) const;
 
   __ubsan_ignore_function__ void trace_cuda_memory_allocation(uintptr_t) const;
+
+  __ubsan_ignore_function__ void trace_cuda_memory_deallocation(uintptr_t) const;
+
+  __ubsan_ignore_function__ void trace_cuda_stream_allocation(uintptr_t) const;
 
   // Disarm this PyInterpreter, making all of its methods noops.
   // Because the function pointers are raw pointers (not atomics),

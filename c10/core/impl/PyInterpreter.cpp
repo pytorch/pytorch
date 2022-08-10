@@ -109,6 +109,10 @@ __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> PyInterpreter::detach(
     return (*trace_cuda_functions->event_creation_fn_)(this, event);
   }
 
+  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_deletion(uintptr_t event) const {
+    return (*trace_cuda_functions->event_deletion_fn_)(this, event);
+  }
+
   __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_record(
     uintptr_t event, uintptr_t stream) const {
     return (*trace_cuda_functions->event_record_fn_)(this, event, stream);
@@ -119,9 +123,16 @@ __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> PyInterpreter::detach(
     return (*trace_cuda_functions->event_wait_fn_)(this, event, stream);
   }
 
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_memory_allocation(
-    uintptr_t pointer) const {
-    return (*trace_cuda_functions->memory_allocation_fn_)(this, pointer);
+  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_memory_allocation(uintptr_t ptr) const {
+    return (*trace_cuda_functions->memory_allocation_fn_)(this, ptr);
+  }
+
+  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_memory_deallocation(uintptr_t ptr) const {
+    return (*trace_cuda_functions->memory_deallocation_fn_)(this, ptr);
+  }
+
+  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_stream_allocation(uintptr_t stream) const {
+    return (*trace_cuda_functions->stream_allocation_fn_)(this, stream);
   }
 
 } // namespace impl

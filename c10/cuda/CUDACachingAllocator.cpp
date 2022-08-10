@@ -1631,6 +1631,12 @@ class THCCachingAllocator {
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_memory_deallocation(
+        reinterpret_cast<uintptr_t>(block->ptr)
+      );
+    }
     device_allocator[block->device]->free(block);
   }
 
@@ -1710,6 +1716,12 @@ bool forceUncachedAllocator() {
 }
 
 static void uncached_delete(void* ptr) {
+  const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+  if (interp) {
+    interp->trace_cuda_memory_deallocation(
+      reinterpret_cast<uintptr_t>(ptr)
+    );
+  }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
@@ -1732,7 +1744,7 @@ struct CudaCachingAllocator : public Allocator {
       C10_CUDA_CHECK(cudaMalloc(&r, size));
       const auto* interp = c10::impl::CUDATraceTLS::get_trace();
       if (interp) {
-        interp->trace_cuda_event_creation(
+        interp->trace_cuda_memory_allocation(
           reinterpret_cast<uintptr_t>(r)
         );
       }

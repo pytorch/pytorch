@@ -117,6 +117,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     int orig_device;
     C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_event_deletion(reinterpret_cast<uintptr_t>(cuda_event));
+    }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
     C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
   }
