@@ -74,7 +74,7 @@ class OpOverload:
         if torch._C._dispatch_has_kernel_for_dispatch_key(self.name, dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
-            return NotImplemented
+            raise NotImplementedError
 
     @property
     def overloadpacket(self):
