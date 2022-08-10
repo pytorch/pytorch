@@ -1,4 +1,4 @@
-from typing import List, Set, Callable, Any, Union
+from typing import List, Set, Callable, Any, Union, Optional
 from enum import Enum
 
 import torch
