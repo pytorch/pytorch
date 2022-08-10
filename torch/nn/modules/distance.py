@@ -22,7 +22,7 @@ class PairwiseDistance(Module):
 
     Returns either a scalar (if input tensors are rank 1) or a vector of a vector of all pairs of distances
     (if input tensors are rank 2). In the second case, the output components are distances of pairs
-    ordered in the same way as hte as output of
+    ordered in the same way as the as output of
     :func:`torch.triu_indices`.
 
     Args:
