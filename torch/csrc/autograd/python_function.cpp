@@ -807,7 +807,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
 }
 
 PyObject* THPFunction_clear_saved_tensors(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS(THPFunction*) self->cdata->release_variables();
+  HANDLE_TH_ERRORS((THPFunction*)self)->cdata.lock()->release_variables();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
