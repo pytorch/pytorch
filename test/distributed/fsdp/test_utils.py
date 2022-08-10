@@ -2,6 +2,7 @@
 
 import random
 import sys
+from typing import List
 import unittest
 from collections import OrderedDict
 
@@ -18,6 +19,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     subtest,
 )
+from dataclasses import dataclass
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -52,11 +54,20 @@ class TestUtils(TestCase):
             expected += t.numel()
             return t
 
+        @dataclass
+        class SomeDataClass:
+            some_key: str
+            some_float: float
+            some_tensor: List[torch.Tensor]
+
+
+
         # create a mixed bag of data.
         data = [1, "str"]
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
         data.insert(0, set(["x", get_a_tensor(), get_a_tensor()]))
         data.append(([1], get_a_tensor(), (1), [get_a_tensor()], set((1, 2))))
+        data.append({"abc": SomeDataClass("some_key", 1.0, [get_a_tensor()])})
         od = OrderedDict()
         od["k"] = "value"
         data.append(od)
