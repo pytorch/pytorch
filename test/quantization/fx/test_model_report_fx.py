@@ -1141,10 +1141,18 @@ class TestFxModelReportClass(QuantizationTestCase):
                     self.assertEqual(len(linear_info), 20)
 
     @skipIfNoFBGEMM
-    def test_qconfig_generation(self):
+    def test_qconfig_mapping_generation(self):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that qconfigmapping is generated
+        - Tests that mappings include information for for relavent modules
+        """
+        pass
+
+    @skipIfNoFBGEMM
+    def test_equalization_mapping_generation(self):
+        """
+        Tests for generation of qconfigs by ModelReport API
         - Tests that equalization config generated when input-weight equalization detector used
         - Tests that mappings include information for for relavent modules
         """

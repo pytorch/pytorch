@@ -96,8 +96,11 @@ class ModelReport:
         >>> # finally we generate the reports and optionally remove the observers we inserted
         >>> reports = tracer_reporter.generate_model_report(remove_inserted_observers=True)
 
-        >>> # Optional: we can generate the qconfigs based on the suggestions
-        >>> qconfigs = model_report.generate_qconfigs()
+        >>> # Optional: we can generate the qconfig mapping based on the suggestions
+        >>> qconfigs = model_report.generate_qconfig_mapping()
+
+        >>> # Optional: we can generate the equalization mapping based on the suggestions
+        >>> qconfigs = model_report.generate_equalization_mapping()
 
         >>> # Optional: we get a ModelReportVisualizer instance to do any visualizations desired
         >>> model_report_visualizer = tracer_reporter.generate_visualizer()
@@ -420,20 +423,29 @@ class ModelReport:
 
         return visualizer
 
-    def generate_qconfigs(self) -> Dict[str, QConfigMapping]:
+    def generate_qconfig_mapping(self) -> QConfigMapping:
         r"""
-        Generates a dictionary mapping each QConfig type name to a type of
-        configuration that can be generated based on the suggestions of the
-        ModelReport API.
-
-        Currently supported types:
-        - Quantization QConfig
-        - Equalization Config
+        Generates a QConfigMapping based on the suggestions of the
+        ModelReport API. The generated mapping encompasses all the
+        different types of feedback from the different detectors
+        all into one place.
 
         These configs are based on the suggestions provided by the ModelReport API
         and can only be generated once the reports have been generated.
 
-        Returns a dictionary mapping names of configurations to:
-            - A QConfigMapping for the respective configuration type
+        Returns a QConfigMapping for the quantization configuration
+        """
+        pass
+
+    def generate_equalization_mapping(self) -> QConfigMapping:
+        r"""
+        Generates a QConfigMapping based on the suggestions of the
+        ModelReport API for equalization. The generated mapping encompasses all the
+        different types of feedback from the input-weight equalization detector.
+
+        These configs are based on the suggestions provided by the ModelReport API
+        and can only be generated once the reports have been generated.
+
+        Returns a QConfigMapping for the equalization configuration
         """
         pass
