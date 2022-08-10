@@ -1,14 +1,9 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
-from torchgen.api import dispatchless, cpp
-from torchgen.api.types import (
-    CppSignatureGroup,
-    kernel_signature,
-)
-from torchgen.context import (
-    method_with_native_function,
-    native_function_manager,
-)
+
+from torchgen.api import cpp, dispatchless
+from torchgen.api.types import CppSignatureGroup, kernel_signature
+from torchgen.context import method_with_native_function, native_function_manager
 
 from torchgen.model import (
     BackendIndex,

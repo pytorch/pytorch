@@ -634,8 +634,7 @@ class NativeFunction:
             else set()
         )
 
-        from torchgen.api import cpp
-        from torchgen.api import dispatchless
+        from torchgen.api import cpp, dispatchless
 
         raw_dispatch = e.pop("dispatch", None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
@@ -834,7 +833,9 @@ class NativeFunction:
             for dispatch_key in composite_dispatch_keys:
                 backend_metadata[dispatch_key] = {
                     func.name: BackendMetadata(
-                        dispatchless.kernel(func, dispatch_key), structured=False
+                        dispatchless.kernel(func, dispatch_key),
+                        structured=False,
+                        cpp_namespace=DEFAULT_KERNEL_NAMESPACE,
                     )
                 }
         else:

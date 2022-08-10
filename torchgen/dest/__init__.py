@@ -1,3 +1,4 @@
+from .dispatchless import DispatchlessComposite as DispatchlessComposite
 from .lazy_ir import (
     generate_non_native_lazy_ir_nodes as generate_non_native_lazy_ir_nodes,
     GenLazyIR as GenLazyIR,
@@ -17,4 +18,3 @@ from .ufunc import (
     compute_ufunc_cpu_kernel as compute_ufunc_cpu_kernel,
     compute_ufunc_cuda as compute_ufunc_cuda,
 )
-from .dispatchless import DispatchlessComposite as DispatchlessComposite

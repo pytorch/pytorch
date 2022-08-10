@@ -42,11 +42,11 @@ from torchgen.gen_functionalization_type import (
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
 from torchgen.model import (
-    COMPOSITE_DISPATCH_KEYS,
     Argument,
     BackendIndex,
     BackendMetadata,
     BaseOperatorName,
+    COMPOSITE_DISPATCH_KEYS,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
     FunctionSchema,
