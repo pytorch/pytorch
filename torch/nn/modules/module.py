@@ -1368,11 +1368,15 @@ class Module:
     # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
-        r"""Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing references to the whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
+
+        .. note::
+            The returned object is a shallow copy. It contains references
+            to the module's parameters and buffers.
 
         .. warning::
             Currently ``state_dict()`` also accepts positional arguments for
