@@ -491,10 +491,18 @@ class MemoryEventTracker {
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
   void append_alloc_free_event(intptr_t ptr, int size, int device) {
     std::lock_guard<std::mutex> lock(mutex);
-    alloc_free_events[device].push_back(AllocFreeEvent{
-        ptr, // ptr
-        size, // size: of allocation in bytes
-    });
+    // if event is created by initialization or raw_alloc, do not create a new
+    // one
+    if (alloc_free_events[device].back().ptr ==
+        reinterpret_cast<intptr_t>(nullptr)) {
+      alloc_free_events[device].back().ptr = ptr;
+      alloc_free_events[device].back().size = size;
+    } else {
+      alloc_free_events[device].push_back(AllocFreeEvent{
+          ptr, // ptr
+          size, // size: of allocation in bytes
+      });
+    };
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() const {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1654,16 +1662,12 @@ class THCCachingAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    // if raw_alloc appended an event, do not append one more
-    if (memory_tracker.alloc_free_events[device].back().ptr !=
-        reinterpret_cast<intptr_t>(nullptr)) {
-      // if allocation fails we still record the event with a nullptr. ptr is
-      // modified if allocation succeeds
-      memory_tracker.append_alloc_free_event(
-          reinterpret_cast<intptr_t>(nullptr), // ptr
-          size, // size: of allocation in bytes
-          device);
-    }
+    // if allocation fails we still record the event with a nullptr. ptr is
+    // modified if allocation succeeds
+    memory_tracker.append_alloc_free_event(
+        reinterpret_cast<intptr_t>(nullptr), // ptr
+        size, // size: of allocation in bytes
+        device);
     Block* block = device_allocator[device]->malloc(device, size, stream);
     memory_tracker.alloc_free_events[device].back().ptr =
         reinterpret_cast<intptr_t>(block->ptr);
