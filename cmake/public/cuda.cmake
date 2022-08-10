@@ -250,7 +250,7 @@ set_property(
 
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
-if(CUDA_USE_STATIC_CUDA_RUNTIME)
+if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cudart_static)
@@ -345,30 +345,6 @@ else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cufft)
-endif()
-
-# cusparse
-add_library(caffe2::cusparse INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cusparse PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cusparse_static)
-else()
-    set_property(
-        TARGET caffe2::cusparse PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cusparse)
-endif()
-
-# cusolver
-add_library(caffe2::cusolver INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cusolver_static)
-else()
-    set_property(
-        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_cusolver_LIBRARY})
 endif()
 
 # TensorRT
