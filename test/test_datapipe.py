@@ -632,13 +632,6 @@ def _mod_3_test(x):
     return x % 3 == 1
 
 
-def _worker_init_fn(worker_id):
-    info = torch.utils.data.get_worker_info()
-    num_workers = info.num_workers
-    datapipe = info.dataset
-    torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
-
-
 lambda_fn1 = lambda x: x  # noqa: E731
 lambda_fn2 = lambda x: x % 2  # noqa: E731
 lambda_fn3 = lambda x: x >= 5  # noqa: E731
