@@ -253,6 +253,23 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
 
+    def test_make_fx_reentrant_dispatch(self):
+        def f(x):
+            return torch.ops.aten.norm.Scalar(x, 2.0)
+
+        def norm_decomp(x, p=2.0):
+            if p != 2.0:
+                raise RuntimeError("can't handle with p != 2")
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        decomp = {torch.ops.aten.norm.Scalar: norm_decomp}
+
+        traced = make_fx(f, decomposition_table=decomp, tracing_mode=self.tracing_mode)(torch.rand(3))
+
+        for n in traced.graph.nodes:
+            self.assertTrue("square" not in str(n.target))
+            self.assertTrue("norm" not in str(n.target))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
@@ -603,9 +620,7 @@ make_fx_failures = {
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
-    xfail('nanquantile'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('quantile'),
     xfail('tensor_split'),
     xfail('corrcoef'),
 
@@ -824,6 +839,7 @@ symbolic_tensor_failures = {
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
+    xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -917,6 +933,7 @@ symbolic_tensor_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('put', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
+    xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('rand_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
