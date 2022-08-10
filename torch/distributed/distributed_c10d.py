@@ -62,9 +62,9 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
+    ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
 except ImportError:
     _UCC_AVAILABLE = False
-
 
 logger = logging.getLogger(__name__)
 
