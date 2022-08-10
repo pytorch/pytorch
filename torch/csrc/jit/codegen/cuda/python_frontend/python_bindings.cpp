@@ -40,8 +40,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! an interface
   //! \todo This object will be removed when a FusionManager is added
   //! containing a cache.
-  py::class_<nvfuser::FusionManager> fusion(nvfuser, "FusionManager");
-  fusion.def(py::init<>())
+  py::class_<nvfuser::FusionManager> fusion_manager(nvfuser, "FusionManager");
+  fusion_manager.def(py::init<int>(), py::arg("max_fusions")=int(256))
       .def(
           "execute",
           [](nvfuser::FusionManager& self, const py::iterable& iter) {
@@ -66,7 +66,10 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! define the set the operations and connections between operations for
   //! nvFuser to create.
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
-  fusion_def.def(py::init<nvfuser::FusionManager*>())
+  fusion_def.def(
+          py::init<nvfuser::FusionManager*, int>(),
+          py::arg("fusion_manager"),
+          py::arg("max_length")=int(256))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",

@@ -38,8 +38,9 @@ const char* dtypeToPyString(Nvf::DataType t) {
   return nullptr;
 }
 
-FusionDefinition::FusionDefinition(FusionManager* fusion_manager)
-    : fusion_manager_(fusion_manager),
+FusionDefinition::FusionDefinition(FusionManager* fusion_manager, size_t max_length)
+    : max_length_(max_length),
+      fusion_manager_(fusion_manager),
       end_record_(new EndRecord()),
       recording_(),
       recording_state_(),
@@ -109,6 +110,10 @@ Tensor* FusionDefinition::defineTensor() {
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
+  TORCH_CHECK(recording_.size() <= max_length_,
+      "The fusion definition has exceeded ", max_length_,
+      "operations.  The max_length for FusionDefintion's might need to be ",
+      "increased if the definition is created as expected.");
   recording_.emplace_back(record);
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(recording_.back());
   if (cache_entry.has_value()) {

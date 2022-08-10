@@ -16,8 +16,10 @@ FusionCacheEntry::FusionCacheEntry()
       fusion_executor_cache(std::make_unique<Nvf::FusionExecutorCache>(
           std::make_unique<Nvf::Fusion>())) {}
 
-FusionManager::FusionManager()
-    : start_record_(new StartRecord()),
+FusionManager::FusionManager(size_t max_fusions)
+    : max_fusions_(max_fusions),
+      num_fusions_(0),
+      start_record_(new StartRecord()),
       fusion_cache_start_(new FusionCacheEntry(start_record_)),
       fusion_cache_ptr_(fusion_cache_start_.get()) {}
 
@@ -48,6 +50,11 @@ void FusionManager::createFusionCacheEntry(
 }
 void FusionManager::createTerminalFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
+  ++num_fusions_;
+  TORCH_CHECK(num_fusions_ <= max_fusions_,
+      "The number of fusions in nvfuser has exceeded ", max_fusions_,
+      "fusions.  The max_fusions for the FusionManager might need to be ",
+      "increased if the max number is not being exceeded due to an error.");
   fusion_cache_ptr_->record_hash_map[rec] =
       std::make_unique<FusionCacheEntry>();
 }

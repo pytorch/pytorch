@@ -25,7 +25,7 @@ struct FusionCacheEntry {
 
 class FusionManager {
  public:
-  FusionManager();
+  FusionManager(size_t max_fusions);
 
   //! Copy and Assignment of the FusionManager is not supported
   FusionManager(const FusionManager&) = delete;
@@ -46,6 +46,8 @@ class FusionManager {
  private:
   Nvf::FusionExecutorCache* fusionExecutorCachePtr() const;
 
+  size_t max_fusions_;
+  size_t num_fusions_;
   //! The fusion cache is implemented as a prefix tree of entries containing
   //! a Record representing a Fusion Definition line entry.
   std::shared_ptr<RecordFunctor> start_record_;

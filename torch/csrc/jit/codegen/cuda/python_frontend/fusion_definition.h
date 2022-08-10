@@ -65,7 +65,7 @@ struct Scalar : State {
 //!   help(FusionDefinition.Operators)
 class FusionDefinition {
  public:
-  FusionDefinition(FusionManager* fusion_manager);
+  FusionDefinition(FusionManager* fusion_manager, size_t max_length);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -107,6 +107,8 @@ class FusionDefinition {
 
  private:
   void buildFusionIr();
+
+  size_t max_length_;
 
   FusionManager* fusion_manager_;
 
