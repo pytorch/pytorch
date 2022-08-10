@@ -7,7 +7,6 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/MPSGraph+CoolMethods.h>
 #include <torch/library.h>
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -119,10 +118,10 @@ TORCH_IMPL_FUNC(gather_out_mps)
                                                           toType:getMPSDataType(ScalarType::Int)
                                                             name:(NSString * _Nonnull)nil];
 
-          MPSGraphTensor* outputTensor = [mpsGraph gatherAlongAxisWithUpdatesTensor:getInput
-                                                                      indicesTensor:castIndexTensor
-                                                                               axis:(NSInteger)dim
-                                                                               name:nil];
+          MPSGraphTensor* outputTensor = [mpsGraph gatherAlongAxis: (NSInteger) dim
+                                                 withUpdatesTensor: getInput
+                                                     indicesTensor: castIndexTensor
+                                                              name: nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->indexTensor_ = indexTensor;
@@ -336,21 +335,21 @@ void scatter_mps_general
             scatter_mode = MPSGraphScatterModeMin;
 
           if(!inputNeedSlice) {
-            outputTensor = [mpsGraph scatterAlongAxisWithDataTensor:getInput
-                                                      updatesTensor:getSrc
-                                                      indicesTensor:castIndexTensor
-                                                               axis:(NSInteger)dim
-                                                               mode:scatter_mode
-                                                               name:nil];
+            outputTensor = [mpsGraph scatterAlongAxis: (NSInteger) dim
+                                       withDataTensor: getInput
+                                        updatesTensor: getSrc
+                                        indicesTensor: castIndexTensor
+                                                 mode: scatter_mode
+                                                 name: nil];
           }
           else {
             // Scatter this into the input with set mode
-            MPSGraphTensor* scatterTensor = [mpsGraph scatterAlongAxisWithDataTensor:getInput
-                                                                       updatesTensor:getSrc
-                                                                       indicesTensor:castIndexTensor
-                                                                                axis:(NSInteger)dim
-                                                                                mode:scatter_mode
-                                                                                name:nil];
+            MPSGraphTensor* scatterTensor = [mpsGraph scatterAlongAxis: (NSInteger) dim
+                                                        withDataTensor: getInput
+                                                         updatesTensor: getSrc
+                                                         indicesTensor: castIndexTensor
+                                                                  mode: scatter_mode
+                                                                  name: nil];
 
             // Make an array of scatter indices tensors
             NSMutableArray<MPSGraphTensor*>* indicesTensors = [NSMutableArray<MPSGraphTensor*> arrayWithCapacity:num_input_dims];
@@ -372,9 +371,9 @@ void scatter_mps_general
             for(int i = 0; i < num_input_dims; i++) {
               MPSGraphTensor* axisTensor = [mpsGraph constantWithScalar:i
                                                                dataType:MPSDataTypeInt32];
-              MPSGraphTensor* scatter_currentIndexTensor = [mpsGraph getCoordinateValueWithShapeTensor:scatterInputShapeTensor
-                                                                                            axisTensor:axisTensor
-                                                                                                  name:nil];
+              MPSGraphTensor* scatter_currentIndexTensor = [mpsGraph coordinateAlongAxisTensor: axisTensor
+                                                                               withShapeTensor: scatterInputShapeTensor
+                                                                                          name: nil];
               scatter_currentIndexTensor = [mpsGraph reshapeTensor:scatter_currentIndexTensor
                                                          withShape:@[@-1, @1]
                                                               name:nil];
