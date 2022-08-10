@@ -806,8 +806,14 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_clear_saved_tensors(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS((THPFunction*)self)->cdata.lock()->release_variables();
+PyObject* THPFunction_maybe_clear_saved_tensors(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  if (!cdata->retain_variables) {
+    cdata->release_variables();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1190,8 +1196,8 @@ static struct PyGetSetDef THPFunction_properties[] = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
-    {(char*)"clear_saved_tensors",
-     THPFunction_clear_saved_tensors,
+    {(char*)"maybe_clear_saved_tensors",
+     THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
