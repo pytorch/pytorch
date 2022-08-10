@@ -13,205 +13,121 @@ constant uint32_t num_indices            [[function_constant(0)]];
 
 struct IndexAB {
     // Allow up to 16 indices
-    metal::array<device void *, 16>  indexArray [[ id(0) ]];
+    metal::array<constant const void *, 16>  indexArray [[ id(0) ]];
 };
 
 template<typename T>
-kernel void index_select(device const IndexAB & indexAB           [[buffer(0)]],
-                         device const void    * indexSizes        [[buffer(1)]],
-                         device const void    * indexStrides      [[buffer(2)]],
-                         device const uint3   * offsets           [[buffer(3)]],
-                         device const void    * inputData         [[buffer(4)]],
-                         device void          * outputData        [[buffer(5)]],
-                         uint thread_index [[thread_position_in_grid]]) {
+kernel void index_select(
+    constant const IndexAB  & indexAB           [[buffer(0)]],
+    constant const void     * indexSizes        [[buffer(1)]],
+    constant const void     * indexStrides      [[buffer(2)]],
+    constant const uint3    * offsets           [[buffer(3)]],
+    constant const void     * inputData         [[buffer(4)]],
+    device   void           * outputData        [[buffer(5)]],
+    uint thread_index [[thread_position_in_grid]]) {
 
-    device const int64_t * index_sizes   = (device const int64_t *)indexSizes;
-    device const int64_t * index_strides = (device const int64_t *)indexStrides;
+    constant const int64_t * index_sizes   = (constant const int64_t *)indexSizes;
+    constant const int64_t * index_strides = (constant const int64_t *)indexStrides;
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
-        int64_t index = ((device const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
+        int64_t index = ((constant const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
         if (index < 0) {
             index += index_sizes[i];
         }
         offset += index * index_strides[i];
      }
     device T * out = (device T*)((device char*)outputData + offsets[thread_index].x);
-    device T * in  = (device T*)((device char*)inputData  + offsets[thread_index].y + offset);
+    constant const T * in  = (constant const T*)((constant const char*)inputData  + offsets[thread_index].y + offset);
     *out = *in;
 }
 
-template
-[[host_name("index_select_float")]]
-kernel void index_select<float>(device const IndexAB & indexAB       [[buffer(0)]],
-                                device const void    * indexSizes    [[buffer(1)]],
-                                device const void    * indexStrides  [[buffer(2)]],
-                                device const uint3   * offsets       [[buffer(3)]],
-                                device const void    * inputData     [[buffer(4)]],
-                                device void          * outputData    [[buffer(5)]],
-                                uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_half")]]
-kernel void index_select<half>(device const IndexAB & indexAB       [[buffer(0)]],
-                                device const void   * indexSizes    [[buffer(1)]],
-                                device const void   * indexStrides  [[buffer(2)]],
-                                device const uint3  * offsets       [[buffer(3)]],
-                                device const void   * inputData     [[buffer(4)]],
-                                device void         * outputData    [[buffer(5)]],
-                                uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_int32")]]
-kernel void index_select<int32_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                                  device const void    * indexSizes    [[buffer(1)]],
-                                  device const void    * indexStrides  [[buffer(2)]],
-                                  device const uint3   * offsets       [[buffer(3)]],
-                                  device const void    * inputData     [[buffer(4)]],
-                                  device void          * outputData    [[buffer(5)]],
-                                  uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_int64")]]
-kernel void index_select<int64_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                                  device const void    * indexSizes    [[buffer(1)]],
-                                  device const void    * indexStrides  [[buffer(2)]],
-                                  device const uint3   * offsets       [[buffer(3)]],
-                                  device const void    * inputData     [[buffer(4)]],
-                                  device void          * outputData    [[buffer(5)]],
-                                  uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_int16")]]
-kernel void index_select<int16_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                                  device const void    * indexSizes    [[buffer(1)]],
-                                  device const void    * indexStrides  [[buffer(2)]],
-                                  device const uint3   * offsets       [[buffer(3)]],
-                                  device const void    * inputData     [[buffer(4)]],
-                                  device void          * outputData    [[buffer(5)]],
-                                  uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_uint8")]]
-kernel void index_select<uint8_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                                  device const void    * indexSizes    [[buffer(1)]],
-                                  device const void    * indexStrides  [[buffer(2)]],
-                                  device const uint3   * offsets       [[buffer(3)]],
-                                  device const void    * inputData     [[buffer(4)]],
-                                  device void          * outputData    [[buffer(5)]],
-                                  uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_select_bool")]]
-kernel void index_select<bool>(device const IndexAB & indexAB       [[buffer(0)]],
-                               device const void    * indexSizes    [[buffer(1)]],
-                               device const void    * indexStrides  [[buffer(2)]],
-                               device const uint3   * offsets       [[buffer(3)]],
-                               device const void    * inputData     [[buffer(4)]],
-                               device void          * outputData    [[buffer(5)]],
-                               uint thread_index [[thread_position_in_grid]]);
-
 template<typename T>
-kernel void index_put(device const IndexAB & indexAB           [[buffer(0)]],
-                      device const void    * indexSizes        [[buffer(1)]],
-                      device const void    * indexStrides      [[buffer(2)]],
-                      device const uint3   * offsets           [[buffer(3)]],
-                      device const void    * inputData         [[buffer(4)]],
-                      device void          * outputData        [[buffer(5)]],
-                      uint thread_index [[thread_position_in_grid]]) {
+kernel void index_put(
+    constant const IndexAB  & indexAB           [[buffer(0)]],
+    constant const void     * indexSizes        [[buffer(1)]],
+    constant const void     * indexStrides      [[buffer(2)]],
+    constant const uint3    * offsets           [[buffer(3)]],
+    constant const void     * inputData         [[buffer(4)]],
+    device   void           * outputData        [[buffer(5)]],
+    uint thread_index [[thread_position_in_grid]]) {
 
-    device const int64_t * index_sizes   = (device const int64_t *)indexSizes;
-    device const int64_t * index_strides = (device const int64_t *)indexStrides;
+    constant const int64_t * index_sizes   = (constant const int64_t *)indexSizes;
+    constant const int64_t * index_strides = (constant const int64_t *)indexStrides;
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
-        int64_t index = ((device const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
+        int64_t index = ((constant const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
         if (index < 0) {
             index += index_sizes[i];
         }
         offset += index * index_strides[i];
      }
     device T * out = (device T*)((device char*)outputData + offsets[thread_index].x + offset);
-    device T * in  = (device T*)((device char*)inputData  + offsets[thread_index].y);
+    constant const T * in  = (constant const T*)((constant const char*)inputData  + offsets[thread_index].y);
     *out = *in;
 }
 
-template
-[[host_name("index_put_float")]]
-kernel void index_put<float>(device const IndexAB & indexAB       [[buffer(0)]],
-                             device const void    * indexSizes    [[buffer(1)]],
-                             device const void    * indexStrides  [[buffer(2)]],
-                             device const uint3   * offsets       [[buffer(3)]],
-                             device const void    * inputData     [[buffer(4)]],
-                             device void          * outputData    [[buffer(5)]],
-                             uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_half")]]
-kernel void index_put<half>(device const IndexAB & indexAB       [[buffer(0)]],
-                            device const void    * indexSizes    [[buffer(1)]],
-                            device const void    * indexStrides  [[buffer(2)]],
-                            device const uint3   * offsets       [[buffer(3)]],
-                            device const void    * inputData     [[buffer(4)]],
-                            device void          * outputData    [[buffer(5)]],
-                            uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_int32")]]
-kernel void index_put<int32_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                               device const void    * indexSizes    [[buffer(1)]],
-                               device const void    * indexStrides  [[buffer(2)]],
-                               device const uint3   * offsets       [[buffer(3)]],
-                               device const void    * inputData     [[buffer(4)]],
-                               device void          * outputData    [[buffer(5)]],
-                               uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_int64")]]
-kernel void index_put<int64_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                               device const void    * indexSizes    [[buffer(1)]],
-                               device const void    * indexStrides  [[buffer(2)]],
-                               device const uint3   * offsets       [[buffer(3)]],
-                               device const void    * inputData     [[buffer(4)]],
-                               device void          * outputData    [[buffer(5)]],
-                               uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_int16")]]
-kernel void index_put<int16_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                               device const void    * indexSizes    [[buffer(1)]],
-                               device const void    * indexStrides  [[buffer(2)]],
-                               device const uint3   * offsets       [[buffer(3)]],
-                               device const void    * inputData     [[buffer(4)]],
-                               device void          * outputData    [[buffer(5)]],
-                               uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_uint8")]]
-kernel void index_put<uint8_t>(device const IndexAB & indexAB       [[buffer(0)]],
-                               device const void    * indexSizes    [[buffer(1)]],
-                               device const void    * indexStrides  [[buffer(2)]],
-                               device const uint3   * offsets       [[buffer(3)]],
-                               device const void    * inputData     [[buffer(4)]],
-                               device void          * outputData    [[buffer(5)]],
-                               uint thread_index [[thread_position_in_grid]]);
-template
-[[host_name("index_put_bool")]]
-kernel void index_put<bool>(device const IndexAB & indexAB       [[buffer(0)]],
-                            device const void    * indexSizes    [[buffer(1)]],
-                            device const void    * indexStrides  [[buffer(2)]],
-                            device const uint3   * offsets       [[buffer(3)]],
-                            device const void    * inputData     [[buffer(4)]],
-                            device void          * outputData    [[buffer(5)]],
-                            uint thread_index [[thread_position_in_grid]]);
+#define REGISTER_INDEX_OP(DTYPE, INDEX_OP_TYPE)                \
+template                                                       \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE)]]              \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                    \
+    constant IndexAB       & indexAB           [[buffer(0)]],  \
+    constant const void    * indexSizes        [[buffer(1)]],  \
+    constant const void    * indexStrides      [[buffer(2)]],  \
+    constant const uint3   * offsets           [[buffer(3)]],  \
+    constant const void    * inputData         [[buffer(4)]],  \
+    device   void          * outputData        [[buffer(5)]],  \
+    uint thread_index [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE) \
+    REGISTER_INDEX_OP(float, INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(half,  INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(long,  INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(int,   INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(short, INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(char,  INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(uchar, INDEX_OP_TYPE);        \
+    REGISTER_INDEX_OP(bool,  INDEX_OP_TYPE);
+
+REGISTER_INDEX_OP_ALL_DTYPES(select);
+REGISTER_INDEX_OP_ALL_DTYPES(put);
+
+kernel void kernel_index_offsets(constant const packed_uint3 * strides         [[buffer(0)]],
+                                 device uint3                * data_offsets    [[buffer(1)]],
+                                 constant const uint         * iter_shape      [[buffer(2)]],
+                                 constant const uint         & num_dimensions  [[buffer(3)]],
+                                 constant const uint         & num_offsets     [[buffer(4)]],
+                                 uint thread_index [[thread_position_in_grid]]) {
+    device uint3 & localDataOffsets = data_offsets[thread_index];
+    uint32_t idx = thread_index;
+    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
+        uint32_t remainder = idx % iter_shape[dim];
+        idx /= iter_shape[dim];
+
+        for (uint32_t offset = 0; offset < num_offsets; offset++)
+            data_offsets[thread_index][offset] += remainder * strides[dim][offset];
+    }
+}
 
 template<typename T, typename E>
-kernel void index_put_accumulate_native_dtypes(device const IndexAB & indexAB      [[buffer(0)]],
-                                               device const void    * indexSizes   [[buffer(1)]],
-                                               device const void    * indexStrides [[buffer(2)]],
-                                               device const uint3   * offsets      [[buffer(3)]],
-                                               device const void    * inputData    [[buffer(4)]],
+kernel void index_put_accumulate_native_dtypes(constant const IndexAB & indexAB      [[buffer(0)]],
+                                               constant const void    * indexSizes   [[buffer(1)]],
+                                               constant const void    * indexStrides [[buffer(2)]],
+                                               constant const uint3   * offsets      [[buffer(3)]],
+                                               constant const void    * inputData    [[buffer(4)]],
                                                device       void    * outputData   [[buffer(5)]],
                                                uint thread_index [[thread_position_in_grid]]) {
-    device const int64_t * index_sizes   = (device const int64_t *)indexSizes;
-    device const int64_t * index_strides = (device const int64_t *)indexStrides;
+    constant const int64_t * index_sizes   = (constant const int64_t *)indexSizes;
+    constant const int64_t * index_strides = (constant const int64_t *)indexStrides;
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
-        int64_t index = ((device const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
+        int64_t index = ((constant const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
         if (index < 0) {
             index += index_sizes[i];
         }
         offset += index * index_strides[i];
     }
     device T * out = (device T*)((device char*)outputData + offsets[thread_index].x + offset);
-    device E * in  = (device E*)((device char*)inputData  + offsets[thread_index].y);
+    constant const E * in  = (constant const E*)((constant const char*)inputData  + offsets[thread_index].y);
     atomic_fetch_add_explicit(out, *in, memory_order_relaxed);
 }
 
@@ -226,46 +142,46 @@ __attribute__((__always_inline__)) void atomic_fetch_add_relaxed(device void * a
 }
 
 template<typename T>
-kernel void atomic_index_put_accumulate(device const IndexAB & indexAB           [[buffer(0)]],
-                                        device const void    * indexSizes        [[buffer(1)]],
-                                        device const void    * indexStrides      [[buffer(2)]],
-                                        device const uint3   * offsets           [[buffer(3)]],
-                                        device const void    * inputData         [[buffer(4)]],
-                                        device       void    * outputData        [[buffer(5)]],
+kernel void atomic_index_put_accumulate(constant const IndexAB & indexAB           [[buffer(0)]],
+                                        constant const void    * indexSizes        [[buffer(1)]],
+                                        constant const void    * indexStrides      [[buffer(2)]],
+                                        constant const uint3   * offsets           [[buffer(3)]],
+                                        constant const void    * inputData         [[buffer(4)]],
+                                        device         void    * outputData        [[buffer(5)]],
                                         uint thread_index [[thread_position_in_grid]]) {
-    device const int64_t * index_sizes   = (device const int64_t *)indexSizes;
-    device const int64_t * index_strides = (device const int64_t *)indexStrides;
+    constant const const int64_t * index_sizes   = (constant const int64_t *)indexSizes;
+    constant const const int64_t * index_strides = (constant const int64_t *)indexStrides;
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
-        int64_t index = ((device const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
+        int64_t index = ((constant const int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
         if (index < 0) {
             index += index_sizes[i];
         }
         offset += index * index_strides[i];
     }
     device void * out = (device void*)((device char*)outputData + offsets[thread_index].x + offset);
-    device T * in  = (device T*)((device char*)inputData  + offsets[thread_index].y);
+    constant const T * in  = (constant const T*)((constant const char*)inputData  + offsets[thread_index].y);
     atomic_fetch_add_relaxed<T>(out, *in);
 }
 
 template
 [[host_name("index_put_accumulate_float")]]
-kernel void atomic_index_put_accumulate<float>(device const IndexAB & indexAB             [[buffer(0)]],
-                                               device const void    * indexSizes   [[buffer(1)]],
-                                               device const void    * indexStrides [[buffer(2)]],
-                                               device const uint3   * offsets      [[buffer(3)]],
-                                               device const void    * inputData    [[buffer(4)]],
-                                               device void          * outputData   [[buffer(5)]],
+kernel void atomic_index_put_accumulate<float>(constant const IndexAB & indexAB      [[buffer(0)]],
+                                               constant const void    * indexSizes   [[buffer(1)]],
+                                               constant const void    * indexStrides [[buffer(2)]],
+                                               constant const uint3   * offsets      [[buffer(3)]],
+                                               constant const void    * inputData    [[buffer(4)]],
+                                               device   void          * outputData   [[buffer(5)]],
                                                uint thread_index [[thread_position_in_grid]]);
 template
-[[host_name("index_put_accumulate_int32")]]
-kernel void index_put_accumulate_native_dtypes<atomic_int, int32_t>(device const IndexAB & indexAB      [[buffer(0)]],
-                                                                    device const void    * indexSizes   [[buffer(1)]],
-                                                                    device const void    * indexStrides [[buffer(2)]],
-                                                                    device const uint3   * offsets      [[buffer(3)]],
-                                                                    device const void    * inputData    [[buffer(4)]],
-                                                                    device void          * outputData   [[buffer(5)]],
-                                                                    uint thread_index [[thread_position_in_grid]]);
+[[host_name("index_put_accumulate_int")]]
+kernel void index_put_accumulate_native_dtypes<atomic_int, int>(constant const IndexAB & indexAB      [[buffer(0)]],
+                                                                constant const void    * indexSizes   [[buffer(1)]],
+                                                                constant const void    * indexStrides [[buffer(2)]],
+                                                                constant const uint3   * offsets      [[buffer(3)]],
+                                                                constant const void    * inputData    [[buffer(4)]],
+                                                                device   void          * outputData   [[buffer(5)]],
+                                                                uint thread_index [[thread_position_in_grid]]);
 
 )INDEX_METAL";
 

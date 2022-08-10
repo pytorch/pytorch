@@ -11,6 +11,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/Indexing.h>
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <torch/library.h>
@@ -29,125 +30,119 @@ namespace at {
 namespace native {
 
 static
-void getDataOffsets(const TensorIteratorBase& iter, simd_uint3* data_offsets, uint32_t num_outputs) {
-  // Collect offsets for Input, Output and Index tensors
-  const uint32_t nOffsets = 3;
-  const uint32_t nDim = iter.ndim();
-
-  std::vector<uint32_t> strides[nDim];
-  const IntArrayRef& iterShape = iter.shape();
-
-  for (uint32_t i=0; i < nDim; i++)
-    for (uint32_t offset = 0; offset < nOffsets; offset++)
-      strides[i].push_back(iter.strides(offset)[i]);
-
-  for (int32_t i = 0; i < num_outputs; i++) {
-    uint32_t idx = i;
-    for (int dim = 0; dim < nDim; dim++) {
-      uint32_t remainder = idx % iterShape[dim];
-      idx /= iterShape[dim];
-
-      for (int offset = 0; offset < nOffsets; offset++) {
-        data_offsets[i][offset] += remainder * strides[dim][offset];
-      }
-    }
-  }
-}
-
-static
 bool dispatchIndexKernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, bool index_select, bool accumulate) {
   using namespace mps;
 
-  @autoreleasepool {
-    if (iter.numel() == 0) {
-      return true;
+  if (iter.numel() == 0)
+    return true;
+
+  const Tensor& inputTensor = iter.tensor(1);
+  Tensor outputTensor = iter.tensor(0);
+  id<MTLBuffer> inputBuffer  = getMTLBufferStorage(inputTensor);
+  id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
+  MTLResourceOptions options = [inputBuffer resourceOptions];
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync(mpsStream->queue(), ^(){
+    @autoreleasepool {
+      NSError* error = nil;
+      constexpr uint32_t nOffsets = 3;
+      const int64_t num_indices = index_size.size();
+      const uint32_t numThreads = iter.numel();
+      const uint32_t nDim = iter.ndim();
+      const IntArrayRef& iterShape = iter.shape();
+      std::vector<uint32_t> iterShapeData(iterShape.size());
+      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+
+      for (const auto i: c10::irange(iterShape.size())) {
+        TORCH_CHECK(i <= UINT32_MAX);
+        iterShapeData[i] = (uint32_t)(iterShape[i]);
+      }
+
+      for (const auto i: c10::irange(nDim)) {
+        for (const auto offset: c10::irange(nOffsets)) {
+          strides[i][offset] = iter.strides(offset)[i];
+        }
+      }
+
+      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalFunction("kernel_index_offsets", nil);
+      id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
+                                                                                                error: &error] autorelease];
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(simd_uint3)
+                                                             options: 0] autorelease];
+      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
+
+      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
+      if (kernelOffsetsTGSize > numThreads)
+          kernelOffsetsTGSize = numThreads;
+
+      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
+      [computeEncoder dispatchThreads: gridSize
+                threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
+
+      MTLFunctionConstantValues* constantValues = [[MTLFunctionConstantValues new] autorelease];
+      [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
+
+      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalFunction(indexFunction, constantValues);
+      id<MTLArgumentEncoder> argumentEncoder = [[indexKernelFunction newArgumentEncoderWithBufferIndex:0] autorelease];
+      NSUInteger argumentBufferLength = argumentEncoder.encodedLength;
+      id<MTLBuffer> indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
+      [argumentEncoder setArgumentBuffer:indexAB offset:0];
+
+      for (uint32_t idx = 0; idx < num_indices; idx++) {
+        const Tensor& indexTensor = iter.tensor(idx+2);
+        [argumentEncoder setBuffer: getMTLBufferStorage(indexTensor)
+                            offset: indexTensor.storage_offset() * indexTensor.element_size()
+                            atIndex: idx];
+        TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
+      }
+
+      // FIXME: PSO needs to be cached
+      id<MTLComputePipelineState> indexSelectPSO = [[device newComputePipelineStateWithFunction: indexKernelFunction
+                                                                                         error: &error] autorelease];
+      TORCH_CHECK(indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+      for (uint32_t idx = 0; idx < num_indices; idx++) {
+        const Tensor& indexTensor = iter.tensor(idx+2);
+        [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+      }
+
+      [computeEncoder setComputePipelineState:indexSelectPSO];
+      [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
+      [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
+      [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      [computeEncoder setBuffer:inputBuffer offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
+      [computeEncoder setBuffer:outputBuffer offset:outputTensor.storage_offset() * outputTensor.element_size() atIndex:5];
+
+      NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
+      if (tgSize > numThreads)
+          tgSize = numThreads;
+
+      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
+      [computeEncoder dispatchThreads: gridSize
+                threadsPerThreadgroup: threadGroupSize];
+
+      [computeEncoder endEncoding];
+      mpsStream->commit(true);
     }
-
-    const Tensor& inputTensor = iter.tensor(1);
-    Tensor outputTensor = iter.tensor(0);
-
-    id<MTLBuffer> inputBuffer  = getMTLBufferStorage(inputTensor);
-    id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
-    MTLResourceOptions options = [inputBuffer resourceOptions];
-    int64_t iter_numel = iter.numel();
-    int64_t num_indices = index_size.size();
-    NSError* error = nil;
-
-    std::string indexFunction;
-    if (!getIndexFunctionName(inputTensor.scalar_type(), indexFunction, index_select, accumulate)) {
-        TORCH_CHECK(false, "Failed to create indexing library, error: ", inputTensor.scalar_type());
-    }
-
-    MPSStream* mpsStream = getCurrentMPSStream();
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-    id<MTLBuffer> offsets = [device newBufferWithLength: iter_numel * sizeof(simd_uint3)
-                                                options: 0];
-    // Get a list of offsets to index the Input, Output and the Index tensors
-    simd_uint3* data_offsets = (simd_uint3*)[offsets contents];
-    getDataOffsets(iter, data_offsets, iter_numel);
-
-    id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-
-    MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
-    [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
-
-    id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalFunction(indexFunction, constantValues);
-    id<MTLArgumentEncoder> argumentEncoder = [indexKernelFunction newArgumentEncoderWithBufferIndex:0];
-    NSUInteger argumentBufferLength = argumentEncoder.encodedLength;
-    id<MTLBuffer> indexAB = [device newBufferWithLength:argumentBufferLength options:0];
-    [argumentEncoder setArgumentBuffer:indexAB offset:0];
-
-    for (uint32_t idx = 0; idx < num_indices; idx++) {
-      const Tensor& indexTensor = iter.tensor(idx+2);
-      [argumentEncoder setBuffer: getMTLBufferStorage(indexTensor)
-                          offset: indexTensor.storage_offset() * indexTensor.element_size()
-                         atIndex: idx];
-      TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for index");
-    }
-
-    id<MTLBuffer> indexSize = [device newBufferWithBytes: index_size.data()
-                                                  length: sizeof(index_size[0]) * index_size.size()
-                                                 options: options];
-    id<MTLBuffer> indexStride = [device newBufferWithBytes: index_stride.data()
-                                                    length: sizeof(index_stride[0]) * index_stride.size()
-                                                   options: options];
-
-    // FIXME: PSO needs to be cached
-    id<MTLComputePipelineState> indexSelectPSO = [device newComputePipelineStateWithFunction: indexKernelFunction
-                                                                                       error: &error];
-    TORCH_CHECK(indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-    for (uint32_t idx = 0; idx < num_indices; idx++) {
-      const Tensor& indexTensor = iter.tensor(idx+2);
-      [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
-    }
-
-    [computeEncoder setComputePipelineState: indexSelectPSO];
-    [computeEncoder setBuffer: indexAB offset:0 atIndex:0];
-    [computeEncoder setBuffer: indexSize offset:0 atIndex:1];
-    [computeEncoder setBuffer: indexStride offset:0 atIndex:2];
-    [computeEncoder setBuffer: offsets offset:0 atIndex:3];
-    [computeEncoder setBuffer: inputBuffer offset: inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
-    [computeEncoder setBuffer: outputBuffer offset: outputTensor.storage_offset() * outputTensor.element_size() atIndex:5];
-
-    MTLSize numOutputElems = MTLSizeMake(iter.numel(), 1, 1);
-    NSUInteger threadGroupSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
-    if (threadGroupSize > iter.numel()) {
-        threadGroupSize = iter.numel();
-    }
-
-    MTLSize threadgroupSize = MTLSizeMake(threadGroupSize, 1, 1);
-    [computeEncoder dispatchThreads: numOutputElems
-              threadsPerThreadgroup: threadgroupSize];
-
-    [computeEncoder endEncoding];
-    mpsStream->commit(true);
-  }
+  });
 
   return true;
 }
+
 
 static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
   using namespace mps;
@@ -207,7 +202,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  NSMutableArray<NSNumber*> * ns_dims = [NSMutableArray<NSNumber*> new];
+  NSMutableArray<NSNumber*> * ns_dims = [[NSMutableArray<NSNumber*> new] autorelease];
 
   for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {

@@ -55,9 +55,15 @@ id<MTLFunction> MPSDevice::metalFunction(const std::string& kernel, MTLFunctionC
     TORCH_CHECK(_mtl_indexing_library, "Failed to create indexing library, error: ", [[error description] UTF8String]);
   }
 
-  id<MTLFunction> indexFunction = [_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String:kernel.c_str()]
-                                                              constantValues: constantValues
-                                                                       error: &error];
+  id<MTLFunction> indexFunction = nil;
+  if (constantValues) {
+    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]
+                                                constantValues: constantValues
+                                                         error: &error] autorelease];
+  } else {
+    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]] autorelease];
+  }
+
   TORCH_CHECK(indexFunction, "Failed to create specialized function state object: ", kernel, ", error: ", [[error description] UTF8String]);
 
   return indexFunction;

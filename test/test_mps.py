@@ -6139,40 +6139,6 @@ class TestAdvancedIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
-    def test_index_put_accumulate(self, device="mps"):
-        N = 1<< 16
-        dt = torch.int32
-        a = torch.ones(N, dtype=dt, device=device)
-        indices = torch.tensor([-2, 0, -2, -1, 0, -1, 1], device=device, dtype=torch.long)
-        values = torch.tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt, device=device)
-
-        a.index_put_((indices, ), values, accumulate=True)
-
-        self.assertEqual(a[0], 11)
-        self.assertEqual(a[1], 12)
-        self.assertEqual(a[2], 1)
-        self.assertEqual(a[-3], 1)
-        self.assertEqual(a[-2], 13)
-        self.assertEqual(a[-1], 14)
-
-        a = torch.ones((2, N), dtype=dt, device=device)
-        indices0 = torch.tensor([0, -1, 0, 1], device=device, dtype=torch.long)
-        indices1 = torch.tensor([-2, -1, 0, 1], device=device, dtype=torch.long)
-        values = torch.tensor([12, 13, 10, 11], dtype=dt, device=device)
-
-        a.index_put_((indices0, indices1), values, accumulate=True)
-
-        self.assertEqual(a[0, 0], 11)
-        self.assertEqual(a[0, 1], 1)
-        self.assertEqual(a[1, 0], 1)
-        self.assertEqual(a[1, 1], 12)
-        self.assertEqual(a[:, 2], torch.ones(2, dtype=dt))
-        self.assertEqual(a[:, -3], torch.ones(2, dtype=dt))
-        self.assertEqual(a[0, -2], 13)
-        self.assertEqual(a[1, -2], 1)
-        self.assertEqual(a[-1, -1], 14)
-        self.assertEqual(a[0, -1], 1)
-
     def test_index_put_accumulate_expanded_values(self, device="mps"):
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
@@ -6258,7 +6224,7 @@ class TestAdvancedIndexing(TestCase):
         self.assertEqual(out_mps.cpu(), out_cpu)
 
     def test_index_put_accumulate_duplicate_indices(self, device="mps"):
-        for i in range(1, 512):
+        for i in range(1, 128):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
             delta = torch.empty(i, dtype=torch.float32, device=device).uniform_(-1, 1)
