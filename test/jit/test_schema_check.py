@@ -319,6 +319,13 @@ class TestSchemaCheck(JitTestCase):
             actual = batch(actual)
         self.assertEqual(expected, actual)
 
+    # Tests that SchemaCheckMode wraps Torch.tensor with empty list input
+    def test_schema_check_mode_empty_list_input(self):
+        expected = torch.atleast_1d([])
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual = torch.atleast_1d([])
+        self.assertEqual(expected, actual)
+
     # Tests that an exception is raised for a mismatching mutation
     def test_mutation_check_fail(self):
         with self.assertRaisesRegex(RuntimeError, "Argument input is not defined as mutable but was mutated"):
@@ -368,15 +375,22 @@ class TestSchemaCheck(JitTestCase):
                 IncorrectAliasTensor(x).aminmax(dim=0)
 
     # Tests that is_alias_of returns as expected
-    def test_is_alias_of(self):
+    def test_is_alias_of_basic(self):
         x = torch.rand((3, 3), requires_grad=True)
         y = torch.rand((3, 3), requires_grad=True)
         y = x.add(x, alpha=2)
         self.assertTrue(torch._C._is_alias_of(x, x))
         self.assertFalse(torch._C._is_alias_of(x, y))
 
+    # Tests that is_alias_of returns as expected with empty containers
+    def test_is_alias_of_empty_container(self):
+        x = []
+        y = torch.rand((3, 3), requires_grad=True)
+        self.assertFalse(torch._C._is_alias_of(x, x))
+        self.assertFalse(torch._C._is_alias_of(x, y))
+
     # Tests that overlaps returns as expected
-    def test_overlaps(self):
+    def test_overlaps_basic(self):
         x = torch.rand((3, 3), requires_grad=True)
         y = torch.rand((3, 3), requires_grad=True)
         z = [x, y]
@@ -385,8 +399,16 @@ class TestSchemaCheck(JitTestCase):
         self.assertTrue(torch._C._overlaps(z, x))
         self.assertTrue(torch._C._overlaps(z, y))
 
+    # Tests that overlaps returns correctly with empty containers
+    def test_overlaps_empty_container(self):
+        x = []
+        y = [torch.rand((3, 3), requires_grad=True)]
+        # Anything overlaps nothing
+        self.assertTrue(torch._C._overlaps(y, x))
+        self.assertTrue(torch._C._overlaps(y, y))
+
     # Tests that SchemaInfo Bindings work as expected
-    def test_schema_info_bind(self):
+    def test_schema_info_bind_basic(self):
         class SchemaInfoBindTestMode(TorchDispatchMode):
             def __init__(self, test_self):
                 self.test_self = test_self

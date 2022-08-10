@@ -196,6 +196,42 @@ class UnswitchInElseChecker : public kir::IrVisitor {
   }
 };
 
+// Basically just TransformPropagator, except that it checks the consistency
+// replayPasC with getMatchedLeafPosWithoutReplayPasC, replayCasP with
+// getMatchedLeafPosWithoutReplayCasP, and fullSelfReplay with fullSelfMatching:
+// - After replayPasC, getMatchedLeafPosWithoutReplayPasC should return the same
+//   replayed position
+// - After replayCasP, getMatchedLeafPosWithoutReplayCasP should return the same
+//   replayed position
+// - After fullSelfReplay, fullSelfMatching should return true
+struct TransformPropagatorWithCheck : public TransformPropagator {
+ public:
+  virtual void propagateC2P(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateC2P(from, to);
+    auto from_pos = replayed_pos_.at(from);
+    auto to_pos = replayed_pos_.at(to);
+    TORCH_CHECK(
+        TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+            to, from, from_pos) == to_pos);
+  }
+  virtual void propagateP2C(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateP2C(from, to);
+    auto from_pos = replayed_pos_.at(from);
+    auto to_pos = replayed_pos_.at(to);
+    TORCH_CHECK(
+        TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+            to, from, from_pos) == to_pos);
+  }
+  virtual void propagateSibling(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateSibling(from, to);
+    auto from_pos = replayed_pos_.at(from);
+    auto to_pos = replayed_pos_.at(to);
+    TORCH_CHECK(from_pos == to_pos);
+    TORCH_CHECK(TransformReplay::fullSelfMatching(from, to));
+  }
+  using TransformPropagator::TransformPropagator;
+};
+
 } // namespace
 
 // 1. Test cases are void() functions.
@@ -1326,26 +1362,26 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  int64_t i51;
-  i51 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i51 < T0.size[0])) {
+  int64_t i50;
+  i50 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i50 < T0.size[0])) {
     float T5[1];
     T5[0] = 0;
     T5[0]
-       = T1[i51];
+       = T1[i50];
     float T4[1];
     T4[0] = 0;
     T4[0]
-       = T0[i51];
-    float T6[1];
+       = T0[i50];
     float T2[1];
     T2[0]
       = T4[0]
       * T5[0];
+    float T6[1];
     T6[0]
       = T2[0]
       * T4[0];
-    T3[i51]
+    T3[i50]
        = T6[0];
   }
 }
@@ -9407,6 +9443,13 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   const int64_t dimx = 1024;
   const int64_t dimy = 16384;
 
+  auto properties = at::cuda::getDeviceProperties(0);
+  // Require 70KB of smem to run test
+  const size_t required_smem_size = 70 << 10;
+  if (properties->sharedMemPerBlockOptin < required_smem_size) {
+    GTEST_SKIP() << "not enough shared memory space on device to run test";
+  }
+
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   at::Tensor aten_static_in = aten_input.narrow(1, 0, static_size);
@@ -9604,6 +9647,14 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
+
+  auto properties = at::cuda::getDeviceProperties(0);
+  // Require 70KB of smem to run test
+  const size_t required_smem_size = 70 << 10;
+  if (properties->sharedMemPerBlockOptin < required_smem_size) {
+    GTEST_SKIP() << "not enough shared memory space on device to run test";
+  }
+
   fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
 
   auto at_mu = at::mean(aten_input.to(at::kDouble), -1).unsqueeze(1);
@@ -13807,7 +13858,7 @@ TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
   tv3->reorder({{4, 2}});
   // [bidx, unswitch, vectorize{2}, unroll{2}, tidx]
 
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
   scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
 
@@ -14446,7 +14497,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   // Split inner-most dim
   tv2->split(-1, kNumElems);
   tv2->split(-1, kVecSize);
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   c0->computeAt(tv2, -2);
@@ -14509,7 +14560,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   }
   tv2->split(-1, kNumElems);
   tv2->split(-1, kVecSize);
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   c0->computeAt(tv2, -2);
@@ -15169,7 +15220,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->split(0, 3);
   tv4->split(0, 2);
 
-  TransformPropagator propagator(tv4);
+  TransformPropagatorWithCheck propagator(tv4);
   MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv0->computeAt(tv2, 2);
@@ -16540,7 +16591,7 @@ TEST_F(NVFuserTest, FusionSimpleWarp_CUDA) {
 
   tv1->split(1, 32);
   auto tv1_rf = tv1->rFactor({1});
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(0)->parallelize(ParallelType::BIDx);
@@ -16587,7 +16638,7 @@ TEST_F(NVFuserTest, FusionSimpleWarpPad_CUDA) {
   tv1_rf->axis(-1)->padToMultipleOfWarp(32);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp(32);
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(-1)->padToMultipleOfWarp(32);
@@ -16636,7 +16687,7 @@ TEST_F(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
   tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16678,7 +16729,7 @@ TEST_F(NVFuserTest, FusionSerialWarpReduction_CUDA) {
 
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
-  TransformPropagator propagator(tv1);
+  TransformPropagatorWithCheck propagator(tv1);
   MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16723,7 +16774,7 @@ TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   tv1_rf->axis(-2)->parallelize(ParallelType::TIDx);
   tv1->axis(-2)->parallelize(ParallelType::TIDx);
   tv1->axis(-2)->padToMultipleOfWarp();
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv0->axis(-2)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-2)->parallelize(ParallelType::TIDx);
@@ -16771,7 +16822,7 @@ TEST_F(NVFuserTest, FusionMultipleDimBinding_CUDA) {
   tv1_rf->axis(-1)->padToMultipleOfWarp(32);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp(32);
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(-1)->padToMultipleOfWarp(32);
@@ -16854,7 +16905,7 @@ TEST_F(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
   tv2_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv2_rf->axis(-1)->padToMultipleOfWarp();
 
-  TransformPropagator propagator(tv2_rf);
+  TransformPropagatorWithCheck propagator(tv2_rf);
   MaxRootDomainInfoSpanningTree(tv2_rf).traverse(&propagator);
 
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16901,7 +16952,7 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
   tv1->axis(1)->parallelize(ParallelType::Unroll);
-  TransformPropagator propagator(tv1_rf);
+  TransformPropagatorWithCheck propagator(tv1_rf);
   MaxRootDomainInfoSpanningTree(tv1_rf).traverse(&propagator);
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(1)->parallelize(ParallelType::Unroll);
@@ -17104,7 +17155,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination3_CUDA) {
 
   tv1->split(0, 10);
   tv1->split(0, 33);
-  TransformPropagator propagator(tv1);
+  TransformPropagatorWithCheck propagator(tv1);
   MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   auto tv4 = tv1->rFactor({-1});
@@ -17158,7 +17209,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination4_CUDA) {
   tv1->split(1, 7);
   tv1->split(0, 11);
   tv1->reorder({{1, 2}, {2, 1}});
-  TransformPropagator propagator(tv1);
+  TransformPropagatorWithCheck propagator(tv1);
   MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv1->axis(0)->parallelize(ParallelType::TIDy);
@@ -17207,7 +17258,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination5_CUDA) {
   fusion.addOutput(tv3);
 
   tvs2.avg->split(0, 4);
-  TransformPropagator propagator(tvs2.avg);
+  TransformPropagatorWithCheck propagator(tvs2.avg);
   MaxRootDomainInfoSpanningTree(tvs2.avg).traverse(&propagator);
   auto rtvs2 = tvs2.rFactor({1});
 
@@ -17252,7 +17303,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination6_CUDA) {
   fusion.addOutput(tv4);
 
   tv4->split(1, 5);
-  TransformPropagator propagator(tv4);
+  TransformPropagatorWithCheck propagator(tv4);
   MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv4->reorder({{0, 1}, {1, 0}});
@@ -17300,7 +17351,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination7_CUDA) {
   tv3->split(-1, 5);
   tv3->split(-1, 4);
   tv3->split(-1, 3);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
@@ -18938,7 +18989,7 @@ TEST_F(NVFuserTest, FusionFloatPow_CUDA) {
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
 
-  TransformPropagator propagator(tv1);
+  TransformPropagatorWithCheck propagator(tv1);
   MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
   scheduler_utils::parallelizeAllLike(tv1, {tv2, tv3, tv4, tv5, tv6});
 
@@ -19046,9 +19097,9 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  int64_t i172;
-  i172 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i172 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  int64_t i171;
+  i171 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i171 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
@@ -19056,8 +19107,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T8[1];
     T8[0] = 0;
     T8[0]
-       = T0[i172];
-    __half T10[1];
+       = T0[i171];
     float T3[1];
     T3[0]
        = __half2float(T9[0]);
@@ -19074,9 +19124,10 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     float T6[1];
     T6[0]
        = relu(T5[0]);
+    __half T10[1];
     T10[0]
        = __float2half(T6[0]);
-    T7[i172]
+    T7[i171]
        = T10[0];
   }
 }
@@ -20182,7 +20233,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
 
   tv3->split(0, 8, false);
   tv3->split(1, 4);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv3->axis(1)->parallelize(ParallelType::TIDx);
@@ -20345,7 +20396,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering1_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
@@ -20383,7 +20434,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering2_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, -1);
@@ -20423,7 +20474,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering3_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
@@ -20472,7 +20523,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering4_CUDA) {
   tv3->split(-1, 128);
   tv3->split(-1, 32);
   tv3->split(-1, 8);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 2);
@@ -20514,7 +20565,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering5_CUDA) {
   tv2->split(-1, 128);
   tv2->split(-1, 32);
   tv2->split(-1, 8);
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv0->computeAt(tv2, 2);
@@ -20558,7 +20609,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering6_CUDA) {
   tv3->split(-1, 16);
   tv3->split(-2, 4);
   tv3->split(-2, 2);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
@@ -20596,7 +20647,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering7_CUDA) {
 
   tv2->split(-1, 128);
   tv2->split(-1, 4);
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv1->computeAt(tv2, 2);
@@ -20637,7 +20688,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering8_CUDA) {
 
   tv4->split(0, 32);
   tv4->split(0, 4);
-  TransformPropagator propagator(tv4);
+  TransformPropagatorWithCheck propagator(tv4);
   MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv0->computeAt(tv4, 1);
@@ -20679,7 +20730,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering9_CUDA) {
 
   out->split(0, 32);
   out->split(0, 4);
-  TransformPropagator propagator(out);
+  TransformPropagatorWithCheck propagator(out);
   MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv2->setMemoryType(MemoryType::Shared);
@@ -20748,7 +20799,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
 
   auto tv6_rf = tv6->rFactor({-1});
 
-  TransformPropagator propagator(tv6_rf);
+  TransformPropagatorWithCheck propagator(tv6_rf);
   MaxRootDomainInfoSpanningTree(tv6_rf).traverse(&propagator);
 
   tv0->computeAt(tv6, 3);
@@ -20815,7 +20866,7 @@ TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
     tv1->setMemoryType(mem_type);
 
     tv3->split(-1, 4);
-    TransformPropagator propagator(tv3);
+    TransformPropagatorWithCheck propagator(tv3);
     MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
     tv1->computeAt(tv3, -2);
@@ -21465,7 +21516,7 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
   fusion.addOutput(tv5);
 
   tv5->split(-1, 4);
-  TransformPropagator propagator(tv5);
+  TransformPropagatorWithCheck propagator(tv5);
   MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv4->split(-1, 3);
@@ -21558,7 +21609,7 @@ TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
   tv4->merge(0);
   tv4->split(0, 2);
 
-  TransformPropagator propagator(tv4);
+  TransformPropagatorWithCheck propagator(tv4);
   MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv3->computeAt(tv4, 1);
@@ -21925,7 +21976,7 @@ TEST_F(NVFuserTest, FusionContigIndexingWithBroadcast_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->merge(0);
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv2->setMemoryType(MemoryType::Local);
@@ -21975,7 +22026,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail2_CUDA) {
   tv4->merge(1, 2);
   tv4->merge(0, 1);
   tv4->split(0, 4);
-  TransformPropagator propagator(tv4);
+  TransformPropagatorWithCheck propagator(tv4);
   MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv0->computeAt(tv4, -2);
@@ -22021,7 +22072,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexWithBroadcast_CUDA) {
   // Don't modify tv1 so that it's replayed as tv2 with actual
   // transformations. It would create temporary IterDomains, and the
   // validation should still be able to detect vectorization by 4 is valid.
-  // TransformPropagator propagator(tv3);
+  // TransformPropagatorWithCheck propagator(tv3);
   // MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv2->merge(1, 2);
@@ -22106,7 +22157,7 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding1_CUDA) {
   tv2->merge(0);
   tv2->split(0, 4);
 
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   // All tensors must be transformed to a 2D tensor with each axis
@@ -22869,7 +22920,7 @@ TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   fusion.addOutput(tv_avg);
 
   tv_avg->split(0, 128);
-  TransformPropagator propagator(tv_avg);
+  TransformPropagatorWithCheck propagator(tv_avg);
   MaxRootDomainInfoSpanningTree(tv_avg).traverse(&propagator);
 
   tv_avg->axis(0)->parallelize(ParallelType::BIDx);
@@ -23097,7 +23148,7 @@ TEST_F(NVFuserTest, FusionIncompleteConcreteID_CUDA) {
   tv6->merge(0);
   tv6->merge(0);
 
-  TransformPropagator propagator(tv6);
+  TransformPropagatorWithCheck propagator(tv6);
   MaxRootDomainInfoSpanningTree(tv6).traverse(&propagator);
 
   tv0->computeAt(tv6, -1, ComputeAtMode::MostInlined);
@@ -23159,7 +23210,7 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   // T2_g[iblockIdx.x, ithreadIdx.x24, rblockIdx.y, rthreadIdx.y, rS{16},
   // iV25{4}]
 
-  TransformPropagator propagator(reduction_tv);
+  TransformPropagatorWithCheck propagator(reduction_tv);
   MaxRootDomainInfoSpanningTree(reduction_tv).traverse(&propagator);
   auto rfactor_tv = ir_utils::rfactorHelper(reduction_tv, {4});
   scheduler_utils::parallelizeAllLike(rfactor_tv, ir_utils::allTvs(&fusion));
@@ -23255,6 +23306,240 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   auto ref = t0 + t1;
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Test a basic swizzle pattern
+TEST_F(NVFuserTest, FusionSimpleSwizzle0_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv2);
+
+  // Make a 2x8 Zshape tile
+  tv1->split(-1, 16);
+  tv1->split(-1, 8);
+  // [O, 2, 8]
+
+  tv2->split(-1, 16);
+  tv2->split(-1, 4);
+  //[O, 4, 4]
+
+  tv1->computeAt(tv2, 1);
+  tv1->swizzle(Swizzle2DType::ZShape, -2, -1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 32}, options);
+  auto t2 = t0 + 2.0;
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+// Test swizzle inlining
+TEST_F(NVFuserTest, FusionSimpleSwizzle1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv3);
+
+  // Make a 2x8 Zshape tile
+  tv2->split(-1, 16);
+  tv2->split(-1, 8);
+  // [O, 2, 8]
+
+  tv3->split(-1, 16);
+  tv3->split(-1, 4);
+  //[O, 4, 4]
+
+  tv2->computeAt(tv3, 1);
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1);
+
+  // Inlining a producer into a swizzled consumer is ok
+  tv1->computeAt(tv2, -1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 32}, options);
+  auto t3 = t0 + 3.0;
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t3}, __LINE__, __FILE__);
+}
+
+// Test sync insertion and memory check in parallelized swizzles.
+//  In this test, data is parallel written into smem in zcurve
+//   pattern and then read out and output to global mem unswizzled.
+TEST_F(NVFuserTest, FusionSimpleSwizzle2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv2);
+
+  tv1->swizzle(Swizzle2DType::ZShape, -2, -1);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDy);
+
+  // Validation should fail since TV1 is not in shared
+  //  memory as required by sync info pass.
+  ASSERT_ANY_THROW(GpuLower gpulw_throw(&fusion));
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  // Make sure that a sync is inserted:
+  bool sync_found = false;
+  GpuLower gpu_lw(&fusion);
+  auto flattened_exps =
+      ir_utils::flattenScopedExprs(gpu_lw.kernel()->topLevelExprs());
+
+  for (auto expr : flattened_exps) {
+    if (expr->isA<kir::BlockSync>()) {
+      sync_found = true;
+    }
+    // Will require a sync thread before any shared memory read.
+    for (auto inp_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      if (inp_tv->getMemoryType() == MemoryType::Shared) {
+        TORCH_INTERNAL_ASSERT(
+            sync_found, "Block sync required but not inserted");
+      }
+    }
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({32, 32}, options);
+  auto t2 = t0 + 2.0;
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+// Test BestEffortReplay behavior with swizzle op
+TEST_F(NVFuserTest, FusionSwizzleMapping_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv3);
+
+  // Make a 2x8 Zshape tile
+  tv2->split(-1, 16);
+  tv2->split(-1, 8);
+  // [O, 2, 8]
+
+  tv3->split(-1, 16);
+  tv3->split(-1, 4);
+  //[O, 4, 4]
+
+  tv2->computeAt(tv3, 1);
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1);
+
+  // Inlining a producer into a swizzled consumer is ok
+  tv1->computeAt(tv2, -1);
+
+  // Check BestEffortReplay behavior with skip swizzles option on.
+  PairwiseRootDomainMap root_map(tv1, tv2);
+
+  // Check producer to consumer map,
+  //  i.e. unswizzled tensor to swizzled tensor map
+  //----------------------------------------------------------
+  auto p2c = BestEffortReplay::replayCasP(tv2, tv1, -1, root_map).getReplay();
+  auto swizzle_x_it0 = p2c.find(tv1->axis(-2));
+  auto swizzle_y_it0 = p2c.find(tv1->axis(-1));
+  // P2C map should exist and both the x and y map should
+  //  map to the output of the swizzle op.
+  TORCH_INTERNAL_ASSERT(
+      swizzle_x_it0 != p2c.end() && swizzle_y_it0 != p2c.end());
+  TORCH_INTERNAL_ASSERT(
+      swizzle_x_it0->second == tv2->axis(-2) &&
+      swizzle_y_it0->second == tv2->axis(-1));
+
+  // Check consumer to producer map,
+  //  i.e. swizzled tensor to unswizzled tensor map
+  //----------------------------------------------------------
+  auto c2p = BestEffortReplay::replayPasC(tv1, tv2, -1, root_map).getReplay();
+
+  auto swizzle_op = tv2->axis(-1)->definition()->as<Swizzle2D>();
+
+  // Find mapping for swizzle inputs
+  auto swizzle_x_it1 = c2p.find(swizzle_op->inX());
+  auto swizzle_y_it1 = c2p.find(swizzle_op->inY());
+
+  // Find mapping for swizzle outputs
+  auto swizzle_x_it2 = c2p.find(swizzle_op->outX());
+  auto swizzle_y_it2 = c2p.find(swizzle_op->outY());
+
+  // Input of swizzle ops will not be mapped to any
+  //  by BestEffortReplay, as BestEffortReplay has to be
+  //  one to one. IdGraph will further map them together.
+  TORCH_INTERNAL_ASSERT(
+      swizzle_x_it1 == c2p.end() && swizzle_y_it1 == c2p.end());
+
+  // Mapping for swizzle outputs should be mapped and should
+  //  also map to the corresponding axes on the unswizzled tensor.
+  TORCH_INTERNAL_ASSERT(
+      swizzle_x_it2 != c2p.end() && swizzle_y_it2 != c2p.end());
+  TORCH_INTERNAL_ASSERT(
+      swizzle_x_it2->second == tv1->axis(-2) &&
+      swizzle_y_it2->second == tv1->axis(-1));
+
+  // Check id graph behavior
+  //----------------------------------------------------------
+  ComputeAtMap ca_map(&fusion);
+  // Corresponding inputs and outputs of swizzle ops are
+  //  map through by exact and permissive map.
+  TORCH_INTERNAL_ASSERT(
+      ca_map.areMapped(tv1->axis(-2), swizzle_op->inX(), IdMappingMode::EXACT));
+  TORCH_INTERNAL_ASSERT(
+      ca_map.areMapped(tv1->axis(-1), swizzle_op->inY(), IdMappingMode::EXACT));
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-2), swizzle_op->outX(), IdMappingMode::EXACT));
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-1), swizzle_op->outY(), IdMappingMode::EXACT));
+
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-2), swizzle_op->inX(), IdMappingMode::PERMISSIVE));
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-1), swizzle_op->inY(), IdMappingMode::PERMISSIVE));
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-2), swizzle_op->outX(), IdMappingMode::PERMISSIVE));
+  TORCH_INTERNAL_ASSERT(ca_map.areMapped(
+      tv1->axis(-1), swizzle_op->outY(), IdMappingMode::PERMISSIVE));
 }
 
 TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
@@ -23650,6 +23935,46 @@ TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
       executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
 }
 
+namespace {
+
+// check that the resulting sibling are identical
+void checkSiblingConsistency(TensorView* replay, TensorView* target) {
+  auto replay_root = replay->getRootDomain();
+  auto replay_dom = replay->domain()->domain();
+  auto target_root = target->getRootDomain();
+  auto target_dom = target->domain()->domain();
+  std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
+  TORCH_CHECK(replay_root.size() == target_root.size());
+  target2replay_map.reserve(replay_root.size());
+  std::transform(
+      target_root.begin(),
+      target_root.end(),
+      replay_root.begin(),
+      std::inserter(target2replay_map, target2replay_map.begin()),
+      [](auto a, auto b) { return std::make_pair(a, b); });
+  BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
+  auto r = replay_.getReplay();
+  for (int64_t i = 0; i < replay_dom.size(); i++) {
+    auto target_id = target_dom[i];
+    auto replay_it = r.find(target_id);
+    TORCH_CHECK(replay_it != r.end());
+    TORCH_CHECK(
+        replay_it->second == replay_dom[i],
+        "IterDomain mismatch when checking ",
+        replay,
+        " and ",
+        target,
+        " at ",
+        i,
+        ", got ",
+        replay_it->second,
+        " and ",
+        replay_dom[i]);
+  }
+};
+
+} // namespace
+
 TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   // https://github.com/csarofeen/pytorch/issues/1760
   Fusion fusion;
@@ -23673,53 +23998,83 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
 
   auto tvs2 = tvs.rFactor({1, 4});
 
-  TransformPropagator propagator(tvs2.var_sum);
+  TransformPropagatorWithCheck propagator(tvs2.var_sum);
   MaxRootDomainInfoSpanningTree(tvs2.var_sum).traverse(&propagator);
 
-  // check that the resulting tensors in tvs2 are identical
-  auto checkSiblingConsistency = [](TensorView* replay, TensorView* target) {
-    auto replay_root = replay->getRootDomain();
-    auto replay_dom = replay->domain()->domain();
-    auto target_root = target->getRootDomain();
-    auto target_dom = target->domain()->domain();
-    std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
-    TORCH_CHECK(replay_root.size() == target_root.size());
-    target2replay_map.reserve(replay_root.size());
-    std::transform(
-        target_root.begin(),
-        target_root.end(),
-        replay_root.begin(),
-        std::inserter(target2replay_map, target2replay_map.begin()),
-        [](auto a, auto b) { return std::make_pair(a, b); });
-    BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
-    auto r = replay_.getReplay();
-    for (int64_t i = 0; i < replay_dom.size(); i++) {
-      auto target_id = target_dom[i];
-      auto replay_it = r.find(target_id);
-      TORCH_CHECK(replay_it != r.end());
-      TORCH_CHECK(
-          replay_it->second == replay_dom[i],
-          "IterDomain mismatch when checking ",
-          replay,
-          " and ",
-          target,
-          " at ",
-          i,
-          ", got ",
-          replay_it->second,
-          " and ",
-          replay_dom[i]);
-    }
-  };
   std::vector<TensorView*> siblings[] = {
       {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
   for (auto tensors : siblings) {
     for (auto t1 : tensors) {
       for (auto t2 : tensors) {
-        checkSiblingConsistency(t1, t2);
+        TORCH_CHECK(TransformReplay::fullSelfMatching(t1, t2));
       }
     }
   }
+}
+
+TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {1});
+  fusion.addOutput(tvs.var_sum);
+
+  tvs.avg->split(1, 1);
+  tvs.avg->split(1, 2);
+  tvs.avg->split(1, 3);
+  tvs.var_sum->split(1, 1);
+  tvs.var_sum->split(1, 2);
+  tvs.var_sum->split(1, 3);
+  tvs.n->split(1, 1);
+  tvs.n->split(1, 2);
+  tvs.n->split(1, 3);
+
+  auto tvs2 = tvs.rFactor({1, 4});
+
+  struct DisableTv0 : public MaxInfoSpanningTree::Selector {
+    TensorView* tv0;
+    virtual bool allowC2P(TensorView* from, TensorView* to) override {
+      return from != tv0 && to != tv0;
+    };
+    virtual bool allowP2C(TensorView* from, TensorView* to) override {
+      return from != tv0 && to != tv0;
+    };
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return true;
+    }
+    DisableTv0(TensorView* tv0) : tv0(tv0) {}
+  } selector1(tv0);
+
+  struct DisableTv0AndSibling : public DisableTv0 {
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return false;
+    }
+    using DisableTv0::DisableTv0;
+  } selector2(tv0);
+
+  TransformPropagatorWithCheck propagator(tvs2.var_sum);
+  MaxRootDomainInfoSpanningTree good_path(tvs2.var_sum, &selector1);
+  MaxRootDomainInfoSpanningTree bad_path(tvs2.var_sum, &selector2);
+
+  auto check = [&]() {
+    std::vector<TensorView*> siblings[] = {
+        {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
+    for (auto tensors : siblings) {
+      for (auto t1 : tensors) {
+        for (auto t2 : tensors) {
+          TORCH_CHECK(TransformReplay::fullSelfMatching(t1, t2));
+        }
+      }
+    }
+  };
+
+  bad_path.traverse(&propagator);
+  ASSERT_ANY_THROW(check());
+  good_path.traverse(&propagator);
+  check();
 }
 
 TEST_F(NVFuserTest, FusionTransformPropagatePosition_CUDA) {
@@ -23736,7 +24091,7 @@ TEST_F(NVFuserTest, FusionTransformPropagatePosition_CUDA) {
 
   tv0->merge(2);
   tv0->merge(0);
-  TransformPropagator propagator(tv0);
+  TransformPropagatorWithCheck propagator(tv0);
   MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
 
   TORCH_CHECK(tv1->nDims() == 4);
@@ -23819,7 +24174,7 @@ TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
       __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTransormPropagatorSelector_CUDA) {
+TEST_F(NVFuserTest, FusionTransformPropagatorSelector_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -23841,16 +24196,19 @@ TEST_F(NVFuserTest, FusionTransormPropagatorSelector_CUDA) {
   struct Selector : public MaxInfoSpanningTree::Selector {
     TensorView* tv0;
     TensorView* tv3;
-    virtual bool allowPasC(TensorView* from, TensorView* to) override {
+    virtual bool allowC2P(TensorView* from, TensorView* to) override {
       return to == tv0;
     }
-    virtual bool allowCasP(TensorView* from, TensorView* to) override {
+    virtual bool allowP2C(TensorView* from, TensorView* to) override {
       return to == tv3;
+    }
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return false;
     }
     Selector(TensorView* tv0, TensorView* tv3) : tv0(tv0), tv3(tv3) {}
   } selector(tv0, tv3);
 
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2, &selector).traverse(&propagator);
 
   TORCH_CHECK(tv0->nDims() == 2);
@@ -23860,7 +24218,7 @@ TEST_F(NVFuserTest, FusionTransormPropagatorSelector_CUDA) {
   TORCH_CHECK(tv4->nDims() == 1);
 }
 
-TEST_F(NVFuserTest, FusionTransormPropagatorPos_CUDA) {
+TEST_F(NVFuserTest, FusionTransformPropagatorPos_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -23874,13 +24232,12 @@ TEST_F(NVFuserTest, FusionTransormPropagatorPos_CUDA) {
   tv1->split(-1, 3);
   tv1->split(-1, 5);
 
-  TransformPropagator propagator(tv1, 2);
+  TransformPropagatorWithCheck propagator(tv1, 2);
   MaxRootDomainInfoSpanningTree(tv1, 2).traverse(&propagator);
 
-  TORCH_CHECK(tv0->nDims() == 3);
-  TORCH_CHECK(tv0->axis(0)->extent()->evaluateInt() == 11);
-  TORCH_CHECK(tv0->axis(1)->extent()->evaluateInt() == 2);
-  TORCH_CHECK(tv0->axis(2)->extent()->evaluateInt() == 105);
+  auto expect = makeConcreteTensor({22, 105});
+  expect->split(0, 2);
+  TORCH_CHECK(TransformReplay::fullSelfMatching(expect, tv0));
 }
 
 TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
@@ -23899,13 +24256,18 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
 
   struct Printer : public MaxInfoSpanningTree::Propagator {
     std::stringstream ss;
-    virtual void propagateTvPasC(TensorView* from, TensorView* to) override {
-      ss << "propagateTvPasC" << std::endl;
+    virtual void propagateC2P(TensorView* from, TensorView* to) override {
+      ss << "propagateC2P" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }
-    virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
-      ss << "propagateTvCasP" << std::endl;
+    virtual void propagateP2C(TensorView* from, TensorView* to) override {
+      ss << "propagateP2C" << std::endl;
+      ss << "from: " << from->name() << std::endl;
+      ss << "to: " << to->name() << std::endl;
+    }
+    virtual void propagateSibling(TensorView* from, TensorView* to) override {
+      ss << "propagateSibling" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }
@@ -23918,15 +24280,161 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
   path.traverse(&printer2);
 
   auto expect = R"ESCAPE(
-propagateTvPasC
+propagateC2P
 from: 1
 to: 0
-propagateTvCasP
+propagateP2C
 from: 1
 to: 2
 )ESCAPE";
   TORCH_CHECK(printer1.ss.str() == expect);
   TORCH_CHECK(printer2.ss.str() == expect);
+}
+
+TEST_F(NVFuserTest, FusionTransformPropagatorNoOverwrite_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = broadcast(tv0, {true, false, true});
+  auto tv2 = sin(tv1);
+  fusion->addOutput(tv2);
+
+  tv0->split(0, 2);
+  tv2->split(1, 2);
+  tv2->split(0, 4);
+
+  MaxRootDomainInfoSpanningTree path1(tv2);
+  TransformPropagatorWithCheck propagator1(tv2);
+  path1.traverse(&propagator1);
+
+  MaxRootDomainInfoSpanningTree path2(tv0);
+  TransformPropagatorWithCheck propagator2(tv0);
+  path2.traverse(&propagator2);
+
+  TORCH_CHECK(tv1->axis(0)->isBroadcast());
+  TORCH_CHECK(tv1->axis(1)->isBroadcast());
+  TORCH_CHECK(!tv1->axis(2)->isBroadcast());
+  TORCH_CHECK(!tv1->axis(3)->isBroadcast());
+  TORCH_CHECK(tv1->axis(4)->isBroadcast());
+
+  auto expect = makeSymbolicTensor(3);
+  expect->split(1, 2);
+  expect->split(0, 4);
+  TORCH_CHECK(TransformReplay::fullSelfMatching(expect, tv1));
+}
+
+TEST_F(NVFuserTest, FusionIssue1785Repro_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(1);
+  TensorView* tv1 = makeContigTensor(2);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  // [B, I]
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = set(tv4);
+
+  // Register your outputs
+  fusion.addOutput(tv5);
+
+  tv5->split(0, 8);
+  tv5->split(-1, 8);
+
+  // [Serial, TIDy, TIDX, Serial]
+
+  tv4->computeAt(tv5, -2);
+  tv3->computeAt(tv4, -1);
+  tv2->computeAt(tv3, 0);
+  tv2->split(0, 8);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->computeAt(tv5, -2);
+
+  tv5->axis(1)->parallelize(ParallelType::TIDy);
+  tv5->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor in1 = at::randn({16}, options);
+  at::Tensor in2 = at::randn({12, 16}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {in1, in2});
+  auto cg_outputs = fe.runFusion({in1, in2});
+
+  auto tv_ref = in1 + in2;
+
+  testValidate(&fusion, cg_outputs, {in1, in2}, {tv_ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionSkipReplay_CUDA) {
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* tv0 = makeContigTensor(1);
+    TensorView* tv1 = makeContigTensor(2);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    auto tv2 = broadcast(tv0, {false, true});
+    auto tv3 = add(tv2, tv1);
+    fusion.addOutput(tv3);
+
+    tv3->split(1, 2, false);
+
+    TransformPropagatorWithCheck propagator(tv3);
+    MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
+  }
+
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* tv0 = makeContigTensor(3);
+    fusion.addInput(tv0);
+
+    auto tv1 = sum(tv0, {0, 2});
+    auto tv2 = sin(tv1);
+    fusion.addOutput(tv2);
+
+    tv0->split(1, 2, false);
+
+    TransformPropagatorWithCheck propagator(tv0);
+    MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
+  }
+}
+
+TEST_F(NVFuserTest, FusionInlineRepro1803_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeContigTensor(2);
+
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tvs = Welford(tv1, {1});
+  auto tvo = set(tvs.var_sum);
+  fusion.addOutput(tvo);
+
+  tvo->split(0, 16);
+  tvo->axis(1)->parallelize(ParallelType::Unroll);
+
+  tv0->computeAt(tvo, -1, ComputeAtMode::BestEffort);
+
+  TORCH_CHECK(
+      tvs.var_sum->getComputeAtPosition() == tvs.avg->getComputeAtPosition());
+  TORCH_CHECK(
+      tvs.var_sum->getComputeAtPosition() == tvs.n->getComputeAtPosition());
+  TORCH_CHECK(tvs.var_sum->getComputeAtPosition() == 1);
 }
 
 } // namespace jit
