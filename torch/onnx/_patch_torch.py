@@ -1,11 +1,12 @@
 """Importing this patches torch._C classes to add ONNX conveniences."""
 import numbers
 import re
-from typing import Iterable, Tuple, Union
+from typing import Any, Iterable, Tuple, Union
 
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
+from torch.onnx import _deprecation
 
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import utils
@@ -146,7 +147,7 @@ def _is_onnx_list(value):
     )
 
 
-def _scalar(x):
+def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
@@ -159,7 +160,7 @@ def _is_caffe2_aten_fallback():
     )
 
 
-def _add_attribute(node: _C.Node, key: str, value, aten: bool):
+def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _ATTR_PATTERN.match(key)
     if m is None:
@@ -184,8 +185,10 @@ def _add_attribute(node: _C.Node, key: str, value, aten: bool):
     return getattr(node, f"{kind}_")(name, value)
 
 
-# TODO: We might not need this anymore, since most scalars now show up as tensors
-# TODO(#76254): Remove the helper function if not needed.
+# TODO(#76254): Remove the deprecated function.
+@_deprecation.deprecated(
+    "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
+)
 def _graph_constant(
     g,
     value,
@@ -239,6 +242,12 @@ def _graph_constant(
     return g.op("Constant", *args, value_t=tensor, **kwargs)
 
 
+# TODO(#76254): Remove the deprecated function.
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "Internally use '_node_get' in symbolic_helper instead.",
+)
 def _node_getitem(self, k):
     """Gets attributes of a node which is polymorphic over return type.
 
