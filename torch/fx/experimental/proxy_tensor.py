@@ -145,6 +145,10 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+    with proxy_mode.restore():
+        r = func_overload.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
     if func_overload == aten._local_scalar_dense.default:
         t, = args
         assert not kwargs
