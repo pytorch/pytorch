@@ -1191,6 +1191,7 @@ def merge(pr_num: int, repo: GitRepo,
     initial_commit_sha = pr.last_commit()['oid']
     explainer = TryMergeExplainer(force, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
     on_green, land_checks = explainer.get_flags()
+    land_check_commit = None
 
     check_for_sev(org, project, force)
 
