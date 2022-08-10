@@ -766,10 +766,6 @@ void smooth_l1_loss_impl(
           MPSGraphTensor *targetTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()));
 
           // Setup tensors
-          MPSGraphTensor *mpsGraphZeroTensor = [mpsGraph constantWithScalar: 0.0
-                                                                   dataType: inputTensor.dataType];
-          MPSGraphTensor *mpsGraphOneTensor = [mpsGraph constantWithScalar: 1.0
-                                                                  dataType: inputTensor.dataType];
           MPSGraphTensor *mpsGraphHalfTensor = [mpsGraph constantWithScalar: 0.5
                                                                    dataType: inputTensor.dataType];
           MPSGraphTensor *betaTensor = [mpsGraph constantWithScalar: beta
@@ -1066,8 +1062,6 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
         MPSGraphTensor* outputTensor_ = nil;
     };
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
-    MPSStream* stream = getCurrentMPSStream();
 
     @autoreleasepool {
         string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" + getTensorsStringKey({input, target});
