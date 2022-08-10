@@ -9,9 +9,6 @@ namespace mps {
   void MPSGuardImpl::createEvent(
     mpsEvent_t* event,
     const EventFlag flag) const {
-    id<MTLDevice> mtl_device = MPSDevice::getInstance()->device();
-    // when static casting we already create an _event object.
-    auto mps_event = static_cast<mpsEvent_t>(*event);
   }
 
   void MPSGuardImpl::destroyEvent(
