@@ -415,15 +415,41 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
-  list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-      torch::cudart
-      caffe2::cusparse
-      caffe2::curand
-      caffe2::cufft
-  )
-  if(NOT BUILD_LAZY_CUDA_LINALG)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS caffe2::cusolver)
+  if($ENV{ATEN_STATIC_CUDA})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      ${CUDA_LIBRARIES}
+      CUDA::cusparse_static
+      CUDA::curand_static
+      CUDA::cufft_static_nocallback
+    )
+   if(NOT BUILD_LAZY_CUDA_LINALG)
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       CUDA::cusolver_static
+     )
+   endif()
+  else()
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      ${CUDA_LIBRARIES}
+      CUDA::cusparse
+      CUDA::curand
+      CUDA::cufft
+    )
+   if(NOT BUILD_LAZY_CUDA_LINALG)
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       CUDA::cusolver
+     )
+   endif()
   endif()
+
+  if(CAFFE2_USE_CUDNN)
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
+  endif()
+  if($ENV{ATEN_STATIC_CUDA})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      CUDA::culibos
+      CUDA::cudart_static
+    )
+  endif($ENV{ATEN_STATIC_CUDA})
 endif()
 
 
