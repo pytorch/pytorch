@@ -1004,24 +1004,18 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
     // some negative sizes remain to be infered
     if (ndims_underlying < ndims_underlying_reshaped) {
       // replace negative sizes for old dimensions with old sizes
-      int64_t numel = 1, numel_reshaped = 1;
       for (int64_t idim = 0; idim < ndims_underlying; idim++) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
         TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
         if (size_reshaped == -1) {
           size_reshaped = size[idim];
         }
-        numel *= size[idim];
-        numel_reshaped *= size_reshaped;
       }
       // infer negative size for new dimension
       int64_t infer_index = -1;
       for (int64_t idim = ndims_underlying; idim < ndims_underlying_reshaped; idim++) {
         const int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped >= 0) {
-          numel_reshaped *= size_reshaped;
-        }
-        else if (size_reshaped == -1) {
+        if (size_reshaped == -1) {
           if (infer_index > -1) {
             throw std::runtime_error("only one dimension can be inferred");
           }
@@ -1029,7 +1023,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
             infer_index = idim;
           }
         }
-        else {
+        else if (size_reshaped < 0) {
           AT_ERROR("invalid shape dimension ", size_reshaped);
         }
       }
