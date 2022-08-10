@@ -368,9 +368,6 @@ class MaskedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        if func is torch.ops.aten.stride:
-            return None
-
         func = func.overloadpacket
 
         from .reductions import apply_reduction, is_reduction
