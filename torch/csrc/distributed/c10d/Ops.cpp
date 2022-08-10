@@ -18,7 +18,8 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>> allreduce_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
@@ -29,8 +30,9 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>> allr
       AllreduceOptions{
           static_cast<ReduceOp>(reduce_op),
           std::chrono::milliseconds(timeout)});
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
-      std::move(tensor_vec), work);
+  return std::
+      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+          std::move(tensor_vec), work);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
@@ -211,7 +213,9 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce(
     const AllreduceOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allreduce_", "")
-                       .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+                       .typed<std::tuple<
+                           std::vector<at::Tensor>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,

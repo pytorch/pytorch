@@ -164,8 +164,12 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        args[0].proxy = proxy_res
-        proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+        flat_args, args_spec = pytree.tree_flatten(args[0])
+
+        for i, a in enumerate(flat_args):
+            a.proxy = proxy_res[0][i]
+            proxy_res[0][i].node.meta['tensor_meta'] = _extract_tensor_metadata(a)
+
     inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
 
     # Needed to sync up metadata for in-place operators that modify metadata

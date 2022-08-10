@@ -6,13 +6,10 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from contextlib import (
-    nullcontext,
-    suppress,
-)
 
 import torch
 import torch.distributed as dist
@@ -34,7 +31,6 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
