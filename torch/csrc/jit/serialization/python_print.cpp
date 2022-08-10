@@ -751,7 +751,7 @@ struct PythonPrintImpl {
       auto version_entry = get_operator_version_map().find(schema_name);
       if (version_entry != get_operator_version_map().end()) {
         const auto& entry = version_entry->second;
-        // TODO (tugsuu) move this calculation into a seperate step.
+        // TODO (tugsuu) move this calculation into a separate step.
         uint64_t current_version = entry[entry.size() - 1].bumped_at_version;
         uint64_t legacy_version_map_version =
             get_min_version_for_kind(node->kind());
