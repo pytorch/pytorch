@@ -139,7 +139,14 @@ Delays a cos being executed on the unwraptensor until its used. Simulates a Comm
 class UnwrapTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
-        r = torch.Tensor._make_wrapper_subclass(cls, tensor.size(), dtype=tensor.dtype, device=tensor.device, layout=tensor.layout, requires_grad=tensor.requires_grad,)
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            tensor.size(),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
         r._tensor = tensor
         return r
 
