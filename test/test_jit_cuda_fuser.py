@@ -669,12 +669,12 @@ class TestCudaFuser(JitTestCase):
                       torch.isreal,
                       torch.nn.functional.softplus,
                       torch.nn.functional.gelu,
+                      torch.nn.functional.silu,
                       torch.relu,
                       torch.sigmoid,
                       torch.bitwise_not,
                       torch.tan,
-                      torch.tanh,
-                      torch.nn.functional.silu]
+                      torch.tanh]
         skip_complex = {torch.rsqrt, torch.reciprocal}
         for op, dtype in itertools.product(operations, data_types):
             if dtype.is_complex and op in skip_complex:
@@ -5090,7 +5090,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         def _get_extremal_sample(sample: SampleInput, val, dtype):
             extremal_sample = SampleInput(
                 input=_get_extremal_input(sample.input, val, dtype),
-                args=[_get_extremal_input(x, val, dtype) for x in sample.args],
+                args=tuple(_get_extremal_input(x, val, dtype) for x in sample.args),
                 kwargs={k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()},
             )
             return extremal_sample
@@ -5099,7 +5099,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             vals = [float('inf'), float('-inf'), float('nan')]
             if dtype.is_complex:
                 complex_vals = itertools.product(vals, vals)
-                vals = list(map(lambda x: complex(*x), complex_vals))
+                vals = tuple(map(lambda x: complex(*x), complex_vals))
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 
