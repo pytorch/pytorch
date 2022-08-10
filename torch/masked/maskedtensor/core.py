@@ -15,7 +15,22 @@ __all__ = [
 
 
 def is_masked_tensor(a):
-    """ Returns True if the input is a MaskedTensor, else False """
+    r""" Returns True if the input is a MaskedTensor, else False
+
+    Args:
+        a: input MaskedTensor
+
+    Shape:
+        a: :math:`(*)`, where :math:`*` means any number of dimensions.
+
+    Examples:
+
+        >>> data = torch.arange(6).reshape(2,3)
+        >>> mask = torch.tensor([[True, False, False], [True, True, False]])
+        >>> mt = masked_tensor(data, mask)
+        >>> is_masked_tensor(mt)
+        True
+    """
     return isinstance(a, MaskedTensor)
 
 
