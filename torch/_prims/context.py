@@ -13,7 +13,9 @@ import torch._refs.special
 import torch.overrides
 
 from torch._prims_common import torch_function_passthrough
+from torch._prims.nvfuser_prims import NvfuserPrimsMode
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+from torch.utils._mode_utils import autodispatch_below_autograd
 
 
 @functools.lru_cache(None)
@@ -65,37 +67,37 @@ def all_prims():
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
 
 
-class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
-    """
-    Switches the interpretation of torch.ops.prims.* functions to
-    use nvFuser's prims in torch.ops.nvprims.*
+# class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
+#     """
+#     Switches the interpretation of torch.ops.prims.* functions to
+#     use nvFuser's prims in torch.ops.nvprims.*
 
-    >>> with NvfuserPrimMode():
-    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
+#     >>> with NvfuserPrimMode():
+#     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 
-    By default, this context manager will fall back on the torch.ops.prims* if the
-    nvprim does not exist.
-    """
+#     By default, this context manager will fall back on the torch.ops.prims* if the
+#     nvprim does not exist.
+#     """
 
-    def __torch_function__(
-        self,
-        orig_func: Callable,
-        types: Sequence,
-        args: Sequence[Any] = (),
-        kwargs: Dict = None,
-    ):
-        if kwargs is None:
-            kwargs = {}
-        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
-            orig_func, torch._ops.OpOverloadPacket
-        ):
-            namespace = str(orig_func).split(".")[0]
-            name = str(orig_func).split(".")[1]
-            if namespace == "prims":
-                nvfunc = getattr(torch.ops.nvprims, name, None)
-                if nvfunc is not None:
-                    return nvfunc(*args, **kwargs)
-        return orig_func(*args, **kwargs)
+#     def __torch_function__(
+#         self,
+#         orig_func: Callable,
+#         types: Sequence,
+#         args: Sequence[Any] = (),
+#         kwargs: Dict = None,
+#     ):
+#         if kwargs is None:
+#             kwargs = {}
+#         if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
+#             orig_func, torch._ops.OpOverloadPacket
+#         ):
+#             namespace = str(orig_func).split(".")[0]
+#             name = str(orig_func).split(".")[1]
+#             if namespace == "prims":
+#                 nvfunc = getattr(torch.ops.nvprims, name, None)
+#                 if nvfunc is not None:
+#                     return nvfunc(*args, **kwargs)
+#         return orig_func(*args, **kwargs)
 
 
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
@@ -160,7 +162,7 @@ def _is_node_supported_nvfuser(node):
 
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch.overrides.enable_torch_function_mode(
+    with autodispatch_below_autograd(), torch.overrides.enable_torch_function_mode(
         torch_function_mode, replace=torch_function_mode.inner
     ):
         gm = get_isolated_graphmodule(func, args, kwargs)
@@ -169,6 +171,9 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     any_unsupported = any(
         not _is_node_supported_nvfuser(node) for node in call_function_nodes
     )
+    print(func)
+    print(list(filter(lambda n: n.op == "call_function", gm.graph.nodes)))
+    print(any_unsupported)
     return any_unsupported
 
 

@@ -137,3 +137,11 @@ def no_dispatch():
         yield
     finally:
         del guard
+
+@contextmanager
+def autodispatch_below_autograd():
+    guard = torch._C._AutoDispatchBelowAutograd()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
