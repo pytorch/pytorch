@@ -713,11 +713,11 @@ class PolynomialLR(_LRScheduler):
 
     Example:
         >>> # Assuming optimizer uses lr = 0.001 for all groups
-        >>> # lr = 0.00010   if epoch == 0
+        >>> # lr = 0.001     if epoch == 0
         >>> # lr = 0.00075   if epoch == 1
         >>> # lr = 0.00050   if epoch == 2
         >>> # lr = 0.00025   if epoch == 3
-        >>> # lr = 0.0      if epoch >= 4
+        >>> # lr = 0.0       if epoch >= 4
         >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
         >>> for epoch in range(100):
         >>>     train(...)
