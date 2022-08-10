@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.parallel.scatter_gather import _is_namedtuple
+from torch.nn.parallel.scatter_gather import _is_namedtuple  # type: ignore[attr-defined]
 
 from torch.nn.utils.rnn import PackedSequence
 

@@ -80,15 +80,11 @@ class TestFSDPMisc(FSDPTest):
         # Ensure hooks are registered
         for x in out:
             self.assertNotEqual([], list(x._backward_hooks.values()))
-        # print(out._backward_hooks)
-        # res = torch.cat([e for e in out]).sum()
-        # res.backward()
-        # params = m.params
-        # for p in params:
-        #     full_param_padded = p._full_param_padded
-        #     print(full_param_padded.storage().size())
-        # Ensure they are resharded
-        dist.barrier()
+
+        # TODO: we should check backward() and param is resharded
+        # as well, but this is blocked by
+        # https://github.com/pytorch/pytorch/issues/83107 and
+        # https://github.com/pytorch/pytorch/issues/83129
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
