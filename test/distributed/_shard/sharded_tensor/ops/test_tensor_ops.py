@@ -62,6 +62,14 @@ class TestTensorOps(ShardedTensorTestBase):
         st.copy_(ones_st)
         self.assertTrue(torch.equal(st, ones_st))
 
+        # no grad inplace_copy should work between two with different requires_grad
+        st_with_grad = sharded_tensor.rand(spec, (12, 5), requires_grad=True)
+        self.assertTrue(st_with_grad.requires_grad)
+        self.assertFalse(ones_st.requires_grad)
+        with torch.no_grad():
+            st_with_grad.copy_(ones_st)
+            self.assertEqual(st_with_grad.local_tensor(), ones_st.local_tensor())
+
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
