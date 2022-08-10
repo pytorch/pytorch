@@ -200,6 +200,7 @@ def export(
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    full_model_check: bool = False,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -470,7 +471,10 @@ def export(
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
               only if the type of the ``nn.Module`` is found in the set.
-
+        full_model_check (bool, default False): if True, ONNX checker will give the exported model a
+            strict shape type inference check to make sure it's a valid ONNX model. Notice that only a
+            valid ONNX model can be executed on ONNXRUNTIME. Default to False, as users might run the
+            model on different platforms that don'e need a valid ONNX model.
     Raises:
       CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
         model to the file ``f`` even if this is raised.
@@ -492,6 +496,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        full_model_check=full_model_check,
     )
 
 
@@ -1352,6 +1357,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    full_model_check=False,
 ):
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
@@ -1539,7 +1545,7 @@ def _export(
                 not val_use_external_data_format
             ):
                 try:
-                    _C._check_onnx_proto(proto, full_check=True)
+                    _C._check_onnx_proto(proto, full_check=full_model_check)
                 except RuntimeError as e:
                     raise errors.CheckerError(e)
     finally:

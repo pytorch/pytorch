@@ -1366,11 +1366,8 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
-  onnx::checker::check_model(model);
-
-  if (full_check) {
-    onnx::shape_inference::InferShapes(model);
-  }
+  // full check includes strict shape inference check
+  onnx::checker::check_model(model, full_check = full_check);
 }
 
 } // namespace jit
