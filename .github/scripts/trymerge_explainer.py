@@ -78,7 +78,7 @@ class TryMergeExplainer(object):
         if commit is not None:
             return (
                 " and land check "
-                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})."
+                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})"
             )
         else:
             return ""
