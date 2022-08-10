@@ -182,9 +182,6 @@ def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
-    """
- We generate the constraint: input = output
- """
     output, counter = gen_tvar(counter)
     symbols[n] = output
 
