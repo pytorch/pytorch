@@ -1040,7 +1040,6 @@ if(CUDAToolkit_FOUND)
 
   # nvtools can be installed outside the CUDA toolkit directory,
   # so search the NVTOOLSEXT_PATH windows only environment variable
-  set(CMAKE_FIND_DEBUG_MODE ON)
   set(nvToolsExt_EXTRA_PATHS)
   if(WIN32)
      set(nvToolsExt_EXTRA_PATHS
@@ -1062,8 +1061,6 @@ if(CUDAToolkit_FOUND)
         EXTRA_HINTS ${nvToolsExt_EXTRA_PATHS}
         EXTRA_INCLUDE_DIRS "${CUDAToolkit_nvToolsExt_INCLUDE_DIR}")
   endif()
-
-  set(CMAKE_FIND_DEBUG_MODE OFF)
 
   _CUDAToolkit_find_and_add_import_lib(OpenCL)
 endif()
