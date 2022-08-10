@@ -62,10 +62,12 @@ def _inline_flatten_list(inputs, res_list):
     return res_list
 
 
-def _unpack_to_numpy(values):
+def _unpack_to_numpy(values, cast_onnx_accepted=True):
     value_unpacked = []
     for value in values:
-        value_unpacked.extend(utils.unpack_quantized_tensor(value))
+        value_unpacked.extend(
+            utils.unpack_quantized_tensor(value, cast_onnx_accepted=cast_onnx_accepted)
+        )
     return [_to_numpy(v) for v in value_unpacked]
 
 
@@ -122,7 +124,7 @@ def _compare_ort_pytorch_outputs(
     check_dtype: bool,
 ):
     pt_outs, _ = torch.jit._flatten(pt_outs)
-    pt_outs = _unpack_to_numpy(pt_outs)
+    pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
 
     assert len(ort_outs) == len(
         pt_outs

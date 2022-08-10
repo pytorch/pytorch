@@ -4909,6 +4909,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     torch.argmax(input),
                     torch.argmin(input, keepdim=True),
                     torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
                 )
 
         self.run_test(ArgminArgmaxModel(), input)
@@ -8707,6 +8709,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(10, 3, 53)
         self.run_test(M(), (x))
+
+    def test_rrelu_eval(self):
+        x = torch.tensor([0.5, -0.5])
+        self.run_test(torch.nn.RReLU(0.1, 0.3).eval(), x)
 
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
