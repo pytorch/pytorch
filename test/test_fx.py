@@ -567,7 +567,7 @@ class TestFX(JitTestCase):
 
         # nodes after Transformer should still preserve the original node's stack trace
         for node in new_gm.graph.nodes:
-            if node.op == 'output':
+            if node.op in {'placeholder', 'output'}:
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
