@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, gradcheck
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -320,6 +320,32 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
+    def _test_complex_2d(self, optimizer_constructor, f=None):
+        if f is None:
+            f = rosenbrock
+        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
+        a1_real = a1.real.clone().detach()
+        a1_imag = a1.imag.clone().detach()
+        a1_real.requires_grad_()
+        a1_imag.requires_grad_()
+        optim1 = optimizer_constructor([a1])
+        optim2 = optimizer_constructor([a1_real, a1_imag])
+
+        for i in range(10):
+            optim1.zero_grad()
+            optim2.zero_grad()
+            a2 = torch.complex(a1_real, a1_imag)
+            f(a1).backward()
+            f(a2).backward()
+
+            self.assertEqual(a1.grad.real, a1_real.grad)
+            self.assertEqual(a1.grad.imag, a1_imag.grad)
+
+            optim1.step()
+            optim2.step()
+            self.assertEqual(a1.real, a1_real)
+            self.assertEqual(a1.imag, a1_imag)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -469,9 +495,8 @@ class TestOptim(TestCase):
 
         kIterations = 4
         device = 'cuda'
-
         for optimizers, params in optimizer_pairs_with_flags:
-            res = []
+            res, state = [], []
             for opt in optimizers:
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
@@ -495,10 +520,20 @@ class TestOptim(TestCase):
 
                     optimizer.step()
 
+                state.append(optimizer.state)
                 res.append(model.parameters())
 
-            for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2, atol=5e-5, rtol=0)
+            st_state = state[0]
+            mt_state = state[1]
+            for st_p, mt_p in zip(res[0], res[1]):
+                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
+
+                # check that optimizer states are the same
+                st_p_state = st_state[st_p]
+                mt_p_state = mt_state[mt_p]
+
+                for k in st_p_state:
+                    self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -566,26 +601,13 @@ class TestOptim(TestCase):
                  lambda opt: ReduceLROnPlateau(opt)],
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-
-    # Test whether variance parameter is always real
-    def test_complex_adam_variance(self):
-        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        target = torch.randn(5, 5, dtype=torch.complex64)
-        optimizer = optim.Adam([complex_param], lr=0.001)
-
-        for i in range(20):
-            optimizer.zero_grad()
-            loss = (complex_param - target).pow(2).sum()
-            loss.backward()
-            optimizer.step()
-            for idx in optimizer.state_dict()['state'].keys():
-                variance = optimizer.state_dict()['state'][idx]['exp_avg_sq']
-                self.assertEqual(variance.imag, torch.zeros(variance.imag.shape))
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
@@ -606,6 +628,7 @@ class TestOptim(TestCase):
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
@@ -771,6 +794,7 @@ class TestOptim(TestCase):
                     [weight, bias], lr=1e-1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
@@ -840,17 +864,20 @@ class TestOptim(TestCase):
     def test_asgd(self):
         for optimizer in [optim.ASGD, optim_mt.ASGD]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, t0=100)
+                    lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, weight_decay=1)
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
@@ -2679,6 +2706,31 @@ class TestSWAUtils(TestCase):
         self.assertEqual(dnn.bn.momentum, 0.3)
 
 instantiate_parametrized_tests(TestLRScheduler)
+
+
+def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
+    # Ignored is the list of values in `opt_differentiable_state`, we do this
+    # for `gradcheck` to correctly track the state tensors as function inputs
+    # because otherwise it can't unpack the values in the `opt_differentiable_state`
+    # dict
+    p = p.clone()
+    p.grad = grad
+    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt = opt_class([p], **kwargs)
+    opt.state.update(opt_differentiable_state)
+    opt.step()
+    return (p,) + tuple(opt_differentiable_state.values())
+
+
+class TestDifferentiableOptimizer(TestCase):
+
+    def test_sgd(self):
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state = {'momentum_buffer': mbuff}
+        gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
 
 if __name__ == '__main__':
     run_tests()

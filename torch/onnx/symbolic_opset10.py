@@ -8,9 +8,12 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import (  # noqa: F401
+    _patch_torch,
+    _type_utils,
+    symbolic_helper,
+    symbolic_opset9 as opset9,
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -485,8 +488,9 @@ def isfinite(g, input):
 
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    # TODO(justinchuby): Extract all the cast ops into a helper function.
     zero_point = g.op(
-        "Cast", zero_point, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+        "Cast", zero_point, to_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
@@ -502,7 +506,7 @@ def nan_to_num(g, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
+    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)

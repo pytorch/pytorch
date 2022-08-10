@@ -415,6 +415,17 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         sym_size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.strides());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+        sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);

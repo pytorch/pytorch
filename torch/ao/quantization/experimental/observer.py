@@ -23,7 +23,7 @@ class APoTObserver(ObserverBase):
         self,
         b,
         k,
-            dtype=torch.int32) -> None:
+            dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.b = b
         self.k = k
@@ -43,11 +43,12 @@ class APoTObserver(ObserverBase):
         min_val: optional arg that can override min_val internal attribute
         max_val: optional arg that can override max_val internal attribute
     Returns:
+        alpha: alpha quantization parameter, max of abs value of observed values
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
         quantization_levels: non-uniform quantization levels (fp representation)
         level_indices: int representation of quantization_levels indices
     """
-    def _calculate_qparams(self, signed, min_val=None, max_val=None):
+    def _calculate_qparams(self, signed: bool, min_val=None, max_val=None):
         if min_val is not None:
             self.min_val = min_val
         if max_val is not None:
@@ -119,7 +120,9 @@ class APoTObserver(ObserverBase):
 
         return (alpha, gamma, quantization_levels, level_indices)
 
-    r"""Records the running minimum and maximum of ``x``."""
+    r"""Records the running minimum and maximum of ``x``.
+        Args:
+            x_orig: Tensor to be observed for min and max val"""
     def forward(self, x_orig):
         if x_orig.numel() == 0:
             return x_orig
@@ -133,10 +136,17 @@ class APoTObserver(ObserverBase):
         self.max_val = max_val
         return x_orig
 
-    def quant_levels_visualization(self, obs_result, filename):
+    r"""Displays visualization of APoT quantization levels
+        Args:
+            observer: APoTObserver to calculate qparams
+            signed: bool to indicate if qparams should be signed/unsigned
+    """
+    def quant_levels_visualization(self, signed=False):
+        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(signed)
+
         xs = [float(x) / 1000.0 for x in range(1000)]
-        ys = [apot_to_float(float_to_apot(x, obs_result[1], obs_result[2]),
-                            obs_result[1], obs_result[2]).item() for x in xs]
+        ys = [apot_to_float(float_to_apot(x, quantization_levels, level_indices, alpha),
+                            quantization_levels, level_indices).item() for x in xs]
 
         f = plt.figure(figsize=(15, 10))
 

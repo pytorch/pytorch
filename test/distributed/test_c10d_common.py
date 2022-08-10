@@ -9,7 +9,10 @@ import time
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from contextlib import suppress
+from contextlib import (
+    nullcontext,
+    suppress,
+)
 
 import torch
 import torch.distributed as dist
@@ -19,18 +22,21 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.distributed.distributed_c10d as c10d
-from torch.utils.checkpoint import checkpoint
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch._C import _disabled_torch_function_impl
+from torch.fx.experimental.proxy_tensor import (
+    ProxyTensor,
+    make_fx,
+)
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_gloo,
     skip_if_lt_x_gpu,
 )
-
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
@@ -39,6 +45,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize
 )
+from torch.utils._pytree import tree_map
+from torch.utils.checkpoint import checkpoint
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
@@ -1237,34 +1246,6 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
 
-class CompilerTest(MultiProcessTestCase):
-    def setUp(self):
-        super(CompilerTest, self).setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(CompilerTest, self).tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def test_make_fx(self):
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '6789'
-        dist.init_process_group("gloo", rank=self.rank, world_size=self.world_size)
-
-        def fn(x):
-            y = x + x
-            dist.all_reduce(y)
-            return y * 2
-
-        x = torch.ones(2, 2) * self.rank
-        fx_fn = make_fx(fn)(x)
-
-        self.assertEqual(fn(x), fx_fn(x))
-
-
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
         super(PythonProcessGroupExtensionTest, self).setUp()
@@ -1353,6 +1334,100 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
+
+
+def wait_comm(comm_tensor):
+    comm_tensor._work.wait()
+    return comm_tensor._tensor
+
+
+class CommTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor, work: torch.distributed._Work):
+
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            tensor.size(),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
+        r._tensor = tensor
+        r._work = work
+        return r
+
+    def __repr__(self):
+        return f"CommTensor({self._tensor})"
+
+    # disable __torch_function__ so that CommTensor can recursively dispatch
+    # ProxyTensor in make_fx
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+
+        def unwrap(e):
+            if isinstance(e, CommTensor):
+                t = e._tensor
+                w = e._work
+
+                if isinstance(t, ProxyTensor):
+                    # in tracing mode, add wait_comm node to graph
+                    proxy_res = t.proxy_mode.tracer.create_proxy(
+                        'call_function',
+                        wait_comm,
+                        (e,),
+                        {},
+                        name="wait_comm"
+                    )
+                    t.proxy = proxy_res
+                    return t
+                else:
+                    # in eager mode, simply wait
+                    w.wait()
+                    return t
+            else:
+                return e
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+
+        return func(*args, **kwargs)
+
+
+class CompilerTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CompilerTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(CompilerTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _get_process_group(self):
+        raise NotImplementedError("To be implemented by subclass")
+
+    def _test_work_wait(self, x):
+        pg = self._get_default_group()
+
+        def fn(x):
+            y = x + x
+            work = dist.all_reduce(y, group=pg, async_op=True)
+            y = CommTensor(y, work)
+            return y * 2
+
+        xx = x.clone()
+
+        fx_fn = make_fx(fn)(xx)
+
+        y = fn(x)
+        yy = fx_fn(xx).elem
+
+        self.assertEqual(y, yy)
 
 
 if __name__ == "__main__":

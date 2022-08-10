@@ -1,6 +1,5 @@
 // This file registers special JIT operators used to implement the PyTorch CUDA
 // API in TorchScript.
-#if !defined(USE_ROCM)
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/jit/cuda/cuda.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -167,4 +166,3 @@ RegisterOperators const reg({
 } // namespace
 } // namespace jit
 } // namespace torch
-#endif

@@ -1825,7 +1825,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_grad_layout_1devicemodule_1replicaperprocess(self):
         dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         # Tells DDP to use just one device.
@@ -2745,6 +2744,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
+
+
+class CompilerTest(test_c10d_common.CompilerTest):
+
+    def _get_default_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+    @skip_if_lt_x_gpu(2)
+    def test_work_wait_gpu(self):
+        self._test_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+
 
 if __name__ == "__main__":
     assert (
