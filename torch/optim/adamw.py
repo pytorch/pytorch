@@ -257,6 +257,12 @@ def _single_tensor_adamw(params: List[Tensor],
         if capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)
+
         # update step
         step_t += 1
 
@@ -336,6 +342,11 @@ def _multi_tensor_adamw(params: List[Tensor],
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
+
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
+    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
+    params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
 
     # update steps
     torch._foreach_add_(state_steps, 1)
