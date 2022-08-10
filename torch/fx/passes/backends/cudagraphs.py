@@ -1,3 +1,4 @@
+import copy
 import torch
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
@@ -6,6 +7,28 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils._pytree import tree_map
 
 import operator
+
+
+import difflib
+
+red = lambda text: f"\033[38;2;255;0;0m{text}\033[38;2;255;255;255m"
+green = lambda text: f"\033[38;2;0;255;0m{text}\033[38;2;255;255;255m"
+blue = lambda text: f"\033[38;2;0;0;255m{text}\033[38;2;255;255;255m"
+white = lambda text: f"\033[38;2;255;255;255m{text}\033[38;2;255;255;255m"
+
+def get_edits_string(old, new):
+    result = ""
+    codes = difflib.SequenceMatcher(a=old, b=new).get_opcodes()
+    for code in codes:
+        if code[0] == "equal": 
+            result += white(old[code[1]:code[2]])
+        elif code[0] == "delete":
+            result += red(old[code[1]:code[2]])
+        elif code[0] == "insert":
+            result += green(new[code[3]:code[4]])
+        elif code[0] == "replace":
+            result += (red(old[code[1]:code[2]]) + green(new[code[3]:code[4]]))
+    return result
 
 class CudaGraphsSupport(OperatorSupport):
     # TODO: why is submodules passed here
@@ -43,11 +66,41 @@ def partition_cudagraphs(gm, inputs):
     must involve CUDA tensors only/
     """
 
+    keep_gm = copy.deepcopy(gm)
+
     FakeTensorProp(gm).propagate(*inputs)
     supported_ops = CudaGraphsSupport()
+    print(f"supported ops are {supported_ops}")
     # TODO: single node partition may be wrong due to the pessimization
     # from copying in and out the data.  Check in benchmarks, perhaps
     partitioner = CapabilityBasedPartitioner(gm, supported_ops, allows_single_node_partition=True)
     partitions = partitioner.propose_partitions()
     fused_graph = partitioner.fuse_partitions(partitions)
+
+    # print(f"partitioner is {partitioner}")
+    # print(f"partitions are {partitions}")
+    # print(f"fused graph is {fused_graph}")
+
+    # print("diff between gm and partitioner")
+    # print(get_edits_string(repr(gm), str(partitioner)))
+
+        
+    # print("diff between partitioner and partition")
+    # print(get_edits_string(str(partitioner), partitions))
+
+    # print("diff between partitions and fused graph")
+    # print(get_edits_string(partitions, str(fused_graph)))
+    
+
+    # print("diff between gm and fused_graph")
+    print(get_edits_string(str(keep_gm), str(fused_graph)))
+
+    print(f"original graph {keep_gm}")
+    print(f"fused graph {fused_graph}")
+    # print(gm)
+
+    # print(fused_graph)
+
     return fused_graph
+
+

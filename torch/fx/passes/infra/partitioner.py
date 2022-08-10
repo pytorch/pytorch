@@ -11,8 +11,8 @@ from collections import defaultdict
 import logging
 import itertools
 
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
 
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = None):
@@ -45,7 +45,13 @@ class CapabilityBasedPartitioner:
         # map of node to it's upstream dependency nodes
         # if A is found in dependency_map[B], then B depends on A (or a is an upstream depedency of b)
         self.dependency_map = self.__build_dependency_map()
+        logging.debug(f"Graph module is {self.graph_module}")
+        # logging.debug(f"operator support is {self.operator_support}")
+        logging.debug(f"single node partition allowed is {self.allows_single_node_partition}")
 
+    def __repr__(self):
+        # return f"graph module: {self.graph_module} operator support {self.operator_support} single node partitions allowed {self.allows_single_node_partition}"
+        return repr(self.graph_module)
     def __build_dependency_map(self) -> Dict[Node, Set[Node]]:
         dependency_map = defaultdict(set)
 
@@ -92,6 +98,8 @@ class CapabilityBasedPartitioner:
         for node in self.graph_module.graph.nodes:
             if self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node):
                 supported_nodes.append(node)
+        
+        logging.debug(f"Supported nodes are {supported_nodes}")
         return supported_nodes
 
     def propose_partitions(self) -> List[Partition]:
@@ -124,7 +132,7 @@ class CapabilityBasedPartitioner:
 
         # visit candidates in reversed topological order
         for node in reversed(candidates):
-            # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
+            # use Dict as an ordered set to ensure deterministic partitioning result (Python 3.7+), don't care value
             user_partitions: Dict[Partition, None] = {}
             for user_node in node.users:
                 if user_node in assignment:
@@ -134,7 +142,7 @@ class CapabilityBasedPartitioner:
                     user_partitions[Partition(nodes=[user_node])] = None
 
             # Filter out all the partitions that has dependency on other users
-            # TODO: find a better way to do this, rather than pair-wise comparision
+            # TODO: find a better way to do this, rather than pair-wise comparison
             user_partitions_list = list(user_partitions.keys())
             for i in range(len(user_partitions_list)):
                 for j in range(i + 1, len(user_partitions_list)):
@@ -142,8 +150,10 @@ class CapabilityBasedPartitioner:
                     pj = user_partitions_list[j]
                     dependency = self.__partition_depends_on(pi, pj)
                     if dependency == 1 and pj in user_partitions:
+                        logging.debug(f"filtered out {user_partitions[pj]}")
                         del user_partitions[pj]
                     elif dependency == -1 and pi in user_partitions:
+                        logging.debug(f"filtered out {user_partitions[pi]}")
                         del user_partitions[pi]
 
             # We use the following rules for partition assignment:
@@ -157,15 +167,21 @@ class CapabilityBasedPartitioner:
 
             if len(assigned_candidate_partition_ids) == 0:
                 # create a new partition
+                new_id = [str(x) for x in str(new_partition_id) if x.isdigit()]
+                logging.debug(f"assigned node: {node} to partition id {new_id}")
                 assign(node, next(new_partition_id))
+
             elif len(assigned_candidate_partition_ids) == 1:
                 id = assigned_candidate_partition_ids[0]
                 assign(node, id)
+                logging.debug(f"assigned node: {node} to id {id}")
+
             else:
                 # users are assigned to more than one partition, since user_partitions doesn't have
                 # dependency on each other, they can be fused into a single partition
                 id = assigned_candidate_partition_ids[0]
                 assign(node, id)
+                logging.debug(f"assigned node: {node} to id {id}")
 
                 reassignment: Dict[Node, int] = {}
                 for other_id in assigned_candidate_partition_ids[1:]:
@@ -173,9 +189,11 @@ class CapabilityBasedPartitioner:
                         reassignment[other_node] = id
                 for other_node in reassignment:
                     assign(other_node, id)
+                    logging.debug(f"reassigned node {other_node} to {id}")
+
 
         # post processing to re-assign "getitem" nodes into upstream partition
-        logger.debug("Reassigning getitem nodes to its producer node's partition...")
+        logging.debug("Reassigning getitem nodes to its producer node's partition...")
         nodes_reassignment: Dict[Node, int] = {}
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
@@ -196,7 +214,7 @@ class CapabilityBasedPartitioner:
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
-            logger.debug("Filtering out single node partitions...")
+            logging.debug("Filtering out single node partitions...")
             non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
@@ -212,12 +230,13 @@ class CapabilityBasedPartitioner:
 
         logging.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logging.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logging.debug(f"partition #{id}  {[node.name for node in partition.nodes]}")
 
         return list(partitions_by_id.values())
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
-        logging.debug("Fusing partitions...")
+        # for node0, node1 in partitions:
+        logging.debug(f"Fusing partitions {partitions}")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
 
