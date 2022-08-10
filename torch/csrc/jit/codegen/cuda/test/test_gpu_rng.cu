@@ -133,6 +133,40 @@ TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionRNGSimpleValidateWithCURand_CUDA) {
+  int64_t size = 128;
+  auto dtype = kFloat;
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(1, aten_to_data_type(dtype));
+  fusion->addInput(tv0);
+  auto tv1 = randlike(tv0);
+  auto tv2 = set(tv1);
+  fusion->addOutput(tv2);
+
+  tv2->split(0, 8);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv2, 1);
+
+  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+  at::Tensor t0 = at::zeros({size}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0});
+
+  at::manual_seed(0);
+  auto cg_outputs = fe.runFusion({t0});
+  auto out = cg_outputs[0];
+
+  at::manual_seed(0);
+  auto ref = generate_uniform(size, dtype);
+
+  testValidate(fusion, {out}, {t0}, {ref}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionBroadcastingRNG_CUDA) {
   for (auto dtype : {kFloat, kDouble}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
