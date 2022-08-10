@@ -13,10 +13,14 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
+
+import types
+import functools
 
 aten = torch.ops.aten
 
@@ -60,6 +64,16 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
+
+
+def copy_func(f):
+    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
+    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                           argdefs=f.__defaults__,
+                           closure=f.__closure__)
+    g = functools.update_wrapper(g, f)
+    g.__kwdefaults__ = f.__kwdefaults__
+    return g
 
 
 # Copied from functorch
@@ -115,22 +129,53 @@ def _create_new_input(x):
     if x.dtype != torch.float:
         return x + 1
     if x.is_leaf:
-        return torch.rand_like(x, requires_grad=True)
+        return torch.rand_like(x, requires_grad=x.requires_grad)
     else:
         return torch.rand_like(x)
 
-class TestProxyTensor(TestCase):
+"""
+Delays a cos being executed on the unwraptensor until its used. Simulates a CommTensor used
+"""
+class UnwrapTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor):
+        r = torch.Tensor._make_wrapper_subclass(cls, tensor.size(), dtype=tensor.dtype, device=tensor.device, layout=tensor.layout, requires_grad=tensor.requires_grad,)
+        r._tensor = tensor
+        return r
+
+    def __repr__(self):
+        # TODO: consider all_gather the local tensors for better debugging
+        return f"UnwrapTensor({self._tensor})"
+
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            ret = e
+            if isinstance(e, UnwrapTensor):
+                ret = e._tensor.cos()
+
+            return ret
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
+
+class TestGenericProxyTensor(TestCase):
+    # WARNING: if any of your inputs are index tensors, DO NOT use this
+    # function
     def _test(self, f, inps):
-        fx_f = make_fx(f)(*inps)
+        fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
         self.assertEqual(fx_f(*new_inps), f(*new_inps))
 
-    def test_make_fx_simple(self, device):
+    def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)
         self._test(f, (torch.randn(3),))
 
-    def test_scalar_device(self, device):
+    def test_scalar_device(self, device='cpu'):
         def f(a, b):
             return a + b
         self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
@@ -238,19 +283,44 @@ class TestProxyTensor(TestCase):
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
 
+    def test_make_fx_reentrant_dispatch(self):
+        def f(x):
+            return torch.ops.aten.norm.Scalar(x, 2.0)
+
+        def norm_decomp(x, p=2.0):
+            if p != 2.0:
+                raise RuntimeError("can't handle with p != 2")
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        decomp = {torch.ops.aten.norm.Scalar: norm_decomp}
+
+        traced = make_fx(f, decomposition_table=decomp, tracing_mode=self.tracing_mode)(torch.rand(3))
+
+        for n in traced.graph.nodes:
+            self.assertTrue("square" not in str(n.target))
+            self.assertTrue("norm" not in str(n.target))
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_backward_trace(self, device):
+    def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 
-        def f(x):
-            for a in mod.parameters():
-                a.grad = None
-            out = mod(x)
-            out.sum().backward()
-            return [a.grad for a in mod.parameters()]
+        # An old version of this test called the module directly.  This works
+        # for tracing_mode == "real", but for fake tensors, we also have to
+        # ensure that the parameters and buffers get wrapped in fake tensors
+        # because free fake tensors are not supported.  Fortunately stateless
+        # does precisely this for us.
+        def f(x, params, buffers):
+            for p in params.values():
+                p.grad = None
+            loss = stateless.functional_call(mod, {**params, **buffers}, (x,)).sum()
+            # I could have done this with the functional API, but there is
+            # plenty of exercising this; I want to show mutating API still
+            # works
+            loss.backward()
+            return [p.grad for p in params.values()]
 
-        inp = torch.randn(3, 3, 250, 250, requires_grad=True)
-        self._test(f, [inp])
+        inp = torch.randn(3, 3, 250, 250)
+        self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
 
     def test_proxy_tensor(self):
         def f_grad(x):
@@ -279,20 +349,8 @@ class TestProxyTensor(TestCase):
             return x + torch.randn(x.shape)
 
         # default behavior should trace factory functions
-        traced = make_fx(f)(torch.randn(3))
+        traced = make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3))
         self.assertTrue(
-            any(
-                node.target == aten.randn.default
-                for node in traced.graph.nodes
-            )
-        )
-
-    def test_mode_tracing_factory_function_no_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-        # setting the flag to false should not trace factory functions
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
-        self.assertFalse(
             any(
                 node.target == aten.randn.default
                 for node in traced.graph.nodes
@@ -303,7 +361,7 @@ class TestProxyTensor(TestCase):
         def f(x):
             return x.cos() + torch.randn(x.shape)
 
-        traced = make_fx(f)(torch.randn(3))
+        traced = make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3))
 
         self.assertTrue(all([isinstance(node.target, torch._ops.OpOverload)
                              for node in traced.graph.nodes if node.op == 'call_function']))
@@ -316,29 +374,20 @@ class TestProxyTensor(TestCase):
         self._test(f, [])
 
     def test_constant_proxy_tensor(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
         def f():
             val = torch.tensor(float('inf'))
             return torch.full((100, 100), val)
 
-        g = make_fx(f)()
+        g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
 
     def test_constant_proxy_tensor_mut(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
         def f():
             val = torch.tensor(float(1))
             val.add_(2)
             return torch.full((100, 100), val)
 
-        g = make_fx(f)()
-        self.assertEqual(g(), f())
-        # In case we mutated shared state in the g graph!
-        self.assertEqual(g(), f())
-
-        g = make_fx(f, tracing_mode="fake")()
+        g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
         # In case we mutated shared state in the g graph!
         self.assertEqual(g(), f())
@@ -349,37 +398,15 @@ class TestProxyTensor(TestCase):
             r, = torch.unbind(val, 0)
             return r.item()
 
-        g = make_fx(f)()
+        g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
-
-    def test_issue82547(self):
-        x = nn.Parameter(torch.randn(3, 3))
-
-        def f():
-            return torch.ops.aten.t.default(x)
-        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
-
-        class A(torch.Tensor):
-            pass
-
-        x = A(torch.randn(3, 3))
-        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
-
-    def test_use_fake_and_tensor(self):
-        def f(x, y):
-            z = torch.tensor([2.0, 3.0])
-            return x + y + z
-
-        g = make_fx(f, tracing_mode="fake")(torch.randn(2), torch.randn(2))
-        x, y = torch.randn(2), torch.randn(2)
-        self.assertEqual(g(x, y), f(x, y))
 
     def test_decomposition_interpreter(self):
         def fn(x):
             return torch.nn.functional.silu(x)
 
         x = torch.rand((4, 4))
-        fx_module = make_fx(fn, decomposition_table=None)(x)
+        fx_module = make_fx(fn, tracing_mode=self.tracing_mode, decomposition_table=None)(x)
 
         found_silu = False
         for n in fx_module.graph.nodes:
@@ -404,7 +431,7 @@ class TestProxyTensor(TestCase):
 
         self.assertEqual(fx_module(x), decomposed_module(x))
 
-    def test_make_fx_model_fwd_bwd(self, device):
+    def test_make_fx_model_fwd_bwd(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -421,7 +448,7 @@ class TestProxyTensor(TestCase):
             return list(params.values())
         input = torch.randn(3, 5, requires_grad=True)
         params = dict(model.named_parameters())
-        fx_f = make_fx(f)(input, params)
+        fx_f = make_fx(f, tracing_mode=self.tracing_mode)(input, params)
         # fx may change the order of parameters in list, so using set() to compare
         self.assertTrue(
             torch.allclose(fx_f(input, params)[0], f(input, params)[0])
@@ -434,7 +461,7 @@ class TestProxyTensor(TestCase):
             torch.allclose(fx_f(input, params)[1], f(input, params)[1])
         )
 
-    def test_make_fx_model_fwd_bwd_wgtupdate(self, device):
+    def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -456,7 +483,7 @@ class TestProxyTensor(TestCase):
         input = torch.randn(3, 5, requires_grad=True)
         params = dict(model.named_parameters())
         buffers = dict(model.named_buffers())
-        fx_f = make_fx(f)(input, params, buffers)
+        fx_f = make_fx(f, tracing_mode=self.tracing_mode)(input, params, buffers)
         # fx may change the order of parameters in list, so using set() to compare
         # also there is a numerical difference in results so changing atol from 1e-08 to 1e-03
         self.assertTrue(
@@ -469,6 +496,94 @@ class TestProxyTensor(TestCase):
             or
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
+
+    def test_trace_subclasses(self):
+        def f(x):
+            x = UnwrapTensor(x)
+            y = x * 2
+            return y
+
+        inp = [torch.randn(5)]
+        self._test(f, [torch.randn(5)])
+
+
+class TestGenericProxyTensorReal(TestGenericProxyTensor):
+    tracing_mode = "real"
+
+
+class TestGenericProxyTensorFake(TestGenericProxyTensor):
+    tracing_mode = "fake"
+
+
+def xfail_inherited_tests(tests):
+    """
+    Given a list of test names which are defined by a superclass of the
+    class this decorates, mark them as expected failure.  This is useful
+    if you are doing poor man's parameterized tests by subclassing a generic
+    test class.
+    """
+    def deco(cls):
+        for t in tests:
+            # NB: expectedFailure operates by mutating the method in question,
+            # which is why you have to copy the function first
+            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
+        return cls
+    return deco
+
+
+@skipIfNoSympy
+@xfail_inherited_tests([
+    "test_inplace_metadata",
+    "test_mode_tracing_factory_function",
+    "test_make_fx_overloads",
+    "test_make_fx_model_fwd_bwd_wgtupdate",
+    "test_make_fx_model_fwd_bwd",
+    "test_proxy_tensor",
+    "test_resnet18_backward_trace",
+    "test_trace_subclasses",
+])
+class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
+    tracing_mode = "symbolic"
+
+
+del TestGenericProxyTensor
+
+
+class TestRealProxyTensor(TestCase):
+    def test_mode_tracing_factory_function_no_factory_function(self):
+        def f(x):
+            return x + torch.randn(x.shape)
+        # setting the flag to false should not trace factory functions
+        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
+        self.assertFalse(
+            any(
+                node.target == aten.randn.default
+                for node in traced.graph.nodes
+            )
+        )
+
+class TestFakeProxyTensor(TestCase):
+    def test_issue82547(self):
+        x = nn.Parameter(torch.randn(3, 3))
+
+        def f():
+            return torch.ops.aten.t.default(x)
+        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(3, 3))
+        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
+
+    def test_use_fake_and_tensor(self):
+        def f(x, y):
+            z = torch.tensor([2.0, 3.0])
+            return x + y + z
+
+        g = make_fx(f, tracing_mode="fake")(torch.randn(2), torch.randn(2))
+        x, y = torch.randn(2), torch.randn(2)
+        self.assertEqual(g(x, y), f(x, y))
 
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
@@ -545,9 +660,7 @@ make_fx_failures = {
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
-    xfail('nanquantile'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('quantile'),
     xfail('tensor_split'),
     xfail('corrcoef'),
 
@@ -766,6 +879,7 @@ symbolic_tensor_failures = {
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
+    xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -859,6 +973,7 @@ symbolic_tensor_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('put', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
+    xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('rand_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
@@ -996,11 +1111,6 @@ class TestProxyTensorOpInfo(TestCase):
 
 
 only_for = ("cpu")
-instantiate_device_type_tests(
-    TestProxyTensor,
-    globals(),
-    only_for=only_for,
-)
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
 
