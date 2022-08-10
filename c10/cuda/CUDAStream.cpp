@@ -1,7 +1,7 @@
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -167,10 +167,12 @@ static void initDeviceStreamState(DeviceIndex device_index) {
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream, kDefaultFlags, kHighPriority));
 
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_stream_allocation(reinterpret_cast<uintptr_t>(lowpri_stream));
-      interp->trace_cuda_stream_allocation(reinterpret_cast<uintptr_t>(hipri_stream));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(lowpri_stream));
+      interp->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(hipri_stream));
     }
   }
 

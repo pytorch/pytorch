@@ -463,11 +463,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         registerPythonTensorClass(device, cls);
       });
 
-  _C_m.def(
-      "_activate_cuda_trace",
-      []() {
-        activateCUDATrace();
-      });
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 

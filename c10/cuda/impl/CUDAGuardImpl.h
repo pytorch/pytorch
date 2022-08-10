@@ -2,7 +2,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/core/impl/CUDATraceTLS.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -101,11 +101,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_creation(
-        reinterpret_cast<uintptr_t>(cuda_event)
-      );
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_creation(reinterpret_cast<uintptr_t>(cuda_event));
     }
   }
 
@@ -117,9 +115,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     int orig_device;
     C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_deletion(reinterpret_cast<uintptr_t>(cuda_event));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(cuda_event));
     }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
     C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
@@ -150,14 +148,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       createEvent(&cuda_event, flag);
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_record(
-          reinterpret_cast<uintptr_t>(cuda_event),
-          reinterpret_cast<uintptr_t>(cuda_stream.stream())
-      );
-    }
     *event = cuda_event;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_record(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
+    }
 
     // Resets device
     setDevice(orig_device);
@@ -174,12 +171,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_stream,
         cuda_event,
         /*flags (must be zero)=*/0));
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_wait(
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_wait(
           reinterpret_cast<uintptr_t>(cuda_event),
-          reinterpret_cast<uintptr_t>(cuda_stream.stream())
-      );
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
     }
     setDevice(orig_device);
   }

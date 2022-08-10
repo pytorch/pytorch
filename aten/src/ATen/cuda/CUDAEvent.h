@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/core/impl/CUDATraceTLS.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
@@ -46,9 +46,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     try {
       if (is_created_) {
         CUDAGuard guard(device_index_);
-        const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-        if (interp) {
-          interp->trace_cuda_event_deletion(reinterpret_cast<uintptr_t>(event_));
+        const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+        if (C10_UNLIKELY(interp)) {
+          interp->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
         }
         cudaEventDestroy(event_);
       }
@@ -118,9 +118,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_record(
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_record(
           reinterpret_cast<uintptr_t>(event_),
           reinterpret_cast<uintptr_t>(stream.stream())
       );
@@ -134,9 +134,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
-      const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-      if (interp) {
-        interp->trace_cuda_event_wait(
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        interp->trace_gpu_event_wait(
             reinterpret_cast<uintptr_t>(event_),
             reinterpret_cast<uintptr_t>(stream.stream())
         );
@@ -183,9 +183,9 @@ private:
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
-    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
-    if (interp) {
-      interp->trace_cuda_event_creation(reinterpret_cast<uintptr_t>(event_));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_event_creation(reinterpret_cast<uintptr_t>(event_));
     }
     is_created_ = true;
   }

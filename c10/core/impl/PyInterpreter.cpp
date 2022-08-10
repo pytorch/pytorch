@@ -1,10 +1,26 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/core/impl/PyInterpreter.h>
 
 namespace c10 {
 namespace impl {
+
+template <typename... Ts>
+static void noop_trace_gpu_fn(const PyInterpreter*, Ts...) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call a GPU trace function after corresponding interpreter died");
+}
+
+void GPUTraceFunctionWrapper::disarm() {
+  event_creation_fn_ = &noop_trace_gpu_fn;
+  event_deletion_fn_ = &noop_trace_gpu_fn;
+  event_record_fn_ = &noop_trace_gpu_fn;
+  event_wait_fn_ = &noop_trace_gpu_fn;
+  memory_allocation_fn_ = &noop_trace_gpu_fn;
+  memory_deallocation_fn_ = &noop_trace_gpu_fn;
+  stream_creation_fn_ = &noop_trace_gpu_fn;
+}
 
 static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
@@ -96,7 +112,7 @@ void PyInterpreter::disarm() noexcept {
   sym_sizes_fn_ = &noop_sym_sizes_fn;
   layout_fn_ = &noop_layout_fn;
   sym_numel_fn_ = &noop_sym_numel_fn;
-  trace_cuda_functions->disarm();
+  trace_gpu_functions.disarm();
 }
 
 // Defined out-of-line because it needs access to the definition of TensorImpl.
@@ -104,36 +120,6 @@ __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> PyInterpreter::detach(
     const TensorImpl* self) const {
   return (*detach_fn_)(this, self);
 }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_creation(uintptr_t event) const {
-    return (*trace_cuda_functions->event_creation_fn_)(this, event);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_deletion(uintptr_t event) const {
-    return (*trace_cuda_functions->event_deletion_fn_)(this, event);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_record(
-    uintptr_t event, uintptr_t stream) const {
-    return (*trace_cuda_functions->event_record_fn_)(this, event, stream);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_event_wait(
-    uintptr_t event, uintptr_t stream) const {
-    return (*trace_cuda_functions->event_wait_fn_)(this, event, stream);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_memory_allocation(uintptr_t ptr) const {
-    return (*trace_cuda_functions->memory_allocation_fn_)(this, ptr);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_memory_deallocation(uintptr_t ptr) const {
-    return (*trace_cuda_functions->memory_deallocation_fn_)(this, ptr);
-  }
-
-  __ubsan_ignore_function__ void PyInterpreter::trace_cuda_stream_allocation(uintptr_t stream) const {
-    return (*trace_cuda_functions->stream_allocation_fn_)(this, stream);
-  }
 
 } // namespace impl
 } // namespace c10
