@@ -954,6 +954,23 @@ void TensorIteratorBase::build_ternary_op(
       .add_owned_input(c));
 }
 
+void TensorIteratorBase::build_quaternary_op(
+  const TensorBase &output,
+  const TensorBase &a,
+  const TensorBase &b,
+  const TensorBase &c,
+  const TensorBase &d
+) {
+  build(TensorIteratorConfig()
+      .promote_inputs_to_common_dtype(true)
+      .enforce_safe_casting_to_output(true)
+      .add_owned_output(output)
+      .add_owned_input(a)
+      .add_owned_input(b)
+      .add_owned_input(c)
+      .add_owned_input(d));
+}
+
 // This cannot be a function because TensorIteratorConfig is not
 // copyable or movable, so it can't be returned from the function.
 #define BINARY_OP_CONFIG()                              \

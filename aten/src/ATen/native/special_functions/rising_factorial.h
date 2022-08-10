@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/promote_t.h>
-#include "detail/rising_factorial.h"
+#include <ATen/native/special_functions/detail/rising_factorial.h>
 
 namespace at {
 namespace native {

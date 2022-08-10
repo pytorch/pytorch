@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/harmonic_number.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

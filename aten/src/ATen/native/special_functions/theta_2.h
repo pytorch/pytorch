@@ -1,6 +1,6 @@
 #pragma once
 
-#include "detail/elliptic_theta_2.h"
+#include <ATen/native/special_functions/detail/elliptic_theta_2.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

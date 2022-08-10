@@ -1,7 +1,7 @@
 #pragma once
 
-#include "detail/elliptic_theta_1.h"
 #include <ATen/native/special_functions/detail/promote_t.h>
+#include <ATen/native/special_functions/detail/elliptic_theta_1.h>
 
 namespace at {
 namespace native {

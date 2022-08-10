@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/bose_einstein_integral_g.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

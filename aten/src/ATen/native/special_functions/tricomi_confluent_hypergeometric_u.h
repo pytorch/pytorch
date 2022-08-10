@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/promote_t.h>
+#include <ATen/native/special_functions/detail/tricomi_confluent_hypergeometric_u.h>
 
 namespace at {
 namespace native {

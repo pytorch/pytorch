@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/bulirsch_elliptic_integral_cel.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/promote_t.h>
+#include <ATen/native/special_functions/detail/sinhc.h>
 
 namespace at {
 namespace native {

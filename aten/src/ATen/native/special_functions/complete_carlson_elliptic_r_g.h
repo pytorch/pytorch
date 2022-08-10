@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/complete_carlson_elliptic_r_g.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

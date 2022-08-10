@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/fermi_dirac_integral_f.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {

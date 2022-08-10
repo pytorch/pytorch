@@ -563,6 +563,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
       const TensorBase& a,
       const TensorBase& b,
       const TensorBase& c);
+  void build_quaternary_op(
+    const TensorBase &output,
+    const TensorBase &a,
+    const TensorBase &b,
+    const TensorBase &c,
+    const TensorBase &d);
 
 #undef TORCH_DISALLOW_TEMPORARIES
  protected:

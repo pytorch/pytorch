@@ -2798,158 +2798,158 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
 
-- name: special_airy_ai(Tensor x) -> Tensor
-  x: non_differentiable
-
-- name: special_bessel_j_0(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_bessel_j_1(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_bessel_y_0(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_bessel_y_1(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_modified_bessel_i_0(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_modified_bessel_i_1(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_modified_bessel_k_0(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_modified_bessel_k_1(Tensor self) -> Tensor
-  self: non_differentiable
-
-- name: special_exp_modified_bessel_k_0(Tensor x) -> Tensor
-  x: non_differentiable
-
-- name: special_exp_modified_bessel_k_1(Tensor x) -> Tensor
-  x: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
-  x: non_differentiable
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
-  n: non_differentiable
-
-- name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
-  x: non_differentiable
-
-- name: special_spherical_bessel_j_0(Tensor x) -> Tensor
-  x: non_differentiable
+#- name: special_airy_ai(Tensor x) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_bessel_j_0(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_bessel_j_1(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_bessel_y_0(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_bessel_y_1(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_modified_bessel_i_0(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_modified_bessel_i_1(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_modified_bessel_k_0(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_modified_bessel_k_1(Tensor self) -> Tensor
+#  self: non_differentiable
+#
+#- name: special_exp_modified_bessel_k_0(Tensor x) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_exp_modified_bessel_k_1(Tensor x) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+#  x: non_differentiable
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+#  n: non_differentiable
+#
+#- name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+#  x: non_differentiable
+#
+#- name: special_spherical_bessel_j_0(Tensor x) -> Tensor
+#  x: non_differentiable

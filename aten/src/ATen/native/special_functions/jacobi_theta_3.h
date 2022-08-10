@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/native/special_functions/detail/jacobi_theta_3.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 
 namespace at {
