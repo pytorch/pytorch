@@ -3,7 +3,7 @@ import random
 import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
-from typing import Iterator, List, Optional, TypeVar
+from typing import List, Optional, TypeVar
 
 __all__ = ["ShufflerMapDataPipe", ]
 
@@ -45,7 +45,6 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
         self.indices = list(range(len(datapipe))) if indices is None else indices
-        self.index_map = {index_name: num_index for num_index, index_name in enumerate(self.indices)}
         self._enabled: bool = True
         self._seed: Optional[int] = None
         self._rng = random.Random()
@@ -62,11 +61,6 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         return self
 
     def __getitem__(self, index) -> T_co:
-        try:
-            old_numeric_index = self.index_map[index]
-        except KeyError:
-            raise IndexError(f"Index {index} is out of range for {self}.")
-
         if self._enabled:
             if self._reset:
                 if self._seed is None:
@@ -74,16 +68,10 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
                 self._rng.seed(self._seed)
                 self.shuffled_indices = self._rng.sample(self.indices, len(self.indices))
                 self._reset = False
-            new_index = self.shuffled_indices[old_numeric_index]  # type: ignore[index]
+            new_index = self.shuffled_indices[index]  # type: ignore[index]
         else:
-            new_index = self.indices[old_numeric_index]
+            new_index = self.indices[index]
         return self.datapipe[new_index]
-
-    # Without __iter__ implemented, by default it tries to use 0-index,
-    # which doesn't work when there is a custom index.
-    def __iter__(self) -> Iterator[T_co]:
-        for i in self.indices:
-            yield self.datapipe[i]
 
     def __len__(self) -> int:
         return len(self.datapipe)
