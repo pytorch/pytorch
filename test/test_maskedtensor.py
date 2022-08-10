@@ -28,31 +28,42 @@ from torch.masked.maskedtensor.reductions import REDUCE_NAMES
 
 
 def _compare_mt_t(mt_result, t_result):
-    mask = mt_result._masked_mask
-    mt_result_data = mt_result._masked_data
+    mask = mt_result.get_mask()
+    mt_result_data = mt_result.get_data()
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
     if mt_result_data.layout in {torch.sparse_coo, torch.sparse_csr}:
         mt_result_data = mt_result_data.to_dense()
     a = mt_result_data.detach().masked_fill_(~mask, 0)
     b = t_result.detach().masked_fill_(~mask, 0)
-    assert _tensors_match(a, b, exact=False)
+    if not _tensors_match(a, b, exact=False):
+        raise ValueError("The data in MaskedTensor a and Tensor b do not match")
 
 def _compare_mts(mt1, mt2):
-    assert mt1._masked_data.layout == mt2._masked_data.layout
-    assert mt1._masked_mask.layout == mt2._masked_mask.layout
-    assert _masks_match(mt1, mt2)
-    mask = mt1._masked_mask
-    mt_data1 = mt1._masked_data
-    mt_data2 = mt2._masked_data
+    mt_data1 = mt1.get_data()
+    mt_data2 = mt2.get_data()
+    if mt_data1.layout != mt_data2.layout:
+        raise ValueError("mt1's data and mt2's data do not have the same layout. "
+                         f"mt1.get_data().layout = {mt_data1.layout} while mt2.get_data().layout = {mt_data2.layout}")
+
+    mask = mt1.get_mask()
+    mask2 = mt2.get_mask()
+    if not _masks_match(mt1, mt2):
+        raise ValueError("mt1 and mt2 must have matching masks")
+    if mask.layout != mt2.get_mask().layout:
+        raise ValueError("mt1's mask and mt2's mask do not have the same layout. "
+                         f"mt1.get_mask().layout = {mask.layout} while mt2.get_mask().layout = {mask2.layout}")
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
+
     if mt_data1.layout in {torch.sparse_coo, torch.sparse_csr}:
         mt_data1 = mt_data1.to_dense()
         mt_data2 = mt_data2.to_dense()
     a = mt_data1.detach().masked_fill_(~mask, 0)
     b = mt_data2.detach().masked_fill_(~mask, 0)
-    assert _tensors_match(a, b, exact=False)
+
+    if not _tensors_match(a, b, exact=False):
+        raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
 
 def _create_random_mask(shape, device):
     return make_tensor(
@@ -161,7 +172,7 @@ class TestBasics(TestCase):
 
         output, scores = attn_mt(x, x_mt, x, attn_mask=attn_mask)
         loss1 = output[0, :].sum()
-        self.assertEqual(loss0, loss1.masked_data)
+        self.assertEqual(loss0, loss1.get_data())
 
     def test_chunk(self):
         return
@@ -282,7 +293,7 @@ class TestBasics(TestCase):
         now_contiguous_mt = not_contiguous_mt.contiguous()
 
         self.assertEqual(now_contiguous_mt.is_contiguous(), True)
-        self.assertEqual(now_contiguous_mt.masked_data.is_contiguous(), True)
+        self.assertEqual(now_contiguous_mt.get_data().is_contiguous(), True)
         self.assertEqual(now_contiguous_mt.is_contiguous(), True)
 
 class TestUnary(TestCase):
@@ -469,7 +480,6 @@ class TestReductions(TestCase):
         )
 
     def test_mean_grad(self):
-        print ("hi")
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
@@ -576,10 +586,10 @@ class TestMatMul(TestCase):
         x_mt = masked_tensor(
             x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x))
         )
-        x = x.masked_fill(~x_mt.mask(), 0)
+        x = x.masked_fill(~x_mt.get_mask(), 0)
         attn_2 = torch.bmm(x, x.transpose(-2, -1))
         attn_3 = torch.bmm(x_mt, x_mt.transpose(-2, -1))
-        self.assertEqual(attn_3.masked_data.masked_fill(~attn_3.mask(), 0), attn_2)  # type: ignore[attr-defined]
+        self.assertEqual(attn_3.get_data().masked_fill(~attn_3.get_mask(), 0), attn_2)  # type: ignore[attr-defined]
 
     def test_bmm_2(self):
         x = torch.arange(3 * 2 * 2).reshape(3, 2, 2).float()
