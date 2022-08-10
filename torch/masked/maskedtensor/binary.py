@@ -2,7 +2,7 @@
 
 import torch
 
-from .core import _masks_match, _tensors_match, get_mask, is_masked_tensor
+from .core import _masks_match, _tensors_match, is_masked_tensor
 
 BINARY_NAMES = [
     "add",
@@ -75,8 +75,8 @@ def get_at_least_one_mask(a, b):
     if not _masks_match(a, b):
         raise ValueError("a and b must have matching masks")
     if is_masked_tensor(a):
-        return get_mask(a)
-    return get_mask(b)
+        return a.get_mask()
+    return b.get_mask()
 
 
 def _binary_helper(fn, args, kwargs, inplace):
@@ -104,10 +104,10 @@ def _binary_helper(fn, args, kwargs, inplace):
         )
 
     data_args, data_kwargs = _map_mt_args_kwargs(
-        args, kwargs, lambda x: x._masked_data
+        args, kwargs, lambda x: x.get_data()
     )
     mask_args, mask_kwargs = _map_mt_args_kwargs(
-        args, kwargs, lambda x: x._masked_mask
+        args, kwargs, lambda x: x.get_mask()
     )
 
     if args[0].layout() == torch.sparse_coo:
@@ -150,7 +150,7 @@ def _binary_helper(fn, args, kwargs, inplace):
 
     else:
         result_data = fn(*data_args)
-    
+
     if inplace:
         args[0]._set_data_mask(result_data, mask_args[0])
         return args[0]
