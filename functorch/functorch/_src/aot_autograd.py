@@ -10,7 +10,6 @@ import torch.utils.dlpack
 from torch.nn.utils import _stateless
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
-from . import compile_utils
 from . import config
 from .decompositions import register_decomposition
 from .partitioners import default_partition
@@ -264,7 +263,8 @@ def create_aot_autograd_function(
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
-                # Used to POC memory-savings
+                # Used to prove out memory-savings
+                # from . import compile_utils
                 # bw_module = compile_utils._reorder_nodes(bw_module)
 
                 if config.aot_clear_list:

@@ -74,6 +74,7 @@ def _reorder_nodes(gm):
     new_graph = fx.Graph()
     env = {}
     delayed_nodes = set()
+
     def process_args(n):
         if isinstance(n, fx.Node):
             if n in env:

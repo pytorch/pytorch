@@ -23,7 +23,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, config
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -34,6 +34,7 @@ from common_utils import (
     skip,
     skipOps,
 )
+from unittest.mock import patch
 
 USE_TORCHVISION = False
 try:
@@ -307,6 +308,15 @@ class TestAOTAutograd(TestCase):
         mod = compiled_module(nn.BatchNorm2d(4), nop, nop)
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
+
+    @patch.object(config, "aot_clear_list", True)
+    def test_list_codegen(self):
+        def f(a, b, c):
+            return a.sin() * b.cos() * c.sin()
+        f = aot_function(f, nop)
+        inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
+        f(*inp).sum().backward()
+
 
 
 class TestEagerFusionOpInfo(TestCase):
