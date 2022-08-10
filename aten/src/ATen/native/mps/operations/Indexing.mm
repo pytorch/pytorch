@@ -143,6 +143,7 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
   return true;
 }
 
+
 static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
   using namespace mps;
 
@@ -196,7 +197,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  NSMutableArray<NSNumber*> * ns_dims = [NSMutableArray<NSNumber*> new];
+  NSMutableArray<NSNumber*> * ns_dims = [[NSMutableArray<NSNumber*> new] autorelease];
 
   for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
