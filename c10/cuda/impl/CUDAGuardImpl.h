@@ -103,7 +103,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
     const auto* interp = c10::impl::CUDATraceTLS::get_trace();
     if (interp) {
-      interp->trace_cuda_event_creation(reinterpret_cast<uintptr_t>(cuda_event));
+      interp->trace_cuda_event_creation(
+        reinterpret_cast<uintptr_t>(cuda_event)
+      );
     }
   }
 

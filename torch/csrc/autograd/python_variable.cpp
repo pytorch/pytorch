@@ -266,19 +266,7 @@ c10::Layout concrete_layout_fn(
     const c10::TensorImpl* self);
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
-    const c10::TensorImpl* self);    
-void concrete_trace_cuda_event_creation_fn(
-    const c10::impl::PyInterpreter*,
-    uintptr_t event);
-void concrete_trace_cuda_event_record_fn(
-    const c10::impl::PyInterpreter*,
-    uintptr_t event,
-    uintptr_t stream);
-void concrete_trace_cuda_event_wait_fn(
-    const c10::impl::PyInterpreter*,
-    uintptr_t event,
-    uintptr_t stream);
-
+    const c10::TensorImpl* self);
 template<const char*, typename... Ts>
 void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts...);
 
@@ -298,9 +286,13 @@ class PyInterpreterHolder {
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
             &concrete_sym_numel_fn,
-            &concrete_trace_cuda_event_creation_fn,
-            &concrete_trace_cuda<c10::impl::trace_cuda_event_record_fn_name>,
-            &concrete_trace_cuda<c10::impl::trace_cuda_event_wait_fn_name>)) {}
+            new c10::impl::CUDATraceFunctionWrapper(
+              &concrete_trace_cuda<c10::impl::trace_cuda_event_creation_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_event_record_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_event_wait_fn_name>,
+              &concrete_trace_cuda<c10::impl::trace_cuda_memory_allocation_fn_name>
+            )
+            )) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2513,41 +2505,13 @@ c10::SymInt concrete_sym_numel_fn(
       : c10::SymInt{py::cast<int64_t>(out)};
 }
 
-void concrete_trace_cuda_event_creation_fn(const c10::impl::PyInterpreter*, uintptr_t event) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  py::module mod = py::module::import("torch.utils._cuda_trace");
-  py::object hook = mod.attr("_fire_callbacks_for_cuda_event_creation");
-  hook(event);
-}
-
-void concrete_trace_cuda_event_record_fn(const c10::impl::PyInterpreter*, uintptr_t event, uintptr_t stream) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  py::module mod = py::module::import("torch.utils._cuda_trace");
-  py::object hook = mod.attr("_fire_callbacks_for_cuda_event_record");
-  hook(event, stream);
-}
-
-void concrete_trace_cuda_event_wait_fn(const c10::impl::PyInterpreter*, uintptr_t event, uintptr_t stream) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  py::module mod = py::module::import("torch.utils._cuda_trace");
-  py::object hook = mod.attr("_fire_callbacks_for_cuda_event_wait");
-  hook(event, stream);
-}
-
-// The above functions all have very similar behaviour and could be templated like so:
 template<const char* func_name, typename... Ts>
 void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts... args) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
   py::module mod = py::module::import("torch.utils._cuda_trace");
-  py::object hook = mod.attr(func_name);
+  py::object hook = mod.attr(func_name).attr("fire_callbacks");
   hook(args...);
 }
 

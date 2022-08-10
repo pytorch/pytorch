@@ -1,17 +1,41 @@
 import traceback
 import sys
-from typing import Callable, List
+from typing import Callable, List, Tuple, Any
 
 
-cuda_event_creation_callbacks: List[Callable[[int], None]] = []
+class CallbackRegistry:
+    def __init__(self):
+        self.callback_list : List[Callable[[Tuple[Any, ...]], None]] = []
+
+    def add_callback(self, cb : Callable[[Tuple[Any, ...]], None]) -> None:
+        self.callback_list.append(cb)
+
+    def fire_callbacks(self, *args: int) -> None:
+        for cb in self.callback_list:
+            try:
+                cb(*args)
+            except Exception:
+                print(
+                    f"Callback registered with CUDA trace threw an exception:\n"
+                    f"{traceback.format_exc()}",
+                    file=sys.stderr
+                )
+
+
+CUDAEventCreationCallbacks = CallbackRegistry()
+CUDAEventRecordCallbacks = CallbackRegistry()
+CUDAEventWaitCallbacks = CallbackRegistry()
+CUDAMemoryAllocationCallbacks = CallbackRegistry()
 
 def register_callback_for_cuda_event_creation(cb: Callable[[int], None]) -> None:
-    cuda_event_creation_callbacks.append(cb)
+    CUDAEventCreationCallbacks.add_callback(cb)
 
+def register_callback_for_cuda_event_record(cb: Callable[[int, int], None]) -> None:
+    CUDAEventRecordCallbacks.add_callback(cb)
 
-def _fire_callbacks_for_cuda_event_creation(event_id: int) -> None:
-    for cb in cuda_event_creation_callbacks:
-        try:
-            cb(event_id)
-        except Exception:
-            print(f"Callback registered with CUDA trace for CUDA event creation threw an exception:\n{traceback.format_exc()}", file=sys.stderr)
+def register_callback_for_cuda_event_wait(cb: Callable[[int, int], None]) -> None:
+    CUDAEventWaitCallbacks.add_callback(cb)
+
+def register_callback_for_cuda_memory_allocation(cb: Callable[[int], None]) -> None:
+    CUDAMemoryAllocationCallbacks.add_callback(cb)
+

@@ -17,6 +17,10 @@ struct IValue;
 class OperatorHandle;
 struct TensorImpl;
 struct SafePyObject;
+
+namespace impl {
+struct CUDATraceFunctionWrapper;
+} // namespace impl
 } // namespace c10
 
 namespace torch {
@@ -137,11 +141,6 @@ struct C10_API PyInterpreter {
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
   using sym_numel_sig = c10::SymInt(const PyInterpreter*, const TensorImpl*);
-  using trace_cuda_event_creation_sig = void(const PyInterpreter*, uintptr_t event);
-  using trace_cuda_event_record_sig =
-      void(const PyInterpreter*, uintptr_t event, uintptr_t stream);
-  using trace_cuda_event_wait_sig =
-      void(const PyInterpreter*, uintptr_t event, uintptr_t stream);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -156,9 +155,7 @@ struct C10_API PyInterpreter {
       sym_sizes_sig* sym_sizes,
       layout_sig* layout,
       sym_numel_sig* sym_numel,
-      trace_cuda_event_creation_sig* trace_cuda_event_creation,
-      trace_cuda_event_record_sig* trace_cuda_event_record,
-      trace_cuda_event_wait_sig* trace_cuda_event_wait)
+      CUDATraceFunctionWrapper* trace_cuda_functions)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
@@ -171,9 +168,7 @@ struct C10_API PyInterpreter {
         sym_sizes_fn_(sym_sizes),
         layout_fn_(layout),
         sym_numel_fn_(sym_numel),
-        trace_cuda_event_creation_fn_(trace_cuda_event_creation),
-        trace_cuda_event_record_fn_(trace_cuda_event_record),
-        trace_cuda_event_wait_fn_(trace_cuda_event_wait) {}
+        trace_cuda_functions(trace_cuda_functions) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -187,9 +182,7 @@ struct C10_API PyInterpreter {
   sym_sizes_sig* sym_sizes_fn_;
   layout_sig* layout_fn_;
   sym_numel_sig* sym_numel_fn_;
-  trace_cuda_event_creation_sig* trace_cuda_event_creation_fn_;
-  trace_cuda_event_record_sig* trace_cuda_event_record_fn_;
-  trace_cuda_event_wait_sig* trace_cuda_event_wait_fn_;
+  CUDATraceFunctionWrapper* trace_cuda_functions;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -257,19 +250,13 @@ struct C10_API PyInterpreter {
     return (*sym_numel_fn_)(this, self);
   }
 
-  __ubsan_ignore_function__ void trace_cuda_event_creation(uintptr_t event) const {
-    return (*trace_cuda_event_creation_fn_)(this, event);
-  }
+  __ubsan_ignore_function__ void trace_cuda_event_creation(uintptr_t) const;
 
-  __ubsan_ignore_function__ void trace_cuda_event_record(
-    uintptr_t event, uintptr_t stream) const {
-    return (*trace_cuda_event_record_fn_)(this, event, stream);
-  }
+  __ubsan_ignore_function__ void trace_cuda_event_record(uintptr_t, uintptr_t) const;
 
-  __ubsan_ignore_function__ void trace_cuda_event_wait(
-    uintptr_t event, uintptr_t stream) const {
-    return (*trace_cuda_event_wait_fn_)(this, event, stream);
-  }
+  __ubsan_ignore_function__ void trace_cuda_event_wait(uintptr_t, uintptr_t) const;
+
+  __ubsan_ignore_function__ void trace_cuda_memory_allocation(uintptr_t) const;
 
   // Disarm this PyInterpreter, making all of its methods noops.
   // Because the function pointers are raw pointers (not atomics),

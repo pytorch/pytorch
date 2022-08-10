@@ -20,5 +20,15 @@ const PyInterpreter* CUDATraceTLS::get_trace() {
   return cudaTraceState.load();
 }
 
+template<typename... Ts>
+static void noop_trace_cuda_fn(const PyInterpreter*, Ts...) {}
+
+void CUDATraceFunctionWrapper::disarm() {
+  event_creation_fn_ = &noop_trace_cuda_fn;
+  event_record_fn_ = &noop_trace_cuda_fn;
+  event_wait_fn_ = &noop_trace_cuda_fn;
+  memory_allocation_fn_ = &noop_trace_cuda_fn;
+}
+
 } // namespace impl
 } // namespace c10

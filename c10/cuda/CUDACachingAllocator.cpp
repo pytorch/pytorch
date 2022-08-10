@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -1614,6 +1615,12 @@ class THCCachingAllocator {
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_memory_allocation(
+        reinterpret_cast<uintptr_t>(*devPtr)
+      );
+    }
   }
 
   void free(void* ptr) {
@@ -1723,6 +1730,12 @@ struct CudaCachingAllocator : public Allocator {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
       C10_CUDA_CHECK(cudaMalloc(&r, size));
+      const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+      if (interp) {
+        interp->trace_cuda_event_creation(
+          reinterpret_cast<uintptr_t>(r)
+        );
+      }
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
