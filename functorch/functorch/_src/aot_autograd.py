@@ -263,10 +263,6 @@ def create_aot_autograd_function(
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
-                # Used to prove out memory-savings
-                # from . import compile_utils
-                # bw_module = compile_utils._reorder_nodes(bw_module)
-
                 if config.aot_clear_list:
                     fw_module.graph.set_codegen(ListCodeGen())
                     fw_module.recompile()

@@ -20,7 +20,9 @@ use_functionalize = False
 #   fix for complex numbers
 use_fake_tensor = False
 
-# Changes AOTAutograd to passing a list of tensors that are then cleared
+# Changes contract with backends to AOTAutograd
+# Instead of expecting backends to return a callable with signature f(a,b,c), we
+# now expect them to return a callable with signature f([a,b,c])
 aot_clear_list = False
 
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
