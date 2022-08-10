@@ -3553,7 +3553,7 @@ def empty_strided(
     )
 
 
-# TODO: support layout, pin_memory
+# TODO: no support for layout, pin_memory
 @register_decomposition(torch.ops.aten.eye)
 @out_wrapper()
 def eye(
@@ -3575,25 +3575,16 @@ def eye(
     check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    # generate square eye
-    min_size = min(n, m)
-    diff = builtins.abs(n - m)
-    ones = torch.ones(min_size, dtype=dtype, device=device, requires_grad=False)
-    eye = torch.diag_embed(ones)
+    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
 
-    # add padding for the (n, m) case
-    if n < m:
-        pad_shape = (min_size, diff)
-        dim = -1
-    else:
-        pad_shape = (diff, min_size)
-        dim = -2
+    cond = range_n.unsqueeze(-1) == range_m
+    # TODO: pin_memory=pin_memory, layout=layout
+    one = torch.ones(1, dtype=dtype, device=device, requires_grad=requires_grad)
+    zero = torch.zeros(1, dtype=dtype, device=device, requires_grad=requires_grad)
+    result = torch.where(cond, one, zero)
 
-    zeros = torch.zeros(
-        pad_shape, dtype=dtype, device=device, requires_grad=requires_grad
-    )
-
-    return torch.cat((eye, zeros), dim=dim)
+    return result
 
 
 # TODO: missing kwargs (e.g. layout)
