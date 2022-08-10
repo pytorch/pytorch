@@ -1444,7 +1444,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (discard_grad_) {
-      return false
+      return;
     }
 
     if (!gradient_as_bucket_view_) {
