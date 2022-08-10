@@ -11,6 +11,8 @@ from torch._C import _onnx as _C_onnx
 from torch.onnx import utils
 from torch.onnx._globals import GLOBALS
 
+_ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
+
 
 # TODO(#78694): Refactor the patching process to make it more transparent to users.
 def _graph_op(
@@ -116,7 +118,7 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
 def _new_node(
     g: _C.Graph, namespace: str, op: str, outputs: int, *args, **kwargs
 ) -> _C.Node:
-    """Creates a new operator.
+    """Creates a new node in the graph.
 
     Args:
         g: The graph to create the operator on.
@@ -134,9 +136,6 @@ def _new_node(
             continue
         _add_attribute(node, k, v, aten=aten)
     return node
-
-
-_ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
 def _is_onnx_list(value):
