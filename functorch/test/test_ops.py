@@ -495,11 +495,6 @@ class TestOperators(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-
         def test(_op, inplace=False):
             for sample in samples:
                 if inplace and not is_valid_inplace_sample_input(sample, op, op.inplace_variant):
