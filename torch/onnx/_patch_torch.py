@@ -6,10 +6,9 @@ from typing import Any, Iterable, Tuple, Union
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch.onnx import _deprecation
 
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
-from torch.onnx import utils
+from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
