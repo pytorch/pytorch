@@ -2367,8 +2367,10 @@ class TestDataLoader2_EventLoop(TestCase):
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     def test_shuffler_iterdatapipe(self):
+        exp = list(range(100))
+
         def _create_dp(buffer_size):
-            input_ds = dp.iter.IterableWrapper(list(range(100)))
+            input_ds = dp.iter.IterableWrapper(exp)
             return input_ds.shuffle(buffer_size=buffer_size).sharding_filter()
 
         for bs in (5, 20, 33):
@@ -2390,13 +2392,11 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
                     num_workers=num_workers,
                     shuffle=True,
                     multiprocessing_context=mp_ctx,
-                    worker_init_fn=_worker_init_fn,
                     persistent_workers=pw
                 )
 
                 # No seed
                 dl_res_ns = list(dl)
-                self.assertEqual(len(dl_res_ns), len(exp))
                 self.assertEqual(sorted(dl_res_ns), sorted(exp))
 
                 # Same seeds
