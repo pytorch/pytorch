@@ -20,6 +20,8 @@ use_functionalize = False
 #   fix for complex numbers
 use_fake_tensor = False
 
+aot_clear_list = True
+
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 # Prints out forward + backwards FX graphs
 debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)

@@ -10,6 +10,7 @@ import torch.utils.dlpack
 from torch.nn.utils import _stateless
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
+from . import compile_utils
 from . import config
 from .decompositions import register_decomposition
 from .partitioners import default_partition
@@ -35,6 +36,23 @@ pytree._register_pytree_node(
         {key: value for key, value in zip(c, x)}
     ),
 )
+import torch.fx as fx
+import typing
+class ListCodeGen(fx.CodeGen):
+    def gen_fn_def(self, free_vars, maybe_return_annotation):
+        lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {''.join(f"{x}," for x in free_vars)} = args_list
+    args_list.clear()
+    """
+        return lst_unpack
+
+    def additional_globals(self):
+        return [('List', typing.List)]
+
+    def process_inputs(self, *inputs):
+        assert(len(inputs) == 1)
+        return inputs[0]
 
 # TODO - move this to PyTorch core. This overrides the pytree implementation for
 # dict to maintain parity with Deepmind pytree.
@@ -163,6 +181,14 @@ def track_graph_compiling(graph_name, increment_index=False):
         nth_graph += 1
     graph_being_compiled = None
 
+def call_func_with_args(f, args, own_args=False):
+    if not own_args:
+        args = list(args)
+    assert isinstance(args, list)
+    if config.aot_clear_list:
+        return normalize_as_list(f(args))
+    else:
+        return normalize_as_list(f(*args))
 
 def create_aot_autograd_function(
     flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
@@ -238,12 +264,24 @@ def create_aot_autograd_function(
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
+                # Used to POC memory-savings
+                # bw_module = compile_utils._reorder_nodes(bw_module)
+
+                if config.aot_clear_list:
+                    fw_module.graph.set_codegen(ListCodeGen())
+                    fw_module.recompile()
+
+                    bw_module.graph.set_codegen(ListCodeGen())
+                    bw_module.recompile()
+
                 if config.debug_graphs:
                     print(fw_module.code, bw_module.code)
 
+
                 with track_graph_compiling("forward"):
                     compiled_fw = fw_compiler(fw_module, flat_tensor_args)
-                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
+
+                fw_outs = call_func_with_args(compiled_fw, flat_tensor_args)
                 if config.debug_partitioner:
                     activation_sizes = 0
                     for out in fw_outs[num_outs:]:
@@ -255,7 +293,7 @@ def create_aot_autograd_function(
                 with track_graph_compiling("backward", True):
                     compiled_bw = bw_compiler(bw_module, bw_args)
             else:
-                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
+                fw_outs = call_func_with_args(compiled_fw, flat_tensor_args)
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
@@ -267,8 +305,10 @@ def create_aot_autograd_function(
             # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
             old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
             contiguous_args = [t.contiguous() for t in flat_args]
-            # contiguous_args = [t for t in flat_args]
-            out = normalize_as_list(compiled_bw(*ctx.saved_tensors, *contiguous_args))
+            all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            ctx.clear_saved()
+            out = call_func_with_args(compiled_bw, all_args, own_args=True)
+
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
             return tuple(out)
 

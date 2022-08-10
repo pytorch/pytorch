@@ -67,6 +67,32 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     return new_graph
 
 
+def _reorder_nodes(gm):
+    """
+    Some sort of weird DFS from the output
+    """
+    new_graph = fx.Graph()
+    env = {}
+    delayed_nodes = set()
+    def process_args(n):
+        if isinstance(n, fx.Node):
+            if n in env:
+                return env[n]
+            assert n in delayed_nodes
+            env[n] = new_graph.node_copy(n, process_args)
+            return env[n]
+        return n
+    for n in gm.graph.nodes:
+        if n.op != 'call_function':
+            new_node = new_graph.node_copy(n, process_args)
+            env[n] = new_node
+        else:
+            delayed_nodes.add(n)
+    return fx.GraphModule(gm, new_graph)
+
+
+
+
 def strip_overloads(gm):
     """
     Modifies the target of graph nodes in :attr:`gm` to strip overloads.
