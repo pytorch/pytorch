@@ -13,7 +13,7 @@ namespace native {
 namespace {
 const auto chebyshev_polynomial_v_string = jiterator_stringify(
     template<typename T>
-    T chebyshev_polynomial_v_forward(T x, int64_t n) {
+    T chebyshev_polynomial_v(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -61,15 +61,15 @@ const auto chebyshev_polynomial_v_string = jiterator_stringify(
         }
 
         return r;
-    } // chebyshev_polynomial_v_forward(T x, int64_t n)
+    } // chebyshev_polynomial_v(T x, int64_t n)
 
     template<typename T>
-    T chebyshev_polynomial_v_forward(T x, T n) {
-        return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
-    } // chebyshev_polynomial_v_forward(T x, T n)
+    T chebyshev_polynomial_v(T x, T n) {
+        return chebyshev_polynomial_v(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_v(T x, T n)
 ); // chebyshev_polynomial_v_string
 
-const char chebyshev_polynomial_v_name[] = "chebyshev_polynomial_v_forward";
+const char chebyshev_polynomial_v_name[] = "chebyshev_polynomial_v";
 
 void chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -78,8 +78,8 @@ void chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_v_cuda", [&]() {
-    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-      return chebyshev_polynomial_v_forward<scalar_t, true>(x, n);
+    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      return chebyshev_polynomial_v<scalar_t, true>(x, y);
     });
   });
 #endif

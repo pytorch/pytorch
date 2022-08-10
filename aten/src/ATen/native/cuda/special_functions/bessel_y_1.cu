@@ -23,7 +23,7 @@ namespace native {
 namespace {
 const auto bessel_y_1_string = bessel_j_1_string + jiterator_stringify(
     template<typename T>
-    T bessel_y_1_forward(T x) {
+    T bessel_y_1(T x) {
         static const T PP[] = {
                 +7.62125616208173112003e-04,
                 +7.31397056940917570436e-02,
@@ -106,7 +106,7 @@ const auto bessel_y_1_string = bessel_j_1_string + jiterator_stringify(
                 yq = yq * (x * x) + YQ[index];
             }
 
-            return x * (yp / yq) + (T(0.636619772367581343075535053490057448) * (bessel_j_1_forward(x) * log(x) - T(1.0) / x));
+            return x * (yp / yq) + (T(0.636619772367581343075535053490057448) * (bessel_j_1(x) * log(x) - T(1.0) / x));
         }
 
         T pp = 0.0;
@@ -134,10 +134,10 @@ const auto bessel_y_1_string = bessel_j_1_string + jiterator_stringify(
         }
 
         return (pp / pq * sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / sqrt(x);
-    } // bessel_y_1_forward(T x)
+    } // bessel_y_1(T x)
 ); // bessel_y_1_string
 
-const char bessel_y_1_name[] = "bessel_y_1_forward";
+const char bessel_y_1_name[] = "bessel_y_1";
 
 void bessel_y_1_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -146,8 +146,8 @@ void bessel_y_1_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y_1_cuda", [&]() {
-    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return bessel_y_1_forward(a);
+    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t x) -> scalar_t {
+      return x;
     });
   });
 #endif // AT_USE_JITERATOR()

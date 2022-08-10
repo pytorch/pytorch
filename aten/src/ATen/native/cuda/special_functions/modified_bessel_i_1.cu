@@ -23,7 +23,7 @@ namespace native {
 namespace {
 const auto modified_bessel_i_1_string = jiterator_stringify(
     template<typename T>
-    T modified_bessel_i_1_forward(T x) {
+    T modified_bessel_i_1(T x) {
         static const T A[] = {
                 +2.77791411276104639959e-18,
                 -2.11142121435816608115e-17,
@@ -116,10 +116,10 @@ const auto modified_bessel_i_1_string = jiterator_stringify(
         }
 
         return exp(abs(x)) * (T(0.5) * (b - p)) / sqrt(abs(x));
-    } // modified_bessel_i_1_forward(T x)
+    } // modified_bessel_i_1(T x)
 ); // modified_bessel_i_1_string
 
-const char modified_bessel_i_1_name[] = "modified_bessel_i_1_forward";
+const char modified_bessel_i_1_name[] = "modified_bessel_i_1";
 
 void modified_bessel_i_1_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -128,8 +128,8 @@ void modified_bessel_i_1_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i_1_cuda", [&]() {
-    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return modified_bessel_i_1_forward(a);
+    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t x) -> scalar_t {
+      return x;
     });
   });
 #endif // AT_USE_JITERATOR()

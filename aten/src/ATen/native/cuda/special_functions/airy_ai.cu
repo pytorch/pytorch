@@ -23,7 +23,7 @@ namespace native {
 namespace {
 const auto airy_ai_string = jiterator_stringify(
     template<typename T>
-    T airy_ai_forward(T x) {
+    T airy_ai(T x) {
         static const T AN[] = {
                 +3.46538101525629032477e-01,
                 +1.20075952739645805542e+01,
@@ -202,7 +202,7 @@ const auto airy_ai_string = jiterator_stringify(
     } // T airy_ai(T x)
 ); // airy_ai_string
 
-const char airy_ai_name[] = "airy_ai_forward";
+const char airy_ai_name[] = "airy_ai";
 
 void airy_ai_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -211,8 +211,8 @@ void airy_ai_kernel_cuda(TensorIteratorBase &iterator) {
   });
   #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
-    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return airy_ai_forward(a);
+    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t x) -> scalar_t {
+      return x;
     });
   });
 #endif // AT_USE_JITERATOR()

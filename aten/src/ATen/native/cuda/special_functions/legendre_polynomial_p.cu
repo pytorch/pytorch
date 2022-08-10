@@ -13,7 +13,7 @@ namespace native {
 namespace {
 const auto legendre_polynomial_p_string = jiterator_stringify(
     template<typename T>
-    T legendre_polynomial_p_forward(T x, int64_t n) {
+    T legendre_polynomial_p(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -45,15 +45,15 @@ const auto legendre_polynomial_p_string = jiterator_stringify(
         }
 
         return r;
-    } // legendre_polynomial_p_forward(T x, int64_t n)
+    } // legendre_polynomial_p(T x, int64_t n)
 
     template<typename T>
-    T legendre_polynomial_p_forward(T x, T n) {
-        return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
-    } // legendre_polynomial_p_forward(T x, T n)
+    T legendre_polynomial_p(T x, T n) {
+        return legendre_polynomial_p(x, static_cast<int64_t>(n));
+    } // legendre_polynomial_p(T x, T n)
 ); // legendre_polynomial_p_string
 
-const char legendre_polynomial_p_name[] = "legendre_polynomial_p_forward";
+const char legendre_polynomial_p_name[] = "legendre_polynomial_p";
 
 void legendre_polynomial_p_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -62,8 +62,8 @@ void legendre_polynomial_p_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "legendre_polynomial_p_cuda", [&]() {
-    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-      return legendre_polynomial_p_forward<scalar_t, true>(x, n);
+    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      return legendre_polynomial_p<scalar_t, true>(x, y);
     });
   });
 #endif

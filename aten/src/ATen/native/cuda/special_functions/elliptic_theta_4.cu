@@ -17,8 +17,8 @@ void elliptic_theta_4_cuda_kernel(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_theta_4_cuda_kernel", [&]() {
-    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-      return special_functions::elliptic_theta_4<scalar_t, true>(x, n);
+    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      return special_functions::elliptic_theta_4<scalar_t, true>(x, y);
     });
   });
 #endif

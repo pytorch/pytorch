@@ -13,7 +13,7 @@ namespace native {
 namespace {
 const auto hermite_polynomial_he_string = jiterator_stringify(
     template<typename T>
-    T hermite_polynomial_he_forward(T x, int64_t n) {
+    T hermite_polynomial_he(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -37,15 +37,15 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
         }
 
         return r;
-    } // hermite_polynomial_he_forward(T x, int64_t n)
+    } // hermite_polynomial_he(T x, int64_t n)
 
     template<typename T>
-    T hermite_polynomial_he_forward(T x, T n) {
-        return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
-    } // hermite_polynomial_he_forward(T x, T n)
+    T hermite_polynomial_he(T x, T n) {
+        return hermite_polynomial_he(x, static_cast<int64_t>(n));
+    } // hermite_polynomial_he(T x, T n)
 ); // hermite_polynomial_he_string
 
-const char hermite_polynomial_he_name[] = "hermite_polynomial_he_forward";
+const char hermite_polynomial_he_name[] = "hermite_polynomial_he";
 
 void hermite_polynomial_he_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -54,8 +54,8 @@ void hermite_polynomial_he_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_he_cuda", [&]() {
-    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-      return hermite_polynomial_he_forward<scalar_t, true>(x, n);
+    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      return hermite_polynomial_he<scalar_t, true>(x, y);
     });
   });
 #endif

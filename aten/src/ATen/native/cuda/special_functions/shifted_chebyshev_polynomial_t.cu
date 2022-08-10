@@ -13,7 +13,7 @@ namespace native {
 namespace {
 const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
-    T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+    T shifted_chebyshev_polynomial_t(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -53,15 +53,15 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
         }
 
         return r;
-    } // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+    } // shifted_chebyshev_polynomial_t(T x, int64_t n)
 
     template<typename T>
-    T shifted_chebyshev_polynomial_t_forward(T x, T n) {
-        return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
-    } // shifted_chebyshev_polynomial_t_forward(T x, T n)
+    T shifted_chebyshev_polynomial_t(T x, T n) {
+        return shifted_chebyshev_polynomial_t(x, static_cast<int64_t>(n));
+    } // shifted_chebyshev_polynomial_t(T x, T n)
 ); // shifted_chebyshev_polynomial_t_string
 
-const char shifted_chebyshev_polynomial_t_name[] = "shifted_chebyshev_polynomial_t_forward";
+const char shifted_chebyshev_polynomial_t_name[] = "shifted_chebyshev_polynomial_t";
 
 void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
@@ -70,8 +70,8 @@ void shifted_chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase &iterator) {
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_t_cuda", [&]() {
-    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-      return shifted_chebyshev_polynomial_t_forward<scalar_t, true>(x, n);
+    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      return shifted_chebyshev_polynomial_t<scalar_t, true>(x, y);
     });
   });
 #endif
