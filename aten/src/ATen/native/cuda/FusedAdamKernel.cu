@@ -71,9 +71,9 @@ C10_DEVICE __forceinline__ void adam_math(
 
         opmath_t denom;
         if (amsgrad) {
-            denom = (::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
+            denom = (std::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
         } else {
-            denom = (::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
+            denom = (std::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
         }
 
         param -= step_size * exp_avg / denom;
