@@ -20,8 +20,8 @@ from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_B
 
 
 def _compare_mt_t(mt_result, t_result):
-    mask = mt_result.masked_mask
-    mt_result_data = mt_result.masked_data
+    mask = mt_result._masked_mask
+    mt_result_data = mt_result._masked_data
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
     if mt_result_data.layout in {torch.sparse_coo, torch.sparse_csr}:
@@ -31,12 +31,12 @@ def _compare_mt_t(mt_result, t_result):
     assert _tensors_match(a, b, exact=False)
 
 def _compare_mts(mt1, mt2):
-    assert mt1.masked_data.layout == mt2.masked_data.layout
-    assert mt1.masked_mask.layout == mt2.masked_mask.layout
+    assert mt1._masked_data.layout == mt2._masked_data.layout
+    assert mt1._masked_mask.layout == mt2._masked_mask.layout
     assert _masks_match(mt1, mt2)
-    mask = mt1.masked_mask
-    mt_data1 = mt1.masked_data
-    mt_data2 = mt2.masked_data
+    mask = mt1._masked_mask
+    mt_data1 = mt1._masked_data
+    mt_data2 = mt2._masked_data
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
     if mt_data1.layout in {torch.sparse_coo, torch.sparse_csr}:
