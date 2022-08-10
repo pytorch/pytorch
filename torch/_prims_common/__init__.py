@@ -454,10 +454,12 @@ def canonicalize_dim(rank: int, idx: int) -> int:
     else:
         _idx = idx
 
-    if _idx < 0 or _idx > _rank:
+    if _idx < 0 or _idx >= _rank:
+        # Always report the lower dimension first
+        bound1, bound2 = sorted((-rank, rank - 1))
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
         msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
-            -rank, rank - 1, idx
+            bound1, bound2, idx
         )
         raise IndexError(msg)
 
