@@ -292,6 +292,12 @@ class TestGenericProxyTensor(TestCase):
         inp = torch.randn(3, 3, 250, 250)
         self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
 
+    def test_varargs(self):
+        def f(*args):
+            return sum(args)
+
+        self._test(f, [torch.randn(2), torch.randn(2)])
+
     def test_proxy_tensor(self):
         def f_grad(x):
             val = x.cos().cos().sum()
