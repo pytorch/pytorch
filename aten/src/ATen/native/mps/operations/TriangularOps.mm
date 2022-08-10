@@ -9,9 +9,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 namespace at {
 namespace native {
@@ -275,9 +273,9 @@ Tensor& diag_mps_out(const Tensor& self,
             MPSGraphTensor* inputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data length:sizeof(int)]
                                                                     shape:@[@1]
                                                                  dataType:MPSDataTypeInt32];
-            numDiagElementsRange = [mpsGraph getCoordinateValueWithShapeTensor:inputShapeTensor
-                                                                    axisTensor:zeroTensor
-                                                                          name:nil];
+            numDiagElementsRange = [mpsGraph coordinateAlongAxisTensor: zeroTensor
+                                                       withShapeTensor: inputShapeTensor
+                                                                  name: nil];
             diagOffset = [mpsGraph constantWithScalar:diagonal
                                              dataType:MPSDataTypeInt32];
             rowMultiplier = [mpsGraph constantWithScalar:[num_output_cols intValue]
@@ -288,9 +286,9 @@ Tensor& diag_mps_out(const Tensor& self,
             MPSGraphTensor* outputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data length:sizeof(int)]
                                                                      shape:@[@1]
                                                                   dataType:MPSDataTypeInt32];
-            numDiagElementsRange = [mpsGraph getCoordinateValueWithShapeTensor:outputShapeTensor
-                                                                    axisTensor:zeroTensor
-                                                                          name:nil];
+            numDiagElementsRange = [mpsGraph coordinateAlongAxisTensor: zeroTensor
+                                                       withShapeTensor: outputShapeTensor
+                                                                  name: nil];
             diagOffset = [mpsGraph constantWithScalar:diagonal
                                              dataType:MPSDataTypeInt32];
             rowMultiplier = [mpsGraph constantWithScalar:[num_input_cols intValue]
