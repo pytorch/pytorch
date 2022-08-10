@@ -7,7 +7,7 @@ from .core import MaskedTensor, is_masked_tensor
 
 def masked_tensor(data, mask, requires_grad=False):
     r""" A basic factory function to create a MaskedTensor
-    
+
     Args:
         data: input data tensor
         mask: input mask tensor with dtype bool where True indicates "specified" and False indicates "unspecified"
@@ -15,7 +15,7 @@ def masked_tensor(data, mask, requires_grad=False):
     Shape:
         data: :math:`(*)`, where :math:`*` means any number of dimensions.
         mask: :math:`(*)`, same shape as data
-    
+
     Examples::
 
         >>> data = torch.arange(6).reshape(2,3)
