@@ -86,6 +86,7 @@ void FusionDefinition::exit() {
   
 void FusionDefinition::print(std::ostream& os) const {
   os << "\ndef nvfuser_fusion(fd : FusionDefinition) -> None :\n";
+  os << std::dec;
   for (auto &rec : recording_) {
     os << "    ";
     rec->print(os);
