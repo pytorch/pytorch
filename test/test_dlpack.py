@@ -14,7 +14,6 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 class TestTorchDlPack(TestCase):
     exact_dtype = True
 
-    # FIXME: move dlpack tests to their own test class/suite
     @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
@@ -187,7 +186,6 @@ class TestTorchDlPack(TestCase):
         # gh-83069, to_dlpack should normalize strides
         assert(z.stride() == (1,))
         # TODO: are there more complicated cases that are still not handled?
-
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
