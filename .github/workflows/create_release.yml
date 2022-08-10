@@ -15,6 +15,8 @@ on:
 jobs:
   release:
     if: ${{ github.repository == 'pytorch/pytorch' }}
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     name: Create Release
     runs-on: ubuntu-latest
     steps:
@@ -46,11 +48,30 @@ jobs:
             # Create archive
             tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
             echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
+      - name: Generate subject
+        if: ${{ github.event_name == 'release' }}
+        id: hash
+        run: |
+            set -euo pipefail
+
+            echo "::set-output name=hashes::$(sha256sum $PT_RELEASE_FILE | base64 -w0)"
       - name: Upload source distribution
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
+
+  provenance:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'release' }}
+    needs: [release]
+    permissions:
+      actions: read # To read the workflow path.
+      id-token: write # To sign the provenance.
+      contents: write # To add assets to a release.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.2.0
+    with:
+      base64-subjects: "${{ needs.release.outputs.hashes }}"
+      upload-assets: true # Optional: Upload to a new release
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
