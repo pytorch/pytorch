@@ -155,7 +155,8 @@ def _load_global_deps():
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
         platform.system() != 'Windows':
-    # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
+    # Do it the hard way.
+    # You might want to load libtorch with RTLD_GLOBAL in
     # few circumstances:
     #
     #   1. You're in a build environment (e.g., fbcode) where
@@ -187,8 +188,9 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     del _dl_flags
 
 else:
-    # Easy way.  You want this most of the time, because it will prevent
-    # C++ symbols from libtorch clobbering C++ symbols from other
+    # Easy way.
+    # You want this most of the time, because it will prevent
+    # C++ symbols from libtorch, clobbering C++ symbols from other
     # libraries, leading to mysterious segfaults.
     #
     # If building in an environment where libtorch_global_deps isn't available
@@ -545,7 +547,7 @@ def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
             debug_mode = 2
         else:
             raise RuntimeError(
-                'invalid value of debug_mode, expected one of `default`, '
+                'Invalid value of debug_mode, expected one of `default`, '
                 f'`warn`, `error`, but got {debug_mode}')
 
     if debug_mode == 0:
@@ -556,7 +558,7 @@ def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
         _C._set_deterministic_algorithms(True)
     else:
         raise RuntimeError(
-            'invalid value of debug_mode, expected 0, 1, or 2, '
+            'Invalid value of debug_mode, expected 0, 1, or 2, '
             f'but got {debug_mode}')
 
 def get_deterministic_debug_mode() -> builtins.int:
@@ -632,7 +634,7 @@ def set_warn_always(b):
 
     Args:
         b (:class:`bool`): If True, force warnings to always be emitted
-                           If False, set to the default behaviour
+                           If False, set to the default behaviour.
     """
     _C._set_warnAlways(b)
 
