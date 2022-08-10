@@ -326,7 +326,7 @@ ScalarType get_result_or_self_value_dtype(
 }
 
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
-(const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
+(const Tensor& self, const OptionalScalarRef p, at::OptionalIntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
       at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
       "norm(): input dtype should be either floating point or complex. "
@@ -339,7 +339,7 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim)
 TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
 (const Tensor& self,
  const OptionalScalarRef p,
- IntArrayRef dim,
+ at::OptionalIntArrayRef dim,
  bool keepdim,
  ScalarType dtype) {
   TORCH_CHECK(
@@ -373,7 +373,7 @@ TORCH_META_FUNC(aminmax)
 }
 
 TORCH_META_FUNC(amax)
-(const Tensor& self, IntArrayRef dim, bool keepdim) {
+(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
     TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
@@ -387,7 +387,7 @@ TORCH_META_FUNC(amax)
 }
 
 TORCH_META_FUNC(amin)
-(const Tensor& self, IntArrayRef dim, bool keepdim) {
+(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
     TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
@@ -1449,7 +1449,7 @@ Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim
 void impl_func_norm(
     const Tensor& self,
     const OptionalScalarRef& opt_p,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype,
     const Tensor& result) {
@@ -1486,7 +1486,7 @@ void impl_func_norm(
 TORCH_IMPL_FUNC(norm_out)
 (const Tensor& self,
  const OptionalScalarRef p,
- IntArrayRef dim,
+ at::OptionalIntArrayRef dim,
  bool keepdim,
  const Tensor& result) {
   impl_func_norm(self, p, dim, keepdim, c10::nullopt, result);
@@ -1495,7 +1495,7 @@ TORCH_IMPL_FUNC(norm_out)
 TORCH_IMPL_FUNC(norm_dtype_out)
 (const Tensor& self,
  const OptionalScalarRef p,
- IntArrayRef dim,
+ at::OptionalIntArrayRef dim,
  bool keepdim,
  ScalarType dtype,
  const Tensor& result) {
@@ -1505,7 +1505,7 @@ TORCH_IMPL_FUNC(norm_dtype_out)
 Tensor sparse_norm(
     const Tensor& self,
     const optional<Scalar>& p,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   return at::native_norm(self, p, dim, keepdim, c10::nullopt);
 }
@@ -1513,7 +1513,7 @@ Tensor sparse_norm(
 Tensor sparse_dtype_norm(
     const Tensor& self,
     const optional<Scalar>& p,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     ScalarType dtype) {
   return at::native_norm(self, p, dim, keepdim, dtype);
@@ -1578,7 +1578,7 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
 }
 
-TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+TORCH_IMPL_FUNC(amin_out) (const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
   auto iter =
       meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
@@ -1586,7 +1586,7 @@ TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, co
   }
 }
 
-TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+TORCH_IMPL_FUNC(amax_out) (const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
   auto iter =
       meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {

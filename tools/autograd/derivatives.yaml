@@ -465,9 +465,10 @@
   self: grad * self.sinh().conj()
   result: auto_element_wise
 
-- name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
+- name: count_nonzero.dim_IntList(Tensor self, int[]? dim) -> Tensor
   output_differentiability: [False]
 
+# TODO: Should probably remove this overload
 - name: count_nonzero(Tensor self, int? dim=None) -> Tensor
   output_differentiability: [False]
 
@@ -1101,11 +1102,11 @@
   other: grad.masked_fill((self <= other).logical_or_(other.isnan()), 0)
   result: other_t + (self_p <= other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
-- name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+- name: amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
-- name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+- name: amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
@@ -1186,7 +1187,7 @@
   self: norm_backward(grad, self, p, result)
   result: norm_jvp(self_p, self_t, p, result)
 
-- name: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
+- name: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1]? dim, bool keepdim=False) -> Tensor
   self: norm_backward(grad, self, p, result, dim, keepdim)
   result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
@@ -1194,7 +1195,7 @@
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result)
   result: norm_jvp(self_p, self_t, p, result)
 
-- name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1]? dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
   result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
