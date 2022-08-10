@@ -176,6 +176,37 @@ class TestAutogradFuns(unittest.TestCase):
         input = torch.ones(1)
         run_model_test(self, model, input_args=(input,))
 
+    def test_inline_with_scoped_tracing(self):
+        class Exp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.exp()
+
+            @staticmethod
+            def symbolic(g, input):
+                return g.op("Exp", input)
+
+        class LogLog(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.log().log()
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                exp_result = Exp.apply(input)
+                return LogLog.apply(exp_result)
+
+        model = Caller()
+        input = torch.ones(1)
+
+        torch.jit._trace._trace_module_map = {
+            _m: torch.typename(type(_m)) for _m in model.modules()
+        }
+        run_model_test(self, model, input_args=(input,))
+        torch.jit._trace._trace_module_map = None
+
 
 if __name__ == "__main__":
     unittest.main()
