@@ -243,23 +243,18 @@ print(graph.code)
 graph.graph.print_tabular()
 
 """
-Output
-
 def forward(self, x_1, pred_1):
-    torch_cond = __main___torch_cond(pred_1, true_fn(), false_fn(), x_1);  pred_1 = x_1 = None
-    return torch_cond
-
-true_fn in the graph:
-
-def forward(self, x_1):
-    sin = torch.ops.aten.sin(x_1);  x_1 = None
-    return sin
-
-git  in the graph:
-
-def forward(self, x_1):
-    cos = torch.ops.aten.cos(x_1);  x_1 = None
-    return cos
+    _tensor_constant0 = self._tensor_constant0
+    conditional = __main___torch_cond(False, wrapped(), wrapped(), _tensor_constant0);  _tensor_constant0 = None
+    return conditional
+    
+opcode         name               target                                          args                                              kwargs
+-------------  -----------------  ----------------------------------------------  ------------------------------------------------  --------
+placeholder    x_1                x_1                                             ()                                                {}
+placeholder    pred_1             pred_1                                          ()                                                {}
+get_attr       _tensor_constant0  _tensor_constant0                               ()                                                {}
+call_function  conditional        <__main__.PyOperator object at 0x7ff4b4480100>  (False, wrapped(), wrapped(), _tensor_constant0)  {}
+output         output             output                                          (conditional,)                                    {}
 
 """
 
@@ -293,7 +288,21 @@ graph = make_fx(f)(x, False, True)
 print("graph.code:")
 print(graph.code)
 graph.graph.print_tabular()
-
+"""
+def forward(self, x_1, pred_1, pred2_1):
+    _tensor_constant0 = self._tensor_constant0
+    conditional = __main___torch_cond(False, wrapped(), wrapped(), (_tensor_constant0, True));  _tensor_constant0 = None
+    return conditional
+    
+opcode         name               target                                          args                                                      kwargs
+-------------  -----------------  ----------------------------------------------  --------------------------------------------------------  --------
+placeholder    x_1                x_1                                             ()                                                        {}
+placeholder    pred_1             pred_1                                          ()                                                        {}
+placeholder    pred2_1            pred2_1                                         ()                                                        {}
+get_attr       _tensor_constant0  _tensor_constant0                               ()                                                        {}
+call_function  conditional        <__main__.PyOperator object at 0x7ff4b4480100>  (False, wrapped(), wrapped(), (_tensor_constant0, True))  {}
+output         output             output                                          (conditional,)                                            {}
+"""
 """
 More test cases (coming soon)
 
