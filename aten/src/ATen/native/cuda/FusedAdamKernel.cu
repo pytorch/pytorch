@@ -18,12 +18,6 @@ constexpr uint8_t kExpAvgIdx = 2;
 constexpr uint8_t kExpAvgSqIdx = 3;
 constexpr uint8_t kMaxExpAvgSqIdx = 4;
 
-// Ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
-template <typename T>
-C10_DEVICE __forceinline__ T lerp(const T v0, const T v1, const double t) {
-    return std::fma(t, v1, std::fma(-t, v0, v0));
-}
-
 template <typename scalar_type, typename opmath_t, int depth=4>
 C10_DEVICE __forceinline__ void adam_math(
     scalar_type r_args[depth][kILP],
@@ -61,8 +55,10 @@ C10_DEVICE __forceinline__ void adam_math(
         if (weight_decay != 0) {
             grad += param * weight_decay;
         }
-        exp_avg = lerp(grad, exp_avg, beta1);
-        exp_avg_sq = lerp(grad * grad, exp_avg_sq, beta2);
+        // todo(crcrpar): use lerp
+        // ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
+        exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
+        exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
 
         if (amsgrad) {
             max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
