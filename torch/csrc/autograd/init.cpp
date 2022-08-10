@@ -336,6 +336,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
