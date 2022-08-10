@@ -387,7 +387,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return func_overload(*args, **kwargs)
 
         if symbolic_shapes.is_symbolic_op(func_overload):
-            return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
+            with self.restore():
+                return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
 
         func = func_overload.overloadpacket
         # We don't want to convert torch.tensor constants into tracing objects.
