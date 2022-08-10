@@ -36,11 +36,6 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
-#ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
-#endif
-
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
