@@ -139,5 +139,23 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     return skip_dec
 
 
+def skipShapeChecking(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self.check_shape = False
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
+def skipDtypeChecking(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self.check_dtype = False
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))
