@@ -122,7 +122,8 @@ def _compare_ort_pytorch_outputs(
     atol: float,
     check_shape: bool,
     check_dtype: bool,
-    flatten: bool):
+    flatten: bool,
+):
     if flatten:
         pt_outs, _ = torch.jit._flatten(pt_outs)
     else:
@@ -268,7 +269,8 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs, pt_outs, rtol, atol, check_shape, check_dtype, flatten)
+            ort_outs, pt_outs, rtol, atol, check_shape, check_dtype, flatten
+        )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
 
