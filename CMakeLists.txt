@@ -970,6 +970,8 @@ if(APPLE)
     if(USE_MPS)
       string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      # To suppress MPSGraph availability warnings
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
     endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
