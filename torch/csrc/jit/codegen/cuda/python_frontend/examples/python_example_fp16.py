@@ -1,11 +1,11 @@
 import torch
 
-from torch._C._nvfuser import Fusion, FusionDefinition, DataType
+from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
 
 # Construct and Define Fusion
-fusion = Fusion()
+fm = FusionManager()
 
-with FusionDefinition(fusion) as fd :
+with FusionDefinition(fm) as fd :
     t0 = fd.define_tensor(3, DataType.Half)
     t1 = fd.define_tensor(1, DataType.Half)
     s0 = fd.define_scalar()
@@ -21,7 +21,7 @@ with FusionDefinition(fusion) as fd :
     t7 = fd.ops.cast(t6, DataType.Half)
     fd.add_output(t7)
 
-fusion.print_ir()
+fm.print_ir()
 
 # Execute Fusion
 input1 = torch.ones(2, 4, 8, device='cuda', dtype=torch.float16)
@@ -30,6 +30,6 @@ input2 = torch.ones(8, device='cuda', dtype=torch.float16)
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape
 for _ in range(5) :
-    outputs = fusion.execute([input1, input2, 2.0])
+    outputs = fm.execute([input1, input2, 2.0])
 
 print(outputs[0])

@@ -1,11 +1,11 @@
 import torch
 
-from torch._C._nvfuser import Fusion, FusionDefinition
+from torch._C._nvfuser import FusionManager, FusionDefinition
 
 # Construct and Define Fusion
-fusion1 = Fusion()
+fm1 = FusionManager()
 
-with FusionDefinition(fusion1) as fd :
+with FusionDefinition(fm1) as fd :
     t0 = fd.define_tensor(1)
     t1 = fd.define_tensor(3)
 
@@ -14,7 +14,7 @@ with FusionDefinition(fusion1) as fd :
 
     fd.add_output(t2)
 
-fusion1.print_ir()
+fm1.print_ir()
 
 # Execute Fusion
 input1 = torch.ones(3, device='cuda')
@@ -23,16 +23,16 @@ input2 = torch.ones(2, 3, 4, device='cuda')
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape
 for _ in range(5) :
-    outputs = fusion1.execute([input1, input2])
+    outputs = fm1.execute([input1, input2])
 
 print(outputs[0])
 
-fusion2 = Fusion()
+fm2 = FusionManager()
 
 input1 = torch.ones(1, 1, 4, device='cuda')
 input2 = torch.ones(2, 3, 4, device='cuda')
 
-with FusionDefinition(fusion2) as fd :
+with FusionDefinition(fm2) as fd :
     t0 = fd.define_tensor(sizes=input1.size(), strides=input1.stride())
     t1 = fd.define_tensor(sizes=input2.size(), strides=input2.stride())
 
@@ -41,11 +41,11 @@ with FusionDefinition(fusion2) as fd :
 
     fd.add_output(t2)
 
-fusion2.print_ir()
+fm2.print_ir()
 
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape
 for _ in range(5) :
-    outputs = fusion2.execute([input1, input2])
+    outputs = fm2.execute([input1, input2])
 
 print(outputs[0])

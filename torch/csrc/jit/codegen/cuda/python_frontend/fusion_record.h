@@ -188,7 +188,7 @@ struct OpRecord : RecordFunctor {
         // Match the nvFuser arith function types
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
-        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x" <<
               fusion_op_.target_type().name() << "] [other: 0x" <<
               child_ptr->fusion_op_.target_type().name() << "]\n";
@@ -197,7 +197,7 @@ struct OpRecord : RecordFunctor {
         result = result &&
             (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
              *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
-        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nOpRecord: " << name_ << " Target  Ptr [self: 0x" <<
               std::hex << (size_t) *fusion_op_.template target<OutType (*)(ArgTypes...)>()
               << "] [other: 0x" <<
@@ -343,6 +343,31 @@ struct BroadcastOpRecord : RecordFunctor {
 
   virtual void print(std::ostream& os, bool close_function=true) const {
     RecordFunctor::print(os, false);
+    os << ", output_shape=[";
+    bool first_arg = true;
+    for (auto shape : output_shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << shape;
+    }
+    os << "]";
+    os << ", broadcast_dims=[";
+    first_arg = true;
+    for (auto dim : broadcast_dims_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << dim;
+    }
+    os << "]";
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
@@ -403,6 +428,14 @@ struct CastOpRecord : RecordFunctor {
     auto arg = dynamic_cast<ArgType>(fd.getFusionState(args_.at(0).index));
     auto output = fusion_op_(dtype_, arg);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+  
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    os << ", dtype=DataType." << dtypeToString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
@@ -590,7 +623,7 @@ struct TensorRecord : RecordFunctor {
         os << "False";
       }
     }
-    os << "], dtype=DataType." << dtype_;
+    os << "], dtype=DataType." << dtypeToString(dtype_);
     if (close_function) {
       os << ")";
     }
@@ -724,6 +757,26 @@ struct ReductionOpRecord : RecordFunctor {
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
+  
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    os << ", axes=[";
+    bool first_arg = true;
+    for (auto axis : axes_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << axis;
+    }
+    os << "]";
+    os << ", keepdim=" << (keep_dim_ ? "True" : "False");
+    os << ", dtype=DataType." << dtypeToString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
+  }
 
  private:
   //! nvFuser arith function signature for a given reduction operation
@@ -783,7 +836,7 @@ struct ScalarRecord : RecordFunctor {
   
   virtual void print(std::ostream& os, bool close_function=true) const {
     RecordFunctor::print(os, false);
-    os << "dtype=DataType." << dtype_;
+    os << "dtype=DataType." << dtypeToString(dtype_);
     if (close_function) {
       os << ")";
     }
@@ -882,6 +935,26 @@ struct VarianceOpRecord : RecordFunctor {
     auto output =
         torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+  
+  virtual void print(std::ostream& os, bool close_function=true) const {
+    RecordFunctor::print(os, false);
+    os << ", axes=[";
+    bool first_arg = true;
+    for (auto axis : axes_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << axis;
+    }
+    os << "]";
+    os << ", correction=" << correction_;
+    os << ", keepdim=" << (keep_dim_ ? "True" : "False");
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:

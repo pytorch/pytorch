@@ -44,7 +44,8 @@ enum class DebugDumpOption {
   Halo, //! Halo information of tensors
   PerfDebugVerbose, //! When running kernels, print verbose information
                     //! associated with what's running
-  PythonFrontend //! Python Frontend debug information.
+  PythonDefinition, //! Python Frontend Fusion Definition.
+  PythonFrontendDebug //! Python Frontend debug information.
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

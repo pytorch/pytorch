@@ -9,6 +9,35 @@ using namespace torch::jit::fuser::cuda::inst;
 
 namespace nvfuser {
 
+const char* dtypeToString(Nvf::DataType t) {
+  switch (t) {
+    case Nvf::DataType::Bool:
+      return "Bool";
+    case Nvf::DataType::Double:
+      return "Double";
+    case Nvf::DataType::Float:
+      return "Float";
+    case Nvf::DataType::Half:
+      return "Half";
+    case Nvf::DataType::BFloat16:
+      return "Bfloat16";
+    case Nvf::DataType::Int:
+      return "Int";
+    case Nvf::DataType::Int32:
+      return "Int32";
+    case Nvf::DataType::ComplexFloat:
+      return "ComplexFloat";
+    case Nvf::DataType::ComplexDouble:
+      return "ComplexDouble";
+    case Nvf::DataType::Null:
+      return "Null";
+    default:
+      break;
+  }
+  TORCH_INTERNAL_ASSERT(false, "No string found for data type.");
+  return nullptr;
+}
+
 FusionDefinition::FusionDefinition(FusionManager* fusion_manager)
     : fusion_manager_(fusion_manager),
       end_record_(new EndRecord()),
@@ -36,21 +65,23 @@ void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_);
   if (!cache_entry.has_value()) {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
     fusion_manager_->createTerminalFusionCacheEntry(end_record_);
     fusion_manager_->traverseFusionCache(end_record_);
+    
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
+      print(std::cout);
+    }
 
     buildFusionIr();
   } else {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
     fusion_manager_->traverseFusionCache(end_record_);
   }
-
-  print(std::cout);
 }
   
 void FusionDefinition::print(std::ostream& os) const {
@@ -80,12 +111,12 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   recording_.emplace_back(record);
   auto cache_entry = fusion_manager_->lookupFusionCacheEntry(recording_.back());
   if (cache_entry.has_value()) {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
           std::hex << record->hash() << ") hit in Fusion Cache.\n";
     }
   } else {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontend)) {
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
           std::hex << record->hash() << ") missed in Fusion Cache.\n";
     }

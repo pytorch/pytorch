@@ -36,7 +36,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
       {DebugDumpOption::PerfDebugVerbose, false},
-      {DebugDumpOption::PythonFrontend, false},
+      {DebugDumpOption::PythonDefinition, false},
+      {DebugDumpOption::PythonFrontendDebug, false},
   };
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
@@ -84,8 +85,10 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
-      } else if (token == "python_frontend") {
-        options_map[DebugDumpOption::PythonFrontend] = true;
+      } else if (token == "python_definition") {
+        options_map[DebugDumpOption::PythonDefinition] = true;
+      } else if (token == "python_frontend_debug") {
+        options_map[DebugDumpOption::PythonFrontendDebug] = true;
       } else {
         TORCH_CHECK(
             false,

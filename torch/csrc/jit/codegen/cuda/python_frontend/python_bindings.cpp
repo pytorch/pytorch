@@ -125,10 +125,37 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
-             std::vector<int64_t> sizes,
-             std::vector<int64_t> strides,
+             std::vector<int64_t>& symbolic_sizes,
+             std::vector<bool>& contiguous,
              Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
-            FUSER_PERF_SCOPE("FusionDefinition.define_tensor");
+            FUSER_PERF_SCOPE("FusionDefinition.define_tensor (default)");
+
+            for (size_t i = 0; i < symbolic_sizes.size(); ++i) {
+              TORCH_CHECK(symbolic_sizes[i] == -1 || symbolic_sizes[i] == 1,
+                  "The value ", symbolic_sizes[i], " at index ", i,
+                  " was neither broadcast(1) or symbolic(-1).");
+            }
+
+            nvfuser::Tensor* out = self.defineTensor();
+            self.defineRecord(new nvfuser::TensorRecord(
+                {*static_cast<nvfuser::State*>(out)},
+                symbolic_sizes,
+                contiguous,
+                dtype));
+
+            return out;
+          },
+          py::arg("symbolic_sizes"),
+          py::arg("contiguous"),
+          py::arg("dtype") = Nvf::DataType::Float,
+          py::return_value_policy::reference)
+      .def(
+          "define_tensor",
+          [](nvfuser::FusionDefinition& self,
+             std::vector<int64_t>& sizes,
+             std::vector<int64_t>& strides,
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+            FUSER_PERF_SCOPE("FusionDefinition.define_tensor (integration)");
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -1010,7 +1037,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                         \
          nvfuser::Tensor* arg,                                               \
          const std::vector<int>& axes,                                       \
-         bool keep_dim,                                                      \
+         bool keepdim,                                                      \
          Nvf::DataType dtype) -> nvfuser::Tensor* {                          \
         FUSER_PERF_SCOPE("Operators." op_str);                               \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
@@ -1020,13 +1047,13 @@ void initNvFuserPythonBindings(PyObject* module) {
             ("ops." op_str),                                                 \
             Nvf::op_name,                                                    \
             axes,                                                            \
-            keep_dim,                                                        \
+            keepdim,                                                         \
             dtype));                                                         \
         return output;                                                       \
       },                                                                     \
       py::arg("arg"),                                                        \
       py::arg("axes"),                                                       \
-      py::arg("keep_dim"),                                                   \
+      py::arg("keepdim") = false,                                            \
       py::arg("dtype") = Nvf::DataType::Null,                                \
       py::return_value_policy::reference);
 
@@ -1092,6 +1119,10 @@ void initNvFuserPythonBindings(PyObject* module) {
             axes, correction, keepdim));
         return output;
       },
+      py::arg("arg"),
+      py::arg("axes"),
+      py::arg("correction"),
+      py::arg("keepdim") = false,
       py::return_value_policy::reference);
 
   nvf_ops.def(
@@ -1111,6 +1142,9 @@ void initNvFuserPythonBindings(PyObject* module) {
             "ops.broadcast_in_dim", output_shape, broadcast_dims));
         return output;
       },
+      py::arg("arg"),
+      py::arg("output_shape"),
+      py::arg("broadcast_dims"),
       py::return_value_policy::reference);
 }
 
