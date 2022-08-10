@@ -2188,17 +2188,18 @@ std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
-  int64_t dim_size = self.size(dim);
-  int64_t num_splits = split_sizes.size();
-  std::vector<Tensor> splits(num_splits);
+  const int64_t dim_size = self.size(dim);
+  const int64_t num_splits = split_sizes.size();
   int64_t start_idx = 0;
 
+  std::vector<Tensor> splits;
+  splits.reserve(num_splits);
   for (const auto i : c10::irange(num_splits)) {
     auto length = split_sizes[i];
     TORCH_CHECK(length >= 0,
              "split_with_sizes expects split_sizes have only non-negative ",
              "entries, but got split_sizes=", split_sizes);
-    splits[i] = self.narrow(dim, start_idx, length);
+    splits.push_back(self.narrow(dim, start_idx, length));
     start_idx += length;
   }
   TORCH_CHECK(start_idx == dim_size,
