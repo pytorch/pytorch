@@ -8,8 +8,3 @@ from .matmul import apply_native_matmul, is_native_matmul, masked_bmm
 from .passthrough import apply_pass_through_fn, is_pass_through_fn
 from .reductions import apply_reduction, is_reduction
 from .unary import apply_native_unary, is_native_unary
-
-try:
-    from .version import __version__  # type: ignore[import] # noqa: F401
-except ImportError:
-    pass

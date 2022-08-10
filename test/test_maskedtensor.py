@@ -20,8 +20,8 @@ from torch.testing._internal.common_methods_invocations import (
 )
 
 from torch._masked import _combine_input_and_mask
+from torch.masked import masked_tensor, masked_bmm
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
-from torch.masked.maskedtensor import masked_tensor, masked_bmm
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES
 from torch.masked.maskedtensor.reductions import REDUCE_NAMES
@@ -469,6 +469,7 @@ class TestReductions(TestCase):
         )
 
     def test_mean_grad(self):
+        print ("hi")
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)

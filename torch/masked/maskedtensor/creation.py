@@ -2,15 +2,38 @@
 
 import torch
 
-from .core import MaskedTensor
+from .core import MaskedTensor, is_masked_tensor
 
 
-# Basic factory function
 def masked_tensor(data, mask, requires_grad=False):
-    from .core import is_masked_tensor
+    r""" A basic factory function to create a MaskedTensor
+    
+    Args:
+        data: input data tensor
+        mask: input mask tensor with dtype bool where True indicates "specified" and False indicates "unspecified"
 
-    assert not is_masked_tensor(data)
-    assert not is_masked_tensor(mask)
+    Shape:
+        data: :math:`(*)`, where :math:`*` means any number of dimensions.
+        mask: :math:`(*)`, same shape as data
+    
+    Examples::
+
+        >>> data = torch.arange(6).reshape(2,3)
+        >>> mask = torch.tensor([[True, False, False], [True, True, False]])
+        >>> mt = masked_tensor(data, mask)
+        >>> mt
+        masked_tensor(
+        [
+            [0,       --,       --],
+            [3, 4,       --]
+        ]
+        )
+    """
+    if is_masked_tensor(data):
+        raise TypeError("data is already a MaskedTensor but must be a regular Tensor")
+    if is_masked_tensor(mask):
+        raise TypeError("mask is already a MaskedTensor but must be a regular Tensor")
+
     data = data.clone().detach()
     mask = mask.clone().detach()
     return MaskedTensor(data, mask, requires_grad)
@@ -22,8 +45,6 @@ def masked_tensor(data, mask, requires_grad=False):
 class AsMaskedTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, data, mask):
-        ctx.mark_non_differentiable(mask)
-        ctx.save_for_backward(mask)
         return MaskedTensor(data, mask)
 
     @staticmethod
