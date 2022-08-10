@@ -13,7 +13,8 @@ class OverlappedAdamW(OverlappedOptimizer):
         amsgrad: bool = False,
         maximize: bool = False,
         foreach: bool = False,
-        grad_scaler=None
+        grad_scaler=None,
+        discard_grad=False
     ):
         
         self._functional_adamw = _FunctionalAdamW([],
@@ -27,8 +28,9 @@ class OverlappedAdamW(OverlappedOptimizer):
                                                   _allow_empty_param_list=True)
 
         super().__init__(functional_optim=self._functional_adamw, 
-                         grad_scaler=grad_scaler)
-        self.params = params
+                         grad_scaler=grad_scaler,
+                         params=params,
+                         discard_grad=discard_grad)
     
     def _step_param(self, param: Tensor, grad: Tensor):
         return self._functional_adamw.step_param(param=param, grad=grad)

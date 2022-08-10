@@ -164,6 +164,11 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
+  // Not copy gard back to parameters' grad 
+  // Used by DDP._register_overlapped_optim
+  // OverlappedOptim update parameters in the comm hook, thus, no need to copy grad back
+  void set_discard_grad(bool discard_grad);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -511,6 +516,9 @@ class TORCH_API Reducer {
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
+
+  // If true, skipping copy grad back to parameters
+  bool discard_grad_;
 
   friend class Logger;
 };

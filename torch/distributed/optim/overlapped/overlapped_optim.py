@@ -1,14 +1,25 @@
+import functools
+
+import torch
 from torch import Tensor
+
+
 class OverlappedOptimizer(object):
     def __init__(self, 
                  functional_optim,
-                 grad_scaler=None
+                 grad_scaler=None,
+                 params=None,
+                 discard_grad=False
                  ) -> None:
         self._functional_optim = functional_optim
         self.grad_scaler = grad_scaler
+        self.params = params
+        self.discard_grad = discard_grad
 
-        # Dummpy param_groups to cooperate with LRScheduler
+        # Dummy param_groups to be compatible with LRScheduler
         self.param_groups = [{'lr': functional_optim.defaults['lr']}]
+
+        self._hook_for_profile()
 
         self.is_overlapped = True
         
@@ -34,7 +45,35 @@ class OverlappedOptimizer(object):
         pass
             
     def _step_param(self, param: Tensor, grad: Tensor):
-        """The actual optimizing algorithm"""
+        """
+        The actual optimizing algorithm. 
+        Should be implemented by subcalsses.
+        """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped DDP."
         )
+
+    # TODO: pickle/unpickle
+    def __getstate__(self):
+        ...
+
+    # TODO: pickle/unpickle
+    def __setstate__(self, state):
+        ...
+
+    def _hook_for_profile(self):
+
+        def profile_hook_step(func):
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                obj, *_ = args
+                profile_name = "OverlappedOptimizer.step_param#{}.step_param".format(obj.__class__.__name__)
+                with torch.autograd.profiler.record_function(profile_name):
+                    return func(*args, **kwargs)
+            return wrapper
+
+        hooked = getattr(self.__class__._step_param, "hooked", None)
+        if not hooked:
+            self.__class__._step_param = profile_hook_step(self.__class__._step_param)
+            self.__class__._step_param.hooked = True

@@ -1471,6 +1471,9 @@ class DistributedDataParallel(Module, Joinable):
         self._opt_hook_state = _OptimizerHookState(optim, optim.params)
         opt_hook = _hook_then_optimizer(allreduce_hook, self._opt_hook_state)
         self.register_comm_hook(None, opt_hook)
+
+        if optim.discard_grad:
+            self.reducer._set_discard_grad(True)
     
 
     def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):

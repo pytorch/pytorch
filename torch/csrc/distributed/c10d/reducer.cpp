@@ -117,7 +117,8 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      discard_grad_(false) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       params_.size() >= 1, "Expected at least one parameter.");
@@ -1442,6 +1443,10 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       }
     }
 
+    if (discard_grad_) {
+      return false
+    }
+
     if (!gradient_as_bucket_view_) {
       RECORD_FUNCTION(
           "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1503,15 +1508,18 @@ void Reducer::finalize_backward() {
         "Expected bucket.future_work not to be null. "
         "This may indicate that communication hook was not properly installed.");
     bucket.future_work->wait();
-    auto future_result = comm_hook_ == nullptr
+
+    if (!discard_grad_) {
+      auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    if (bucket.expect_sparse_gradient) {
-      bucket.gradients.copy_(future_result);
-    } else {
-      // Reinitialize only `bucket_views_out` with the future_result by
-      // following the same logic in `initialize_buckets`.
-      populate_bucket_views_out(bucket, future_result);
+      if (bucket.expect_sparse_gradient) {
+        bucket.gradients.copy_(future_result);
+      } else {
+        // Reinitialize only `bucket_views_out` with the future_result by
+        // following the same logic in `initialize_buckets`.
+        populate_bucket_views_out(bucket, future_result);
+      }
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass
@@ -1929,6 +1937,10 @@ void Reducer::set_static_graph() {
   // when static_graph_ is set as true, always initialize_local_used_map
   // and detect the global unused parameters in the first iteration.
   initialize_local_used_map();
+}
+
+void Reducer::set_discard_grad(bool discard_grad) {
+  discard_grad_ = discard_grad;
 }
 
 namespace {

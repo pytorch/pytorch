@@ -1,10 +1,11 @@
 import warnings
-from collections import defaultdict, abc
-from typing import Any, Dict, List, Optional, Tuple
+from collections import abc
+from typing import List, Tuple
 
 import torch
 from .grad_scaler import _MultiDeviceReplicator
 from .common import amp_definitely_not_available
+
 
 class OverlappedGradScaler:
     """
@@ -48,7 +49,7 @@ class OverlappedGradScaler:
     the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used
     without incurring inf or NaN gradient values.
     ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every
-    step.
+    iteration.
 
     * If infs/NaNs are found,  the underlying ``optimizer.step_param()`` will be skipped for the current bucket 
       (so the params in this bucket will not be updated but the reset buckets may be updated if no infs/NaNs are found) 
@@ -170,7 +171,7 @@ class OverlappedGradScaler:
         assert self._scale is not None, "Attempted unscale_grad but _scale is None. " + fix
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=grad.device)
-        with torch.no_grad:
+        with torch.no_grad():
             if grad is None:
                 return
             if grad.dtype == torch.float16:
@@ -184,7 +185,8 @@ class OverlappedGradScaler:
                     grad = grad.coalesce()
                 to_unscale = grad._values()
             else:
-                to_unscale = grad
+                # Compatible with _amp_foreach_non_finite_check_and_unscale_
+                to_unscale = [grad]
             torch._amp_foreach_non_finite_check_and_unscale_(to_unscale,
                                                              found_inf,
                                                              inv_scale)
