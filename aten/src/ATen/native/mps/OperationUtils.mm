@@ -231,7 +231,12 @@ void printTensorNDArray(const Tensor& t) {
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
                                                          dataType:selfDType] autorelease];
+  C10_CLANG_DIAGNOSTIC_PUSH()
+  #if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
+  #endif
   [tdata printNDArray];
+  C10_CLANG_DIAGNOSTIC_POP()
 }
 
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)

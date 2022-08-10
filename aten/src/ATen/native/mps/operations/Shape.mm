@@ -534,7 +534,6 @@ TORCH_IMPL_FUNC(cat_out_mps)
   };
 
   const Tensor* notSkippedTensor = NULL; // non-owning reference
-  int nDims = 0;
 
   // Check for type promotion
   TORCH_CHECK(
@@ -570,7 +569,6 @@ TORCH_IMPL_FUNC(cat_out_mps)
       continue;
     }
     input_tensors.push_back(&t);
-    nDims = t.dim();
     // TODO: Is this OK?
     notSkippedTensor = &t;
     tensor_idx++;
@@ -879,7 +877,6 @@ void upsample_out_mps(const Tensor& input,
     int64_t output_width = output_size[1];
     @autoreleasepool {
       MPSShape* input_shape = getMPSShape(input);
-      NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
       string key = string("upsample_2d:") + mps::getMPSShapeString(input_shape) + ":" +
                              getMPSTypeString(input.scalar_type()) +
                              ":h" + to_string(output_height) + ":w" + to_string(output_width) +
@@ -992,7 +989,6 @@ void upsample1d_out_mps(const Tensor& input,
     int64_t out_size = output_size[0];
     @autoreleasepool {
       MPSShape* input_shape = getMPSShape(input);
-      NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
       string key = string("upsample_1d:") + mps::getMPSShapeString(input_shape) + ":" +
                              getMPSTypeString(input.scalar_type()) +
                              ":size" + to_string(out_size) +

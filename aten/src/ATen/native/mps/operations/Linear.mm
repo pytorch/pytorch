@@ -65,7 +65,6 @@ Tensor _mps_linear(
 
     MPSShape* wt_shape = getMPSShape(weight);
     string wt_key = string([[[wt_shape valueForKey:@"description"] componentsJoinedByString:@","] UTF8String]);
-    MPSShape* bias_shape = nil;
     string bias_key = "nobias";
     if(is_bias_defined) {
       bias_key = "bias";
