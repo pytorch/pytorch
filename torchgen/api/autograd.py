@@ -466,7 +466,7 @@ Attempted to convert a derivative formula for a mutable operator
 
                 required_original_self_value = bool(
                     re.search(IDENT_REGEX.format("original_self_p"), formula)
-                )
+                ) or bool(re.search(IDENT_REGEX.format("original_self_t"), formula))
 
                 forward_derivatives = [
                     ForwardDerivative(
