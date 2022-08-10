@@ -1,11 +1,14 @@
+import traceback
 from contextlib import contextmanager
 from typing import Optional, List
 from ._compatibility import compatibility
 
 __all__ = ['override_stack_trace', 'append_stack_trace', 'format_stack', 'is_stack_trace_overridden']
 
+
 current_stack: List[str] = []
 is_overridden = False
+
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
@@ -22,8 +25,10 @@ def override_stack_trace():
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def append_stack_trace(stack: Optional[str]):
-    global is_overridden
+def append_stack_trace(stack : Optional[str]):
+    """
+    The content of stack here is an entire stacktraces as a string
+    """
     global current_stack
 
     if is_overridden and stack:
@@ -37,18 +42,14 @@ def append_stack_trace(stack: Optional[str]):
 
 
 @compatibility(is_backward_compatible=False)
-def format_stack() -> str:
-    global is_overridden
-    global current_stack
-
+def format_stack() -> List[str]:
     if is_overridden:
-        return '\n'.join(reversed(current_stack))
+        return current_stack
     else:
-        return ''
+        # fallback to traceback.format_stack()
+        return traceback.format_stack()
 
 
 @compatibility(is_backward_compatible=False)
 def is_stack_trace_overridden() -> bool:
-    global is_overridden
-
     return is_overridden
