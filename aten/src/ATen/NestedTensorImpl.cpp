@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
@@ -66,16 +67,40 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
   return strides;
 }
 
+// assume contiguous, we can construct offsets from size
+inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
+  // empty `sizes` means empty nested tensor, so return empty strides
+  if (sizes.dim() == 0) {
+    return std::vector<int64_t>();
+  }
+  int64_t ntensors = sizes.size(0),
+      orig_dim = sizes.size(1);
+  std::vector<int64_t> offsets(ntensors);
+  // nesting scalars has easy offsets
+  if (orig_dim == 0) {
+    std::iota(offsets.begin(), offsets.end(), 0);
+    return offsets;
+  }
+  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  offsets[0] = 0;
+  for (int64_t i = 0; i < ntensors - 1; i++) {
+    int64_t row_product = sizes_ptr[0];
+    for (int64_t j = 1; j < orig_dim; j++) {
+      row_product *= sizes_ptr[j];
+    }
+    offsets[i + 1] = offsets[i] + row_product;
+    sizes_ptr += orig_dim;
+  }
+  return offsets;
+}
+
 // [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality
 // key and therefore getAutogradRelatedKeySetFromBackend will return the
 // wrong autograd key. For this specific impl we make sure to register the
 // correct Autograd key which is AutogradNestedTensor
 c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
   c10::DispatchKeySet key_set =
-      (c10::DispatchKeySet(DispatchKey::NestedTensor) |
-       c10::DispatchKeySet(
-           buffer.is_cuda() ? BackendComponent::CUDABit
-                            : BackendComponent::CPUBit));
+      c10::DispatchKeySet(DispatchKey::NestedTensor) | c10::DispatchKeySet{buffer.key_set().highestBackendKey()};
 
   // Add AutogradNestedTensor specific keys
   key_set = key_set | inplace_or_view_ks | autograd_nested;
@@ -84,26 +109,53 @@ c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
 
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor)
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    std::vector<int64_t> offsets)
     : TensorImpl(
+          Storage(buffer.storage()),
           generate_nested_key_set(buffer),
-          buffer.dtype(),
-          buffer.device()),
-      buffer_(std::move(buffer)),
+          buffer.dtype()),
       nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
+      nested_stride_tensor_(std::move(nested_stride_tensor)),
+      offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
+  auto buffer_size_vec{buffer.unsafeGetTensorImpl()->sizes()};
+  TORCH_INTERNAL_ASSERT(
+      buffer_size_vec.size() == 1,
+      "NestedTensorImpl buffer is required to be 1 dimensional but got a buffer with ",
+      buffer.dim(),
+      " dimensions.");
+  buffer_size_ = buffer_size_vec[0];
+
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
-  TORCH_INTERNAL_ASSERT(buffer_.is_cuda() || buffer_.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer_);
+  TORCH_INTERNAL_ASSERT(buffer.is_cuda() || buffer.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer.device());
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.is_contiguous());
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.dim() == size_dim);
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.sizes() == nested_size_tensor_.sizes());
+  TORCH_INTERNAL_ASSERT((size_dim == 0 && (int64_t)offsets_.empty())
+      || (size_dim == 2 && nested_size_tensor_.size(0) == (int64_t)offsets_.size()));
   refresh_dim();
   set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
+
+// assume contiguous, `nested_stride_tensor` and `offsets`
+// can be infered from `nested_size_tensor`
+NestedTensorImpl::NestedTensorImpl(
+    at::Tensor buffer,
+    at::Tensor nested_size_tensor)
+    : NestedTensorImpl(
+          buffer,
+          nested_size_tensor,
+          construct_nested_stride_tensor(nested_size_tensor),
+          construct_offsets(nested_size_tensor))
+{}
 
 void NestedTensorImpl::refresh_dim() {
   const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
@@ -140,8 +192,13 @@ int64_t NestedTensorImpl::numel_custom() const {
   return static_cast<int64_t>(num_elements);
 }
 
+
+c10::SymInt NestedTensorImpl::sym_numel_custom() const {
+  return NestedTensorImpl::numel_custom();
+}
+
 bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
-  TORCH_CHECK(false, "is_contiguous is disabled.");
+  return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");

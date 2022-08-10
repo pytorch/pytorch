@@ -337,7 +337,7 @@ def generate_tensor_like_torch_implementations():
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
+        "torch.overrides.get_testing_overrides for this function or if a "
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
@@ -648,7 +648,11 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                elif t == 'Dimname':
+                    func_args.append("")
+                elif t == 'DimnameList':
+                    func_args.append([""])
+                elif t.startswith('int'):
                     func_args.append(0)
                 elif t in {'Stream'}:
                     func_args.append(torch.Stream())
@@ -1129,7 +1133,7 @@ class TestTorchFunctionMode(TestCase):
         with A():
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.split(None, [2]), -1)  # python side
+            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1527,6 +1531,20 @@ class TestTorchFunctionMode(TestCase):
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_enable_subclass(self):
+        called = False
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(5))
+        with torch._C.DisableTorchFunction():
+            g = torch._C._EnableTorchFunction()
+            try:
+                self.assertIsInstance(torch.sum(x), A)
+            finally:
+                del g
 
 
 if __name__ == '__main__':
