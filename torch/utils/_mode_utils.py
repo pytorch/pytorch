@@ -72,7 +72,7 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
                 f'of {mode_info.mode_class_name()} to make it compositional!'
             )
         raise ValueError(
-            f'Attempted to enable_{mode_info.mode_name}_mode, but there is already an '
+            f'Attempted to {replace}, but there is already an '
             f'active mode {old}.  {help_text}'
         )
     # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
@@ -94,8 +94,8 @@ def _restore_mode(mode, mode_info: _ModeInfo):
     if not hasattr(mode, "ancestors"):
         raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
     old = mode_info.get_mode()
-    if old is not None and old not in mode.ancestors:
-        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
+    if old is not None and old is not mode and old not in mode.ancestors:
+        raise RuntimeError(f"{mode} is not valid in the current state {old} because the current mode is not its ancestor: {mode.ancestors}")
     mode_info.set_mode(mode)
     try:
         yield mode

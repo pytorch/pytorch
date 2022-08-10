@@ -85,9 +85,7 @@ class PyDispatcher:
             self.already_dispatched_keys = self.already_dispatched_keys | DispatchKeySet(dispatch_key)
 
 
-
 dispatcher_singleton = PyDispatcher()
-
 
 class PyOperator:
     def __init__(self, name):
@@ -123,6 +121,7 @@ def compute_dispatch_key(PyOperator, args, kwargs, additional_exclude=None):
 
 
 def dispatch(dispatch_key, operator, args, kwargs):
+    print("Dispatching:", dispatch_key, operator.__name__)
     if dispatch_key not in SUPPORTED_KEYS:
         raise RuntimeError(f'NYI: {dispatch_key}')
     assert dispatch_key in operator.table
@@ -157,6 +156,7 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
+    print("In cond dense")
     if pred:
         return true_fn(*operands)
     else:
@@ -186,20 +186,19 @@ def fallthrough_fn(operator, dispatch_key):
 
 def python_fallback(op):
     def inner(*args, **kwargs):
-        # Step 1: Check if any modes are active
-        mode = torch._C._get_torch_dispatch_mode()
-        if mode is not None:
-            return mode.__torch_dispatch__(op, None, args, kwargs)
-
-        # Step 2: Get all tensors. For each tensor, try their torch_dispatch
+        # Get all tensors. For each tensor, try their torch_dispatch
         # until one returns something other than NotImplemented
-        tensors = get_tensors(args, kwargs)
-        for tensor in tensors:
-            ret = tensor.__torch_dispatch__(op, None, args, kwargs)
-            if ret is NotImplemented:
-                continue
-            return ret
-        return NotImplemented
+        mode = torch._C._get_torch_dispatch_mode()
+
+        print("In fallback", mode)
+        with mode.restore():
+            tensors = get_tensors(args, kwargs)
+            for tensor in tensors:
+                ret = tensor.__torch_dispatch__(op, None, args, kwargs)
+                if ret is NotImplemented:
+                    continue
+                return ret
+            return NotImplemented
     return inner
 
 
@@ -244,6 +243,7 @@ def f(x, pred):
 graph = make_fx(f)(x, torch.tensor(False))
 print("graph.code:")
 print(graph.code)
+graph.graph.print_tabular()
 
 print("true_fn in the graph:")
 print(list(graph.graph.nodes)[2].args[1].code)

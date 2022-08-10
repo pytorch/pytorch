@@ -140,14 +140,16 @@ def unwrap_elem(e):
 
 def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # Hack
-    if func_overload.__name__ == 'torch.cond':
-        # TODO: need to parse
-        assert kwargs is None or not kwargs
-        pred, true_fn, false_fn, *operands = args
+    print("Here with my boy:", func_overload.__name__)
+    # if func_overload.__name__ == 'torch.cond':
+    #     print("Called into cond")
+    #     # TODO: need to parse
+    #     assert kwargs is None or not kwargs
+    #     pred, true_fn, false_fn, *operands = args
 
-        g_true_fn = make_fx(true_fn)(*operands)
-        g_false_fn = make_fx(false_fn)(*operands)
-        args = (pred, g_true_fn, g_false_fn, *operands)
+    #     g_true_fn = make_fx(true_fn)(*operands)
+    #     g_false_fn = make_fx(false_fn)(*operands)
+    #     args = (pred, g_true_fn, g_false_fn, *operands)
         
     if kwargs is None:
         kwargs = {}
@@ -303,8 +305,10 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+        print("In ProxyTensor __torch_dispatch__ with", func_overload.__name__)
         # Get the first proxy mode. If there are different proxy modes with
         # different tracers torch.fx.Proxy would raise an error.
+        
         proxy_mode = None
         for arg in pytree.tree_flatten((args, kwargs))[0]:
             if isinstance(arg, ProxyTensor):
@@ -314,6 +318,16 @@ class ProxyTensor(torch.Tensor):
         assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
 
         with proxy_mode.restore():  # type: ignore[union-attr]
+            if func_overload.__name__ == 'torch.cond':
+                print("Called into cond")
+                # TODO: need to parse
+                assert kwargs is None or not kwargs
+                pred, true_fn, false_fn, *operands = args
+
+                g_true_fn = make_fx(true_fn)(*operands)
+                g_false_fn = make_fx(false_fn)(*operands)
+                args = (pred, g_true_fn, g_false_fn, *operands)
+
             return func_overload(*args, **kwargs)
 
 
@@ -400,10 +414,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        print("In ProxyTorchDispatchMode __torch_dispatch__ with ", func_overload.__name__)
         if not self.enable_tracing:
+            print("No tracing enabled")
             return func_overload(*args, **kwargs)
 
         if symbolic_shapes.is_symbolic_op(func_overload):
+            print("Op is symbolic")
             return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
 
         func = func_overload.overloadpacket
@@ -411,6 +428,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
+            print("Proxy time")
             return proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -446,6 +464,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            print("Missed proxy")
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
@@ -465,6 +484,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                 constant = None
             return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
         else:
+            print("Missed proxy")
             return func_overload(*args, **kwargs)
 
 
