@@ -26,13 +26,13 @@ from pytorch_test_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
+    skipDtypeChecking,
     skipForAllOpsetVersions,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
     skipShapeChecking,
-    skipDtypeChecking,
     skipTraceTest,
 )
 from torch import Tensor
