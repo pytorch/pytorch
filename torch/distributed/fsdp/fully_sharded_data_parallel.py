@@ -3113,6 +3113,9 @@ class FullyShardedDataParallel(nn.Module):
             """
             try:
                 for p in fsdp_module.params:
+                    if p.data.data_ptr() == p._local_shard.data_ptr():
+                        continue
+
                     if (
                         fsdp_module.sharding_strategy == ShardingStrategy.FULL_SHARD
                         or fsdp_module._require_backward_grad_sync
@@ -3133,8 +3136,6 @@ class FullyShardedDataParallel(nn.Module):
 
         def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
             """Helper used below on all fsdp modules."""
-
-            needs_reshard = False
 
             for p in fsdp_module.params:
                 if p.requires_grad:
@@ -3171,13 +3172,8 @@ class FullyShardedDataParallel(nn.Module):
                         # Check if post-backward was called for this param (FSDP unit).
                         # TODO: This logic will have to be revisited when non-recursive wrapping
                         # lands. If it was not called, there is no new gradient to accumulate
-                        # and the param is also unsharded at this point, so add the FSDP module
-                        # to a set of FSDP modules that need to be resharded in a catch-all
-                        # fashion.
                         if p._post_backward_called:
                             p.grad = p._saved_grad_shard
-                        else:
-                            needs_reshard = True
                     else:
                         print(f" {fsdp_module} -- did not receive gradient --")
                         p_assert(
@@ -3195,15 +3191,10 @@ class FullyShardedDataParallel(nn.Module):
                     # Reset _post_backward_called in preparation for the next iteration.
                     p._post_backward_called = False
 
-            if needs_reshard:
-                # at least one FlatParam in this fsdp unit needs to be resharded.
-                # TODO: may need to make this on a per-FlatParam basis.
-                _catch_all_reshard(fsdp_module)
-
         # Update root and nested FSDP's hooks and flags.
         for m in self.fsdp_modules(self):  # includes self
             _finalize_params(m)
-            # _catch_all_reshard(m)
+            _catch_all_reshard(m)
             m._pre_backward_hook_has_run = False
             m.training_state = TrainingState_.IDLE
 
