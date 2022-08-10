@@ -708,7 +708,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (!print_inline_) {
       if (op_type == UnaryOpType::RandLike) {
         auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
-        auto index = genTensorIndex(uop->out()->as<kir::TensorIndex>());
+        auto index = genTensorIndex(uop->in()->as<kir::TensorIndex>());
         int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
         indent() << "nvfuser_index_t subseq" << uop->name() << " = (" << index
                  << ") / " << multiple << ";\n";
