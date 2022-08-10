@@ -1208,14 +1208,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_sparse_csr_from_dense_convert_error(self, device, dtype):
-        size = (4, 2, 4)
-        dense = make_tensor(size, dtype=dtype, device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "Only 2D"):
-            sparse = dense.to_sparse_csr()
-
     # TODO: Support auto generation of device check for sparse tensors
     # See: https://github.com/pytorch/pytorch/issues/59058
     @onlyCUDA
