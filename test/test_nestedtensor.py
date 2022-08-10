@@ -1208,6 +1208,40 @@ class TestNestedTensorDeviceType(TestCase):
             torch.ops.aten._scaled_dot_product_attention(
                 query, key, value, dropout_p=dropout_p, need_attn_weights=need_attn_weights, is_causal=True)
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_empty_like(self, device, dtype):
+        ntensors = 4
+        nt = self.random_nt(device, dtype, ntensors, (4, 4))
+
+        # Create empty on same device as original nested tensor
+        nt_empty = torch.empty_like(nt)
+        assert nt.is_same_size(nt_empty)
+        self.assertEqual(nt.dtype, nt_empty.dtype)
+        self.assertEqual(nt.device, nt_empty.device)
+        self.assertEqual(nt.layout, nt_empty.layout)
+
+        # TODO Fix this Create empty on different device from original nested tensor currently errors.
+        if device == "cpu":
+            self.assertRaisesRegex(RuntimeError,
+                                   "Currently nested tensors doesn't support creating an empty_like tensor on a different device.",
+                                   lambda: torch.empty_like(nt, device='cuda'))
+        else:
+            self.assertRaisesRegex(RuntimeError,
+                                   "Currently nested tensors doesn't support creating an empty_like tensor on a different device.",
+                                   lambda: torch.empty_like(nt, device='cpu'))
+
+        # Check changing dtype of empty_like nested tensor output
+        dtype_set = {torch.float, torch.float16, torch.double}
+        for other_dtype in dtype_set - {dtype}:
+            nt_empty_other_dtype = torch.empty_like(nt, dtype=other_dtype)
+            self.assertEqual(nt.dtype, dtype)
+            self.assertEqual(nt_empty_other_dtype.dtype, other_dtype)
+            self.assertEqual(nt.device, nt_empty.device)
+            self.assertEqual(nt.layout, nt_empty.layout)
+
+        # Create tensor for autograd
+        nt_empty_req_grad = torch.empty_like(nt, requires_grad=True)
+        self.assertEqual(nt_empty_req_grad.requires_grad, True)
 
 class TestNestedTensorAutograd(TestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck

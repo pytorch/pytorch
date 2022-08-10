@@ -93,6 +93,23 @@ TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
     double padding,
     OptionalIntArrayRef output_size);
 
+TORCH_API TensorOptions verify_empty_parameters(
+    const at::Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format);
+
+TORCH_API at::Tensor empty_nested_generic(
+    int64_t buffer_size,
+    c10::Allocator* allocator,
+    TensorOptions options,
+    c10::DispatchKeySet key_set,
+    at::Tensor nested_size,
+    at::Tensor nested_stride,
+    std::vector<int64_t> offsets);
+
 namespace impl {
 
 template <typename T>

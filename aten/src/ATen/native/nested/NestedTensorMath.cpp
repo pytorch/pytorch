@@ -10,7 +10,7 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/EmptyTensor.h>
-#include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
 namespace at {
 namespace native {
@@ -820,14 +820,13 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-Tensor empty_like_nested(
-    const Tensor& self,
+TensorOptions verify_empty_parameters(
+    const at::Tensor& self,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options_ =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
@@ -850,12 +849,19 @@ Tensor empty_like_nested(
   TORCH_CHECK(
       !(options.layout() != kStrided && optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
+  return options;
+}
 
-  auto* allocator = self.is_cuda() ? GetAllocator(kCUDA) : GetAllocator(kCPU);
-
-  auto self_impl = get_nested_tensor_impl(self);
+Tensor empty_nested_generic(
+    int64_t buffer_size,
+    c10::Allocator* allocator,
+    TensorOptions options,
+    c10::DispatchKeySet key_set,
+    at::Tensor nested_size,
+    at::Tensor nested_stride,
+    std::vector<int64_t> offsets) {
   size_t size_bytes = detail::computeStorageNbytesContiguous(
-      {self_impl->get_buffer_size()}, options.dtype().itemsize());
+      {buffer_size}, options.dtype().itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -864,14 +870,43 @@ Tensor empty_like_nested(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      self_impl->get_buffer_size(),
+      buffer_size,
       std::move(storage_impl),
-      self.key_set(),
+      key_set,
       options.dtype(),
-      self_impl->get_nested_size_tensor().clone(),
-      self_impl->get_nested_stride_tensor().clone(),
-      self_impl->get_offsets());
+      nested_size,
+      nested_stride,
+      offsets);
   return tensor;
+}
+
+Tensor empty_like_nested_cpu(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      device == self.device(),
+      "Currently nested tensors doesn't support creating an empty_like tensor on a different device.")
+  auto options = verify_empty_parameters(
+      self, dtype, layout, device, pin_memory, optional_memory_format);
+
+  auto* allocator = c10::GetCPUAllocator();
+  auto self_impl = get_nested_tensor_impl(self);
+  auto nested_size = self_impl->get_nested_size_tensor().clone();
+  auto nested_strides = self_impl->get_nested_stride_tensor().clone();
+  auto offsets = self_impl->get_offsets();
+
+  return empty_nested_generic(
+      self_impl->get_buffer_size(),
+      allocator,
+      options,
+      self.key_set(),
+      nested_size,
+      nested_strides,
+      offsets);
 }
 
 // utilities support _NestedTensor_GeneralizedBMM

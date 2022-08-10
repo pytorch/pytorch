@@ -1425,6 +1425,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/cuda/TensorTopK.cpp",
     "aten/src/ATen/native/cuda/jit_utils.cpp",
     "aten/src/ATen/native/nested/cuda/NestedTensorTransformerFunctions.cpp",
+    "aten/src/ATen/native/nested/cuda/NestedTensorMath.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
