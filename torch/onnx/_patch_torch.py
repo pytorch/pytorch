@@ -6,10 +6,10 @@ from typing import Iterable, Tuple, Union
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch.onnx._globals import GLOBALS
 
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import utils
+from torch.onnx._globals import GLOBALS
 
 
 # TODO(#78694): Refactor the patching process to make it more transparent to users.
