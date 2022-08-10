@@ -1,17 +1,16 @@
 import random
 
-from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import MapDataPipe
-from typing import Iterator, List, Optional, TypeVar
+import torch
+from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
+from typing import List, Optional, TypeVar
 
-__all__ = ["ShufflerMapDataPipe", ]
+__all__ = ["ShufflerIterDataPipe", ]
 
 
 T_co = TypeVar('T_co', covariant=True)
 
 
-@functional_datapipe('shuffle')
-class ShufflerMapDataPipe(MapDataPipe[T_co]):
+class ShufflerIterDataPipe(IterDataPipe[T_co]):
     r"""
     Shuffle the input DataPipe via its indices (functional name: ``shuffle``).
 
@@ -35,6 +34,9 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
     datapipe: MapDataPipe[T_co]
+    _enabled: bool
+    _seed: Optional[int]
+    _rng: random.Random
 
     def __init__(self,
                  datapipe: MapDataPipe[T_co],
@@ -44,23 +46,58 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
         self.indices = list(range(len(datapipe))) if indices is None else indices
-        self.index_map = {index_name: num_index for num_index, index_name in enumerate(self.indices)}
-        # We do not lazily shuffle because this way is significantly faster in terms of total time
-        random.shuffle(self.indices)
+        self._enabled = True
+        self._seed = None
+        self._rng = random.Random()
 
-    def __getitem__(self, index) -> T_co:
-        try:
-            old_numeric_index = self.index_map[index]
-        except KeyError:
-            raise IndexError(f"Index {index} is out of range for {self}.")
-        new_index = self.indices[old_numeric_index]
-        return self.datapipe[new_index]
+    def set_shuffle(self, shuffle=True):
+        self._enabled = shuffle
+        return self
 
-    # Without __iter__ implemented, by default it tries to use 0-index,
-    # which doesn't work when there is a custom index.
+    def set_seed(self, seed: int):
+        self._seed = seed
+        return self
+
     def __iter__(self) -> Iterator[T_co]:
-        for i in self.indices:
-            yield self.datapipe[i]
+        if not self._enabled:
+            for idx in self.indices:
+                yield self.datapipe[idx]
+        else:
+            if self._seed is None:
+                self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            self._rng.seed(self._seed)
+            self._seed = None
+            shuffled_indices = self._rng.sample(self.indices, len(self.indices))
+            for idx in shuffled_indices:
+                yield self.datapipe[idx]
 
     def __len__(self) -> int:
         return len(self.datapipe)
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (
+            self.datapipe,
+            self._enabled,
+            self._seed,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
+            self._rng.getstate(),
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipe,
+            self._enabled,
+            self._seed,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
+            rng_state,
+        ) = state
+        self._rng = random.Random()
+        self._rng.setstate(rng_state)
+
+
+MapDataPipe.register_datapipe_as_function("shuffle", ShufflerIterDataPipe)

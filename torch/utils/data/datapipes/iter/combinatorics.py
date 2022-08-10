@@ -116,12 +116,15 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def set_seed(self, seed: int):
         self._seed = seed
+        return self
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._enabled:
             for x in self.datapipe:
                 yield x
         else:
+            if self._seed is None:
+                self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
             self._rng.seed(self._seed)
             self._seed = None
             for x in self.datapipe:
@@ -142,8 +145,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def reset(self) -> None:
         self._buffer = []
-        if self._enabled and self._seed is None:
-            self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
