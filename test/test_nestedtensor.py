@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -274,7 +274,6 @@ class TestNestedTensor(TestCase):
         nt = torch.nested_tensor([])
         empty = nt.to_padded_tensor(4)
         self.assertEqual(empty, torch.tensor([]))
-
 class TestNestedTensorDeviceType(TestCase):
 
     # Helper function to generate a random nested tensor
@@ -733,7 +732,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_softmax(self, device, dtype):
         # normal nested tensor
         ntensors = 4
@@ -1278,7 +1276,7 @@ class TestNestedTensorAutograd(TestCase):
             nt = torch._nested_tensor_from_mask(inpt, mask)
             # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_padded(self):
         nested_size = torch.tensor([[1, 2], [2, 2]])
@@ -1292,7 +1290,7 @@ class TestNestedTensorAutograd(TestCase):
             return nt.to_padded_tensor(0)
 
         data = (padded_tensor, nested_size)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_padded_fused(self):
         nested_size = torch.tensor([[1, 8], [2, 8]])
@@ -1305,7 +1303,7 @@ class TestNestedTensorAutograd(TestCase):
             # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
         data = (padded_tensor, nested_size)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_list(self):
 
@@ -1318,7 +1316,7 @@ class TestNestedTensorAutograd(TestCase):
             # This implictily tests to_padded_tensor grads
             return c.to_padded_tensor(0)
         data = (a, b, c)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_size_dim(self):
         a = torch.nested_tensor([])
@@ -1467,11 +1465,26 @@ class TestNestedTensorAutograd(TestCase):
             d = torch.functional.F.linear(nt, weight, bias)
             return d.to_padded_tensor(0)
         data = (a, b, c, weight, bias)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
         # Test linear with no bias added
         data = (a, b, c, weight)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_nested_tensor_softmax(self):
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, dim):
+            nt = torch.nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.softmax(nt, dim=dim)
+            return d.to_padded_tensor(0)
+
+        # softmax over last dim
+        data = (a, b, c, -1)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_linear_backward(self):
         a = torch.randn(1, 2, requires_grad=False)
