@@ -1868,6 +1868,10 @@ def var(
 
 
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def std(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1881,13 +1885,9 @@ def std(
     if dim == () or dim == []:
         dim = None
 
-    opmath_dtype, dtype = utils.reduction_dtypes(
-        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
-    )
-
     result = torch.var(a, dim=dim, keepdim=keepdim, correction=correction)
     result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
+    return result
 
 
 @register_decomposition(torch.ops.aten.mean)
