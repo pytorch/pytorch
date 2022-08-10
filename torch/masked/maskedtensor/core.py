@@ -10,7 +10,6 @@ from torch.overrides import get_default_nowrap_functions
 __all__ = [
     "MaskedTensor",
     "is_masked_tensor",
-    "get_default_nowrap_functions",
 ]
 
 
@@ -99,19 +98,19 @@ def _masked_tensor_str(data, mask, formatter):
     return "[\n" + ",\n".join(sub_strings) + "\n]"
 
 
-def get_data(a):
+def _get_data(a):
     if is_masked_tensor(a):
         return a._masked_data
     return a
 
 
-def get_mask(a):
+def _maybe_get_mask(a):
     if is_masked_tensor(a):
         return a._masked_mask
     return None
 
 
-class MaskedContiguous(torch.autograd.Function):
+class _MaskedContiguous(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         if not is_masked_tensor(input):
@@ -119,8 +118,10 @@ class MaskedContiguous(torch.autograd.Function):
 
         if input.is_contiguous():
             return input
-        mask = get_mask(input)
-        data = get_data(input)
+
+        data = input.get_data()
+        mask = input.get_mask()
+
         return MaskedTensor(data.contiguous(), mask.contiguous())
 
     @staticmethod
@@ -128,20 +129,18 @@ class MaskedContiguous(torch.autograd.Function):
         return grad_output
 
 
-class MaskedToDense(torch.autograd.Function):
+class _MaskedToDense(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToDense forward: input must be a MaskedTensor.")
 
-
         if input.layout() == torch.strided:
             return input
 
         ctx.layout = input.layout()
-
-        data = get_data(input)
-        mask = get_mask(input)
+        data = input.get_data()
+        mask = input.get_mask()
 
         return MaskedTensor(data.to_dense(), mask.to_dense())
 
@@ -158,7 +157,7 @@ class MaskedToDense(torch.autograd.Function):
         raise ValueError("to_dense: Unsupported input layout: ", layout)
 
 
-class MaskedToSparse(torch.autograd.Function):
+class _MaskedToSparse(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         if not is_masked_tensor(input):
@@ -168,9 +167,8 @@ class MaskedToSparse(torch.autograd.Function):
         if input.layout() == torch.sparse_coo:
             return input
 
-        mask = get_mask(input)
-        data = get_data(input)
-
+        data = input.get_data()
+        mask = input.get_mask()
         sparse_mask = mask.to_sparse_coo().coalesce()
         sparse_data = data.sparse_mask(sparse_mask)
 
@@ -181,7 +179,7 @@ class MaskedToSparse(torch.autograd.Function):
         return grad_output.to_dense()
 
 
-class MaskedToSparseCsr(torch.autograd.Function):
+class _MaskedToSparseCsr(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         if not is_masked_tensor(input):
@@ -193,9 +191,8 @@ class MaskedToSparseCsr(torch.autograd.Function):
         if input.layout() == torch.sparse_csr:
             return input
 
-        mask = get_mask(input)
-        data = get_data(input)
-
+        data = input.get_data()
+        mask = input.get_mask()
         sparse_mask = mask.to_sparse_csr()
         sparse_data = data.sparse_mask(sparse_mask)
 
@@ -206,10 +203,7 @@ class MaskedToSparseCsr(torch.autograd.Function):
         return grad_output.to_dense()
 
 
-# Needed until https://github.com/pytorch/pytorch/issues/65243 is fixed
-# since derivative includes usage of zeros_like
-# https://github.com/pytorch/pytorch/blob/master/tools/autograd/derivatives.yaml#L1516-L1519
-class MaskedWhere(torch.autograd.Function):
+class _MaskedWhere(torch.autograd.Function):
     @staticmethod
     def forward(ctx, cond, self, other):
         ctx.mark_non_differentiable(cond)
@@ -221,7 +215,7 @@ class MaskedWhere(torch.autograd.Function):
         (cond,) = ctx.saved_tensors
 
         def masked_out_like(mt):
-            return MaskedTensor(get_data(mt), torch.zeros_like(get_mask(mt)).bool())
+            return MaskedTensor(mt.get_data(), torch.zeros_like(mt.get_mask()).bool())
 
         return (
             None,
@@ -296,7 +290,7 @@ class MaskedTensor(torch.Tensor):
             or data.dtype == torch.int32
             or data.dtype == torch.int64
         ):
-            raise TypeError("data.dtype is not supported in MaskedTensor.")
+            raise TypeError("{data.dtype} is not supported in MaskedTensor.")
         if data.dim() != mask.dim():
             raise ValueError("data.dim() must equal mask.dim()")
         if data.size() != mask.size():
@@ -309,8 +303,6 @@ class MaskedTensor(torch.Tensor):
         self._validate_members()
 
     def _set_data_mask(self, data, mask):
-        # This method is regrettably necessary for in-place operations
-
         self._masked_data = data
         self._masked_mask = mask
         self._validate_members()
@@ -318,22 +310,22 @@ class MaskedTensor(torch.Tensor):
     def __repr__(self):
         formatter = "{0:8.4f}"
         if self.dim() == 0:
-            scalar_data = get_data(self).item()
+            scalar_data = self.get_data().item()
             data_formatted = (
                 formatter.format(scalar_data)
                 if isinstance(scalar_data, float)
                 else str(scalar_data)
             )
-            if not get_mask(self).item():
+            if not self.get_mask().item():
                 data_formatted = "--"
             return (
                 "MaskedTensor("
                 + data_formatted
                 + ", "
-                + str(get_mask(self).item())
+                + str(self.get_mask().item())
                 + ")"
             )
-        s = _masked_tensor_str(get_data(self), get_mask(self), formatter)
+        s = _masked_tensor_str(self.get_data(), self.get_mask(), formatter)
         s = "\n".join("  " + si for si in s.split("\n"))
         return "MaskedTensor(\n" + s + "\n)"
 
@@ -344,15 +336,15 @@ class MaskedTensor(torch.Tensor):
 
         if func in [torch.Tensor.where, torch.where]:
             _check_args_kwargs_length(args, kwargs, "__torch_function__, torch.where", len_args=3, len_kwargs=0)
-            return MaskedWhere.apply(*args)
+            return _MaskedWhere.apply(*args)
         if func is torch.Tensor.contiguous:
-            return MaskedContiguous.apply(args[0])
+            return _MaskedContiguous.apply(args[0])
         if func is torch.Tensor.to_dense:
-            return MaskedToDense.apply(args[0])
+            return _MaskedToDense.apply(args[0])
         if func is torch.Tensor.to_sparse:
-            return MaskedToSparse.apply(args[0])
+            return _MaskedToSparse.apply(args[0])
         if func is torch.Tensor.to_sparse_csr:
-            return MaskedToSparseCsr.apply(args[0])
+            return _MaskedToSparseCsr.apply(args[0])
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
         with torch._C.DisableTorchFunction():
@@ -370,14 +362,13 @@ class MaskedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
 
-        if len(args) <= 0:
-            raise ValueError("It is required that len(args) > 0 for __torch_dispatch__")
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
             return cls.matmul(args[0], args[1], func)  # type: ignore[call-arg]
+
         # Doesn't work for addmm where the first argument is a Tensor
-        data = get_data(args[0])
-        mask = get_mask(args[0])
+        data = _get_data(args[0])
+        mask = _maybe_get_mask(args[0])
         if func is torch.ops.aten.stride:
             return None
         if func is torch.ops.prim.layout:
@@ -393,7 +384,7 @@ class MaskedTensor(torch.Tensor):
                 raise ValueError(
                     "MaskedTensors with sparse data do not have contiguous"
                 )
-            return MaskedContiguous.apply(args[0])
+            return _MaskedContiguous.apply(args[0])
         if func is torch.ops.aten.new_empty_strided:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3)
             if tuple(args[1]) != tuple(data.size()):
@@ -419,15 +410,13 @@ class MaskedTensor(torch.Tensor):
             return MaskedTensor(func(data), mask)
         if func is torch.ops.aten._softmax:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
-            input_data = get_data(args[0]).masked_fill(
-                ~get_mask(args[0]), float("-inf")
-            )
+            input_data = data.masked_fill(~mask, float("-inf"))
             result_data = func(input_data, args[1], args[2])
-            return MaskedTensor(result_data, get_mask(args[0]))
+            return MaskedTensor(result_data, mask)
         if func in [torch.ops.aten.ones_like]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1)
-            res_data = func(get_data(args[0]), **kwargs)
-            return MaskedTensor(res_data, get_mask(args[0]))
+            res_data = func(data, **kwargs)
+            return MaskedTensor(res_data, mask)
         if func is torch.ops.aten._softmax_backward_data:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=4)
             grad = args[0]
@@ -437,18 +426,18 @@ class MaskedTensor(torch.Tensor):
             if is_masked_tensor(grad) and is_masked_tensor(output):
                 if not _masks_match(grad, output):
                     raise ValueError("__torch_dispatch__, {func}: expected the masks of grad and output to match")
-                grad_data = get_data(grad).masked_fill(~get_mask(grad), 1)
-                output_data = get_data(output).masked_fill(~get_mask(output), 0)
+                grad_data = _get_data(grad).masked_fill(~_maybe_get_mask(grad), 1)
+                output_data = _get_data(output).masked_fill(~_maybe_get_mask(output), 0)
                 new_grad_data = torch.ops.aten._softmax_backward_data(
                     grad_data, output_data, dim, input_dtype
                 )
-                res = MaskedTensor(new_grad_data, get_mask(grad))
+                res = MaskedTensor(new_grad_data, _maybe_get_mask(grad))
                 return res
         if func is torch.ops.aten.copy_:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2)
-            if not _masks_match(get_mask(args[0]), get_mask(args[1])):
+            if not _masks_match(mask, _maybe_get_mask(args[1])):
                 raise ValueError("args[0] mask and args[1] mask must match but do not")
-            func(data, get_data(args[1]))
+            func(data, _get_data(args[1]))
             return args[0]
         if func in [torch.ops.aten.where]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
@@ -460,8 +449,8 @@ class MaskedTensor(torch.Tensor):
                 mx = MaskedTensor(mx, torch.ones_like(mx, dtype=torch.bool))
             if not is_masked_tensor(my):
                 my = MaskedTensor(my, torch.ones_like(my, dtype=torch.bool))
-            new_data = func(args[0], get_data(mx), get_data(my))
-            new_mask = func(args[0], get_mask(mx), get_mask(my))
+            new_data = func(args[0], mx.get_data(), my.get_data())
+            new_mask = func(args[0], mx.get_mask(), my.get_mask())
             return MaskedTensor(new_data, new_mask)
         if func is torch.ops.aten.to_sparse:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
@@ -504,7 +493,7 @@ class MaskedTensor(torch.Tensor):
         if func is torch.ops.aten._values:
             # Assumes data is sparse
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
-            data = get_data(args[0]).values()
+            data = data.values()
             return MaskedTensor(data, torch.ones_like(data).bool())
         if func is torch.ops.aten._sparse_coo_tensor_with_dims_and_tensors:
             new_args = list(args)
@@ -530,11 +519,11 @@ class MaskedTensor(torch.Tensor):
 
     def __lt__(self, other):
         if is_masked_tensor(other):
-            return MaskedTensor(get_data(self) < get_data(other), get_mask(self))
-        return MaskedTensor(get_data(self) < other, get_mask(self))
+            return MaskedTensor(self.get_data() < _get_data(other), self.get_mask())
+        return MaskedTensor(self.get_data() < other, self.get_mask())
 
     def to_tensor(self, value):
-        return get_data(self).masked_fill(~get_mask(self), value)
+        return self.get_data().masked_fill(~self.get_mask(), value)
 
     def get_data(self):
         return self._masked_data
