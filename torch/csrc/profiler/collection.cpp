@@ -431,10 +431,15 @@ auto steal_or_default(T& it) {
   }
 }
 
-void mark_finished(std::shared_ptr<Result>& r) {
-  TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
-  r->finished_ = true;
-  TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
+bool mark_finished(std::shared_ptr<Result>& r) {
+  if (SOFT_ASSERT(!r->finished_, r->name()), " already marked finished !") {
+    r->finished_ = true;
+    return SOFT_ASSERT(
+        r->endTimeNS() >= r->start_time_ns_,
+        r->name(),
+        " found end_time < start_time !");
+  }
+  return false;
 }
 
 static constexpr const char* indexKey = "Profiler Event Index";
@@ -689,8 +694,11 @@ class TransferEvents {
             // If a parent was set we have to do some bookkeeping.
             auto parent = e->parent_.lock();
             if (parent) {
-              parent->children_.push_back(e);
-              mark_finished(e);
+              if (mark_finished(e)) {
+                parent->children_.push_back(e);
+              } else {
+                e->parent_.reset();
+              }
             }
           },
           [](const auto&) {}));
@@ -870,6 +878,28 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 }
 } // namespace
 
+namespace {
+bool enable_perturb_tree_ = false;
+}
+
+void setPerturbTreeForTest(bool value) {
+  enable_perturb_tree_ = value;
+}
+
+void perturbTreeForTest(std::vector<std::shared_ptr<Result>> events) {
+  if (!enable_perturb_tree_) {
+    return;
+  }
+  for (auto& e : events) {
+    if (c10::holds_alternative<ExtraFields<EventType::TorchOp>>(
+            e->extra_fields_)) {
+      c10::get<ExtraFields<EventType::TorchOp>>(e->extra_fields_).end_time_ns_ =
+          e->start_time_ns_ - 1;
+      return;
+    }
+  }
+}
+
 std::pair<
     std::vector<std::shared_ptr<Result>>,
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
@@ -960,7 +990,7 @@ RecordQueue::getRecords(
     }
     tracer.clear();
   }
-
+  perturbTreeForTest(out);
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
   build_tree(out);
   return {out, std::move(trace)};

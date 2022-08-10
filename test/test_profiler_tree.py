@@ -961,6 +961,37 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_survive_assert(self):
+        torch._C._autograd._soft_assert_raises(False)
+        torch._C._autograd._perturb_tree_for_test(True)
+        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+        with torch.profiler.profile() as p:
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = (y - z) ** 2
+            loss.backward()
+
+        torch._C._autograd._soft_assert_raises(None)
+        torch._C._autograd._perturb_tree_for_test(False)
+        tree = p.profiler.kineto_results.experimental_event_tree()
+        self.assertEqual(tree[0].end_time_ns, tree[0].start_time_ns - 1)
+
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_raises_assert(self):
+        torch._C._autograd._soft_assert_raises(True)
+        torch._C._autograd._perturb_tree_for_test(True)
+        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            with torch.profiler.profile() as p:
+                z = torch.add(t1, t2)
+                y = torch.ones(1)
+                loss = (y - z) ** 2
+                loss.backward()
+
+        torch._C._autograd._soft_assert_raises(None)
+        torch._C._autograd._perturb_tree_for_test(False)
+
 
 if __name__ == '__main__':
     run_tests()

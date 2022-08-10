@@ -338,6 +338,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         });
 
     m.def("_soft_assert_raises", &setSoftAssertRaises);
+    m.def("_perturb_tree_for_test", &setPerturbTreeForTest);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")

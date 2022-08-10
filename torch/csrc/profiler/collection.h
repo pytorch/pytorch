@@ -518,6 +518,8 @@ class TORCH_API RecordQueue {
   std::mutex sub_queue_mutex_;
 };
 
+TORCH_API void setPerturbTreeForTest(bool value);
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
