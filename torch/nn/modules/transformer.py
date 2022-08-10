@@ -356,7 +356,7 @@ class TransformerEncoderLayer(Module):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to attention and feedforward
-            operations, respectivaly. Otherwise it's done after. Default: ``False`` (after).
+            operations, respectively. Otherwise it's done after. Default: ``False`` (after).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -561,7 +561,7 @@ class TransformerDecoderLayer(Module):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to self attention, multihead
-            attention and feedforward operations, respectivaly. Otherwise it's done after.
+            attention and feedforward operations, respectively. Otherwise it's done after.
             Default: ``False`` (after).
 
     Examples::
