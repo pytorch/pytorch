@@ -9,6 +9,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
@@ -35,9 +36,25 @@
 #endif
 #endif
 
+// TODO: replace with pytorch/rfcs#43 when it is ready.
+#define SOFT_ASSERT(cond, ...)                         \
+  [&]() -> bool {                                      \
+    if (C10_UNLIKELY(!(cond))) {                       \
+      if (torch::profiler::impl::softAssertRaises()) { \
+        TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
+      } else {                                         \
+        TORCH_WARN(__VA_ARGS__);                       \
+      }                                                \
+      return false;                                    \
+    }                                                  \
+    return true;                                       \
+  }()
+
 namespace torch {
 namespace profiler {
 namespace impl {
+TORCH_API bool softAssertRaises();
+TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
 
 using time_t = int64_t;
 using steady_clock_t = std::conditional<
