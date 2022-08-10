@@ -96,6 +96,7 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
         BackendPatternConfig(torch.nn.functional.linear)
             .set_observation_type(observation_type)  # noqa: E131
             .set_dtype_configs(dtype_configs))
+            ._set_input_type_to_index({"weight": 1, "bias": 2})
 
     # (2) Linear + relu
     # -------------------
@@ -198,6 +199,8 @@ def _get_conv_configs(dtype_configs):
             BackendPatternConfig(convs.func)
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
+                ._set_input_type_to_index()
+                ._set_input_type_to_index({"weight": 1, "bias": 2})
 
         # (2) Conv + relu
         # -----------------
