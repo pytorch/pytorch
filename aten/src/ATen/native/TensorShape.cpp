@@ -2193,7 +2193,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
   int64_t start_idx = 0;
 
   std::vector<Tensor> splits;
-  splits.reseve(num_splits);
+  splits.reserve(num_splits);
   for (const auto i : c10::irange(num_splits)) {
     auto length = split_sizes[i];
     TORCH_CHECK(length >= 0,
