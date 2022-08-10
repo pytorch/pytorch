@@ -1133,7 +1133,7 @@ class TestTorchFunctionMode(TestCase):
         with A():
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.split(None, [2]), -1)  # python side
+            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1531,6 +1531,20 @@ class TestTorchFunctionMode(TestCase):
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_enable_subclass(self):
+        called = False
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(5))
+        with torch._C.DisableTorchFunction():
+            g = torch._C._EnableTorchFunction()
+            try:
+                self.assertIsInstance(torch.sum(x), A)
+            finally:
+                del g
 
 
 if __name__ == '__main__':
