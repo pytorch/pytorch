@@ -90,10 +90,23 @@ bool Alias::apply_updates() {
   return any_updates;
 }
 
+c10::SymInt get_nbytes(const Tensor& value) {
+  if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    // Today, the two implementations of SymInt are in Python (proxy tensor),
+    // and lazy tensor (LTC/XLA).
+    // LTC hasn't implemented SymInt support yet though (torch::lazy::SymIntNodeImpl).
+    // Once it does, we should remove this check.
+    if (value.key_set().has(c10::DispatchKey::Python)) {
+      return at::detail::computeStorageNbytesSymInt(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.storage_offset());
+    }
+  }
+  return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
+}
+
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
   : c10::StorageImpl(
       c10::StorageImpl::use_byte_size_t(),
-      at::detail::computeStorageNbytesSymInt(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.storage_offset()),
+      get_nbytes(value),
       DataPtr{nullptr, value.device()},
       // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
       nullptr,
