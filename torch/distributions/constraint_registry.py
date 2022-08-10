@@ -98,7 +98,7 @@ class ConstraintRegistry(object):
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
                 A subclass of :class:`~torch.distributions.constraints.Constraint`, or
                 a singleton object of the desired class.
-            factory (callable): A callable that inputs a constraint object and returns
+            factory (Callable): A callable that inputs a constraint object and returns
                 a  :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.

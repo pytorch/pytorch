@@ -32,7 +32,6 @@ __all__ = [
     'norm',
     'meshgrid',
     'pca_lowrank',
-    'split',
     'stft',
     'svd_lowrank',
     'tensordot',
@@ -136,59 +135,6 @@ def broadcast_shapes(*shapes):
             return tensors[0].shape
 
 
-
-def split(
-    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
-) -> List[Tensor]:
-    r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
-
-    If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
-    be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim` is not divisible by
-    :attr:`split_size`.
-
-    If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
-    into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
-    to :attr:`split_size_or_sections`.
-
-    Args:
-        tensor (Tensor): tensor to split.
-        split_size_or_sections (int) or (list(int)): size of a single chunk or
-            list of sizes for each chunk
-        dim (int): dimension along which to split the tensor.
-
-    Example::
-
-        >>> a = torch.arange(10).reshape(5,2)
-        >>> a
-        tensor([[0, 1],
-                [2, 3],
-                [4, 5],
-                [6, 7],
-                [8, 9]])
-        >>> torch.split(a, 2)
-        (tensor([[0, 1],
-                 [2, 3]]),
-         tensor([[4, 5],
-                 [6, 7]]),
-         tensor([[8, 9]]))
-        >>> torch.split(a, [1,4])
-        (tensor([[0, 1]]),
-         tensor([[2, 3],
-                 [4, 5],
-                 [6, 7],
-                 [8, 9]]))
-    """
-    if has_torch_function_unary(tensor):
-        return handle_torch_function(
-            split, (tensor,), tensor, split_size_or_sections, dim=dim)
-    # Overwriting reason:
-    # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in _tensor.py, which we
-    # call here.
-    return tensor.split(split_size_or_sections, dim)
-
-
 def einsum(*args: Any) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
@@ -252,7 +198,7 @@ def einsum(*args: Any) -> Tensor:
         may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
-        equation (string): The subscripts for the Einstein summation.
+        equation (str): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
@@ -575,7 +521,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
-        pad_mode (string, optional): controls the padding method used when
+        pad_mode (str, optional): controls the padding method used when
             :attr:`center` is ``True``. Default: ``"reflect"``
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``

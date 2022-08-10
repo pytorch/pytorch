@@ -6,6 +6,10 @@ from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfig
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
+from torch.ao.quantization.backend_config import (
+    DTypeConfig,
+)
+
 from torch.fx import (
     GraphModule,
 )
@@ -229,13 +233,15 @@ def compare_prepare_convert_qconfig_mappings(
                 "Expected convert QConfigMapping to have the same qconfig as prepare for key {} {}; \
                 prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
-def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):
+def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
     for dtype_config in dtype_configs:
-        is_dynamic = dtype_config.get("is_dynamic", False)
-        input_dtype = dtype_config.get("input_dtype", torch.float)
-        weight_dtype = dtype_config.get("weight_dtype", torch.float)
-        bias_dtype = dtype_config.get("bias_dtype", torch.float)
-        output_dtype = dtype_config.get("output_dtype", torch.float)
+        is_dynamic = dtype_config.is_dynamic
+        if is_dynamic is None:
+            is_dynamic = False
+        input_dtype = dtype_config.input_dtype or torch.float
+        weight_dtype = dtype_config.weight_dtype or torch.float
+        bias_dtype = dtype_config.bias_dtype or torch.float
+        output_dtype = dtype_config.output_dtype or torch.float
         qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
             get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
