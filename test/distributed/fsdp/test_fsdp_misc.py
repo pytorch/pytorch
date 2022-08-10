@@ -2,6 +2,7 @@
 
 import functools
 import sys
+from collections import namedtuple
 from contextlib import suppress
 
 import torch
@@ -51,6 +52,39 @@ class TestFSDPMisc(FSDPTest):
     @property
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_namedtuple(self):
+        # Ensure namedtuple support, preventing issues such as
+        # https://github.com/pytorch/pytorch/issues/83053
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(100, 100)
+
+            def forward(self, x):
+                return x
+
+        m = MyModule().cuda()
+        m = FSDP(m)
+        t = torch.ones(1, device="cuda", requires_grad=True)
+
+        MyOutputType = namedtuple(
+            "MyOutputType",
+            ["a", "b", "c", "d"],
+            defaults=(t, t, t, t)
+        )
+
+        inp = MyOutputType()
+        out = m(inp)
+        # Ensure hooks are registered
+        for x in out:
+            self.assertNotEqual([], list(x._backward_hooks.values()))
+
+        # TODO: we should check backward() and param is resharded
+        # as well, but this is blocked by
+        # https://github.com/pytorch/pytorch/issues/83107 and
+        # https://github.com/pytorch/pytorch/issues/83129
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
