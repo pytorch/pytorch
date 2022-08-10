@@ -87,6 +87,49 @@ class TestFSDPMisc(FSDPTest):
         # https://github.com/pytorch/pytorch/issues/83129
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_not_all_outputs_used_in_loss(self):
+
+        wrapper = FSDP
+        # wrapper = lambda m: m
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = wrapper(nn.Linear(4, 4))
+                self.lin2 = nn.Linear(4, 4)
+#                self.lin2 = FSDP(nn.Linear(100, 100))
+
+            def forward(self, x):
+                a = self.lin1(x)
+                b = self.lin2(x)
+                return (a, b)
+
+        m = MyModule().cuda()
+        m = wrapper(m)
+        for i in range(6):
+            t = torch.ones(4, device="cuda")
+            a, b = m(t)
+            if i < 2:
+                # use both params in loss computation. Later,
+                # b will go unused and we check grads are the
+                # same as local training.
+                loss = (a @ b).sum()
+            else:
+                loss = a.sum()
+            loss.backward()
+            m.zero_grad()
+            # m.zero_grad()
+            # t = torch.ones(4, device="cuda")
+            # a, b = m(t)
+            # if i > 3:
+
+            # loss = a.sum()
+            # loss.backward() # self.lin2 does not get gradient or gets gradient of zeros
+
+        dist.barrier()
+
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
     def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):

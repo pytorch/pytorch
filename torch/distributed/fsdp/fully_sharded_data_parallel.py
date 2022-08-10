@@ -2889,8 +2889,10 @@ class FullyShardedDataParallel(nn.Module):
                 )
 
             if (
-                self._require_backward_grad_sync
-                or self.sharding_strategy == ShardingStrategy.FULL_SHARD
+                self.sharding_strategy == ShardingStrategy.FULL_SHARD
+                # Optimization where we don't reshard if running Zero-2
+                # in no_xsync() after backward.
+                or self._require_backward_grad_sync
             ):
                 self._free_full_params(cast(List[FlatParameter], [param]))
 
@@ -3076,14 +3078,17 @@ class FullyShardedDataParallel(nn.Module):
     def _wait_for_post_backward(self) -> None:
         """Wait for post-backward to finish. Only called on root instance."""
         assert self._is_root, "_wait_for_post_backward can only be called on root."
-        # Check if the root module has params and if any of them has
-        # the `requires_grad` field set. If `requires_grad=False` for
-        # all the params, the post_backward hook will not fire and the
-        # state will remain in `TrainingState_.BACKWARD_PRE`.
-        if any([p.requires_grad for p in self.params]):
-            self._assert_state(TrainingState_.BACKWARD_POST)
-        else:
-            self._assert_state(TrainingState_.BACKWARD_PRE)
+        # Root's training state might be backward_pre or backward_post depending on
+        # if root parameter's post backward hook was called. The post-backward hook
+        # may not have been called if gradient was not computed for this
+        # # Check if the root module has params and if any of them has
+        # # the `requires_grad` field set. If `requires_grad=False` for
+        # # all the params, the post_backward hook will not fire and the
+        # # state will remain in `TrainingState_.BACKWARD_PRE`.
+        # if any([p.requires_grad for p in self.params]):
+        #     self._assert_state(TrainingState_.BACKWARD_POST)
+        # else:
+        #     self._assert_state(TrainingState_.BACKWARD_PRE)
 
         if self._require_backward_grad_sync:
             torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
@@ -3098,8 +3103,39 @@ class FullyShardedDataParallel(nn.Module):
         # A backward pass is done, clean up below.
         self._exec_order_data.reset()
 
+        def _catch_all_reshard(fsdp_module: FullyShardedDataParallel) -> None:
+            """
+            Reshards full parameters that may have not been resharded in
+            post_backward_hook. This can happen when an FSDP module's output
+            is used in forward so its pre-backward fires unsharding the param,
+            but post-backward does not fire since the output was not ultimately
+            used in loss computation so FSDP parameter did not get a gradient.
+            """
+            try:
+                for p in fsdp_module.params:
+                    if (
+                        fsdp_module.sharding_strategy == ShardingStrategy.FULL_SHARD
+                        or fsdp_module._require_backward_grad_sync
+                    ):
+                        fsdp_module._free_full_params(cast(List[FlatParameter], [p]))
+
+                    if fsdp_module._mixed_precision_enabled_for_params():
+                        fsdp_module._free_mp_shard(cast(List[FlatParameter], [p]))
+
+                    fsdp_module._use_param_local_shard(cast(List[FlatParameter], [p]))
+            except Exception as e:
+                p_assert(
+                    False,
+                    f"Got exception while resharding module {fsdp_module}: {str(e)}",
+                    raise_assertion_error=False
+                )
+                raise e
+
         def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
             """Helper used below on all fsdp modules."""
+
+            needs_reshard = False
+
             for p in fsdp_module.params:
                 if p.requires_grad:
                     if hasattr(p, "_shard_bwd_hook"):
@@ -3132,8 +3168,18 @@ class FullyShardedDataParallel(nn.Module):
                             f"Device mismatch: p={p.device} "  # type: ignore[attr-defined]
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
-                        p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
+                        # Check if post-backward was called for this param (FSDP unit).
+                        # TODO: This logic will have to be revisited when non-recursive wrapping
+                        # lands. If it was not called, there is no new gradient to accumulate
+                        # and the param is also unsharded at this point, so add the FSDP module
+                        # to a set of FSDP modules that need to be resharded in a catch-all
+                        # fashion.
+                        if p._post_backward_called:
+                            p.grad = p._saved_grad_shard
+                        else:
+                            needs_reshard = True
                     else:
+                        print(f" {fsdp_module} -- did not receive gradient --")
                         p_assert(
                             not p._is_sharded or not p._post_backward_called,
                             "All sharded parameters that received gradient should "
@@ -3149,9 +3195,15 @@ class FullyShardedDataParallel(nn.Module):
                     # Reset _post_backward_called in preparation for the next iteration.
                     p._post_backward_called = False
 
+            if needs_reshard:
+                # at least one FlatParam in this fsdp unit needs to be resharded.
+                # TODO: may need to make this on a per-FlatParam basis.
+                _catch_all_reshard(fsdp_module)
+
         # Update root and nested FSDP's hooks and flags.
         for m in self.fsdp_modules(self):  # includes self
             _finalize_params(m)
+            # _catch_all_reshard(m)
             m._pre_backward_hook_has_run = False
             m.training_state = TrainingState_.IDLE
 
@@ -3460,6 +3512,7 @@ class FullyShardedDataParallel(nn.Module):
                     # warning in the class's docstring).
                     if not offloaded:
                         p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
+                        print(f"-- rv {self} setting saved_grad_shard with shape {p._saved_grad_shard.shape} {p.grad.data} root {self._is_root}")
                 p.grad = None
 
     @torch.no_grad()
@@ -4155,13 +4208,14 @@ def _alloc_storage(data: torch.Tensor, size: torch.Size) -> None:
     ), "Then tensor storage should have been resized to be 0."
     data.storage().resize_(size.numel())  # type: ignore[attr-defined]
 
-def p_assert(cond: Any, s: Any) -> None:
+def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
-        raise AssertionError
+        if raise_assertion_error:
+            raise AssertionError
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
     r"""Calculate gradient norm of an iterable of parameters.
