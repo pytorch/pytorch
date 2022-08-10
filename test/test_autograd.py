@@ -8946,7 +8946,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
     def test_foward_mode_AD(self, device):
         # check that forward mode AD is only registered for the Default
-        # dispatch for _test_autograd_multiple_dispatch.one and not AutogradCUDA
+        # dispatch for _test_autograd_multiple_dispatch.fullcoverage and not AutogradCUDA
 
         primal = torch.randn(3, device=device)
         tangent = torch.randn(3, device=device)
@@ -8981,7 +8981,7 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(t.grad, t_ref.grad)
         # backward results are per-dispatch-key in derivatives.yaml
         if 'cuda' in device:
-            # gradient registered to autogradCUDA is grad.reshape_as(self) + 1
+            # gradient registered to AutogradCUDA is grad.reshape_as(self) + 1
             self.assertEqual(t.grad, grad.reshape_as(t) + 1)
         else:
             # Default gradient registered is grad.reshape_as(self)
