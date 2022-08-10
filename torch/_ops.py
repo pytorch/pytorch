@@ -8,6 +8,8 @@ import torch._C
 import torch.jit
 from torch import _utils_internal
 
+from torchgen.model import FunctionSchema
+
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
@@ -32,14 +34,21 @@ class OpOverload:
     def __init__(self, overloadpacket, op, schema, tags):
         self._op = op
         self._schema = schema
+
+        self._parsed_schema: FunctionSchema = None
+        try:
+            self._parsed_schema: FunctionSchema = FunctionSchema.parse(str(schema))
+        except Exception as e:
+            # TODO: fix here
+            pass
+
+        self._namespace, self._op_name = schema.name.split("::")
         self._overloadpacket = overloadpacket
         self._tags = tags
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
-        self.__name__ = "{}.{}".format(
-            self._schema.name.split("::")[1], self._overloadname
-        )
+        self.__name__ = "{}.{}".format(self._op_name, self._overloadname)
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
 
@@ -49,7 +58,7 @@ class OpOverload:
 
     def __repr__(self):
         return "<OpOverload(op='{}.{}', overload='{}')>".format(
-            *self._schema.name.split("::"), self._overloadname
+            self._namespace, self._op_name, self._overloadname
         )
 
     def __call__(self, *args, **kwargs):
@@ -63,7 +72,7 @@ class OpOverload:
 
     # `my_namespace.my_op_name.overload_name`
     def __str__(self):
-        return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
+        return "{}.{}.{}".format(self._namespace, self._op_name, self._overloadname)
 
     @property
     def overloadpacket(self):
@@ -76,6 +85,10 @@ class OpOverload:
     @property
     def tags(self):
         return self._tags
+
+    @property
+    def is_functional(self):
+        return not self._parsed_schema.modifies_arguments
 
     # TODO: add more methods to expose information about input and output arguments
 

@@ -1,7 +1,12 @@
+from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 from torch._ops import OpOverload, OpOverloadPacket
 
+@compatibility(is_backward_compatible=False)
 def is_canonical(gm: GraphModule) -> bool:
+    """
+    Checks if a graph_module is "aten canonical"
+    """
 
     for node in gm.graph.nodes:
         if node.op in {"placeholder", "output"}:
@@ -18,26 +23,20 @@ def is_canonical(gm: GraphModule) -> bool:
             continue
 
         if node.op == "call_function":
-            func = None
             if isinstance(node.target, OpOverload):
-                if node.target._overloadname == "out":
-                    # canonical aten graph cannot have out variant ops
+                if not node.target.is_functional:
                     return False
-                func = node.target.overloadpacket
+
+                # canonical aten graph cannot have private ops
+                if node.target._namespace == "aten" and node.target._op_name[0] == "_":
+                    return False
+
             elif isinstance(node.target, OpOverloadPacket):
-                func = node.target
+                # canonical aten graph should have ops resolved to overloads
+                return False
             elif node.target.__qualname__ == "getitem":
                 continue
             else:
-                return False
-
-            # TODO: canonical aten graph cannot have private ops
-            # if func.__name__[0] == "_":
-            #     return False
-
-            # canonical aten graph cannot have inplace ops
-            # TODO: this is a hacky way to check if an op is inplace op
-            if func.__name__[-1] == "_":
                 return False
 
     return True

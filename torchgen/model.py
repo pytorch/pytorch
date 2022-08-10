@@ -1663,6 +1663,7 @@ BaseTy = Enum(
         "ScalarType",
         "Tensor",
         "int",
+        "complex",
         "Dimname",
         "DimVector",
         "float",
