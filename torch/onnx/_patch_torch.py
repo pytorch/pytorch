@@ -59,8 +59,7 @@ def _graph_op(
     if "::" in opname:
         namespace, op = opname.split("::")
     else:
-        aten = kwargs.get("aten")
-        namespace = "aten" if aten else "onnx"
+        namespace = "onnx"
         op = opname
 
     n = g.insertNode(_new_node(g, namespace, op, outputs, *args, **kwargs))
@@ -103,7 +102,7 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
         aten = kwargs.pop("aten", False)
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
-    n = b.addNode(ns_opname, list(args))
+    n = b.addNode(ns_opname, args)
     for k, v in sorted(kwargs.items()):
         if k == "inplace":
             continue
