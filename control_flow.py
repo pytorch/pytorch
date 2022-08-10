@@ -156,7 +156,6 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
-    print("In cond dense")
     if pred:
         return true_fn(*operands)
     else:
@@ -189,8 +188,6 @@ def python_fallback(op):
         # Get all tensors. For each tensor, try their torch_dispatch
         # until one returns something other than NotImplemented
         mode = torch._C._get_torch_dispatch_mode()
-
-        print("In fallback", mode)
         with mode.restore():
             tensors = get_tensors(args, kwargs)
             for tensor in tensors:
@@ -222,7 +219,7 @@ def true_fn(x):
 def false_fn(x):
     return x.cos()
 
-x = torch.randn(3)
+x = torch.randn(4)
 result = cond(False, true_fn, false_fn, x)
 assert torch.allclose(result, torch.cos(x))
 
@@ -240,16 +237,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 def f(x, pred):
     return cond(pred, true_fn, false_fn, x)
 
-graph = make_fx(f)(x, torch.tensor(False))
+graph = make_fx(f)(x, False)
 print("graph.code:")
 print(graph.code)
 graph.graph.print_tabular()
-
-print("true_fn in the graph:")
-print(list(graph.graph.nodes)[2].args[1].code)
-
-print("false_fn in the graph:")
-print(list(graph.graph.nodes)[2].args[2].code)
 
 """
 Output
@@ -264,13 +255,44 @@ def forward(self, x_1):
     sin = torch.ops.aten.sin(x_1);  x_1 = None
     return sin
 
-false_fn in the graph:
+git  in the graph:
 
 def forward(self, x_1):
     cos = torch.ops.aten.cos(x_1);  x_1 = None
     return cos
 
 """
+
+"""
+Test case #3: tracing complex
+
+NB: We need some additional way to add a new "lowering rule" for
+lowering the cond call to an FX node. In particular,
+cond accepts a true_fn/false_fn and these need to be traced out.
+
+I've hardcoded the logic into ProxyTensor.
+"""
+from torch.fx.experimental.proxy_tensor import make_fx
+
+def true_fn(x, pred2):
+    def true_nested(y):
+        return y * y 
+
+    def false_nested(y):
+        return y + y
+        
+    return cond(pred2, true_nested, false_nested, x.sin())
+
+def false_fn(x, _):
+    return x.cos()
+
+def f(x, pred, pred2):
+    return cond(pred, true_fn, false_fn, (x, pred2))
+
+graph = make_fx(f)(x, False, True)
+print("graph.code:")
+print(graph.code)
+graph.graph.print_tabular()
 
 """
 More test cases (coming soon)
