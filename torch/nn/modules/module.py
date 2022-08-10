@@ -1373,8 +1373,8 @@ class Module:
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
-        
-        .. warning::
+
+        .. note::
             The returned object is a shallow copy. It contains references
             to the module's parameters and buffers.
 
