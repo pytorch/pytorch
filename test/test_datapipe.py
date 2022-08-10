@@ -1555,67 +1555,50 @@ class TestFunctionalIterDataPipe(TestCase):
             len(dp1)
 
     def test_shuffler_iterdatapipe(self):
-        exp = list(range(100))
-        input_ds = dp.iter.IterableWrapper(exp)
+        input_dp = dp.iter.IterableWrapper(list(range(10)))
 
         with self.assertRaises(AssertionError):
-            shuffle_dp = input_ds.shuffle(buffer_size=0)
+            shuffle_dp = input_dp.shuffle(buffer_size=0)
 
-        def _create_dp(buffer_size):
-            input_ds = dp.iter.IterableWrapper(list(range(100)))
-            return input_ds.shuffle(buffer_size=bs).sharding_filter()
+        # Functional Test: 
+        shuffler_dp = input_dp.shuffle()
+        self.assertEqual(set(range(10)), set(shuffler_dp))
 
-        for bs in (5, 20, 33):
-            shuffle_dp = _create_dp(bs)
-            self.assertEqual(len(shuffle_dp), len(exp))
+        # Functional Test: No seed
+        shuffler_dp = input_dp.shuffle()
+        self.assertEqual(list(shuffler_dp), list(shuffler_dp))
 
-            torch.manual_seed(123)
-            res = list(shuffle_dp)
-            self.assertEqual(sorted(res), exp)
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp.shuffle()
+        res1 = list(shuffler_dp)
+        self.assertEqual(list(shuffler_dp), res1)
 
-            # Test Deterministic
-            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
-                if num_workers == 0 and pw:
-                    continue
+        # Functional Test: Set seed
+        torch.manual_seed(123)
+        seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        shuffler_dp = input_dp.shuffle().set_seed(seed)
+        res2 = list(shuffler_dp)
+        self.assertEqual(list(shuffler_dp), res2)
+        self.assertEqual(res1, res2)
 
-                mp_ctx = "spawn" if num_workers > 0 else None
-                dl = DataLoader(
-                    shuffle_dp,
-                    num_workers=num_workers,
-                    shuffle=True,
-                    multiprocessing_context=mp_ctx,
-                    worker_init_fn=_worker_init_fn,
-                    persistent_workers=pw
-                )
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp))
 
-                # No seed
-                dl_res_ns = list(dl)
-                self.assertEqual(len(dl_res_ns), len(exp))
-                self.assertEqual(sorted(dl_res_ns), sorted(exp))
+        # Reset Test:
+        shuffler_dp = input_dp.shuffle()
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
+        self.assertEqual(5, len(res_before_reset))
+        for x in res_before_reset:
+            self.assertTrue(x in set(range(10)))
+        self.assertEqual(set(range(10)), set(res_after_reset))
 
-                # Same seeds
-                dl_res = []
-                for epoch in range(2):
-                    torch.manual_seed(123)
-                    dl_res.append(list(dl))
-                self.assertEqual(dl_res[0], dl_res[1])
-
-                # Different seeds
-                torch.manual_seed(321)
-                dl_res.append(list(dl))
-
-                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
-                self.assertNotEqual(dl_res[0], dl_res[2])
-                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
-
-
-        shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(shuffle_dp_nl)
-
-        # Test: deactivate shuffling via set_shuffle
-        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
-        self.assertEqual(list(unshuffled_dp), list(input_ds))
+        # __len__ Test: returns the length of the input DataPipe
+        shuffler_dp = input_dp.shuffle()
+        self.assertEqual(10, len(shuffler_dp))
+        exp = list(range(100))
 
     def test_zip_iterdatapipe(self):
 
@@ -1816,10 +1799,32 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(set(range(10)), set(shuffler_dp))
 
         # Functional Test: Custom indices are working
-        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        shuffler_dp = input_dp2.shuffle(indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
-        # # Reset Test:
+        # Functional Test: No seed
+        shuffler_dp = input_dp1.shuffle()
+        self.assertEqual(list(shuffler_dp), list(shuffler_dp))
+
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp1.shuffle()
+        res1 = list(shuffler_dp)
+        self.assertEqual(list(shuffler_dp), res1)
+
+        # Functional Test: Set seed
+        torch.manual_seed(123)
+        seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        shuffler_dp = input_dp1.shuffle().set_seed(seed)
+        res2 = list(shuffler_dp)
+        self.assertEqual(list(shuffler_dp), res2)
+        self.assertEqual(res1, res2)
+
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp1.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp1))
+
+        # Reset Test:
         shuffler_dp = input_dp1.shuffle()
         n_elements_before_reset = 5
         res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
