@@ -17030,10 +17030,11 @@ torch.cuda.synchronize()
                 input = torch.randn((B, num_heads, L, L))
                 mask = torch.randint(0, 2, (B, L))
                 mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                mask_type = 1   # BxL => src_key_padding_mask
                 if (self.device_type == "cuda"):
                     input = input.cuda()
                     mask = mask.cuda()
-                native_res = torch._masked_softmax(input, mask, dim)
+                native_res = torch._masked_softmax(input, mask, dim, mask_type)
                 mask = ~mask
 
                 def slow_masked_softmax(input, mask):
@@ -17055,9 +17056,9 @@ torch.cuda.synchronize()
                     exact_dtype=True
                 )
 
-    def _test_masked_softmax_helper(self, input, dim, mask):
+    def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
-        result = torch._masked_softmax(input, mask, dim)
+        result = torch._masked_softmax(input, mask, dim, mask_type)
 
         expected = torch._softmax(input_ref.masked_fill(mask, float('-inf')), dim, False)
         grad = torch.randn_like(expected).to(dtype=expected.dtype)
@@ -17068,7 +17069,7 @@ torch.cuda.synchronize()
         # Make sure the optional argument works as well
         if dim == input.dim() - 1:
             input_ref_default = input.detach().clone().requires_grad_()
-            result_default = torch._masked_softmax(input_ref_default, mask)
+            result_default = torch._masked_softmax(input_ref_default, mask, None, mask_type)
             result_default.backward(grad)
             self.assertEqual(result, result_default)
             self.assertEqual(input.grad, input_ref_default.grad)
@@ -17088,10 +17089,11 @@ torch.cuda.synchronize()
             for dim in dims:
                 input = torch.randn(shape, requires_grad=True)
                 mask = torch.randint(0, 2, shape).bool()
+                mask_type = 1   # BxL => src_key_padding_mask
                 if (self.device_type == "cuda"):
                     input = input.cuda().detach().requires_grad_()
                     mask = mask.cuda()
-                self._test_masked_softmax_helper(input, dim, mask)
+                self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
@@ -17100,10 +17102,11 @@ torch.cuda.synchronize()
         for (x, y) in shapes:
             input = torch.randn((x, y), requires_grad=True)
             mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
+            mask_type = 1   # BxL => src_key_padding_mask
             if (self.device_type == "cuda"):
                 input = input.cuda().detach().requires_grad_()
                 mask = mask.cuda()
-            self._test_masked_softmax_helper(input, dim, mask)
+            self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     @onlyCUDA
     def test_masked_softmax_transformer_layout(self, device):
@@ -17113,11 +17116,12 @@ torch.cuda.synchronize()
         input = torch.randn((B, num_heads, L, L))
         dim = input.dim() - 1
         mask = torch.randint(0, 2, (B, L))
+        mask_type = 1   # BxL => src_key_padding_mask
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, mask, dim)
+        native_res = torch._masked_softmax(input, mask, dim, mask_type)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
@@ -17133,11 +17137,12 @@ torch.cuda.synchronize()
         input = torch.randn((B, num_heads, L, L))
         dim = input.dim() - 1
         mask = torch.randint(0, 2, (L, L))
+        mask_type = 0   # LxL => src_mask
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, mask, dim)
+        native_res = torch._masked_softmax(input, mask, dim, mask_type)
         mask = mask.expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
@@ -20861,6 +20866,17 @@ torch.cuda.synchronize()
         query = torch.rand(4, 4, 4, dtype=dtype, device=device)
         key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
+
+    @onlyCPU
+    @dtypes(torch.double)
+    def test_transformerencoderlayer_fast_path(self, device, dtype):
+        model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
+        src = torch.rand(32, 10, 512)
+        src_mask = torch.zeros(10, 10).to(torch.bool)
+
+        model.eval()
+        with torch.no_grad():
+            model(src, src_mask)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
