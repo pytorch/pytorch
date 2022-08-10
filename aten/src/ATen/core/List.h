@@ -69,7 +69,11 @@ struct ListElementConstReferenceTraits<c10::optional<std::string>> {
 template<class T, class Iterator>
 class ListElementReference final {
 public:
-  operator T() const;
+  operator std::conditional_t<
+      std::is_reference<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      const T&,
+      T>() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
