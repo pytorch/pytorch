@@ -319,7 +319,7 @@ class ProxyTensor(torch.Tensor):
             # For a smaller graph that esentially does the same thing, comment out these two lines and replace args with 
             # true_graph / false_graph
             get_true_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})
-            get_false_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})            
+            get_false_proxy = proxy_mode.tracer.create_proxy("get_attr", "false_graph", tuple(*operands), {})            
             
             args = (pred, get_true_proxy, get_false_proxy, *operands)
             proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, args, kwargs,

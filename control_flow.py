@@ -156,10 +156,15 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
+    print("Into cond dense:", true_fn, false_fn)
     if pred:
-        return true_fn(*operands)
+        x = true_fn(*operands)
+        print("Out of cond dense:", x)
+        return x
     else:
-        return false_fn(*operands)
+        x = false_fn(*operands)
+        print("Out of cond dense:", x)
+        return x
 
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
@@ -185,6 +190,7 @@ def fallthrough_fn(operator, dispatch_key):
 
 def python_fallback(op):
     def inner(*args, **kwargs):
+        print("Input:", args)
         # Get all tensors. For each tensor, try their torch_dispatch
         # until one returns something other than NotImplemented
         def extract():
@@ -193,6 +199,7 @@ def python_fallback(op):
                 ret = tensor.__torch_dispatch__(op, None, args, kwargs)
                 if ret is NotImplemented:
                     continue
+                print("Output:", ret)
                 return ret
             return NotImplemented
 
@@ -201,7 +208,7 @@ def python_fallback(op):
             with mode.restore():
                 return extract()
         else:
-            return extract()
+            return cond_dense(*args)
 
     return inner
 
@@ -252,7 +259,7 @@ print("Invoking:")
 result_false = graph.forward(x, False)
 print("False:", result_false)
 result_true = graph(x, True)
-print("True:", result_true())
+print("True:", result_true)
 # result_true()
 # print(graph.forward())
 
