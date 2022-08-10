@@ -27,7 +27,13 @@ class CheckpointWrapperTest(TestCase):
 
     def test_load_activation_checkpointed_module(self):
         lin = nn.Linear(10, 10, bias=False)
-        lin = checkpoint_wrapper(lin)
+        lin = checkpoint_wrapper(
+            lin,
+            checkpoint_fn=checkpoint,
+            # checkpoint kwargs
+            use_reentrant=True,
+            preserve_rng_state=False,
+        )
         state_dict = deepcopy(lin.state_dict())
         # Load into non-checkpoint wrapped linear module
         lin_new = nn.Linear(10, 10, bias=False)

@@ -111,6 +111,13 @@ Fast Fourier Transform (torch.fft)
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
+Sparse
+~~~~~~
+
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
+
+
 CPU Performance / SIMD
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -120,12 +127,13 @@ CPU Performance / SIMD
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
 
-NVIDIA / CUDA
-~~~~~~~~~~~~~
+NVIDIA
+~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
+-  Christian Sarofeen (`csarofeen <https://github.com/csarofeen>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
 Intel / MKLDNN
@@ -185,7 +193,8 @@ C10 utils and operator dispatch
 PyTorch -> ONNX
 ~~~~~~~~~~~~~~~
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
--  Gary Miguel (`garymm <https://github.com/garymm>`__)
+-  Aaron Bockover (`abock <https://github.com/abock>`__)
+-  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
 -  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
