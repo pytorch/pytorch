@@ -333,6 +333,9 @@ public:
     return operatorDef_->op.hasKernelForDispatchKey(k);
   }
 
+  bool hasComputedKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.hasComputedKernelForDispatchKey(k);
+  }
 
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
