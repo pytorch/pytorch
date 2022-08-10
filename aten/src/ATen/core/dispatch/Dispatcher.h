@@ -162,6 +162,7 @@ public:
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  void callBoxedForDispatchKey(const OperatorHandle& op, DispatchKey dk, Stack* stack) const;
 
   // TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
   // See Note [Plumbing Keys Through The Dispatcher]
@@ -374,6 +375,10 @@ public:
 
   void callBoxed(Stack& stack) const {
     callBoxed(&stack);
+  }
+
+  void callBoxedForDispatchKey(DispatchKey dk, Stack& stack) const {
+    c10::Dispatcher::singleton().callBoxedForDispatchKey(*this, dk, &stack);
   }
 
   void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
@@ -619,6 +624,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
+
+// NB: this doesn't count as a "true" dispatcher jump, so no instrumentation
+inline void Dispatcher::callBoxedForDispatchKey(const OperatorHandle& op, DispatchKey dk, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  const auto& entry = op.operatorDef_->op;
+  // We still compute this as we're obligated to pass it on to the internal
+  // kernel, if it is a boxed fallback
+  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+  const auto& kernel = entry.kernelForDispatchKey(dk);
+  kernel.callBoxed(op, dispatchKeySet, stack);
+}
+
 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
