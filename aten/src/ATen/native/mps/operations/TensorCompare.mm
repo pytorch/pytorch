@@ -245,8 +245,6 @@ Tensor& where_self_out_mps(const Tensor& condition,
 
   @autoreleasepool {
 
-    MPSShape* input_shape = getMPSShape(self);
-
     string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
@@ -303,10 +301,6 @@ Tensor& where_self_out_mps(const Tensor& condition,
 Tensor where_mps(const Tensor& condition,
                  const Tensor& self,
                  const Tensor& other) {
-
-  auto cond_shape = condition.sizes();
-  auto self_shape = self.sizes();
-  auto other_shape = other.sizes();
 
   bool cond_zero_shape = (condition.dim() == 0);
   bool self_zero_shape = (self.dim() == 0);
