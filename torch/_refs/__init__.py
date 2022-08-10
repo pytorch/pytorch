@@ -3553,7 +3553,6 @@ def empty_strided(
     )
 
 
-# TODO: no support for layout, pin_memory
 @register_decomposition(torch.ops.aten.eye)
 @out_wrapper()
 def eye(
@@ -3569,6 +3568,10 @@ def eye(
     """
     Reference implementation of torch.eye
     """
+    # TODO: no support for layout, pin_memory
+    assert layout == torch.strided
+    assert pin_memory is False
+
     if m is None:
         m = n
 
