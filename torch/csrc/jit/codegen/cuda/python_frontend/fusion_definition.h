@@ -10,7 +10,7 @@ namespace nvfuser {
 struct RecordFunctor;
 struct FusionManager;
 
-const char* dtypeToString(Nvf::DataType t);
+const char* dtypeToPyString(Nvf::DataType t);
 
 //! The State, child classes Tensor and Scalar, and the StateType enum
 //! are used to define state objects to encapsulate the recording of state

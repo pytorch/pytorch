@@ -432,7 +432,7 @@ struct CastOpRecord : RecordFunctor {
   
   virtual void print(std::ostream& os, bool close_function=true) const {
     RecordFunctor::print(os, false);
-    os << ", dtype=DataType." << dtypeToString(dtype_);
+    os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
       os << ")";
     }
@@ -623,7 +623,7 @@ struct TensorRecord : RecordFunctor {
         os << "False";
       }
     }
-    os << "], dtype=DataType." << dtypeToString(dtype_);
+    os << "], dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
       os << ")";
     }
@@ -772,7 +772,7 @@ struct ReductionOpRecord : RecordFunctor {
     }
     os << "]";
     os << ", keepdim=" << (keep_dim_ ? "True" : "False");
-    os << ", dtype=DataType." << dtypeToString(dtype_);
+    os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
       os << ")";
     }
@@ -836,7 +836,7 @@ struct ScalarRecord : RecordFunctor {
   
   virtual void print(std::ostream& os, bool close_function=true) const {
     RecordFunctor::print(os, false);
-    os << "dtype=DataType." << dtypeToString(dtype_);
+    os << "dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
       os << ")";
     }

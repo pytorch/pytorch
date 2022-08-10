@@ -9,28 +9,28 @@ using namespace torch::jit::fuser::cuda::inst;
 
 namespace nvfuser {
 
-const char* dtypeToString(Nvf::DataType t) {
+const char* dtypeToPyString(Nvf::DataType t) {
   switch (t) {
     case Nvf::DataType::Bool:
-      return "Bool";
+      return "DataType.Bool";
     case Nvf::DataType::Double:
-      return "Double";
+      return "DataType.Double";
     case Nvf::DataType::Float:
-      return "Float";
+      return "DataType.Float";
     case Nvf::DataType::Half:
-      return "Half";
+      return "DataType.Half";
     case Nvf::DataType::BFloat16:
-      return "Bfloat16";
+      return "DataType.Bfloat16";
     case Nvf::DataType::Int:
-      return "Int";
+      return "DataType.Int";
     case Nvf::DataType::Int32:
-      return "Int32";
+      return "DataType.Int32";
     case Nvf::DataType::ComplexFloat:
-      return "ComplexFloat";
+      return "DataType.ComplexFloat";
     case Nvf::DataType::ComplexDouble:
-      return "ComplexDouble";
+      return "DataType.ComplexDouble";
     case Nvf::DataType::Null:
-      return "Null";
+      return "DataType.Null";
     default:
       break;
   }
