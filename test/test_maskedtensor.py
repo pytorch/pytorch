@@ -2,14 +2,18 @@
 
 import torch
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, make_tensor, parametrize, instantiate_parametrized_tests,
+    TestCase,
+    run_tests,
+    make_tensor,
+    parametrize,
+    instantiate_parametrized_tests,
 )
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
 )
 
+from torch.masked import masked_tensor
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
-from torch.masked.maskedtensor import masked_tensor
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS
 
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS
