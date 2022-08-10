@@ -400,10 +400,10 @@ Tensor sparse_compressed_to_dense(
     if (self.dim() > 3) {
       // Flatten batch dims
       auto n_batch_dim = self.dim() - 2;
-      crow_indices = crow_indices.flatten(0, n_batch_dim);
-      col_indices = col_indices.flatten(0, n_batch_dim);
-      values = values.flatten(0, n_batch_dim);
-      dense = dense.flatten(0, n_batch_dim);
+      crow_indices = crow_indices.flatten(0, n_batch_dim - 1);
+      col_indices = col_indices.flatten(0, n_batch_dim - 1);
+      values = values.flatten(0, n_batch_dim - 1);
+      dense = dense.flatten(0, n_batch_dim - 1);
     }
 
     // At this point everything has 3d shape either the batch dim was inserted,
@@ -427,8 +427,8 @@ Tensor sparse_compressed_to_dense(
       dense[batch].index_add_(0, offsets, values[batch]);
     }
 
-    // untile the result, NOTE: The final reshape uses the original self.sizes()
-    // which will squeeze out the extra batch dim if we put one in
+    // un-tile the result, NOTE: The final reshape uses the original
+    // self.sizes() which will squeeze out the extra batch dim if we put one in
     return dense
         .unflatten(
             1, {self.size(-2) / blocksize[0], self.size(-1) / blocksize[1]})
