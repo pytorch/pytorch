@@ -518,7 +518,7 @@ class DistributedDataParallel(Module, Joinable):
     Example::
 
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
-        >>> net = torch.nn.parallel.DistributedDataParallel(model, pg)
+        >>> net = torch.nn.parallel.DistributedDataParallel(model)
     """
 
     def __init__(
