@@ -36,6 +36,11 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
+#endif
+
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -393,7 +398,3 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
 }
 
 }}}  // namespace at::native::<anonymous>
-
-#ifndef _MSC_VER
-#pragma GCC diagnostic pop
-#endif
