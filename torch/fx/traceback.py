@@ -1,40 +1,54 @@
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, List
 from ._compatibility import compatibility
 
-__all__ = ['override_stack_trace', 'current_stack_trace', 'is_stack_trace_overridden']
+__all__ = ['override_stack_trace', 'append_stack_trace', 'format_stack', 'is_stack_trace_overridden']
 
-active_interpreter = None
-is_overriden = False
+current_stack: List[str] = []
+is_overridden = False
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def override_stack_trace(interpreter):
-    global active_interpreter
-    global is_overriden
+def override_stack_trace():
+    global is_overridden
 
-    saved_intepreter = active_interpreter
-    saved_is_overriden = is_overriden
+    saved_is_overridden = is_overridden
     try:
-        active_interpreter = interpreter
-        is_overriden = True
+        is_overridden = True
         yield
     finally:
-        active_interpreter = saved_intepreter
-        is_overriden = saved_is_overriden
+        is_overridden = saved_is_overridden
+
 
 @compatibility(is_backward_compatible=False)
-def current_stack_trace() -> Optional[str]:
-    global active_interpreter
+@contextmanager
+def append_stack_trace(stack: Optional[str]):
+    global is_overridden
+    global current_stack
 
-    if is_overriden and active_interpreter:
-        node = getattr(active_interpreter, "current_node", None)
-        if node is not None:
-            return node.stack_trace
-    return None
+    if is_overridden and stack:
+        try:
+            current_stack.append(stack)
+            yield
+        finally:
+            current_stack.pop()
+    else:
+        yield
+
+
+@compatibility(is_backward_compatible=False)
+def format_stack() -> str:
+    global is_overridden
+    global current_stack
+
+    if is_overridden:
+        return '\n'.join(reversed(current_stack))
+    else:
+        return ''
+
 
 @compatibility(is_backward_compatible=False)
 def is_stack_trace_overridden() -> bool:
-    global is_overriden
+    global is_overridden
 
-    return is_overriden
+    return is_overridden
