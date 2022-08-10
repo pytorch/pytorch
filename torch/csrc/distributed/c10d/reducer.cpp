@@ -1446,7 +1446,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     if (discard_grad_) {
       runGradCallbackForVariable(variable, [&](auto& grad) {
         grad.zero_();
-      }
+      });
       return;
     }
 
