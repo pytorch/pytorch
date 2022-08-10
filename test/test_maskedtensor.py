@@ -16,31 +16,42 @@ from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 
 
 def _compare_mt_t(mt_result, t_result):
-    mask = mt_result._masked_mask
-    mt_result_data = mt_result._masked_data
+    mask = mt_result.get_mask()
+    mt_result_data = mt_result.get_data()
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
     if mt_result_data.layout in {torch.sparse_coo, torch.sparse_csr}:
         mt_result_data = mt_result_data.to_dense()
     a = mt_result_data.detach().masked_fill_(~mask, 0)
     b = t_result.detach().masked_fill_(~mask, 0)
-    assert _tensors_match(a, b, exact=False)
+    if not _tensors_match(a, b, exact=False):
+        raise ValueError("The data in MaskedTensor a and Tensor b do not match")
 
 def _compare_mts(mt1, mt2):
-    assert mt1._masked_data.layout == mt2._masked_data.layout
-    assert mt1._masked_mask.layout == mt2._masked_mask.layout
-    assert _masks_match(mt1, mt2)
-    mask = mt1._masked_mask
-    mt_data1 = mt1._masked_data
-    mt_data2 = mt2._masked_data
+    mt_data1 = mt1.get_data()
+    mt_data2 = mt2.get_data()
+    if mt_data1.layout != mt_data2.layout:
+        raise ValueError("mt1's data and mt2's data do not have the same layout. "
+                         f"mt1.get_data().layout = {mt_data1.layout} while mt2.get_data().layout = {mt_data2.layout}")
+
+    mask = mt1.get_mask()
+    mask2 = mt2.get_mask()
+    if not _masks_match(mt1, mt2):
+        raise ValueError("mt1 and mt2 must have matching masks")
+    if mask.layout != mt2.get_mask().layout:
+        raise ValueError("mt1's mask and mt2's mask do not have the same layout. "
+                         f"mt1.get_mask().layout = {mask.layout} while mt2.get_mask().layout = {mask2.layout}")
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
         mask = mask.to_dense()
+
     if mt_data1.layout in {torch.sparse_coo, torch.sparse_csr}:
         mt_data1 = mt_data1.to_dense()
         mt_data2 = mt_data2.to_dense()
     a = mt_data1.detach().masked_fill_(~mask, 0)
     b = mt_data2.detach().masked_fill_(~mask, 0)
-    assert _tensors_match(a, b, exact=False)
+
+    if not _tensors_match(a, b, exact=False):
+        raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
 
 def _create_random_mask(shape, device):
     return make_tensor(
