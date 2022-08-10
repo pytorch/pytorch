@@ -12215,6 +12215,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 y = None
             return y
 
+    #  Skip now to wait more insight on https://github.com/onnx/onnx/issues/4424
+    #  Model fails on type inference, as it's input/output type mismatch.
     class LoopNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
             y: Optional[Tensor] = None
@@ -12231,7 +12233,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @common_utils.parametrize(
         "module_class",
-        (IfNoneOutput, IfNoneInput, LoopNoneInput, LoopNoneOutput),
+        (IfNoneOutput, IfNoneInput, LoopNoneOutput),
         name_fn=lambda module_class: module_class.__name__,
     )
     @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
