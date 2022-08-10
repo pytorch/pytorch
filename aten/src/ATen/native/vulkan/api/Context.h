@@ -163,6 +163,16 @@ class Context final {
       const utils::uvec3&);
 
  public:
+  template <class S, class D>
+  void submit_copy(
+      const PipelineBarrier&,
+      const S&,
+      const D&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const VkFence fence_handle);
+
   template <typename... Arguments>
   void submit_compute_job(
       const ShaderSource&,
@@ -171,15 +181,6 @@ class Context final {
       const utils::uvec3&,
       const VkFence fence_handle,
       Arguments&&...);
-
-  void submit_texture_copy(
-      const PipelineBarrier& pipeline_barrier,
-      const api::VulkanImage&,
-      const api::VulkanImage&,
-      const api::utils::uvec3&,
-      const api::utils::uvec3&,
-      const api::utils::uvec3&,
-      const VkFence fence_handle);
 
  private:
   void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
@@ -215,28 +216,33 @@ class UniformParamsBuffer final {
   }
 };
 
-class StagingBuffer final {
+class StorageBuffer final {
  private:
   Context* context_p_;
+  c10::ScalarType dtype_;
+  size_t numel_;
   VulkanBuffer vulkan_buffer_;
 
  public:
-  StagingBuffer(
+  StorageBuffer(
       Context* context_p,
-      const VkDeviceSize size,
+      const c10::ScalarType dtype,
+      const size_t numel,
       const bool gpuonly = false)
       : context_p_(context_p),
+        dtype_(dtype),
+        numel_(numel),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            size,
+            c10::elementSize(dtype_) * numel_,
             gpuonly)) {}
 
-  StagingBuffer(const StagingBuffer&) = delete;
-  StagingBuffer& operator=(const StagingBuffer&) = delete;
+  StorageBuffer(const StorageBuffer&) = delete;
+  StorageBuffer& operator=(const StorageBuffer&) = delete;
 
-  StagingBuffer(StagingBuffer&&) = delete;
-  StagingBuffer& operator=(StagingBuffer&&) = delete;
+  StorageBuffer(StorageBuffer&&) = delete;
+  StorageBuffer& operator=(StorageBuffer&&) = delete;
 
-  ~StagingBuffer() {
+  ~StorageBuffer() {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
@@ -265,6 +271,91 @@ inline void bind(
 }
 
 } // namespace detail
+
+template <class S, class D>
+inline void record_copy(
+    CommandBuffer& cmd,
+    const S& source,
+    const D& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) = delete;
+
+template <>
+inline void record_copy<VulkanImage, VulkanImage>(
+    CommandBuffer& cmd,
+    const VulkanImage& source,
+    const VulkanImage& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  cmd.copy_texture_to_texture(
+      source, destination, copy_range, src_offset, dst_offset);
+}
+
+template <>
+inline void record_copy<VulkanImage, VulkanBuffer>(
+    CommandBuffer& cmd,
+    const VulkanImage& source,
+    const VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  cmd.copy_texture_to_buffer(
+      source, destination, copy_range, src_offset, dst_offset);
+}
+
+template <>
+inline void record_copy<VulkanBuffer, VulkanImage>(
+    CommandBuffer& cmd,
+    const VulkanBuffer& source,
+    const VulkanImage& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  cmd.copy_buffer_to_texture(
+      source, destination, copy_range, src_offset, dst_offset);
+}
+
+template <class S, class D>
+inline void Context::submit_copy(
+    const PipelineBarrier& pipeline_barrier,
+    const S& source,
+    const D& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset,
+    const VkFence fence_handle) {
+  // Serialize recording to the shared command buffer. Do not initialize with a
+  // mutex just yet, since in some cases it will be externally managed.
+  std::unique_lock<std::mutex> cmd_lock;
+  // Refer to comments in submit_compute_job for explanation.
+  if (fence_handle == VK_NULL_HANDLE) {
+    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
+  }
+
+  set_cmd();
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  std::string label = "cmd_copy";
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
+  cmd_.insert_barrier(pipeline_barrier);
+
+  record_copy(cmd_, source, destination, copy_range, src_offset, dst_offset);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
+  submit_count_++;
+  if (fence_handle != VK_NULL_HANDLE ||
+      submit_count_ >= config_.cmdSubmitFrequency) {
+    submit_cmd_to_gpu(fence_handle);
+  }
+}
 
 template <typename... Arguments>
 inline void Context::submit_compute_job(
