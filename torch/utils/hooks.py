@@ -2,7 +2,6 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-import functools
 from typing import Any
 
 
@@ -95,8 +94,7 @@ class BackwardHook(object):
 
         return tuple(res)
 
-    def _set_user_hook(self, grad_fn, user_hook):
-        @functools.wraps(user_hook)
+    def _set_user_hook(self, grad_fn):
         def hook(grad_input, _):
             if self.grad_outputs is None:
                 raise RuntimeError("Module backward hook for grad_input is called before "
@@ -106,15 +104,24 @@ class BackwardHook(object):
                                    "output depends on the input and that the loss is computed "
                                    "based on the output.")
 
-            grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
-            res = user_hook(self.module, grad_input, self.grad_outputs)
-            if res is None:
-                return res
+            res = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
 
-            if len(res) != len(grad_input):
-                raise RuntimeError("Backward hook returned an invalid number of grad_input, "
-                                   "got {}, but expected {}".format(len(res), len(grad_input)))
+            for hook in self.user_hooks:
+                out = hook(self.module, res, self.grad_outputs)
+
+                if out is None:
+                    continue
+
+                if len(out) != len(res):
+                    raise RuntimeError("Backward hook returned an invalid number of grad_input, "
+                                       "got {}, but expected {}".format(len(out), len(res)))
+
+                res = out
+
+            self.grad_outputs = None
+
             return self._unpack_none(self.input_tensors_index, res)
+
         grad_fn.register_hook(hook)
 
     def _apply_on_tensors(self, fn, args):
@@ -152,8 +159,7 @@ class BackwardHook(object):
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
-            for hook in self.user_hooks:
-                self._set_user_hook(grad_fn, hook)
+            self._set_user_hook(grad_fn)
 
         res, input_idx = self._apply_on_tensors(fn, args)
         self.n_inputs = len(args)
@@ -176,7 +182,7 @@ class BackwardHook(object):
                         if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
-
+                    self.grad_outputs = None
             grad_fn.register_hook(hook)
 
         is_tuple = True

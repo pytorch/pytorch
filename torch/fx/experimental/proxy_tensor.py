@@ -4,7 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import contextlib
-import copy
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -146,6 +145,10 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+    with proxy_mode.restore():
+        r = func_overload.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
     if func_overload == aten._local_scalar_dense.default:
         t, = args
         assert not kwargs
@@ -387,9 +390,13 @@ def wrap_key(f, inps, proxy_mode):
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, trace_factory_functions=True):
         self.tracer = tracer
+        self.enable_tracing = True
         self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        if not self.enable_tracing:
+            return func_overload(*args, **kwargs)
+
         if symbolic_shapes.is_symbolic_op(func_overload):
             return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
 
@@ -492,6 +499,18 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
+
+def wrapper_and_args_for_make_fx(func, args, kwargs):
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped(flat_args):
+        fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
+        return func(*fn_args, **fn_kwargs)
+    return wrapped, flat_args
+
+
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
     if tracing_mode != "real" and not trace_factory_functions:
         raise ValueError("""\
@@ -568,6 +587,20 @@ def get_torch_dispatch_modes():
     return modes
 
 
+@contextlib.contextmanager
+def disable_proxy_modes_tracing():
+    modes = get_torch_dispatch_modes()
+    proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
+    olds = [m.enable_tracing for m in proxy_tensor_modes]
+    for proxy_mode in proxy_tensor_modes:
+        proxy_mode.enable_tracing = False
+    try:
+        yield
+    finally:
+        for proxy_mode, old in zip(proxy_tensor_modes, olds):
+            proxy_mode.enable_tracing = old
+
+
 def get_isolated_graphmodule(func, args, kwargs):
     """A helper function used to get the GraphModule for the given func.
 
@@ -575,40 +608,21 @@ def get_isolated_graphmodule(func, args, kwargs):
     It detaches the args and kwargs from the current tracer so that the trace of
     the current graph module can be created without any side-effects.
     """
-    # make_fx doesn't support kwargs, so we need to do this flattening
-    # and then unflatten the args before calling func
-    all_args, spec = pytree.tree_flatten((args, kwargs))
-
-    def wrapped(args):
-        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
-        return func(*fn_args, **fn_kwargs)
+    wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
     # Current implementation doesn't support the case when ProxyTensor is
     # wrapped with another Tensor subclass
     # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
+    # TODO: Once https://github.com/pytorch/pytorch/pull/82549 is merged, we can
+    # remove this
     assert all(
         getattr(a, "elem", None) is None
         for a in unwrapped_all_args
         if isinstance(a, torch.Tensor)
     ), "ProxyTensor is wrapped with another Tensor subclass"
 
-
-    with contextlib.ExitStack() as stack:
-        modes = get_torch_dispatch_modes()
-        # Disable all torch dispatch modes
-        for mode in modes:
-            stack.enter_context(enable_torch_dispatch_mode(mode.inner, replace=mode))
-        assert torch._C._get_torch_dispatch_mode() is None
-
-        # Enable all torch dispatch modes except ProxyTorchDispatchMode
-        for mode in reversed([m for m in modes if not isinstance(m, ProxyTorchDispatchMode)]):
-            mode = copy.copy(mode)
-            mode.inner = torch._C._get_torch_dispatch_mode()
-            mode.ancestors = set() if mode.inner is None else mode.inner.ancestors.union({mode.inner})
-            stack.enter_context(mode.restore())
+    with disable_proxy_modes_tracing():
         gm = make_fx(wrapped)(unwrapped_all_args)
-    assert all(m1 == m2 for m1, m2 in zip(modes, get_torch_dispatch_modes()))
-    assert all(m1.inner == m2.inner for m1, m2 in zip(modes, get_torch_dispatch_modes()))
     return gm
