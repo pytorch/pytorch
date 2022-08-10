@@ -579,8 +579,6 @@ def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     b, c = torch.tensor_split(a, 2, dim)
 
     return b * torch.sigmoid(c)
-<<<<<<< HEAD
-# Comment only commit to trigger CI
 
 
 @register_decomposition(torch.ops.aten.pairwise_distance)
@@ -616,4 +614,3 @@ def pdist(a: TensorLikeType, p: int = 2) -> TensorLikeType:
     i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
 
     return t.take(i[0] * t.shape[0] + i[1])
->>>>>>> f82e7217e1 ([primTorch] Added refs for pairwise_distance and pdist)
