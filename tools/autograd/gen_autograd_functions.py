@@ -87,7 +87,7 @@ GRAD_INPUT_MASK = CodeTemplate(
 
 DERIVATIVE_SINGLE = CodeTemplate(
     """\
-if (should_compute_output({ ${name}_ix })) {
+if (task_should_compute_output({ ${name}_ix })) {
   auto grad_result = ${derivative};
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
@@ -96,7 +96,7 @@ if (should_compute_output({ ${name}_ix })) {
 
 DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
     """\
-  if (should_compute_output({ ${name}_ix })) {
+  if (task_should_compute_output({ ${name}_ix })) {
     copy_range(grad_inputs, ${name}_ix, std::get<${i}>(grad_result));
   }
 """
@@ -104,7 +104,7 @@ DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
 
 DERIVATIVE_MULTI = CodeTemplate(
     """\
-if (should_compute_output({ ${idx_ranges} })) {
+if (task_should_compute_output({ ${idx_ranges} })) {
   ${grad_input_mask}
   auto grad_result = ${derivative};
   ${copy_ranges}
@@ -673,7 +673,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
         else:
             if "grad_input_mask" in formula:
-                masks = [f"should_compute_output({{ {n}_ix }})," for n in var_names]
+                masks = [
+                    f"task_should_compute_output({{ {n}_ix }})," for n in var_names
+                ]
                 grad_input_mask = GRAD_INPUT_MASK.substitute(
                     masks=masks, n=len(var_names)
                 )

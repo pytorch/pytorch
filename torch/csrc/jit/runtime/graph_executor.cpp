@@ -375,7 +375,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
  private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
-    if (should_compute_output(i)) {
+    if (task_should_compute_output(i)) {
       const auto& edge = next_edge(i);
       if (output.defined()) {
         outputs.emplace_back(std::move(output));

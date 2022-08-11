@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
 #include <test/cpp/api/support.h>
@@ -274,6 +275,102 @@ TEST(CustomAutogradTest, CustomFunction) {
 
   ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}) * 2);
+}
+
+TEST(CustomAutogradTest, GraphTaskTrimEdges) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2,
+        int mul,
+        bool needs_input1_grad,
+        bool needs_input2_grad) {
+      // setup the expected should and should not compute idx
+      ctx->saved_data["needs_input1_grad"] = needs_input1_grad;
+      ctx->saved_data["needs_input2_grad"] = needs_input2_grad;
+
+      ctx->saved_data["mul"] = mul;
+      ctx->save_for_backward({var1, var2});
+      return var1 + mul * var2 + var1 * var2;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      // Test `needs_input_grad` method is working correctly.
+      // We have to test this within the backward function.
+      auto needs_input1_grad = ctx->saved_data["needs_input1_grad"].toBool();
+      auto needs_input2_grad = ctx->saved_data["needs_input2_grad"].toBool();
+      IndexRange var1_idx = {0, 1};
+      IndexRange var2_idx = {1, 2};
+      EXPECT_EQ(ctx->needs_input_grad(0), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad(1), needs_input2_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var1_idx}), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var2_idx}), needs_input2_grad);
+      EXPECT_EQ(
+          ctx->needs_input_grad({var1_idx, var2_idx}),
+          needs_input1_grad || needs_input2_grad);
+
+      // calculate gradients
+      int mul = ctx->saved_data["mul"].toInt();
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+
+      Variable grad_var1, grad_var2;
+      if (ctx->needs_input_grad(0)) {
+        grad_var1 = grad_output[0] + grad_output[0] * var2;
+      }
+      if (ctx->needs_input_grad(1)) {
+        grad_var2 = grad_output[0] * mul + grad_output[0] * var1;
+      }
+      variable_list output = {
+          grad_var1,
+          grad_var2,
+          Variable(),
+          Variable(),
+          Variable(),
+      };
+      return output;
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  auto go = torch::ones_like(x);
+  Variable out;
+
+  // grad_x
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ true,
+      /* needs_input2_grad= */ false);
+  auto grad_x = torch::autograd::grad({out}, {x}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_x, y + torch::ones({5, 5}));
+
+  // grad_y
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ false,
+      /* needs_input2_grad= */ true);
+  auto grad_y = torch::autograd::grad({out}, {y}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_y, x + torch::ones({5, 5}) * 2);
+
+  // grad_x and grad_y
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ true,
+      /* needs_input2_grad= */ true);
+  auto grads = torch::autograd::grad({out}, {x, y}, {go});
+  ASSERT_VARIABLE_EQ(grads[0], y + torch::ones({5, 5}));
+  ASSERT_VARIABLE_EQ(grads[1], x + torch::ones({5, 5}) * 2);
 }
 
 TEST(CustomAutogradTest, FunctionReturnsInput) {
