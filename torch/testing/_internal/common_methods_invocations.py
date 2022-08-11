@@ -12090,12 +12090,6 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
-               # On ARM we call into the Winograd3x3Depthwise backend for depthwise convolution
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)}),
-                   'TestCompositeCompliance', 'test_forward_ad',
-                   active_if=IS_ARM64
-               ),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
