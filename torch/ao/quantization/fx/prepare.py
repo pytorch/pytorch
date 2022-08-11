@@ -179,8 +179,8 @@ def node_arg_is_weight(node: Node, arg: Any, weight_index_dict: Dict[str, int]) 
     if isinstance(node, Node) and node.op == 'call_function' and \
             node.target in weight_index_dict:
         for i, node_arg in enumerate(node.args):
-            if arg is node_arg and i in \
-                    weight_index_dict[node.target]:  # type: ignore[index]
+            if (arg is node_arg and
+                i in weight_index_dict[node.target]):  # type: ignore[index]
                 return True
         for kwarg_name, kwarg_value in node.kwargs.items():
             if kwarg_name == 'weight' and arg is kwarg_value:
@@ -193,8 +193,8 @@ def node_arg_is_bias(node: Node, arg: Any, bias_index_dict: Dict[str, int]) -> b
         return False
 
     for i, node_arg in enumerate(node.args):
-        if arg is node_arg and i in \
-           bias_index_dict[node.target]:  # type: ignore[index]
+        if (arg is node_arg and
+            i in bias_index_dict[node.target]):  # type: ignore[index]
             return True
 
     return node.kwargs.get('bias', None) is arg
