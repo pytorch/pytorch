@@ -73,12 +73,10 @@ def evaluate(model, criterion, data_loader):
     model.eval()
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
-    cnt = 0
     with torch.no_grad():
         for image, target in data_loader:
             output = model(image)
             loss = criterion(output, target)
-            cnt += 1
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], image.size(0))
             top5.update(acc5[0], image.size(0))
@@ -134,14 +132,9 @@ def prepare_data_loaders(data_path):
 def training_loop(model, criterion, data_loader):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    count = 0
     model.train()
     for i in range(10):
         for data, target in data_loader:
-            # if count == 1:
-            #     break
-            print(count)
-            count += 1
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
