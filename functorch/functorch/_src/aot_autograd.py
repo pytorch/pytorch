@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from contextlib import contextmanager, nullcontext
 from functools import wraps
@@ -10,11 +11,9 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections
-from torch.nn.utils import _stateless
+from torch.nn.utils import _stateless, stateless
 
 from functorch import make_fx
-from torch.nn.utils import stateless
-import dataclasses
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
@@ -194,22 +193,28 @@ def call_func_with_args(f, args, steal_args=False):
     torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
     return out
 
+
 @dataclasses.dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
     """
+
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
+
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     def fake_signature(fn, nargs):
         """FX gets confused by varargs, de-confuse it"""
         argnames = ",".join(f"arg{i}" for i in range(nargs))
         return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
-    fw_module = make_fx(fake_signature(flat_fn, len(flat_args)), aot_config.decompositions)(*flat_args)
+
+    fw_module = make_fx(
+        fake_signature(flat_fn, len(flat_args)), aot_config.decompositions
+    )(*flat_args)
     with track_graph_compiling("forward"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
@@ -228,9 +233,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     with torch.set_grad_enabled(True):
         out = flat_fn(*flat_args)
     out = pytree.tree_map(
-        lambda x: x.detach().contiguous()
-        if isinstance(x, Tensor)
-        else x,
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         out,
     )
 
@@ -241,9 +244,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     joint_inputs = (flat_args, out)
     with torch.set_grad_enabled(True):
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
-            *joint_inputs
-        )
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
         if config.use_functionalize:
             # Functionalize the foward backward graph. First create a
@@ -324,11 +325,10 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-    fake_mode = (
-        FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
-    )
+    fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
 
     with preserve_rng_state(), fake_mode as mode:
+
         def process_inputs(flat_args):
             flat_args = pytree.tree_map(
                 lambda x: x.detach().requires_grad_(x.requires_grad)
@@ -348,14 +348,17 @@ def create_aot_dispatcher_function(
 
         fake_flat_tensor_args = process_inputs(flat_args)
 
-        needs_autograd = any([x.requires_grad for x in fake_flat_tensor_args]) and grad_enabled
+        needs_autograd = (
+            any([x.requires_grad for x in fake_flat_tensor_args]) and grad_enabled
+        )
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            return make_boxed_func(aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config))
+            return make_boxed_func(
+                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
+            )
         else:
             return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
-
 
 
 class _CompileCache(CompileCache):
@@ -392,10 +395,12 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
+
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
     argnames = ",".join(f"arg{i}" for i in range(nargs))
     return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
+
 
 def filter_tensor_and_static_args(args, static_argnums):
     """
@@ -531,7 +536,12 @@ def aot_function(
         compile_cache = CompileCache()
     if bw_compiler is None:
         bw_compiler = fw_compiler
-    aot_config = AOTConfig(fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partition_fn, decompositions=decompositions)
+    aot_config = AOTConfig(
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
+        partition_fn=partition_fn,
+        decompositions=decompositions,
+    )
     cached_res = None
 
     fn_id = id(fn)
@@ -755,7 +765,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         assert static_argnums is None
         if bw_compiler is None:
             bw_compiler = fw_compiler
-        aot_config = AOTConfig(fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partition_fn, decompositions=decompositions)
+        aot_config = AOTConfig(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+            decompositions=decompositions,
+        )
 
         compiled_fn = None
 
