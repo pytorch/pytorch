@@ -279,7 +279,6 @@ class TestCase:
     match_output: bool
     match_placeholder: bool
     num_matches: int
-    fully_contained: bool = True
     remove_overlapping_matches: bool = True
 
 class SingleNodePattern:
@@ -391,13 +390,11 @@ class NonFullyContainedMatches:
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 1, fully_contained=True),
-        TestCase(False, False, 2, fully_contained=False),
+        TestCase(False, False, 1),
 
         TestCase(True, False, 0),
 
-        TestCase(False, True, 1, fully_contained=True),     # leaked used of placeholder is not leaking
-        TestCase(False, True, 2, fully_contained=False),
+        TestCase(False, True, 1),     # leaked used of placeholder is not leaking
     ]
 
 class ChainRepeatedPattern:
@@ -513,13 +510,12 @@ class MultipleOutputsMultipleOverlappingMatches:
         a = a.relu()
         b = a.sigmoid()
         c = a.sum()
-        return b, c
+        return a, b, c
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 0, fully_contained=True),
-        TestCase(False, False, 4, fully_contained=False, remove_overlapping_matches=False),
-        TestCase(False, False, 1, fully_contained=False, remove_overlapping_matches=True),
+        TestCase(False, False, 4, remove_overlapping_matches=False),
+        TestCase(False, False, 1, remove_overlapping_matches=True),
     ]
 
 class MultipleOutputsMultipleNonOverlappingMatches:
@@ -547,8 +543,7 @@ class MultipleOutputsMultipleNonOverlappingMatches:
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 2, fully_contained=False),
-        TestCase(False, False, 1, fully_contained=True),
+        TestCase(False, False, 1),
     ]
 
 class MultipleOutputsIdenticalAnchor:
@@ -577,6 +572,34 @@ class MultipleOutputsIdenticalAnchor:
         TestCase(False, True, 0),
     ]
 
+
+class MultipleOutputsHorizontalPattern:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        y1 = x.relu()
+        y2 = x.sigmoid()
+
+        return y1, y2
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        b2 = a.sigmoid()
+
+        return b1, b2
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -593,6 +616,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsMultipleOverlappingMatches,
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
+        MultipleOutputsHorizontalPattern
     ])
     def test_subgraph_matcher(self, test_model):
         traced = symbolic_trace(test_model.forward)
@@ -603,7 +627,6 @@ class TestFXMatcherUtils(JitTestCase):
             matcher = SubgraphMatcher(pattern_traced.graph,
                                       match_output=test_case.match_output,
                                       match_placeholder=test_case.match_placeholder,
-                                      fully_contained=test_case.fully_contained,
                                       remove_overlapping_matches=test_case.remove_overlapping_matches)
             matches = matcher.match(traced.graph)
 
