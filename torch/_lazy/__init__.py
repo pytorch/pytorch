@@ -36,8 +36,10 @@ def get_tensor_id(tensor):
     return torch._C._lazy._get_tensor_id(tensor)
 
 
-def to_cpu(tensors, devices=["lazy"]):
+def to_cpu(tensors, devices=None):
     from .visit import flatten_tensors, visit_tensors
+
+    devices = devices or ["lazy"]
 
     flattened = flatten_tensors(tensors)
     sync_multi(flattened, devices)
