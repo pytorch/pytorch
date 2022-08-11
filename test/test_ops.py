@@ -33,10 +33,10 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    IS_ARM64
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
-    _NOTHING,
     UnaryUfuncInfo,
     ReductionOpInfo,
     ReductionPythonRefInfo,
@@ -64,7 +64,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
-import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
@@ -89,8 +89,7 @@ _ref_test_ops = tuple(
         lambda op: not isinstance(
             op, (UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, BinaryUfuncInfo)
         )
-        and op.ref is not None
-        and op.ref is not _NOTHING,
+        and op.ref is not None,
         op_db,
     )
 )
@@ -113,9 +112,9 @@ class TestCommon(TestCase):
                 "This is OK for testing, but be sure to set the dtypes manually before landing your PR!"
             )
             # Assure no opinfo entry has dynamic_dtypes
-            filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+            filtered_ops = list(filter(opinfo.utils.is_dynamic_dtype_set, op_db))
             for op in filtered_ops:
-                fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+                fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
                 err_msg += "\n" + fmt_str
 
             assert len(filtered_ops) == 0, err_msg
@@ -1230,6 +1229,7 @@ class TestCommon(TestCase):
         self.fail(msg)
 
 
+@unittest.skipIf(IS_ARM64, "Not working on arm")
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1605,6 +1605,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
+        # CompositeExplicitAutograd,
+        '_refs.unbind',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
