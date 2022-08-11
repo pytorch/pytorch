@@ -156,8 +156,8 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
         is_activation_post_process(modules[str(node.target)])
 
 
-def get_weight_and_bias_index_dicts(backend_config):
-    index_dicts: Dict[str, Dict[str, int]] = {
+def get_weight_and_bias_index_dicts(backend_config: BackendConfig):
+    index_dicts: Dict[str, Dict[str, List[int]]] = {
         "weight": {},
         "bias": {},
         "input": {}  # not used right now
