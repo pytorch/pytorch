@@ -472,44 +472,50 @@ class ModelReportVisualizer:
 
         # offset should either be one of tensor or channel table or neither
         feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        table = tensor_table
+
+        # if a per_channel plot, we have different offset and table
         if is_valid_per_channel_plot:
             feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
-
-        # keep track of per_channel or not
-        data_is_per_channel: bool = False
+            table = channel_table
 
         x_data: List = []
         y_data: List[List] = []
         # the feature will either be a tensor feature or channel feature
-        if is_valid_per_tensor_plot or is_valid_per_channel_plot:
-            # extra setup for y_data if per channel
-            if is_valid_per_channel_plot:
-                # gather the x_data and multiple y_data
-                # calculate the number of channels
-                num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in channel_table) + 1
-                for channel in range(num_channels):
-                    y_data.append([])  # seperate data list per channel
-
-            for table_row_num, row in enumerate(tensor_table):
+        if is_valid_per_tensor_plot:
+            for table_row_num, row in enumerate(table):
                 # get x_value to append
                 x_val_to_append = table_row_num
-                current_channel: int = -1  # intially chose current channel
-                # if new module we are looking at, add it's index to x_data
-                if is_valid_per_channel_plot and row[self.CHANNEL_NUM_INDEX] == 0:
-                    new_module_index: int = table_row_num // num_channels
-                    x_val_to_append = new_module_index
-                    current_channel = row[self.CHANNEL_NUM_INDEX]
-
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
                 if not type(row_value) == str:
                     x_data.append(x_val_to_append)
-                    # how we append y value depends on if per tensor or not
-                    if is_valid_per_channel_plot:
-                        y_data[current_channel].append(row_value)
-                    else:
-                        y_data.append(row_value)
+                    y_data.append(row_value)
+        elif is_valid_per_channel_plot:
+            # gather the x_data and multiple y_data
+            # calculate the number of channels
+            num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
+            for channel in range(num_channels):
+                y_data.append([])  # separate data list per channel
+
+            for table_row_num, row in enumerate(table):
+                # get x_value to append
+                x_val_to_append = table_row_num
+                current_channel = row[self.CHANNEL_NUM_INDEX]  # intially chose current channel
+                new_module_index: int = table_row_num // num_channels
+                x_val_to_append = new_module_index
+
+                # the index of the feature will the 0 + num non feature columns
+                tensor_feature_index = feature_column_offset
+                row_value = row[tensor_feature_index]
+                if not type(row_value) == str:
+                    # only append if new index we are appending
+                    if len(x_data) == 0 or x_data[-1] != x_val_to_append:
+                        x_data.append(x_val_to_append)
+
+                    # append value for that channel
+                    y_data[current_channel].append(row_value)
         else:
             # more than one feature was chosen
             error_str = "Make sure to pick only a single feature with your filter to plot a graph."
@@ -518,11 +524,17 @@ class ModelReportVisualizer:
             raise ValueError(error_str)
 
         # return x, y values, and if data is per-channel
-        return (x_data, y_data, data_is_per_channel)
+        return (x_data, y_data, is_valid_per_channel_plot)
 
     def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
         Takes in a feature and optional module_filter and plots of the desired data.
+
+        For per channel features, it averages the value across the channels and plots a point
+        per module. The reason for this is that for models with hundreds of channels, it can
+        be hard to diffrentiate one channel line from another, and so the point of generating
+        a single average point per module is to give a sense of general trends that encourage
+        further deep dives.
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
@@ -557,7 +569,6 @@ class ModelReportVisualizer:
         x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
 
         # plot based on whether data is per channel or not
-        fig = plt.figure()
         ax = plt.subplot()
         ax.set_ylabel(feature_filter)
         ax.set_title(feature_filter + " Plot")
@@ -566,10 +577,14 @@ class ModelReportVisualizer:
         if data_per_channel:
             ax.set_xlabel("First idx of module")
             # set the legend as well
-            # plot a seperate line for each channel
-            for index, channel_info in enumerate(y_data):
-                ax.plot(x_data, channel_info, label="Channel {}".format(index))
+            # plot a single line that is average of the channel values
+            num_modules = len(y_data[0])  # all y_data have same length, so get num modules
+            num_channels = len(y_data)  # we want num channels to be able to calculate average later
 
+            avg_vals = [sum(y_data[:][index]) / num_channels for index in range(num_modules)]
+
+            # plot the three things we measured
+            ax.plot(x_data, avg_vals, label="Average Value Across {} Channels".format(num_channels))
             ax.legend(loc='upper right')
         else:
             ax.set_xlabel("idx")
@@ -616,7 +631,6 @@ class ModelReportVisualizer:
 
         # for histogram, we just care about plotting the y data
         # plot based on whether data is per channel or not
-        fig = plt.figure()
         ax = plt.subplot()
         ax.set_xlabel(feature_filter)
         ax.set_ylabel("Frequency")
@@ -628,13 +642,13 @@ class ModelReportVisualizer:
             all_data = []
             for index, channel_info in enumerate(y_data):
                 all_data.extend(channel_info)
+
             val, bins, _ = plt.hist(
                 all_data,
                 bins=num_bins,
                 stacked=True,
                 rwidth=0.8,
             )
-            ax.legend(loc='upper right')
             plt.xticks(bins)
         else:
             val, bins, _ = plt.hist(

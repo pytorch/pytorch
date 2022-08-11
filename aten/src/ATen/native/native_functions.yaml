@@ -626,15 +626,10 @@
   dispatch:
     CompositeExplicitAutograd: arange
 
-# Note [arange.start_step schema]
-# We want `arange.start_step` to be grouped up with `arange.start_out`,
-# But this doesn't happen automatically because the step argument
-# is defaultable for .start_out but not for .start_step.
-# We should probably just make "step" a defaultable param on arange.start,
-# and kill arange.start_step.
-- func: arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: arange.start_step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+  cpp_no_default_args: ['step']
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3316,11 +3311,11 @@
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
-- func: nanmean(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: nanmean(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # Composite
   variants: function, method
 
-- func: nanmean.out(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: nanmean.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # Composite
 
 - func: median(Tensor self) -> Tensor
@@ -4777,12 +4772,12 @@
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
-- func: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
     CPU, CUDA: nansum
 
-- func: nansum.out(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nansum_out
 
@@ -4831,7 +4826,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+- func: std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
@@ -4847,7 +4842,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -4865,7 +4860,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: std.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
 - func: std.correction_out(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
@@ -5108,7 +5103,7 @@
     CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
 
-- func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+- func: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask
 
@@ -5246,7 +5241,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+- func: var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
@@ -5257,7 +5252,7 @@
     CPU, CUDA: var
     MPS: var_mps
 
-- func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
 - func: var.correction_out(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
@@ -5284,7 +5279,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -6624,7 +6619,7 @@
   dispatch:
     CompositeExplicitAutograd: masked_scatter
 
-- func: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
+- func: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
@@ -12278,6 +12273,30 @@
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
 
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
+  dispatch:
+    # the NestedTensor keys are necessary because NestedTensor has been removed
+    # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch_fullcoverage
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd, NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch_ntonly
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch_view(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: _test_autograd_multiple_dispatch_view
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch_view_copy(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _test_autograd_multiple_dispatch_view_copy
+  tags: view_copy
+
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
@@ -12743,18 +12762,28 @@
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
 
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
-- func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None) -> Tensor
+- func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, int? mask_type=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_encoder_layer_forward
 
-- func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor)
+- func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True, int? mask_type=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
   variants: function
+
+- func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: triton_scaled_dot_attention
+
+- func: _triton_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: triton_multi_head_attention
 
 - func: special_airy_ai(Tensor x) -> Tensor
   python_module: special
