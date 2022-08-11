@@ -720,6 +720,7 @@ include_patterns = [
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
     'torchgen/**/*.py',
+    'torch/testing/_internal/opinfo/definitions/*.py',
 ]
 command = [
     'python3',
