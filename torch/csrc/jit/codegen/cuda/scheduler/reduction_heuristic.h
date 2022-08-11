@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
 
 #include <sstream>
 
@@ -9,11 +9,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Parameters the Reduction Heuristic Generates to describe the optimial
-// schedule. Warning: equal operator is intended for use in caching the kernel
-// associated with these reduction parameters. It does not check if the launch
-// parameters are equivelent!
-class ReductionParams {
+// Parameters of the reduction heuristic to describe the optimial schedule.
+// Warning: equal operator is intended for use in caching the kernel associated
+// with these reduction parameters. It does not check if the launch parameters
+// are equivelent!
+class ReductionParams : public HeuristicParams {
  public:
   // Reducing inner most dimension?
   bool fastest_dim = false;
@@ -100,18 +100,22 @@ class ReductionParams {
   // parameters, not used for equivalence/hashing.
   ParallelType grid_dim_outer_reduction = ParallelType::Serial;
 
-  std::string tag = "";
-
-  LaunchParams lparams;
-
   bool isUnrolled() const {
     return unroll_factor_inner_reduction > 1 || unroll_factor_iter_dom > 1 ||
         unroll_factor_outer_reduction > 1;
   }
 
  public:
+  using HeuristicParams::HeuristicParams;
+
   // Warning: Does not check launch parameters!
-  bool operator==(const ReductionParams& other) const {
+  bool sameAs(
+      const std::shared_ptr<HeuristicParams>& other_base) const override {
+    auto other_casted = std::dynamic_pointer_cast<ReductionParams>(other_base);
+    if (other_casted == nullptr) {
+      return false;
+    }
+    const ReductionParams& other = *other_casted;
     bool attr_equal = other.fastest_dim == fastest_dim &&
         other.persistent_kernel == persistent_kernel &&
         other.project_persistent_buffers == project_persistent_buffers &&
@@ -139,7 +143,7 @@ class ReductionParams {
     return attr_equal;
   }
 
-  std::string toString() const {
+  std::string toString() const override {
     std::stringstream ss;
     ss << "\n===== Reduction Parameters ========\n"
        << (tag == "" ? "" : "Tag: ") << tag << "\n"
@@ -216,37 +220,36 @@ class ReductionParams {
     ss << "====================================\n";
     return ss.str();
   }
-};
 
-// Warning: Hash is not based on launch parameters!
-class ReductionParamsHash {
- public:
-  size_t operator()(const ReductionParams& rp) const {
+  // Warning: Hash is not based on launch parameters!
+  size_t hash() const override {
     constexpr size_t bits = sizeof(std::size_t) * 8;
-    size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) ^
-        static_cast<size_t>(rp.persistent_kernel) << (bits - 2) ^
-        static_cast<size_t>(rp.project_persistent_buffers) << (bits - 3) ^
-        static_cast<size_t>(rp.schedule_3D) << (bits - 4) ^
-        static_cast<size_t>(rp.flip_grid) << (bits - 5) ^
-        static_cast<size_t>(rp.cross_block_inner_reduction) << (bits - 6) ^
-        static_cast<size_t>(rp.cross_grid_inner_reduction) << (bits - 7) ^
-        static_cast<size_t>(rp.unroll_factor_inner_reduction) << (bits - 8) ^
-        static_cast<size_t>(rp.vectorize_inner_reduction) << (bits - 9) ^
-        static_cast<size_t>(rp.split_grid_dim_inner_reduction) << (bits - 10) ^
-        static_cast<size_t>(rp.pad_inner_reduction_to_warp) << (bits - 11) ^
-        static_cast<size_t>(rp.batches_per_block_inner_reduction)
-            << (bits - 12) ^
-        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 13) ^
-        static_cast<size_t>(rp.unroll_factor_iter_dom) << (bits - 14) ^
-        static_cast<size_t>(rp.vectorize_iter_dom) << (bits - 15) ^
-        static_cast<size_t>(rp.split_grid_dim_iter_dom) << (bits - 16) ^
-        static_cast<size_t>(rp.cross_block_outer_reduction) << (bits - 17) ^
-        static_cast<size_t>(rp.cross_grid_outer_reduction) << (bits - 18) ^
-        static_cast<size_t>(rp.split_grid_dim_outer_reduction) << (bits - 19) ^
-        static_cast<size_t>(rp.batches_per_block_outer_reduction)
-            << (bits - 20) ^
-        static_cast<size_t>(rp.unroll_factor_outer_reduction) << (bits - 21);
+    size_t attr_hash = static_cast<size_t>(fastest_dim) << (bits - 1) ^
+        static_cast<size_t>(persistent_kernel) << (bits - 2) ^
+        static_cast<size_t>(project_persistent_buffers) << (bits - 3) ^
+        static_cast<size_t>(schedule_3D) << (bits - 4) ^
+        static_cast<size_t>(flip_grid) << (bits - 5) ^
+        static_cast<size_t>(cross_block_inner_reduction) << (bits - 6) ^
+        static_cast<size_t>(cross_grid_inner_reduction) << (bits - 7) ^
+        static_cast<size_t>(unroll_factor_inner_reduction) << (bits - 8) ^
+        static_cast<size_t>(vectorize_inner_reduction) << (bits - 9) ^
+        static_cast<size_t>(split_grid_dim_inner_reduction) << (bits - 10) ^
+        static_cast<size_t>(pad_inner_reduction_to_warp) << (bits - 11) ^
+        static_cast<size_t>(batches_per_block_inner_reduction) << (bits - 12) ^
+        static_cast<size_t>(multiple_reds_per_blk) << (bits - 13) ^
+        static_cast<size_t>(unroll_factor_iter_dom) << (bits - 14) ^
+        static_cast<size_t>(vectorize_iter_dom) << (bits - 15) ^
+        static_cast<size_t>(split_grid_dim_iter_dom) << (bits - 16) ^
+        static_cast<size_t>(cross_block_outer_reduction) << (bits - 17) ^
+        static_cast<size_t>(cross_grid_outer_reduction) << (bits - 18) ^
+        static_cast<size_t>(split_grid_dim_outer_reduction) << (bits - 19) ^
+        static_cast<size_t>(batches_per_block_outer_reduction) << (bits - 20) ^
+        static_cast<size_t>(unroll_factor_outer_reduction) << (bits - 21);
     return attr_hash;
+  }
+
+  std::shared_ptr<HeuristicParams> clone() const override {
+    return std::make_shared<ReductionParams>(*this);
   }
 };
 

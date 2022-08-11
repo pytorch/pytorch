@@ -734,6 +734,7 @@ def run_tests(argv=UNITTEST_ARGS):
                                     '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
+            print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
             # exitcode of 5 means no tests were found, which happens since some test configs don't
             # run tests from certain files
             exit(0 if exit_code == 5 else exit_code)
@@ -758,6 +759,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
+IS_ARM64 = platform.machine() == 'arm64'
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -832,7 +834,7 @@ TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
 
-TEST_LIBROSA = _check_module_exists('librosa')
+TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
@@ -981,20 +983,18 @@ def skipIfMps(fn):
             fn(*args, **kwargs)
     return wrapper
 
-# Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
+# Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if not TEST_WITH_ROCM:
-                reason = "ROCm not available"
-                raise unittest.SkipTest(reason)
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-")[0]    # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-            if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
-                raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM:
+                rocm_version = str(torch.version.hip)
+                rocm_version = rocm_version.split("-")[0]    # ignore git sha
+                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
@@ -2152,7 +2152,7 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=()):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=(), dense_dims=0):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
@@ -2160,11 +2160,14 @@ class TestCase(expecttest.TestCase):
         assert len(size) >= sparse_dim
         if blocksize:
             assert len(blocksize) == 2, (size, blocksize)
-            assert size[-2] % blocksize[0] == 0, (size, blocksize)
-            assert size[-1] % blocksize[1] == 0, (size, blocksize)
+            assert size[-2 - dense_dims] % blocksize[0] == 0, (size, blocksize)
+            assert size[-1 - dense_dims] % blocksize[1] == 0, (size, blocksize)
             blocksize0, blocksize1 = blocksize
         else:
             blocksize0 = blocksize1 = 1
+
+        size = tuple(size)
+        dense_size = size[(len(size) - dense_dims):]
 
         def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
             compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
@@ -2175,44 +2178,43 @@ class TestCase(expecttest.TestCase):
                     torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor((nnz,) + blocksize, device=device, dtype=dtype, low=low, high=high)
+            values = make_tensor((nnz,) + blocksize + dense_size, device=device, dtype=dtype, low=low, high=high)
             return values, compressed_indices, plain_indices
 
-        batch_shape = size[:-2]
+        batch_shape = size[:-2 - dense_dims]
         n_batch = reduce(mul, batch_shape, 1)
 
         if layout in {torch.sparse_csr, torch.sparse_bsr}:
-            n_compressed_dims, n_plain_dims = size[-2] // blocksize0, size[-1] // blocksize1
+            n_compressed_dims, n_plain_dims = size[-2 - dense_dims] // blocksize0, size[-1 - dense_dims] // blocksize1
         else:
-            n_compressed_dims, n_plain_dims = size[-1] // blocksize1, size[-2] // blocksize0
+            n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
 
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize)
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-
         return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
                                               values, size=size, dtype=dtype, layout=layout, device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=dense_dims)
 
-    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=0)
 
-    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
-    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
@@ -2353,6 +2355,13 @@ class TestCase(expecttest.TestCase):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
+
+        # If x or y are tensors and nested then we unbind them to a list of tensors this should allow us to compare
+        # a nested tensor to a nested tensor and a nested tensor to a list of expected tensors
+        if isinstance(x, torch.Tensor) and x.is_nested:
+            x = x.unbind()
+        if isinstance(y, torch.Tensor) and y.is_nested:
+            y = y.unbind()
 
         assert_equal(
             x,

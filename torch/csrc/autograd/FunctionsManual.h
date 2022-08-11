@@ -152,10 +152,20 @@ at::Tensor unsqueeze_multiple(
     const at::Tensor& t,
     at::OptionalIntArrayRef opt_dim,
     size_t n_dims);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    at::IntArrayRef sizes,
+    at::OptionalIntArrayRef opt_dims,
+    bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);

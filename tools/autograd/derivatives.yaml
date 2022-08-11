@@ -13,6 +13,14 @@
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
 #     are defining derivatives for, and an argument specification.
+#   - An optional 'dispatch' entry which can be used to specify
+#     per-autograd dispatch key derivatives. If this entry is not
+#     specified, then the gradient entries will be taken as the
+#     default gradients (i.e. registered for every backward dispatch
+#     key). (see _test_autograd_multiple_dispatch for an example
+#     of how to register separate derivates for different dispatch keys).
+#     The list of allowed dispatch keys (in addition to 'Default' which
+#     represents the Autograd alias key) is torchgen/model.py:AUTOGRAD_KEYS.
 #   - One or more gradients entries, mapping differentiable input
 #     names to a formula specifying how to compute its gradient.
 #     Note that a single gradient entry can specify the gradient
@@ -912,11 +920,11 @@
 
 - name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
-  other: grad * at::where(other.isnan() | (self != 0), self / other, zeros_like(other))
+  other: grad * at::where(other.isnan() | (self != 0), self / other, 0)
   result: self_t * at::xlogy((self_p != 0), other_p) + other_t * self_p / other_p
 
 - name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, zeros_like(other))
+  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, 0)
   result: auto_element_wise
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
@@ -1002,7 +1010,7 @@
 
 - name: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   self: grad.masked_fill(mask, 0)
-  value: at::where(mask, grad, zeros_like(grad)).sum()
+  value: at::where(mask, grad, 0).sum()
   mask: non_differentiable
   result: self_t.masked_fill(mask, value_t)
 
@@ -1532,14 +1540,19 @@
   result: auto_linear
 
 - name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward_symint(grad, self.sym_sizes(), dim, keepdim)
+  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
   result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, IntArrayRef({-1}), dim, keepdim, self)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: sum_backward(grad, self.sizes(), dim, keepdim)
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this function once semantics for nested tensor expand have been settled on
+      self: _nested_sum_backward(grad, self, dim, keepdim)
 
-- name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
   result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)
 
@@ -1740,8 +1753,8 @@
 
 - name: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
-  self: where(condition, grad, zeros_like(grad))
-  other: where(condition, zeros_like(grad), grad)
+  self: where(condition, grad, 0)
+  other: where(condition, 0, grad)
   result: where(condition, self_t, other_t)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
@@ -1894,6 +1907,7 @@
 
 - name: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ true, result)
+  result: self_t.copy_(elu_backward(original_self_t, alpha, scale, input_scale, /* is_result */ true, result))
 
 - name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ false, self)
@@ -1901,6 +1915,7 @@
 
 - name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
+  result: self_t.copy_(elu_backward(original_self_t, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result))
 
 - name: gelu(Tensor self, *, str approximate='none') -> Tensor
   self: gelu_backward(grad, self, approximate)
@@ -1949,7 +1964,7 @@
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
 
-- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
+- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   self: _masked_softmax_backward(grad, result, mask, dim)
   mask: non_differentiable
 
@@ -2684,7 +2699,7 @@
 - name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
-- name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+- name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
   t: grad.to_padded_tensor(0, t.sizes())
   mask: non_differentiable
 
@@ -2788,6 +2803,28 @@
 
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
   self: warn_backwards(grad)
+
+- name: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
+  dispatch:
+    Default:
+      self: grad.expand(self.sizes()) + 1
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.mul(grad)
+    AutogradCUDA:
+      self: grad.expand(self.sizes()) * 2
+
+- name: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
+  dispatch:
+    AutogradNestedTensor:
+      self: grad.mul(grad).add(grad)
+
+- name: _test_autograd_multiple_dispatch_view(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    Default:
+      self: grad.reshape_as(self)
+    AutogradCUDA:
+      self: grad.reshape_as(self) + 1
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
