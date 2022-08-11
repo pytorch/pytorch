@@ -2907,6 +2907,21 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
+def normalize_devices(fx_g):
+    for node in fx_g.graph.nodes:
+        args = list(node.args)
+        for idx, arg in enumerate(args):
+            if isinstance(arg, torch.device):
+                args[idx] = 'cpu'
+        node.args = tuple(args)
+        new_kwargs = {}
+        for k, v in node.kwargs.items():
+            if isinstance(v, torch.device):
+                v = 'cpu'
+            new_kwargs[k] = v
+        node.kwargs = new_kwargs
+    fx_g.recompile()
+    return fx_g
 
 class TestFunctionalize(TestCase):
     def _check_functionalize_correctness(self, f, inpt):
@@ -3055,12 +3070,13 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         # To preserve semantics, functionalize() needs to propagate the mutation.
         fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline((out.code), """\
 
 
 
 def forward(self, x_1) -> torch.Tensor:
-    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
@@ -3074,6 +3090,7 @@ def forward(self, x_1) -> torch.Tensor:
             return x.transpose(1, 0)
         fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
