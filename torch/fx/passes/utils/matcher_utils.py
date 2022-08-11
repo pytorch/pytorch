@@ -1,36 +1,83 @@
+from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
 import torch.library
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-
-from torch.fx.subgraph_rewriter import Match
-
 from typing import Dict, List, Set
 
-__all__ = ['SubgraphMatcher']
+__all__ = ['SubgraphMatcher', 'InternalMatch']
 
-regex = torch.library.Library("regex", "DEF")
-regex.define("any() -> ()")
-regex.define("oneof( *, str[] ops) -> ()")
+
+pseudo = torch.library.Library("pseudo", "DEF")
+
+pseudo.define("any() -> ()")
+"""
+pseudo.any is a wildcard node that can be matched with any fx node with arbitrary number of inputs and outputs.
+For example, to match relu followed by one fx node:
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.any(y)
+        return z
+"""
+
+pseudo.define("oneof(*, str[] targets) -> ()")
+"""
+pseudo.oneof is a special node that can be matched with a fx node whose target is in the permissible list.
+`targets` must be be a list of qualified name for operators, e.g. ["operator.add", "torch.sigmoid",
+"torch.ops.aten.foo", "torch.ops.prims.bar"]
+
+For example, using following pattern with pseudo.oneof
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.oneof(y, targets=["relu", "torch.sigmoid", "operator.add"])
+        return z
+
+It will have 3 matches in the following function
+    def forward(y):
+        z = y.relu()
+        x = z.relu()    # first match
+
+        x = x.relu()
+        x = torch.sigmoid(x)    # second match
+
+        x = x.relu()
+        return x + 1    # third match
+"""
+
+@compatibility(is_backward_compatible=False)
+@dataclass
+class InternalMatch():
+    # Nodes from which the match was found
+    anchors: List[Node]
+    # Maps nodes in the pattern subgraph to nodes in the larger graph
+    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+
+    # nodes in target graph that are matched placeholder in pattern
+    placeholder_nodes: List[Node] = field(default_factory=list)
+
+    # nodes in matched subgraph returned by output
+    returning_nodes: List[Node] = field(default_factory=list)
+
+    def __copy__(self):
+        return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
+                             placeholder_nodes=self.placeholder_nodes.copy(),
+                             returning_nodes=self.returning_nodes.copy())
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 fully_contained: bool = True,
                  remove_overlapping_matches: bool = True) -> None:
         """
         Args:
-            pattern: the targeted matching pattern, represented in fx.Graph
+            pattern: the targeted matching pattern, represented in fx.Graph.
             match_output: If True, output node in the pattern graph will be treated as a part of the targeted pattern.
                 If False, output node is ignored during match.
             match_placeholder: If True, placeholder node in the pattern graph will be treated as a part of
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
-            fully_contained: If True, nodes (except placeholder and output_link_nodes ) can only be consumed
-                by nodes within th pattern.
             remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
                 will be returned.
         """
@@ -38,7 +85,6 @@ class SubgraphMatcher:
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
-        self.fully_contained = fully_contained
         self.remove_overlapping_matches = remove_overlapping_matches
 
         if len(pattern.nodes) == 0:
@@ -71,11 +117,16 @@ class SubgraphMatcher:
         if not self.match_placeholder and pn.op == "placeholder":
             return True
 
-        if pn.target == torch.ops.regex.any:
+        if pn.target == torch.ops.pseudo.any:
             return True
 
-        if pn.target == torch.ops.regex.oneof:
-            if gn.target in pn.kwargs["ops"]:
+        if pn.target == torch.ops.pseudo.oneof:
+            permissible_targets: List[str] = pn.kwargs.get("targets", list())  # type: ignore[assignment]
+            assert isinstance(permissible_targets, list), \
+                "pseudo.oneof(permissible_targets=[\"foo\", \"bar\"]) only accept targets as a list"
+            assert len(permissible_targets) > 0, "please specific as least one target for pseudo.oneof"
+
+            if gn._pretty_print_target(gn.target) in permissible_targets:
                 return True
 
         if pn.op == gn.op:
@@ -104,8 +155,8 @@ class SubgraphMatcher:
                     return False
         return True
 
-    def _remove_overlapping_matches(self, matches: List[Match]) -> List[Match]:
-        non_overlapping_matches: List[Match] = list()
+    def _remove_overlapping_matches(self, matches: List[InternalMatch]) -> List[InternalMatch]:
+        non_overlapping_matches: List[InternalMatch] = list()
         nodes_matched: Set[Node] = set()
 
         for match in matches:
@@ -122,7 +173,7 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
-    def _match_nodes(self, pn: Node, gn: Node, match: Match) -> bool:
+    def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -154,8 +205,13 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> List[Match]:
+    def match(self, graph: Graph) -> List[InternalMatch]:
         """
+        Returns:
+            The matched subgraphs.
+            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            and nodes returned by output) can only be consumed by nodes within the matched subgraph.
+
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
 
         1. We first identify all the anchor nodes in the pattern graph. The anchor nodes
@@ -180,6 +236,10 @@ class SubgraphMatcher:
         Notice: graph traversal must be done in the reverser order because a tensor can have multiple
         consumers, but can only have a single producer. Only with reverser order, we can we jointly
         traverse the pattern and target graph in a deterministic path.
+
+        Warning: In theory, this backtracking algorithm have an **exponential** time complexity. However,
+        in practice, it's unlikely to blow up.
+
         """
 
         # find candidate nodes to match with pattern anchors
@@ -189,7 +249,7 @@ class SubgraphMatcher:
                 if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
-        matches: List[Match] = []
+        matches: List[InternalMatch] = []
 
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
@@ -210,13 +270,11 @@ class SubgraphMatcher:
                     # revert to saved_match before matching with current anchor
                     match = copy.copy(saved_match)
 
-        # TODO: Match's anchor is set to the first of self.pattern_anchors[0] for now,
-        # need to update the sematics of this field
-        match = Match(anchor=self.pattern_anchors[0])
+        match = InternalMatch(anchors=self.pattern_anchors)
         backtracking(0, match)
 
-        if self.fully_contained:
-            matches = [match for match in matches if self._is_contained(match.nodes_map)]
+        # filter out the matches where the subgraph is not fully_contained
+        matches = [match for match in matches if self._is_contained(match.nodes_map)]
 
         if self.remove_overlapping_matches:
             matches = self._remove_overlapping_matches(matches)
