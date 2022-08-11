@@ -10,11 +10,11 @@ from .._src.aot_autograd import (
     clear_compile_cache,
     aot_module_simplified,
     get_graph_being_compiled,
-    make_boxed_func
+    make_boxed_func,
+    make_boxed_compiler
 )
 from .._src.compilers import (
     ts_compile,
-    tvm_compile,
     draw_graph_compile,
     nop,
     nnc_jit,
