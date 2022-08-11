@@ -15,18 +15,26 @@ namespace pointwise_utils {
 // that maps to all IterDomains in the fusion.
 class DomainMap {
  public:
-  DomainMap(Fusion* fusion);
+  DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
+    view_tvs_ = scheduler_utils::getViewTVs(fusion);
+  }
   virtual ~DomainMap() = default;
 
-  bool areExactMapped(IterDomain* id1, IterDomain* id2);
+  bool areExactMapped(IterDomain* id1, IterDomain* id2) const {
+    return ca_map_.areMapped(id1, id2, IdMappingMode::EXACT);
+  }
 
   const ComputeAtMap& getComputeAtMap() const {
     return ca_map_;
   }
 
+  // Determine if a TensorView is a valid reference tensor for this fusion.
+  // The reference tensor must map to all the iterDomains in each input.
+  bool isValidReference(TensorView* tv) const;
+
  protected:
-  // Determine if all iterDomains are mapped between input and output tvs
-  bool areAllInputIdsMappedToOutput(TensorView* input_tv, TensorView* output_tv)
+  // Determine if all IterDomains are mapped between input and the given tvs
+  bool areAllInputIdsMappedTo(TensorView* input_tv, TensorView* output_tv)
       const;
 
   // Erase input concrete ID if it is mapped to output ID
@@ -34,10 +42,10 @@ class DomainMap {
       std::unordered_set<IterDomain*>& in_concrete_ids,
       IterDomain* out_id) const;
 
-  // Check if in_id is mapped to out_id through any view rfactor domain
-  void eraseIfInputMappedThroughViewToOutput(
+  // Check if in_id is mapped to id through any view rfactor domain
+  void eraseIfInputMappedThroughViewTo(
       std::unordered_set<IterDomain*>& in_concrete_ids,
-      IterDomain* out_id) const;
+      IterDomain* id) const;
 
   // Find any id in domain that maps with target id
   IterDomain* anyMapped(
