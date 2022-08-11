@@ -1449,7 +1449,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         grad.zero_();
         return false;
       });
-      return;
+      continue;
     }
 
     if (!gradient_as_bucket_view_) {
@@ -1945,7 +1945,6 @@ void Reducer::set_static_graph() {
 }
 
 void Reducer::set_discard_grad(bool discard_grad) {
-  printf("QQQQQ In set_discard_grad, discard_grad: %d", discard_grad);
   discard_grad_ = discard_grad;
 }
 
