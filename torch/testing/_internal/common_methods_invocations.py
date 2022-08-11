@@ -18077,30 +18077,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
 
-class SpectralFuncPythonRefInfo(SpectralFuncInfo):
-    '''
-    An OpInfo for a Python reference of an elementwise unary operation.
-    '''
-    def __init__(
-            self,
-            name,  # the stringname of the callable Python reference
-            *,
-            op=None,  # the function variant of the operation, populated as torch.<name> if None
-            torch_opinfo_name,  # the string name of the corresponding torch opinfo
-            torch_opinfo_variant='',
-            supports_nvfuser=True,
-            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
-
-        self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
-        self.supports_nvfuser = supports_nvfuser
-        assert isinstance(self.torch_opinfo, SpectralFuncInfo)
-
-        inherited = self.torch_opinfo._original_spectral_func_args
-        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
-
-        super().__init__(**ukwargs)
-
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
@@ -19501,110 +19477,8 @@ python_ref_db = [
         torch_opinfo_name="allclose",
         supports_nvfuser=False,
     ),
-    #
-    # FFT OpInfos
-    #
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.fft",
-        torch_opinfo_name="fft.fft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ifft",
-        torch_opinfo_name="fft.ifft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.rfft",
-        torch_opinfo_name="fft.rfft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.irfft",
-        torch_opinfo_name="fft.irfft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.hfft",
-        torch_opinfo_name="fft.hfft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ihfft",
-        torch_opinfo_name="fft.ihfft",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.fftn",
-        torch_opinfo_name="fft.fftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ifftn",
-        torch_opinfo_name="fft.ifftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.rfftn",
-        torch_opinfo_name="fft.rfftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.irfftn",
-        torch_opinfo_name="fft.irfftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.hfftn",
-        torch_opinfo_name="fft.hfftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ihfftn",
-        torch_opinfo_name="fft.ihfftn",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.fft2",
-        torch_opinfo_name="fft.fft2",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ifft2",
-        torch_opinfo_name="fft.ifft2",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.rfft2",
-        torch_opinfo_name="fft.rfft2",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.irfft2",
-        torch_opinfo_name="fft.irfft2",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.hfft2",
-        torch_opinfo_name="fft.hfft2",
-        supports_nvfuser=False,
-    ),
-    SpectralFuncPythonRefInfo(
-        "_refs.fft.ihfft2",
-        torch_opinfo_name="fft.ihfft2",
-        supports_nvfuser=False,
-    ),
-    PythonRefInfo(
-        "_refs.fft.fftshift",
-        torch_opinfo_name="fft.fftshift",
-        supports_nvfuser=False,
-    ),
-    PythonRefInfo(
-        "_refs.fft.ifftshift",
-        torch_opinfo_name="fft.ifftshift",
-        supports_nvfuser=False,
-    ),
 ]
+python_ref_db += opinfo.definitions.python_ref_db
 
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
