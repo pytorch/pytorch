@@ -101,7 +101,6 @@ def simple_ts_compile(fx_g, _):
     return f
 
 
-@make_boxed_compiler
 def nnc_jit(f, static_argnums=None):
     return aot_function(f, simple_ts_compile, static_argnums=static_argnums)
 
