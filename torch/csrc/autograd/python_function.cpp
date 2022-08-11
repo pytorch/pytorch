@@ -213,7 +213,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
     for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -899,7 +899,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, tensor.output_nr()));
+      new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
