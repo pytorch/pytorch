@@ -6,7 +6,7 @@ from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
 from typing import Dict, List, Set
 
-__all__ = ['SubgraphMatcher']
+__all__ = ['SubgraphMatcher', 'InternalMatch']
 
 
 @compatibility(is_backward_compatible=False)
