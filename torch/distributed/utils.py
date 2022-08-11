@@ -4,7 +4,8 @@ import traceback
 
 import torch
 import torch.distributed as dist
-from torch.nn.parallel._functions import _get_stream
+
+from torch.nn.parallel._functions import _get_stream, _get_device_impl
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
@@ -55,9 +56,10 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     """
 
     def to_map(obj):
+        ddp_device_type, ddp_gpu = _get_device_impl()
         if isinstance(obj, (torch.Tensor, PackedSequence)):
             device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
-            if device == torch.device("cuda", target_gpu):
+            if device == torch.device(ddp_device_type, target_gpu):
                 return (obj,)
             if not use_side_stream_for_tensor_copies:
                 return (obj.to(target_gpu),)
@@ -65,11 +67,11 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                 # Perform CPU -> GPU copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
                 stream = _get_stream(target_gpu)
-                with torch.cuda.stream(stream):
+                with ddp_gpu.stream(stream):
                     output = obj.to(target_gpu)
                 # synchronize with the copy stream
-                with torch.cuda.device(target_gpu):
-                    current_stream = torch.cuda.current_stream()
+                with ddp_gpu.device(target_gpu):
+                    current_stream = ddp_gpu.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on

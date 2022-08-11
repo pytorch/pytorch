@@ -45,6 +45,7 @@ from torch.distributed.utils import (
 
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
+from torch.nn.parallel._functions import _get_device_impl
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -9313,6 +9314,16 @@ class DistributedTest:
                 start_powerSGD_iter=4,
             )
             self._test_hook_pickling(hook, powersgd_state)
+
+        @skip_if_no_gpu
+        def test_ddp_get_device_impl(self):
+            ddp_device_type, ddp_gpu = _get_device_impl()
+            if torch.cuda.is_available():
+                self.assertEqual(ddp_device_type, 'cuda')
+                self.assertEqual(ddp_gpu, torch.cuda)
+            elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                self.assertEqual(ddp_device_type, 'xpu')
+                self.assertEqual(ddp_gpu, torch.xpu)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

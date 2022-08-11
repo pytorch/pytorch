@@ -1,11 +1,22 @@
 import warnings
 
 import torch
+import types
+import importlib
 from . import comm
 from torch.autograd import Function
-from torch._utils import _get_device_index
-from typing import List, Optional
+from torch._utils import _get_device_index, _get_available_device_type
+from typing import List, Optional, Tuple
+from functools import lru_cache
 
+@lru_cache(maxsize=None)
+def _get_device_impl() -> Tuple[str, types.ModuleType]:
+    ddp_device_type = _get_available_device_type()
+    if ddp_device_type is not None:
+        ddp_gpu = importlib.import_module("torch." + ddp_device_type)
+    else:
+        raise ImportError("Failed to import the gpu device module of pytorch (torch.cuda or torch.xpu).")
+    return (ddp_device_type, ddp_gpu)
 
 class Broadcast(Function):
 
@@ -90,15 +101,16 @@ class Scatter(Function):
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
-        if torch.cuda.is_available() and ctx.input_device == -1:
+        _, ddp_gpu = _get_device_impl()
+        if ddp_gpu.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(device) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.cuda.device(target_gpus[i]):
-                    main_stream = torch.cuda.current_stream()
+                with ddp_gpu.device(target_gpus[i]):
+                    main_stream = ddp_gpu.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)
         return outputs
@@ -115,10 +127,11 @@ _streams: Optional[List[Optional[torch.cuda.Stream]]] = None
 def _get_stream(device: int):
     """Gets a background stream for copying between CPU and GPU"""
     global _streams
+    _, ddp_gpu = _get_device_impl()
     if device == -1:
         return None
     if _streams is None:
-        _streams = [None] * torch.cuda.device_count()
+        _streams = [None] * ddp_gpu.device_count()
     if _streams[device] is None:
-        _streams[device] = torch.cuda.Stream(device)
+        _streams[device] = ddp_gpu.Stream(device)
     return _streams[device]
