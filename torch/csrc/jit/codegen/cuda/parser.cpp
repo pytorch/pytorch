@@ -2457,7 +2457,7 @@ class IrParser {
 
     {
       std::array<const char*, kNumVarOps> Variance = {
-          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor",
           "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
       for (auto signature : Variance) {
         auto ptr_op = getOperatorForLiteral(signature);
@@ -2906,6 +2906,34 @@ class IrParser {
             }
           },
           isInputNonSizeZeroTensor,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            Val* negative_slope = value_map[node->inputs()[1]->unique()];
+
+            auto out = leaky_relu(self, negative_slope);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
