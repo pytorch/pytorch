@@ -307,6 +307,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   }
   for (const auto i : c10::irange(kSpatialDim)) {
     (void)i; // Suppress unused variable
+    TORCH_INTERNAL_ASSERT(idx < static_cast<int64_t>(config_vals.size()),
+        "Unexpected index = ", idx, " for config_vals of size ",
+        config_vals.size());
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }
