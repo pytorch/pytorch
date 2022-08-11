@@ -1432,7 +1432,7 @@ def _set_operator_export_type(operator_export_type):
 
 
 # This function is for debug use only.
-# onnx_shape_inference = False by default.
+# onnx_shape_inference = True by default.
 def _set_onnx_shape_inference(onnx_shape_inference: bool):
     GLOBALS.onnx_shape_inference = onnx_shape_inference
 

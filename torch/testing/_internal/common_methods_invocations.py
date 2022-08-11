@@ -985,7 +985,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         inp, *arg0 = shape
-        yield SampleInput(inp, args=arg0)
+        yield SampleInput(inp, args=tuple(arg0))
 
 def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
@@ -1086,7 +1086,6 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
     yield SampleInput(1, args=(3, 1))
-
 
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
@@ -2483,8 +2482,13 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d,)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
+
+def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, None)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
 
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -6492,6 +6496,18 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
 
+def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
+    # (row, col, offset)
+    args = ((S, S, 0),
+            (S, S, 1),
+            (S, S, -1),
+            (S, M, 0),
+            (M, S, 2),
+            (S, M, -2),
+            (M, M, -3),
+            (0, S, 0))
+    for row, col, offset in args:
+        yield SampleInput(row, args=(col, offset), kwargs={"dtype": dtype, "device": device})
 
 def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -10871,7 +10887,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           error_inputs_func=error_inputs_lstsq,
+           error_inputs_func=error_inputs_lstsq_grad_oriented,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_autograd=True,
@@ -16141,6 +16157,42 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
+    OpInfo('triu_indices',
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs, dtype, device : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+               # NotImplementedError: Could not run 'aten::triu_indices' with arguments from the 'Meta' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+           )),
+    OpInfo('tril_indices',
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs, dtype, device : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+               # NotImplementedError: Could not run 'aten::tril_indices' with arguments from the 'Meta' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+           )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18621,6 +18673,58 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.triu",
+        torch_opinfo_name="triu",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.tril",
+        torch_opinfo_name="tril",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.triu_indices",
+        torch_opinfo_name="triu_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # RunTimError: no _refs support for torch.Tensor.masked_select
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+            # NotImplementedError: Could not run 'aten::triu_indices' with arguments from the 'Meta' backend.
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
+            DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+        )),
+    PythonRefInfo(
+        "_refs.tril_indices",
+        torch_opinfo_name="tril_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # RunTimError: no _refs support for torch.Tensor.masked_select
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+            # NotImplementedError: Could not run 'aten::tril_indices' with arguments from the 'Meta' backend.
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
+            DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+        )),
+    PythonRefInfo(
         "_refs.meshgrid",
         torch_opinfo_name="meshgrid",
         torch_opinfo_variant_name="list_of_tensors",
@@ -18958,7 +19062,12 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.pdist",
         supports_out=True,
         supports_nvfuser=False,
-    ),
+        skips=(
+            # RunTimError: no _refs support for torch.Tensor.masked_select
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+        )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",

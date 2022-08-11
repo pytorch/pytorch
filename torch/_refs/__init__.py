@@ -225,6 +225,10 @@ __all__ = [
     "vstack",
     "unflatten",
     "unbind",
+    "triu",
+    "tril",
+    "triu_indices",
+    "tril_indices",
     #
     # Tensor Creation
     #
@@ -3629,6 +3633,88 @@ def trace(self: TensorLikeType) -> TensorLikeType:
         self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
     )
     return torch.sum(torch.diag(self, 0))
+
+
+@register_decomposition(torch.ops.aten.triu)
+@out_wrapper()
+def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
+    utils.check(
+        a.ndim >= 2, lambda: "triu: input tensor must have at least 2 dimensions"
+    )
+    h, w = a.shape[-2:]
+    return a * (
+        (
+            torch.arange(h, device=a.device).unsqueeze(-2)
+            - torch.arange(w, device=a.device).unsqueeze(-1)
+        )
+        >= diagonal
+    )
+
+
+@register_decomposition(torch.ops.aten.tril)
+@out_wrapper()
+def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
+    utils.check(
+        a.ndim >= 2, lambda: "tril: input tensor must have at least 2 dimensions"
+    )
+    h, w = a.shape[-2:]
+    return a * (
+        (
+            torch.arange(h, device=a.device).unsqueeze(-2)
+            - torch.arange(w, device=a.device).unsqueeze(-1)
+        )
+        <= diagonal
+    )
+
+
+@register_decomposition(torch.ops.aten.triu_indices)
+def triu_indices(
+    row: int,
+    col: int,
+    offset: int = 0,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    check(row >= 0, lambda: f"row must be non-negative, got {row}")
+    check(col >= 0, lambda: f"row must be non-negative, got {col}")
+    # We need two versions of the xs,ys: one with long dtype and one requested dtype
+    # The long dtype is to compute the mask, so it doesn't get messed up due to overflow in small dtypes
+    xs_long = torch.arange(row, device=device).unsqueeze(1)
+    ys_long = torch.arange(col, device=device).unsqueeze(0)
+    xs = torch.arange(row, dtype=dtype, layout=layout, device=device).unsqueeze(1)
+    ys = torch.arange(col, dtype=dtype, layout=layout, device=device).unsqueeze(0)
+    mask = ys_long >= xs_long + offset
+    return torch.stack((xs.masked_select(mask), ys.masked_select(mask)))
+
+
+@register_decomposition(torch.ops.aten.tril_indices)
+def tril_indices(
+    row: int,
+    col: int,
+    offset: int = 0,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    check(row >= 0, lambda: f"row must be non-negative, got {row}")
+    check(col >= 0, lambda: f"row must be non-negative, got {col}")
+    # We need two versions of the xs,ys: one with long dtype and one requested dtype
+    # The long dtype is to compute the mask, so it doesn't get messed up due to overflow in small dtypes
+    xs_long = torch.arange(row, device=device).unsqueeze(1)
+    ys_long = torch.arange(col, device=device).unsqueeze(0)
+    xs = torch.arange(row, dtype=dtype, layout=layout, device=device).unsqueeze(1)
+    ys = torch.arange(col, dtype=dtype, layout=layout, device=device).unsqueeze(0)
+    mask = ys_long <= xs_long + offset
+    return torch.stack((xs.masked_select(mask), ys.masked_select(mask)))
 
 
 import torch._refs.fft

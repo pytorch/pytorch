@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
     TEST_WITH_ROCM,
+    torch_to_numpy_dtype_dict
 )
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes,
@@ -98,7 +99,9 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         self.input = input
         self.args = args
+        assert isinstance(self.args, tuple)
         self.kwargs = kwargs if kwargs is not None else {}
+        assert isinstance(self.kwargs, dict)
         self.output_process_fn_grad = output_process_fn_grad
         self.name = name
 
