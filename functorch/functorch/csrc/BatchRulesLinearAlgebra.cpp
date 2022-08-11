@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at { namespace functorch {
 
