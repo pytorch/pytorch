@@ -302,33 +302,15 @@ TEST(CustomAutogradTest, GraphTaskTrimEdges) {
       // We have to test this within the backward function.
       auto needs_input1_grad = ctx->saved_data["needs_input1_grad"].toBool();
       auto needs_input2_grad = ctx->saved_data["needs_input2_grad"].toBool();
-      torch::autograd::generated::details::IndexRangeGenerator gen;
-      auto var1_idx = gen.range(1);
-      auto var2_idx = gen.range(1);
-      if (needs_input1_grad && !needs_input2_grad) {
-        // test with size_t argument
-        EXPECT_TRUE(ctx->needs_input_grad(0));
-        EXPECT_FALSE(ctx->needs_input_grad(1));
-        // test with initializer_list argument
-        EXPECT_TRUE(ctx->needs_input_grad({var1_idx}));
-        EXPECT_FALSE(ctx->needs_input_grad({var2_idx}));
-      } else if (!needs_input1_grad && needs_input2_grad) {
-        // test with size_t argument
-        EXPECT_TRUE(ctx->needs_input_grad(1));
-        EXPECT_FALSE(ctx->needs_input_grad(0));
-        // test with initializer_list argument
-        EXPECT_TRUE(ctx->needs_input_grad({var2_idx}));
-        EXPECT_FALSE(ctx->needs_input_grad({var1_idx}));
-      } else if (needs_input1_grad && needs_input2_grad) {
-        // test with size_t argument
-        EXPECT_TRUE(ctx->needs_input_grad(1));
-        EXPECT_TRUE(ctx->needs_input_grad(0));
-        // test with initializer_list argument
-        EXPECT_TRUE(ctx->needs_input_grad({var1_idx, var2_idx}));
-      } else {
-        EXPECT_TRUE(false)
-            << "needs_input1_grad and needs_input2_grad cannot both be false";
-      }
+      IndexRange var1_idx = {0, 1};
+      IndexRange var2_idx = {1, 2};
+      EXPECT_EQ(ctx->needs_input_grad(0), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad(1), needs_input2_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var1_idx}), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var2_idx}), needs_input2_grad);
+      EXPECT_EQ(
+          ctx->needs_input_grad({var1_idx, var2_idx}),
+          needs_input1_grad || needs_input2_grad);
 
       // calculate gradients
       int mul = ctx->saved_data["mul"].toInt();

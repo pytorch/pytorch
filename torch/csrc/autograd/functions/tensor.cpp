@@ -91,7 +91,6 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   // does not traverse into CopySlices node.
   const auto exec_info = get_current_graph_task_exec_info();
   if (exec_info && !exec_info->empty()) {
-    TORCH_INTERNAL_ASSERT(exec_info);
     for (const auto& next : fn->next_edges()) {
       if (next.is_valid()) {
         add_node_to_current_graph_task_exec_info(next.function.get());

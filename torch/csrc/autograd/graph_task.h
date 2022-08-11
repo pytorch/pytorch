@@ -31,6 +31,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  // Note [Exec info]
   // Exec info is created for each GraphTask, which allows filtering paths on
   // the graph that are not needed. It has a bit complicated semantics. If it's
   // empty, it means the task is run in a "default" mode, which means that all

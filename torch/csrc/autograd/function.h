@@ -374,7 +374,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// `task_should_compute_output`: The first one only considers the links in
   /// the actual graph, while the second (that should only be called during the
   /// backward/grad pass) also takes into account the current running graph task
-  /// to trim even more edges that are not needed.
+  /// to trim even more edges that are not needed. Specifically, the autograd
+  /// engine trims unnecessary nodes when running .grad(), or when inputs arg is
+  /// specified for .backward(). However, for an untrimed node left on the
+  /// graph, we have to pass this graph task information for it to decide
+  /// whether a specific edge could be trimed to save some computations.
   ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
@@ -402,7 +406,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     if (next.is_valid()) {
       const auto exec_info = get_current_graph_task_exec_info();
       if (exec_info && !exec_info->empty()) {
-        TORCH_INTERNAL_ASSERT(exec_info);
         auto it = exec_info->find(next.function.get());
         if (it == exec_info->end() || !it->second.should_execute()) {
           return false; // this edge is not needed for the current graph_task
