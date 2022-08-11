@@ -151,8 +151,6 @@ class ExtraCUDACopyPattern(Pattern):
     build-in method                 |build-in method
         ...                         |    aten::to
             aten::fill_/aten::zero_ |        aten::_to_copy
-                                    |            aten::copy_
-                                    |                cudaMemcpyAsync
 
     Algorithm:
     We start at node aten::to, go parent events' previous events,
@@ -189,13 +187,14 @@ class ExtraCUDACopyPattern(Pattern):
         event = event.children[-1]
         if event.name() != "aten::copy_":
             return False
-        if not event.children:
+        # aten::copy_ should have the first 2 args dtype the same
+        dtypes = input_dtypes(event)
+        if len(dtypes) < 2:
             return False
-        event = event.children[0]
-        if event.name() != "cudaMemcpyAsync":
+        if dtypes[0] != dtypes[1]:
             return False
-        # Up one level
         event = to_event
+        # Up one level
         event = event.parent
         if event is None:
             return False
@@ -629,7 +628,7 @@ def report_all_anti_patterns(prof,
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         # ForLoopIndexingPattern(prof, should_benchmark),
-        # FP32MatMulPattern(prof, should_benchmark),
+        FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),
         GradNotSetToNonePattern(prof, should_benchmark),

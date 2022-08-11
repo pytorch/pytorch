@@ -61,6 +61,23 @@ class TestCompileCache(TestCase):
             return [b, b], d
         out = functorch.make_fx(functorch.experimental.functionalize(fn))(
             torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
+        self.assertExpectedInline((out.code), """\
+
+
+
+def forward(self, tensor1, lst, tensor2):
+    tensor1_1, lst_1, lst_2, tensor2_1, = fx_pytree.tree_flatten_spec([tensor1, lst, tensor2], self._in_spec)
+    view_default = torch.ops.aten.view.default(tensor1_1, [-1])
+    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
+    view_default_1 = torch.ops.aten.view.default(lst_2, [-1])
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_default_1, 1);  view_default_1 = None
+    view_default_2 = torch.ops.aten.view.default(add_tensor, [2]);  add_tensor = None
+    view_default_3 = torch.ops.aten.view.default(add_tensor_1, [2]);  add_tensor_1 = None
+    copy__default = torch.ops.aten.copy_.default(tensor1_1, view_default_2);  tensor1_1 = view_default_2 = None
+    copy__default_1 = torch.ops.aten.copy_.default(lst_2, view_default_3);  lst_2 = view_default_3 = None
+    return pytree.tree_unflatten([lst_1, lst_1, tensor2_1], self._out_spec)
+    """)
+
         move_input_mutations_into_submodule(out)
 
         # After calling move_input_mutations_into_submodule,
