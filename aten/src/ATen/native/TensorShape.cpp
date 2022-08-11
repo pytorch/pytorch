@@ -3249,7 +3249,7 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
-              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+              src, " dims) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());

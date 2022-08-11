@@ -3474,6 +3474,15 @@ def movedim(
     if type(destination) is int:
         destination = (destination,)
 
+    utils.check(
+        len(source) == len(destination),  # type: ignore[arg-type]
+        lambda: (
+            "movedim: Invalid source or destination dims: source "
+            f"({source} dims) should contain the same number of dims as "
+            f"destination ({destination} dims)"
+        ),
+    )
+
     rank = input.ndim
     ss = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in source]  # type: ignore[union-attr]
     ds = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in destination]  # type: ignore[union-attr]
