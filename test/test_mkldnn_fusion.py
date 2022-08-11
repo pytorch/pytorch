@@ -47,6 +47,71 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
         return graph
 
+    def _eltwise_list(self):
+        eltwise_list = [
+            [torch.relu, 'aten::relu'],
+            [torch.sigmoid, 'aten::sigmoid'],
+            [torch.tanh, 'aten::tanh'],
+            [nn.LeakyReLU(0.1, inplace=False), 'aten::leaky_relu'],
+            [nn.Hardtanh(inplace=False), 'aten::hardtanh'],
+            [nn.GELU(approximate="none"), 'aten::gelu'],
+            [nn.GELU(approximate="tanh"), 'aten::gelu'],
+        ]
+        return eltwise_list
+
+    def _clamp_modules(self):
+        class MNoOpt(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MNoOpt, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.clamp(x, min=-0.5, max=0.9)
+                return x
+
+        class MInf(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MInf, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.clamp(x, min=0, max=float('inf'))
+                return x
+
+        class MNegInf(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MNegInf, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.clamp(x, min=float('-inf'), max=0)
+                return x
+
+        class MOptMin(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MOptMin, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.clamp(x, max=2)
+                return x
+
+        class MOptMax(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MOptMax, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.clamp(x, min=0)
+                return x
+
+        return [MNoOpt, MInf, MNegInf, MOptMin, MOptMax]
+
     def test_single_conv(self):
         class M(nn.Module):
             def __init__(self, in_channels, out_channels, bias, **kwargs):
@@ -100,15 +165,7 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, False],
             [torch.channels_last, True],
         ]:
-            for eltwise_fn, op_name in [
-                [torch.relu, 'aten::relu'],
-                [torch.sigmoid, 'aten::sigmoid'],
-                [torch.tanh, 'aten::tanh'],
-                [nn.LeakyReLU(0.1, inplace=False), 'aten::leaky_relu'],
-                [nn.Hardtanh(inplace=False), 'aten::hardtanh'],
-                [nn.GELU(approximate="none"), 'aten::gelu'],
-                [nn.GELU(approximate="tanh"), 'aten::gelu'],
-            ]:
+            for eltwise_fn, op_name in self._eltwise_list():
                 for bias in [True, False]:
                     for oC in [1, 10]:
                         m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
@@ -122,57 +179,7 @@ class TestMkldnnFusion(JitTestCase):
                             self.assertGraphContains(graph, kind='aten::conv2d')
 
     def test_conv_clamp(self):
-        class MNoOpt(nn.Module):
-            def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(MNoOpt, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = torch.clamp(x, min=-0.5, max=0.9)
-                return x
-
-        class MInf(nn.Module):
-            def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(MInf, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = torch.clamp(x, min=0, max=float('inf'))
-                return x
-
-        class MNegInf(nn.Module):
-            def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(MNegInf, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = torch.clamp(x, min=float('-inf'), max=0)
-                return x
-
-        class MOptMin(nn.Module):
-            def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(MOptMin, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = torch.clamp(x, max=2)
-                return x
-
-        class MOptMax(nn.Module):
-            def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(MOptMax, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = torch.clamp(x, min=0)
-                return x
-
-        modules = [MNoOpt, MInf, MNegInf, MOptMin, MOptMax]
+        modules = self._clamp_modules()
         op_name = 'aten::clamp'
 
         for memory_format, enabled in [
@@ -181,7 +188,7 @@ class TestMkldnnFusion(JitTestCase):
         ]:
             for M in modules:
                 for bias in [True, False]:
-                    m = M(3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    m = M(nn.Conv2d, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
                     x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
 
                     graph = self._check_model(m, x)
