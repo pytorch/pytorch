@@ -376,9 +376,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// backward/grad pass) also takes into account the current running graph task
   /// to trim even more edges that are not needed. Specifically, the autograd
   /// engine trims unnecessary nodes when running .grad(), or when inputs arg is
-  /// specified for .backward(). However, for an untrimed node left on the
+  /// specified for .backward(). However, for an untrimmed node left on the
   /// graph, we have to pass this graph task information for it to decide
-  /// whether a specific edge could be trimed to save some computations.
+  /// whether a specific edge could be trimmed to save some computations.
   ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
