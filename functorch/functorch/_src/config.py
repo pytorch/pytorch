@@ -20,11 +20,6 @@ use_functionalize = False
 #   fix for complex numbers
 use_fake_tensor = False
 
-# Changes contract with backends to AOTAutograd
-# Instead of expecting backends to return a callable with signature f(a,b,c), we
-# now expect them to return a callable with signature f([a,b,c])
-aot_clear_list = False
-
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 # Prints out forward + backwards FX graphs
 debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
