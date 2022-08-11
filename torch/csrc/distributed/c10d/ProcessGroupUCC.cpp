@@ -7,7 +7,6 @@
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
-#include <cctype>
 
 namespace c10d {
 
@@ -129,17 +128,6 @@ std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
     {"TORCH_UCC_ENABLE_COMMS_LOGGER", "0"},
 };
 
-// trim: remove spaces before and after the string view
-// implementation borrowed from https://stackoverflow.com/a/17976541
-inline c10::string_view trim(c10::string_view s) {
-  auto wsfront = std::find_if_not(
-      s.begin(), s.end(), [](int c) { return std::isspace(c); });
-  auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c) {
-                  return std::isspace(c);
-                }).base();
-  return (wsback <= wsfront ? "" : s.substr(wsfront - s.begin(), wsback - wsfront));
-}
-
 std::unordered_set<OpType> parse_blocking_wait(std::string s) {
   const static std::unordered_map<std::string, OpType> str2op = {
       {"allgather", OpType::ALLGATHER},
@@ -155,31 +143,31 @@ std::unordered_set<OpType> parse_blocking_wait(std::string s) {
       {"recv", OpType::RECV},
   };
   std::unordered_set<OpType> result;
-  c10::string_view sv = trim(s);
-  if (sv == "0") {
+  s = tolower(trim(s));
+  if (s == "0") {
     return result;
   }
-  if (sv == "1" || sv == "all") {
+  if (s == "1" || s == "all") {
     result.reserve(str2op.size());
     for (auto item : str2op) {
       result.insert(item.second);
     }
     return result;
   }
-  while (!sv.empty()) {
-    const auto end_pos = sv.find_first_of(',');
-    const auto token = trim(sv.substr(0, end_pos));
+  while (!s.empty()) {
+    const auto end_pos = s.find_first_of(',');
+    const auto token = trim(s.substr(0, end_pos));
     const auto it = str2op.find(std::string(token));
     TORCH_CHECK(it != str2op.end(), "Invalid blocking wait option: '", token);
     result.insert(it->second);
-    sv = (end_pos != c10::string_view::npos) ? sv.substr(end_pos + 1) : "";
+    s = (end_pos != c10::string_view::npos) ? s.substr(end_pos + 1) : "";
   }
   return result;
 }
 
 } // namespace
 
-void read_confg() {
+void read_config() {
   // default configuration
   torch_ucc_config.blocking_wait.fill(false);
   torch_ucc_config.enable_profiling = false;
@@ -735,7 +723,7 @@ ProcessGroupUCC::ProcessGroupUCC(
     int size,
     std::chrono::duration<float> timeout)
     : ProcessGroup(rank, size), timeout_(timeout) {
-  c10::call_once(torch_ucc_config.flag, read_confg);
+  c10::call_once(torch_ucc_config.flag, read_config);
   oob = std::make_shared<torch_ucc_oob_coll_info_t>();
   oob->rank = rank;
   oob->size = size;

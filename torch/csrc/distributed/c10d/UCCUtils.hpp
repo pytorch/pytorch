@@ -188,6 +188,27 @@ ucc_status_t oob_allgather_test(void* req);
 
 ucc_status_t oob_allgather_free(void* req);
 
+// trim: remove spaces before and after the string view
+// implementation borrowed from https://stackoverflow.com/a/17976541
+inline c10::string_view trim(c10::string_view s) {
+  auto wsfront = std::find_if_not(
+      s.begin(), s.end(), [](int c) { return std::isspace(c); });
+  auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c) {
+                  return std::isspace(c);
+                }).base();
+  return (
+      wsback <= wsfront ? "" : s.substr(wsfront - s.begin(), wsback - wsfront));
+}
+
+inline std::string tolower(c10::string_view s) {
+  std::string result;
+  result.reserve(s.size());
+  for (auto c : s) {
+    result.push_back(std::tolower(c));
+  }
+  return result;
+}
+
 } // namespace c10d
 
 #endif // USE_C10D_UCC
