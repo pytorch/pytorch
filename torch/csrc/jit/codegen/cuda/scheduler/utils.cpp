@@ -566,7 +566,7 @@ TvProperties getProperties(
       TORCH_INTERNAL_ASSERT(
           inferred_val.has_value(), "Error inferring reduction size.");
       inner_most_dimension_numel =
-          inner_most_dimension_numel * inferred_val.value();
+          inner_most_dimension_numel * inferred_val.value().as<int64_t>();
       inner_most_dimension_ndims++;
     }
   }
@@ -583,9 +583,9 @@ TvProperties getProperties(
         inferred_val.has_value(),
         "Error inferring dimensions of reduction fusion.");
     if (id->isReduction()) {
-      total_reduction_numel *= inferred_val.value();
+      total_reduction_numel *= inferred_val.value().as<int64_t>();
     } else {
-      total_iteration_numel *= inferred_val.value();
+      total_iteration_numel *= inferred_val.value().as<int64_t>();
     }
   }
 
@@ -824,7 +824,7 @@ PersistentBufferSizeReturn persistentBufferSize(
       if (persistent_buffer_sizes[buffer_i] == -1) {
         persistent_buffer_sizes[buffer_i] = id_size.value();
       } else {
-        persistent_buffer_sizes[buffer_i] *= id_size.value();
+        persistent_buffer_sizes[buffer_i] *= id_size.value().as<int64_t>();
       }
     }
 
@@ -1483,7 +1483,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
           tv->toString(),
           ", id: ",
           root_id->toString());
-      merged_size *= maybe_dimension_size.value();
+      merged_size *= maybe_dimension_size.value().as<int64_t>();
     }
   } else {
     auto maybe_dimension_size =
@@ -2142,7 +2142,8 @@ size_t expandVectorizationToContigMergedDomains(
     int break_point,
     size_t default_word_size) {
   // Don't vectorize when RNG is used
-  if (fusion->isStochastic() && isDisabled(DisableOption::UnrollWithRng)) {
+  if (fusion->isStochastic() &&
+      isOptionDisabled(DisableOption::UnrollWithRng)) {
     return default_word_size;
   }
 

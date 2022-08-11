@@ -23,6 +23,7 @@ namespace cuda {
 class ViewTransform;
 class Scope;
 class IrCloner;
+struct AnalyzeViewResult;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
@@ -37,7 +38,12 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
+  UnaryOp(
+      IrBuilderPasskey,
+      UnaryOpType type,
+      Val* out,
+      Val* in,
+      int rng_offset = -1);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -52,12 +58,23 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  // TODO: pull RNG op out of Unary ops
+  // https://github.com/csarofeen/pytorch/pull/1892
+  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -876,18 +893,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   bool hasExpandedExtent() const {
-    TORCH_INTERNAL_ASSERT(
-        expanded_extent_ == nullptr || isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions",
-        " yet found an expanded extent without a strided broadcast iter type.");
     return expanded_extent_ != nullptr;
   }
 
   // Returns the expanded extent of a strided broadcast entry.
   Val* expandedExtent() const {
     TORCH_INTERNAL_ASSERT(
-        isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions.");
+        hasExpandedExtent(),
+        "Requested expanded extent, but none found on this dimension.");
     return expanded_extent_;
   }
 
@@ -1206,8 +1219,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
       SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   // Transform TensorView according to merge and split transformations
-  TensorDomain* view(
-      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
+  TensorDomain* view(const AnalyzeViewResult& view_analysis);
 
   TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
 

@@ -195,6 +195,10 @@ class DisjointSets {
   //
   // TODO: Return iterator
   void initializeSet(T entry) {
+    if (disjoint_set_maps_.find(entry) != disjoint_set_maps_.end()) {
+      return;
+    }
+
     disjoint_sets_.push_back(
         std::make_shared<VectorOfUniqueEntries<T, Hash>>());
     disjoint_sets_.back()->pushBack(entry);

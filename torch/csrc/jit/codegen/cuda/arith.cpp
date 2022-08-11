@@ -1004,6 +1004,11 @@ static TensorView* newForReduction(
 
     new_domain.push_back(
         IterDomainBuilder(id)
+            // If the domain is being reduced, but it's coming in as an expanded
+            // extent, we need to realize the expand.
+            .extent(
+                isReduction && id->hasExpandedExtent() ? id->expandedExtent()
+                                                       : id->extent())
             .resetSchedulingParams()
             .iter_type(isReduction ? IterType::Reduction : id->getIterType())
             .build());
@@ -1242,7 +1247,7 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
       // This is just done for clarity. It isn't necessary as it's
       // already done when constructing out_id_builder.
       out_id_builder.extent(inp_id->extent());
-    } else if (inp_id->isBroadcast()) {
+    } else if (inp_id->isBroadcast() && expanded_size_int != 1) {
       // When input id is a broadcast, expand the extent to the given
       // size, which can be concrete or symbolic.
       expanded = true;
@@ -1255,7 +1260,7 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
       // does not mean the ID becomes a broadcast.
       out_id_builder.extent(expanded_sizes[i]);
     } else {
-      // Input id is non-broadcast and its extent is concrete. Nothing
+      // Input id is non-expand and its extent is concrete. Nothing
       // to expand, but the input and expanded sizes should match if
       // the expanded size is also concrete.
       auto inp_id_size_int = inp_id->extent()->getInt();

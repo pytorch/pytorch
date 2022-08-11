@@ -187,6 +187,13 @@ class TORCH_CUDA_CU_API SchedulerEntry {
     return *pparams;
   }
 
+  const TransposeParams& transposeParams() const {
+    auto tparams = std::dynamic_pointer_cast<TransposeParams>(params_);
+    TORCH_INTERNAL_ASSERT(
+        tparams != nullptr, "Heuristic parameter is not a transpose parameter");
+    return *tparams;
+  }
+
   void updateLaunchConstraint(const LaunchParams& launch_params) {
     params_->lparams = launch_params;
   }
