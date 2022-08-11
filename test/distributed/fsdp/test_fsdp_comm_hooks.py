@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -73,16 +74,46 @@ class Net(nn.Module):
 class DummyState(object):
 
     __slots__ = [
-        "process_group"
+        "process_group",
+        "noise"
     ]
 
-    def __init__(self, process_group):
+    def __init__(self, process_group, noise):
         self.process_group = process_group
+        self.noise = noise
 
 class DummyHook(object):
 
-    def dummy_hook(self, state: DummyState, grad: torch.Tensor):
+    def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
+        """
+        This communication hook is for illustration and testing purpouse only.
+        This communication hook is used during FSDF ``NO_SHARD`` training. It adds some moise to
+        the provided ``grad`` porameter and uses ``all_reduce`` to communicate full, flattened,
+        unsharded gradient.
+        """
+        grad.add_(state.noise)
+        dist.all_reduce(grad, group=state.process_group)
+
+    def custom_reduce_scatter(self, output, input, group=None):
+        """
+        This function is for illistrative purpose only.
+        It is meant to implement a custom reduce and scatter
+        of a flattened tensor to all processes in a group.
+        Currently a no-op.
+        """
         pass
+
+    def dummy_hook_for_sharded_fsdp(self, state: DummyState, grad: torch.Tensor, output: torch.Tensor):
+        """
+        This communication hook is for illustration and testing purpouse only.
+        This communication hook is used during FSDF ``FULL_SHARD`` or ``SHARD_GRAD_OP`` training.
+        It adds some moise to the provided ``grad`` porameter and uses
+        ``reduce_scatter`` for gradient communication and stores a sharded gradient in ``output``.
+        """
+        grad.add_(state.noise)
+        self.custom_reduce_scatter(
+            output, grad, group=state.process_group
+        )
 
 class TestCommunicationHooks(FSDPTest):
 
@@ -136,6 +167,8 @@ class TestCommunicationHooks(FSDPTest):
 
             # For each worker, the gradient on the weight should be worker_rank.
             grad = net_default_hook.params[0].grad
+            if sharding_strategy != ShardingStrategy.NO_SHARD:
+                self.assertTrue(net_default_hook.params[0]._is_sharded, "Expected gradient to be a sharded chunk")
             expected_grad = (
                 sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
             )
@@ -188,7 +221,6 @@ class TestCommunicationHooks(FSDPTest):
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
 
         # Check that default hook is set to `all_reduce` for `NO_SHARD`
         # or `reduce_scatter` for sharded cases
@@ -199,30 +231,34 @@ class TestCommunicationHooks(FSDPTest):
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
             self.assertEqual(entry.communication_hook, default_hook)
 
-        dummy_state = DummyState(process_group=None)
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
 
         fsdp_model_with_hook.register_comm_hook(
             dummy_state,
-            DummyHook.dummy_hook
+            dummy_hook
         )
 
         # Check that we can't register comm hook twice
         with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
-                DummyHook.dummy_hook
+                dummy_hook
             )
 
         # Check dummy hook was registered for the root and all submodules if any
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
             self.assertEqual(
                 entry.communication_hook,
-                DummyHook.dummy_hook
+                dummy_hook
             )
             self.assertEqual(
                 entry.communication_hook_state,
                 dummy_state
             )
+
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
             entry.communication_hook = None
 
@@ -232,10 +268,9 @@ class TestCommunicationHooks(FSDPTest):
             loss.backward()
 
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry.communication_hook = DummyHook.dummy_hook
+            entry.communication_hook = dummy_hook
             entry.communication_hook_state = None
 
-        in_data = torch.rand(16, 8).cuda()
         loss = fsdp_model_with_hook(in_data).sum()
         with self.assertRaisesRegex(AssertionError, 'Communication hook state should not be None'):
             loss.backward()
@@ -266,12 +301,15 @@ class TestCommunicationHooks(FSDPTest):
             Net(has_wrapping=True, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
         # Creating a list of non-root submodules to test
         submodules = self._get_submodules(fsdp_model_with_hook)
         # Check that assertion is raised for registering a comm hook on a non-root
         with self.assertRaisesRegex(AssertionError, '^register_comm_hook can only be called on a root instance.$'):
-            submodules[1].register_comm_hook(dummy_state, DummyHook.dummy_hook)
+            submodules[1].register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -298,14 +336,17 @@ class TestCommunicationHooks(FSDPTest):
             Net(has_wrapping=True, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
         submodules = self._get_submodules(fsdp_model_with_hook)
 
         # Simulate a registration of a hook on a submodule
         submodules[1]._hook_registered = True
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
-            fsdp_model_with_hook.register_comm_hook(dummy_state, DummyHook.dummy_hook)
+            fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
         # Reinitialize the model
         fsdp_model_with_hook = self._init_model(
@@ -313,7 +354,7 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy
         )
         submodules = self._get_submodules(fsdp_model_with_hook)
-        submodules[1].communication_hook = DummyHook.dummy_hook
+        submodules[1].communication_hook = dummy_hook
 
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(
@@ -322,7 +363,7 @@ class TestCommunicationHooks(FSDPTest):
         ):
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
-                DummyHook.dummy_hook
+                dummy_hook
             )
 
     def _check_low_precision_hook(self, state, hook, sharding_strategy, dtype, has_wrapping):

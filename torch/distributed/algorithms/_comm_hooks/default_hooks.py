@@ -104,7 +104,7 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A full gradient for the local batch that needs to be
         communicated across ranks.
-        output (torch.Tensor): A single shard of the summed gradient.
+        output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
     # Average grad by pre-division factor. Together pre- and post-division factors
     # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
@@ -135,8 +135,9 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
-    ``state.predivide_factor``, and after an allreduce step gradients are averaged by a ``state.postdivide_factor``.
-    Onse post-division is done, compressed gradients are casted back to parameters' precision.
+    ``state.predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
+    gradients are averaged by a ``state.postdivide_factor``.
+    Once post-division is done, compressed gradients are casted back to parameters' precision.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
@@ -151,8 +152,9 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
-    ``state.predivide_factor``, and after an allreduce step gradients are averaged by a ``state.postdivide_factor``.
-    Onse post-division is done, compressed gradients are casted back to parameters' precision.
+    ``state.predivide_factor``, and afterafter a communication step (``all_reduce`` or ``reduce_scatter``)
+    gradients are averaged by a ``state.postdivide_factor``.
+    Once post-division is done, compressed gradients are casted back to parameters' precision.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
