@@ -175,26 +175,26 @@ def get_weight_and_bias_index_dicts(backend_config: BackendConfig):
 
     return index_dicts['weight'], index_dicts['bias']
 
-def node_arg_is_weight(node: Node, arg: Any, weight_index_dict: Dict[str, int]) -> bool:
+def node_arg_is_weight(node: Node, arg: Any, weight_index_dict: Dict[str, List[int]]) -> bool:
     if isinstance(node, Node) and node.op == 'call_function' and \
             node.target in weight_index_dict:
         for i, node_arg in enumerate(node.args):
-            if (arg is node_arg and
-                i in weight_index_dict[node.target]):  # type: ignore[index]
+            if arg is node_arg and i in \
+                    weight_index_dict[node.target]:  # type: ignore[index]
                 return True
         for kwarg_name, kwarg_value in node.kwargs.items():
             if kwarg_name == 'weight' and arg is kwarg_value:
                 return True
     return False
 
-def node_arg_is_bias(node: Node, arg: Any, bias_index_dict: Dict[str, int]) -> bool:
+def node_arg_is_bias(node: Node, arg: Any, bias_index_dict: Dict[str, List[int]]) -> bool:
     if not isinstance(node, Node) or node.op != 'call_function' or \
        node.target not in bias_index_dict:
         return False
 
     for i, node_arg in enumerate(node.args):
-        if (arg is node_arg and
-            i in bias_index_dict[node.target]):  # type: ignore[index]
+        if arg is node_arg and i in \
+           bias_index_dict[node.target]:  # type: ignore[index]
             return True
 
     return node.kwargs.get('bias', None) is arg
