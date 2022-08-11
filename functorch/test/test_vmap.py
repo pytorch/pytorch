@@ -335,21 +335,6 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out["sin"], expected["sin"])
         self.assertEqual(out["cos"], expected["cos"])
 
-    # temporary test for _odict_flatten and _odict_unflatten
-    def test_pytest_odict_flatten_unflatten(self):
-
-        from functorch._src.vmap import _odict_flatten, _odict_unflatten
-
-        x = torch.randn(2, 3)
-        inpt = OrderedDict([("sin", x.sin()), ("cos", x.cos())])
-
-        out = _odict_flatten(inpt)
-        self.assertEqual(out[0], list(inpt.values()))
-        self.assertEqual(out[1], list(inpt.keys()))
-
-        recon_inpt = _odict_unflatten(*out)
-        self.assertEqual(recon_inpt, inpt)
-
     def test_pytree_returns_outdims(self):
         x = torch.randn(2, 3)
 
@@ -3156,6 +3141,18 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule, skip_inplace=()):
         def test():
+            # Error inputs check
+            if op.error_inputs_func is not None:
+                error_inputs = op.error_inputs(device)
+                for error_input in error_inputs:
+                    sample_input = error_input.sample_input
+                    args = (sample_input.input,) + tuple(sample_input.args)
+                    kwargs = sample_input.kwargs
+                    for args, in_dims, _ in generate_vmap_inputs(args, {}):
+                        with self.assertRaises(Exception):
+                            vmap(op, in_dims)(*args, **kwargs)
+
+            # Sample inputs check
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')

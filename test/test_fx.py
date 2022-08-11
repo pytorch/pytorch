@@ -567,7 +567,7 @@ class TestFX(JitTestCase):
 
         # nodes after Transformer should still preserve the original node's stack trace
         for node in new_gm.graph.nodes:
-            if node.op == 'output':
+            if node.op in {'placeholder', 'output'}:
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
@@ -3524,6 +3524,17 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(gm(2, 3), 6)
         self.assertIn("a *= b", gm.code)
 
+    def test_deepcopy_tracer(self):
+        def fn(x, y):
+            return (x + y).relu().sin()
+
+        tracer = Tracer()
+        tracer_before = copy.deepcopy(tracer)
+        tracer.trace(fn)
+        tracer_after = copy.deepcopy(tracer)
+
+        self.assertEqual(str(tracer.graph), str(tracer_after.graph))
+        self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
