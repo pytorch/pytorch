@@ -266,7 +266,7 @@ class TestAOTAutograd(TestCase):
         f = aot_function(foo, nop, assert_graph_empty)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertTrue(graph_size is None)
         with torch.set_grad_enabled(True):
             f(*inps)
         self.assertTrue(graph_size > 2)
