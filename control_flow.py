@@ -203,9 +203,13 @@ def python_fallback(op):
 
         mode = torch._C._get_torch_dispatch_mode()
         if mode is not None:
+            torch._C._set_torch_dispatch_mode(None)
+
             # with mode.restore():
-            with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
-                return extract()
+            # with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+            ret = mode.__torch_dispatch__(op, None, args, kwargs)
+            torch._C._set_torch_dispatch_mode(mode)
+            return ret
         else:
             return cond_dense(*args)
 

@@ -142,6 +142,30 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
+    if func_overload.__name__ == 'torch.cond':
+        # TODO: need to parse
+        assert kwargs is None or not kwargs
+        pred, true_fn, false_fn, operands = args
+
+        true_graph = get_isolated_graphmodule(true_fn, operands, {})
+        false_graph = get_isolated_graphmodule(false_fn, operands, {})
+        # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now                
+        proxy_mode.tracer.root.register_module("true_graph", true_graph)
+        proxy_mode.tracer.root.register_module("false_graph", false_graph)
+        
+        if isinstance(operands, ProxyTensor):
+            operands = [operands] # Prevent unwanted unpacking
+
+        args = (pred, true_graph, false_graph, operands)
+        def unwrap_proxy(e):
+            return e.proxy if isinstance(e, ProxyTensor) else e
+        proxy_args = pytree.tree_map(unwrap_proxy, args)
+
+        proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
+                                                name="conditional") # Does this need random slug appended so as not to collide?
+
+        return proxy_res
+
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
@@ -303,30 +327,6 @@ class ProxyTensor(torch.Tensor):
                     break
         assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
 
-        if func_overload.__name__ == 'torch.cond':
-            # TODO: need to parse
-            assert kwargs is None or not kwargs
-            pred, true_fn, false_fn, operands = args
-
-            true_graph = get_isolated_graphmodule(true_fn, operands, {})
-            false_graph = get_isolated_graphmodule(false_fn, operands, {})
-            # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now                
-            proxy_mode.tracer.root.register_module("true_graph", true_graph)
-            proxy_mode.tracer.root.register_module("false_graph", false_graph)
-            
-            if isinstance(operands, ProxyTensor):
-                operands = [operands] # Prevent unwanted unpacking
-
-            args = (pred, true_graph, false_graph, operands)
-            def unwrap_proxy(e):
-                return e.proxy if isinstance(e, ProxyTensor) else e
-            proxy_args = pytree.tree_map(unwrap_proxy, args)
-
-            proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
-                                                 name="conditional") # Does this need random slug appended so as not to collide?
-
-            return proxy_res
-
         with proxy_mode.restore():  # type: ignore[union-attr]
             return func_overload(*args, **kwargs)
 
@@ -414,7 +414,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
-        print("Overload dispatch:", func_overload.__name__)
         if not self.enable_tracing:
             return func_overload(*args, **kwargs)
 
