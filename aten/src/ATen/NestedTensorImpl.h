@@ -13,6 +13,15 @@ namespace native {
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
+      int64_t buffer_size,
+      Storage storage,
+      c10::DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      at::Tensor nested_size_tensor,
+      at::Tensor nested_stride_tensor,
+      std::vector<int64_t> offsets);
+
+  explicit NestedTensorImpl(
       at::Tensor buffer,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
@@ -86,6 +95,22 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // this one is real
   int64_t dim_custom() const override;
 
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override;
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override;
+
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+    copy_tensor_metadata(
+        /*src_impl=*/impl.get(),
+        /*dest_impl=*/this,
+        /*version_counter=*/version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+  }
+
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
@@ -112,6 +137,11 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_size_tensor_`
   std::vector<int64_t> opt_sizes_;
+
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(

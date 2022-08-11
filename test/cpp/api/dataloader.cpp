@@ -836,12 +836,10 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
   auto data_loader = torch::data::make_data_loader(
       TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
-  size_t i = 0;
   for (auto batch : *data_loader) {
     for (const auto j : c10::irange(kBatchSize)) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
-    i += 1;
   }
 }
 
