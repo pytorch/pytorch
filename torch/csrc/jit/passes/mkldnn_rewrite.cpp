@@ -15,8 +15,16 @@ namespace jit {
 
 namespace mkldnn {
 
+static constexpr float kMin = -std::numeric_limits<float>::infinity();
+static constexpr float kMax = std::numeric_limits<float>::infinity();
+
 const std::vector<std::string> zero_scalar_operand =
     std::vector<std::string>({});
+const std::vector<std::string> one_scalar_operand =
+    std::vector<std::string>({"%alpha"});
+const std::vector<std::string> two_scalar_operands =
+    std::vector<std::string>({"%alpha", "%beta"});
+const std::string algorithm_indicator = std::string("%algorithm");
 
 std::string construct_operand_list(
     std::vector<std::string> scalar_input,
@@ -37,6 +45,15 @@ std::string construct_operand_list(
   return constructed_operand_list;
 }
 
+bool aten_gelu_approximate_is_supported(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto approximate_value =
+      graph_rewrite_helper::getIValue("algorithm", match_vmap, vmap).value();
+  return approximate_value == "none" || approximate_value == "tanh";
+}
+
 const std::map<std::string, PostOp>& fusion_rewrite_map() {
   static const std::map<std::string, PostOp> fusion_rewrite_map{
       {"none", {zero_scalar_operand}},
@@ -45,6 +62,15 @@ const std::map<std::string, PostOp>& fusion_rewrite_map() {
       {"relu", {zero_scalar_operand}},
       {"sigmoid", {zero_scalar_operand}},
       {"tanh", {zero_scalar_operand}},
+
+      // For element-wise OP that has other scalar inputs:
+      {"leaky_relu", {one_scalar_operand}},
+      {"hardtanh", {two_scalar_operands}},
+      {"clamp", {two_scalar_operands}},
+      {"gelu",
+       {zero_scalar_operand,
+        algorithm_indicator,
+        {aten_gelu_approximate_is_supported}}},
   };
   return fusion_rewrite_map;
 }
