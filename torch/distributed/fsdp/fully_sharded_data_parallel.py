@@ -72,11 +72,7 @@ from ._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
 )
-<<<<<<< HEAD
-from .flat_param import FlatParameter, FlatParamHandle
-=======
 from .flat_param import FlatParameter, FlatParamHandle, HandleMode, ParamInfo
->>>>>>> Make `handle_unflatten` a no-op if already unflattened
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
@@ -890,6 +886,7 @@ class FullyShardedDataParallel(nn.Module):
             self._handle_to_forwarded_modules: Dict[FlatParamHandle, Set[nn.Module]] = (
                 collections.defaultdict(set)
             )
+            self._handle_is_unflattened: Dict[FlatParamHandle, bool] = dict()
         else:
             self._fsdp_wrapped_module = FlattenParamsWrapper(module, params)
             self.params: List[FlatParameter] = []
@@ -1141,7 +1138,7 @@ class FullyShardedDataParallel(nn.Module):
         for module in handle.flat_param._modules:
             self._module_to_handles[module].append(handle)
         self._register_param_handle(handle)
-        print(f"[Rank {self.rank}] registered handle for {handle.flat_param._prefixed_param_names}")
+        # print(f"[Rank {self.rank}] registered handle for {handle.flat_param._prefixed_param_names}")
         self._shard_parameters([handle])
         return handle
 
@@ -1167,12 +1164,13 @@ class FullyShardedDataParallel(nn.Module):
                 :class:`FlatParamHandle`, where the parameters are flattened
                 following that :class:`list` order.
         """
-        print(f"[Rank {self.rank}] reconstructing handles")
+        # print(f"[Rank {self.rank}] reconstructing handles")
         # TODO (awgu): check each handle appears exactly once in the list of lists
         self._deregister_flat_params()
         self._handles.clear()
         self.params.clear()
         self._module_to_handles.clear()
+        self._handle_is_unflattened.clear()
         # TODO (awgu): reconstruct gradients as well
         for old_handles in handles_per_flat_param:
             prefixed_param_names: List[str] = []
@@ -1211,7 +1209,7 @@ class FullyShardedDataParallel(nn.Module):
             self.params.append(new_handle.flat_param)
         for handle in self._handles:
             self._init_param_attributes(handle.flat_param)
-            handle._mode = HandleMode.UNINITIALIZED
+            # handle._mode = HandleMode.UNINITIALIZED
         self._register_flat_params()
         # Re-register the forward hooks since the handle construction changed
         self._register_pre_forward_hooks()
@@ -1785,7 +1783,7 @@ class FullyShardedDataParallel(nn.Module):
         self._cast_buffers(recurse=True)
         for handle in self._handles:
             self._init_param_attributes(handle.flat_param)
-            handle._mode = HandleMode.UNINITIALIZED
+            # handle._mode = HandleMode.UNINITIALIZED
         # Do not reshard the root's parameters at the end of the forward pass
         # with the intention that they are immediately used in the backward
         # pass gradient computation (though this may not be true)
@@ -1808,7 +1806,7 @@ class FullyShardedDataParallel(nn.Module):
                 fsdp_module._exec_order_data = self._exec_order_data
                 for handle in fsdp_module._handles:
                     fsdp_module._init_param_attributes(handle.flat_param)
-                    handle._mode = HandleMode.UNINITIALIZED
+                    # handle._mode = HandleMode.UNINITIALIZED
 
     @torch.no_grad()
     def _init_param_attributes(self, p: FlatParameter) -> None:
@@ -2725,18 +2723,23 @@ class FullyShardedDataParallel(nn.Module):
             input (Any): Unused; expected by the hook signature.
         """
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self.training_state = TrainingState_.FORWARD
+            # TODO (awgu): for AC
+            if self.training_state in [TrainingState_.IDLE, TrainingState_.FORWARD]:
+                self.training_state = TrainingState_.FORWARD
             if reshard_fn is not None:
                 reshard_fn()
             if unshard_fn is not None:
                 unshard_fn()
             if self._use_param_exec_order_policy:
                 for handle in handles:
-                    handle._unflatten(as_params=False)
-            # Register post-backward hooks to reshard the parameters and
-            # reduce-scatter their gradients. They must be re-registered every
-            # forward pass in case the `grad_fn` is mutated.
-            self._register_post_backward_hooks(handles)
+                    if not self._handle_is_unflattened[handle]:
+                        handle._unflatten(as_params=False)
+                        self._handle_is_unflattened[handle] = True
+            if self.training_state == TrainingState_.FORWARD:
+                # Register post-backward hooks to reshard the parameters and
+                # reduce-scatter their gradients. They must be re-registered every
+                # forward pass in case the `grad_fn` is mutated.
+                self._register_post_backward_hooks(handles)
 
     def _post_forward(
         self,
@@ -2773,6 +2776,9 @@ class FullyShardedDataParallel(nn.Module):
         that, after the first forward, the optimizer state is initialized
         according to the sharded flattened parameter's dtype and shape.
         """
+        # TODO (awgu): for AC
+        if self.training_state in [TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST]:
+            return output
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             resharded_handles: List[FlatParamHandle] = []
             if reshard_fn is not None:
@@ -2827,6 +2833,9 @@ class FullyShardedDataParallel(nn.Module):
         self._wait_for_previous_optim_step()
         if hasattr(self, "_handle_to_forwarded_modules"):
             self._handle_to_forwarded_modules.clear()
+        if hasattr(self, "_handle_is_unflattened"):
+            for handle in self._handles:
+                self._handle_is_unflattened[handle] = False
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -4054,7 +4063,7 @@ class FullyShardedDataParallel(nn.Module):
                     f"Expects the local shard to be on CPU but got {local_shard_device}"
                 )
             flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
-            handle._mode = HandleMode.SHARDED_FLAT_PARAM
+            # handle._mode = HandleMode.SHARDED_FLAT_PARAM
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
         """Assert we are in the given state."""
@@ -4701,7 +4710,7 @@ def _free_storage(data: torch.Tensor) -> None:
         # TODO (awgu): free the memory immediately, which is useful for
         # reducing peak and reserved memory usage -- we need to decide whether
         # to have this configurable or default this or neither
-        torch.cuda.current_stream().synchronize()
+        # torch.cuda.current_stream().synchronize()
 
 
 @torch.no_grad()

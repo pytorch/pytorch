@@ -251,7 +251,7 @@ class FlatParamHandle:
         module: nn.Module,
     ) -> None:
         super().__init__()
-        self._mode: HandleMode = HandleMode.UNINITIALIZED
+        # self._mode: HandleMode = HandleMode.UNINITIALIZED
         self._init_flat_param(module, params)
         self._unflatten(as_params=False)
 
@@ -382,14 +382,14 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
-        if not as_params:
-            if self._mode == HandleMode.UNSHARDED_FLAT_PARAM:
-                return  # no-op
-            self._mode = HandleMode.UNSHARDED_FLAT_PARAM
-        else:
-            if self._mode == HandleMode.UNSHARDED_ORIG_PARAMS:
-                return  # no-op
-            self._mode = HandleMode.UNSHARDED_ORIG_PARAMS
+        # if not as_params:
+        #     if self._mode == HandleMode.UNSHARDED_FLAT_PARAM:
+        #         return  # no-op
+        #     self._mode = HandleMode.UNSHARDED_FLAT_PARAM
+        # else:
+        #     if self._mode == HandleMode.UNSHARDED_ORIG_PARAMS:
+        #         return  # no-op
+        #     self._mode = HandleMode.UNSHARDED_ORIG_PARAMS
         views = self._get_unflat_views(self.flat_param)
         for view, (param_name, module, _) in zip(views, self.flat_param._param_infos):
             if hasattr(module, param_name):
