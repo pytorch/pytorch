@@ -2120,10 +2120,10 @@ def transpose(self: List[int],
     keep_dim: bool,
     dt: Any) -> List[int]:
   out = annotate(List[int], [])
-  if opt_dims is None:
-    dims:List[int] = []
+  if torch.__is__(opt_dims, None):
+    dims = annotate(List[int], [])
   else:
-    dims = opt_dims
+    dims = unchecked_cast(List[int], opt_dims)
   for idx in range(torch.len(self)):
     is_mean_dim = False
     for _0 in range(torch.len(dims)):
@@ -2682,17 +2682,9 @@ def native_batch_norm(input: List[int],
   return out
 
 def nonzero_lower_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   return [0, torch.len(input)]
 
 def nonzero_upper_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   numel = 1
   for _0 in range(torch.len(input)):
     elem = input[_0]

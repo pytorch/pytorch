@@ -323,6 +323,9 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
 
   A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
   B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
+  if (!A_bdim.has_value()) {
+    A_ = A_.contiguous();  // bug?
+  }
   const auto res = _linalg_solve_ex(A_, B_, left, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
 }

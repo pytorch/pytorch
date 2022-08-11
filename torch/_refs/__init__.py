@@ -224,6 +224,7 @@ __all__ = [
     "vsplit",
     "vstack",
     "unflatten",
+    "unbind",
     #
     # Tensor Creation
     #
@@ -637,21 +638,19 @@ def logsumexp(
 
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def nan_to_num(
     a: TensorLikeType,
-    *,
     nan: Optional[NumberType] = 0.0,
     posinf: Optional[NumberType] = None,
     neginf: Optional[NumberType] = None,
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
-    if a.dtype == torch.bool:
+    if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return clone(a)
+
+    if nan is None:
+        nan = 0.0
 
     if posinf is None:
         posinf = prims.maximum_value(a.dtype)
@@ -1920,9 +1919,9 @@ def mean(
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
+    *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
-    *,
     correction: Optional[int] = None,
 ):
     s = std(a, dim, unbiased, keepdim, correction=correction)
@@ -1954,6 +1953,7 @@ def addr(
     self: TensorLikeType,
     vec1: TensorLikeType,
     vec2: TensorLikeType,
+    *,
     beta: NumberType = 1,
     alpha: NumberType = 1,
 ) -> TensorLikeType:
@@ -2723,6 +2723,18 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
         )
     out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
     return torch.reshape(a, out_shape)
+
+
+def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
+    dim = utils.canonicalize_dim(t.ndim, dim)
+    check(
+        len(t.shape) > 0,
+        lambda: "dimension specified as 0 but tensor has no dimensions",
+        IndexError,
+    )
+    return tuple(
+        torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
+    )
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
