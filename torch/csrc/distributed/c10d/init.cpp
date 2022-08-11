@@ -996,7 +996,8 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  const ::c10d::BroadcastOptions& opts) {
-                self->_DummyBroadcast(const_cast<std::vector<at::Tensor>&>(tensors), opts);
+                self->_DummyBroadcast(
+                    const_cast<std::vector<at::Tensor>&>(tensors), opts);
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),

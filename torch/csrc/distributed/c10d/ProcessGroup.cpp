@@ -72,8 +72,12 @@ ProcessGroup::ProcessGroup(int rank, int size)
   //     false);
 
   // set up our list of backends
-  setBackend(c10::DeviceType::CPU, c10::make_intrusive<DummyProcessGroupBackend>(rank, size));
-  setBackend(c10::DeviceType::CUDA, c10::make_intrusive<DummyProcessGroupBackend>(rank, size));
+  setBackend(
+      c10::DeviceType::CPU,
+      c10::make_intrusive<DummyProcessGroupBackend>(rank, size));
+  setBackend(
+      c10::DeviceType::CUDA,
+      c10::make_intrusive<DummyProcessGroupBackend>(rank, size));
 }
 
 ProcessGroup::~ProcessGroup() {}
@@ -91,10 +95,11 @@ c10::intrusive_ptr<Work> _dummy_broadcast_cpu_(
     int64_t timeout) {
   VLOG(1) << "in _dummy_broadcast_cpu_";
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CPU)->broadcast(
-      tensor_vec,
-      BroadcastOptions{
-          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->broadcast(
+          tensor_vec,
+          BroadcastOptions{
+              root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> _dummy_broadcast_cuda_(
@@ -105,10 +110,11 @@ c10::intrusive_ptr<Work> _dummy_broadcast_cuda_(
     int64_t timeout) {
   VLOG(1) << "in _dummy_broadcast_cuda_";
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CUDA)->broadcast(
-      tensor_vec,
-      BroadcastOptions{
-          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->broadcast(
+          tensor_vec,
+          BroadcastOptions{
+              root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> ProcessGroup::_DummyBroadcast(
