@@ -2,6 +2,7 @@ from collections import OrderedDict, namedtuple
 import itertools
 import warnings
 import functools
+import weakref
 
 import torch
 from ..parameter import Parameter
@@ -10,6 +11,9 @@ import torch.utils.hooks as hooks
 from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
+
+__all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_hook',
+           'register_module_full_backward_hook', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -36,6 +40,41 @@ def _addindent(s_, numSpaces):
     s = '\n'.join(s)
     s = first + '\n' + s
     return s
+
+class _WrappedHook:
+    def __init__(self, hook: Callable, module: Optional["Module"] = None):
+        self.hook: Callable = hook
+        functools.update_wrapper(self, hook)
+
+        self.with_module: bool = False
+
+        if module is not None:
+            self.module: weakref.ReferenceType["Module"] = weakref.ref(module)
+            self.with_module = True
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if self.with_module:
+            module = self.module()
+            if module is None:
+                raise RuntimeError("You are trying to call the hook of a dead Module!")
+            return self.hook(module, *args, **kwargs)
+        return self.hook(*args, **kwargs)
+
+    def __getstate__(self) -> Dict:
+        result = {"hook": self.hook, "with_module": self.with_module}
+        if self.with_module:
+            result["module"] = self.module()
+
+        return result
+
+    def __setstate__(self, state: Dict):
+        self.hook = state["hook"]
+        self.with_module = state["with_module"]
+
+        if self.with_module:
+            if state["module"] is None:
+                raise RuntimeError("You are trying to revive the hook of a dead Module!")
+            self.module = weakref.ref(state["module"])
 
 
 r"""This tracks hooks common to all modules that are executed before/after
@@ -303,7 +342,7 @@ class Module:
         Buffers can be accessed as attributes using given names.
 
         Args:
-            name (string): name of the buffer. The buffer can be accessed
+            name (str): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor or None): buffer to be registered. If ``None``, then operations
                 that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
@@ -348,7 +387,7 @@ class Module:
         The parameter can be accessed as an attribute using given name.
 
         Args:
-            name (string): name of the parameter. The parameter can be accessed
+            name (str): name of the parameter. The parameter can be accessed
                 from this module using the given name
             param (Parameter or None): parameter to be added to the module. If
                 ``None``, then operations that run on parameters, such as :attr:`cuda`,
@@ -390,7 +429,7 @@ class Module:
         The module can be accessed as an attribute using the given name.
 
         Args:
-            name (string): name of the child module. The child module can be
+            name (str): name of the child module. The child module can be
                 accessed from this module using the given name
             module (Module): child module to be added to the module.
         """
@@ -1183,9 +1222,7 @@ class Module:
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
-                    wrapper = functools.partial(hook, self)
-                    functools.update_wrapper(wrapper, hook)
-                    grad_fn.register_hook(wrapper)
+                    grad_fn.register_hook(_WrappedHook(hook, self))
                 self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
 
         return result
@@ -1331,11 +1368,15 @@ class Module:
     # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
-        r"""Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing references to the whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
+
+        .. note::
+            The returned object is a shallow copy. It contains references
+            to the module's parameters and buffers.
 
         .. warning::
             Currently ``state_dict()`` also accepts positional arguments for
@@ -1418,9 +1459,7 @@ class Module:
                 instance to the hook as the first parameter.
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
-        if with_module:
-            hook = functools.partial(hook, self)
-        self._load_state_dict_pre_hooks[handle.id] = hook
+        self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
 
     def register_load_state_dict_post_hook(self, hook):
@@ -1670,7 +1709,7 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, Parameter): Tuple containing the name and parameter
+            (str, Parameter): Tuple containing the name and parameter
 
         Example::
 
@@ -1718,7 +1757,7 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, torch.Tensor): Tuple containing the name and buffer
+            (str, torch.Tensor): Tuple containing the name and buffer
 
         Example::
 
@@ -1747,7 +1786,7 @@ class Module:
         the name of the module as well as the module itself.
 
         Yields:
-            (string, Module): Tuple containing a name and child module
+            (str, Module): Tuple containing a name and child module
 
         Example::
 
@@ -1800,7 +1839,7 @@ class Module:
                 or not
 
         Yields:
-            (string, Module): Tuple of name and module
+            (str, Module): Tuple of name and module
 
         Note:
             Duplicate modules are returned only once. In the following

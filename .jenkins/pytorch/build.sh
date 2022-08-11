@@ -45,6 +45,10 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
+  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* ]]; then
+    export USE_UCC=1
+    export USE_SYSTEM_UCC=1
+  fi
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
@@ -160,11 +164,6 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
-# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
-  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
@@ -172,6 +171,10 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
+    export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
@@ -304,7 +307,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
-  python test/run_test.py --export-past-test-times
+  python tools/stats/export_test_times.py
 fi
 
 print_sccache_stats

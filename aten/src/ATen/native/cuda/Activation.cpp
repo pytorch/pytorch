@@ -110,7 +110,12 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
+  int64_t weight_dim = weight.dim();
   Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  TORCH_CHECK(weight_dim == 0 || weight_dim == 1,
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ",
+      weight_dim);
 
   // case1: shared weight for all channels
   if (weight_num == 1) {

@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Adam', 'adam']
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm.
@@ -54,7 +55,7 @@ class Adam(Optimizer):
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        amsgrad (boolean, optional): whether to use the AMSGrad variant of this
+        amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer
@@ -107,7 +108,7 @@ class Adam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         self._cuda_graph_capture_health_check()
@@ -195,7 +196,7 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
@@ -251,14 +252,18 @@ def _single_tensor_adam(params: List[Tensor],
 
         if capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
-        else:
-            assert not step_t.is_cuda, "If capturable=False, state_steps should not be CUDA tensors."
 
         # update step
         step_t += 1
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
+
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -330,12 +335,15 @@ def _multi_tensor_adam(params: List[Tensor],
     if capturable:
         assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
-    else:
-        assert all(not step.is_cuda for step in state_steps), \
-            "If capturable=False, state_steps should not be CUDA tensors."
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
+
+    # Handle complex parameters
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
+    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
+    params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
 
     # update steps
     torch._foreach_add_(state_steps, 1)
@@ -369,7 +377,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
@@ -386,7 +394,7 @@ def _multi_tensor_adam(params: List[Tensor],
             torch._foreach_reciprocal_(eps_over_step_size)
             denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom)
+        torch._foreach_addcdiv_(params_, exp_avgs, denom)
     else:
         bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
         bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
@@ -397,7 +405,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
 
             # Use the max. for normalizing running avg. of gradient
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
@@ -408,4 +416,4 @@ def _multi_tensor_adam(params: List[Tensor],
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
+        torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
