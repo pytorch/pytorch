@@ -493,7 +493,6 @@ def prepare_qat_fx(
                 x = self.sub(x) + x
                 return x
 
-
         # initialize a floating point model
         float_model = M().train()
         # (optional, but preferred) load the weights from pretrained model
@@ -676,9 +675,11 @@ def convert_to_reference_fx(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> torch.nn.Module:
-    r""" Convert a calibrated or trained model to a reference quantized model, a common interface
-    between PyTorch quantization with other backends like accelerators. Callers should additionally
-    lower the returned reference model to the target backend before using the model for inference.
+    r""" Convert a calibrated or trained model to a reference quantized model,
+    see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md for more details,
+    reference quantzied model is a standard representation of a quantized model provided
+    by FX Graph Mode Quantization, it can be further lowered to run on the target
+    hardware, like accelerators
 
     Args:
         * `graph_module`: A prepared and calibrated/trained model (GraphModule)
@@ -701,13 +702,6 @@ def convert_to_reference_fx(
     Example::
 
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
-        # convert_to_reference_fx converts observer/fake_quant modules in the model to
-        # quantize and dequantize operators, and produces a reference quantized model
-        # see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md
-        # for more information about reference quantized model
-        # The reference quantized model is a standard format for a quantized model provided
-        # by fx graph mode quantization, it can be further lowered to run on the target
-        # hardware
         # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
         # e.g. backend_config = get_default_backend_config("fbgemm")
         reference_quantized_model = convert_to_reference_fx(prepared_model)
