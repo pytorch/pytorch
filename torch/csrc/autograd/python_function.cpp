@@ -587,6 +587,52 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
+// Given a prim::PythonOp node, _append_subgraph creates a subgraph such that:
+// (1) It has the same inputs as the prim::PythonOp node
+// (2) The intermediate nodes used in the PythonOp are cloned and stored in the
+// subgraph (3) trace_outputs stores the Value* objects, before a new trace
+// value is assigned by the prim::PythonOp node and helps to eventually route
+// the outputs of the subgraph correctly This newly created subgraph is then
+// added to the prim::PythonOp node as a subgraph attribute
+static void _append_subgraph(
+    torch::jit::Node* node,
+    torch::jit::Graph* graph,
+    std::vector<torch::jit::Value*> trace_outputs,
+    bool unpack_output) {
+  node->g_(
+      torch::jit::attr::Subgraph,
+      std::make_shared<torch::jit::Graph>(graph->current_scope()));
+  auto subgraph = node->g(torch::jit::attr::Subgraph);
+
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  for (size_t i = 0; i < node->inputs().size(); ++i) {
+    auto subgraph_input = subgraph->addInput();
+    subgraph_input->copyMetadata(node->inputs().at(i));
+    value_map[node->inputs().at(i)] = subgraph_input;
+  }
+  // Find node position in graph, all subsequent nodes after are added to
+  // subgraph
+  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  // Skip TupleUnpack node if created
+  if (!unpack_output) {
+    it++;
+  }
+  for (it++; it != graph->nodes().end(); ++it) {
+    torch::jit::Node* node = *it;
+    auto* clone_node =
+        subgraph->insertNode(subgraph->createClone(node, value_map_func));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = clone_node->outputs()[i];
+      auto trace_it = std::find(
+          trace_outputs.begin(), trace_outputs.end(), node->outputs()[i]);
+      if (trace_it != trace_outputs.end()) {
+        subgraph->registerOutput(clone_node->outputs()[i]);
+      }
+    }
+  }
+}
+
 static torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
@@ -651,6 +697,8 @@ static void _trace_post_record(
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
+
+  std::vector<torch::jit::Value*> trace_outputs;
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
@@ -658,10 +706,17 @@ static void _trace_post_record(
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
+        trace_outputs.push_back(jit::tracer::getValueTrace(tensor));
         jit::tracer::setValueTrace(tensor, value);
       }
     }
   }
+  py::bool_ is_in_onnx_export =
+      py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
+  if (py::cast<bool>(is_in_onnx_export)) {
+    _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+  }
+
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.
   if (!unpack_output) {
