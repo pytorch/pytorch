@@ -15,6 +15,7 @@ import torch.fx as fx
 from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
+import inspect
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -25,6 +26,12 @@ __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enabl
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+
+def fake_signature(fn, nargs):
+    """FX gets confused by varargs, de-confuse it"""
+    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 
 class ProxySymInt(object):
@@ -441,6 +448,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            flat_args = pytree.tree_flatten((args, kwargs))[0]
+            handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
+
+            # If there are any tensor subclasses, we need to handle those tensor subclasses first
+            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+                return NotImplemented
+
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
@@ -577,8 +591,15 @@ a bug if you need this)""")
         else:
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
+        if not hasattr(f, '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
+            # FX doesn't support varargs, so we gotta fake up a wrapper
+            # TODO: Would be nice to fix this at the source...
+            func = fake_signature(f, len(phs))
+        else:
+            func = f
+
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
-            t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(func, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env  # type: ignore[assignment]
