@@ -32,7 +32,7 @@ if ! command -v aws >/dev/null; then
 fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-510.60.02.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-515.57.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
@@ -66,7 +66,6 @@ add_to_env_file() {
   esac
 }
 
-add_to_env_file IN_CI 1
 add_to_env_file CI_MASTER "${CI_MASTER:-}"
 add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
 add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"

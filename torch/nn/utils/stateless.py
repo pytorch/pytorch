@@ -64,11 +64,13 @@ def _reparametrize_module(
         _apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
             module, name.split("."), name, (tensor,))
-    yield
-    for name in parameters_and_buffers:
-        _apply_func_submodules(
-            _remove_swap,
-            module, name.split("."), name, ())
+    try:
+        yield
+    finally:
+        for name in parameters_and_buffers:
+            _apply_func_submodules(
+                _remove_swap,
+                module, name.split("."), name, ())
 
 
 def _apply_func_submodules(

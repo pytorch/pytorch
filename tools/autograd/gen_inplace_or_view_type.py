@@ -4,40 +4,42 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
+from typing import Dict, List, Optional, Sequence, Tuple
+
 from torchgen.api import cpp
 from torchgen.api.autograd import (
-    NativeFunctionWithDifferentiabilityInfo,
-    gen_differentiable_outputs,
     dispatch_strategy,
+    gen_differentiable_outputs,
+    NativeFunctionWithDifferentiabilityInfo,
 )
 from torchgen.api.types import (
-    Binding,
-    DispatcherSignature,
-    CType,
     BaseCType,
-    OptionalCType,
-    longT,
+    Binding,
     boolT,
+    CType,
+    DispatcherSignature,
     intArrayRefT,
+    longT,
+    OptionalCType,
     symIntArrayRefT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import (
-    Type,
     NativeFunction,
+    SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    SchemaKind,
+    Type,
 )
-from typing import List, Optional, Sequence, Tuple, Dict
 from torchgen.utils import FileManager
+
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
-    MANUAL_AUTOGRAD,
-    type_wrapper_name,
-    tie_return_values,
     get_return_value,
+    MANUAL_AUTOGRAD,
+    tie_return_values,
+    type_wrapper_name,
 )
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.

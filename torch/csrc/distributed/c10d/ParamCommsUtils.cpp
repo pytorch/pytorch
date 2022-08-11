@@ -13,8 +13,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int outSize,
     at::ScalarType dType,
     std::vector<int64_t> inSplitSizes,
-    std::vector<int64_t> outSplitSizes) :
-      rank_(rank),
+    std::vector<int64_t> outSplitSizes)
+    : rank_(rank),
       columnName_(colName),
       inMessageSize_(inSize),
       outMessageSize_(outSize),

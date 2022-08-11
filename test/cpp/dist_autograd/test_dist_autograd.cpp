@@ -21,7 +21,8 @@ class DistAutogradTest : public ::testing::Test {
   }
 
   virtual void TearDown() {
-    autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
+    autogradContainer_->releaseContext(
+        autogradContainer_->currentContext()->contextId());
   }
 
   static DistAutogradContainer* autogradContainer_;
@@ -39,8 +40,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
   rpc::worker_id_t worker_id = 1;
-  addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors);
+  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
   autogradContext->addKnownWorkerId(worker_id);
   auto send_function = autogradContext->sendFunctions()[1];
 

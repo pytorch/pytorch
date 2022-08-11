@@ -137,6 +137,22 @@ struct TORCH_API Operator {
         });
   }
 
+  Operation getOperationForDispatchKey(c10::DispatchKey dk) const {
+    // TODO: some sort of caching mechanism?
+    return op_.fold<Operation>(
+        [dk](const C10Operator& op) {
+          return [op, dk](Stack& stack) {
+            op.handle_.callBoxedForDispatchKey(dk, stack);
+          };
+        },
+        [](const JitOnlyOperator& op) {
+          TORCH_CHECK(
+              false,
+              "calling a JIT operator for dispatch key is not supported");
+          return nullptr;
+        });
+  }
+
   const FunctionSchema& schema() const {
     return op_.fold<const FunctionSchema&>(
         [](const C10Operator& op) -> const FunctionSchema& {
@@ -157,6 +173,16 @@ struct TORCH_API Operator {
                 std::move(schema));
           }
           return op.schema_.left();
+        });
+  }
+
+  c10::ArrayRef<at::Tag> getTags() const {
+    return op_.fold<c10::ArrayRef<at::Tag>>(
+        [](const C10Operator& op) { return op.handle_.getTags(); },
+        [](const JitOnlyOperator& op) {
+          // Returns empty list of tags for JitOnlyOperators since it
+          // doesn't save c10::OperatorHandle
+          return c10::ArrayRef<at::Tag>();
         });
   }
 

@@ -1,15 +1,10 @@
-from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, Set, List, Tuple, Match
+from dataclasses import dataclass
+from typing import List, Match, Optional, Sequence, Set, Tuple
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, NamedCType
-from torchgen.model import (
-    NativeFunction,
-    Type,
-    SchemaKind,
-    NativeFunctionsViewGroup,
-)
+from torchgen.model import NativeFunction, NativeFunctionsViewGroup, SchemaKind, Type
 from torchgen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
@@ -471,7 +466,7 @@ Attempted to convert a derivative formula for a mutable operator
 
                 required_original_self_value = bool(
                     re.search(IDENT_REGEX.format("original_self_p"), formula)
-                )
+                ) or bool(re.search(IDENT_REGEX.format("original_self_t"), formula))
 
                 forward_derivatives = [
                     ForwardDerivative(

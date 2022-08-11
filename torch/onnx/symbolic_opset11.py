@@ -1,39 +1,110 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
+from typing import Tuple, Union
 
 import torch
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_opset10 as opset10
-from torch.onnx import utils
+from torch import _C
+from torch._C import _onnx as _C_onnx
+from torch.onnx import (
+    _type_utils,
+    symbolic_helper,
+    symbolic_opset10 as opset10,
+    symbolic_opset9 as opset9,
+    utils,
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# This file exports ONNX ops for opset 11
+__all__ = [
+    "add",
+    "append",
+    "arange",
+    "argsort",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "cat",
+    "chunk",
+    "clamp_max",
+    "clamp_min",
+    "clamp",
+    "constant_pad_nd",
+    "cumsum",
+    "Delete",
+    "embedding_bag",
+    "embedding_renorm",
+    "flatten",
+    "gather",
+    "hardtanh",
+    "im2col",
+    "index_fill",
+    "index",
+    "index_copy",
+    "index_put",
+    "insert",
+    "linalg_det",
+    "linalg_vector_norm",
+    "logdet",
+    "masked_scatter",
+    "masked_select",
+    "mm",
+    "narrow",
+    "normal",
+    "pad",
+    "pixel_shuffle",
+    "pop",
+    "Prim",
+    "reflection_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "relu6",
+    "remainder",
+    "replication_pad",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "round",
+    "scatter",
+    "select",
+    "size",
+    "sort",
+    "split_with_sizes",
+    "split",
+    "squeeze",
+    "stack",
+    "topk",
+    "unbind",
+    "unique_dim",
+    "unsqueeze",
+    "upsample_bicubic2d",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 @symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            min_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            max_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
     return opset9.op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
@@ -46,7 +117,9 @@ def clamp(g, self, min, max):
     def _cast_if_not_none(tensor, dtype):
         if tensor is not None and not symbolic_helper._is_none(tensor):
             return g.op(
-                "Cast", tensor, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype]
+                "Cast",
+                tensor,
+                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
             )
         else:
             return tensor
@@ -74,7 +147,7 @@ def clamp(g, self, min, max):
 @symbolic_helper.parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -87,7 +160,7 @@ def clamp_min(g, self, min):
 @symbolic_helper.parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -98,27 +171,21 @@ def clamp_max(g, self, max):
 
 
 def relu6(g, input):
-    relu = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    relu_ = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(0, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            6, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(6, dtype=scalar_type.dtype()),
     )
-    return clamp(g, relu, min_val, max_val)
+    return clamp(g, relu_, min_val, max_val)
 
 
 # Opset 11 gather accepts negative indices
@@ -143,7 +210,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":
+            if indices_list[idx_].type().scalarType() == "Bool":  # type: ignore[attr-defined]
+                # TODO(justinchuby): Remove type ignore after #81112 is checked in.
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -198,7 +266,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -217,17 +286,16 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
-        values = g.op("Cast", values, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        values = g.op(
+            "Cast", values, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+        )
+    scalar_type = _type_utils.JitScalarType.from_name(dtype)
 
     if accumulate:
         zeros = g.op(
             "ConstantOfShape",
             g.op("Shape", self),
-            value_t=torch.tensor([0], dtype=dtype),
+            value_t=torch.tensor([0], dtype=scalar_type.dtype()),
         )
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
@@ -256,6 +324,14 @@ upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
 upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
+
+upsample_nearest1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_linear1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bilinear2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_trilinear3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bicubic2d.__module__ = "torch.onnx.symbolic_opset11"
 
 
 @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
@@ -291,7 +367,9 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.JitScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
         return g.op(
             "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
@@ -304,7 +382,7 @@ def cumsum(g, self, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         cast = g.op(
-            "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", self, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     else:
         cast = self
@@ -420,12 +498,12 @@ def _avg_pool(name, tuple_fn):
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(
@@ -477,6 +555,14 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 @symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+
+
+@symbolic_helper.parse_args("v", "i", "i", "none")
+def argsort(g, self, dim, decending, out=None):
+    _, indices = symbolic_helper._sort_helper(
+        g, self, dim, decending=decending, out=out
+    )
+    return indices
 
 
 def round(g, self):
@@ -576,7 +662,7 @@ def _prepare_onnx_paddings(g, input, pad):
     )
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     # Currently ONNX only supports int64 type for Pad
-    pad = g.op("Cast", pad, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    pad = g.op("Cast", pad, to_i=_C_onnx.TensorProtoDataType.INT64)
     paddings = g.op(
         "Concat",
         pad,
@@ -596,9 +682,7 @@ def _prepare_onnx_paddings(g, input, pad):
     paddings = symbolic_helper._reshape_helper(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
-    padding_c = g.op(
-        "Cast", paddings, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
-    )
+    padding_c = g.op("Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64)
     return padding_c
 
 
@@ -664,20 +748,16 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[1])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, end=args[0], dtype=dtype
         )
         start_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(0, dtype=type_.dtype()),
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
         arange_tensor = g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
@@ -687,21 +767,19 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[3])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
         arange_tensor = g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], dtype=dtype
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
         arange_tensor = g.op("Range", start, end, delta_default)
     else:
@@ -848,7 +926,9 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -857,12 +937,12 @@ def __rshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -875,7 +955,9 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -884,12 +966,12 @@ def __lshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1054,12 +1136,17 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = 0
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim
@@ -1081,7 +1168,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

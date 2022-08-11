@@ -2,10 +2,10 @@ name: update-commit-hashes
 
 on:
   schedule:
-    # Every day at 12:37am
-    # Choose a random time near midnight because it may be delayed if there are high loads
+    # Every day at 7:37am UTC = 12:27am PST
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
     # See https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
-    - cron: 37 0 * * *
+    - cron: 37 7 * * *
   workflow_dispatch:
 
 jobs:
@@ -16,6 +16,7 @@ jobs:
       branch: master
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-torchdynamo-commit-hash:
     uses: ./.github/workflows/_update-commit-hash.yml
@@ -24,6 +25,7 @@ jobs:
       branch: main
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-vision-commit-hash:
     uses: ./.github/workflows/_update-commit-hash.yml
@@ -32,3 +34,4 @@ jobs:
       branch: main
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

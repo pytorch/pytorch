@@ -44,11 +44,17 @@ class Cleanup {
     return *this;
   }
 
-  void Release() { func_ = nullptr; }
+  void Release() {
+    func_ = nullptr;
+  }
 
-  void SetStatus(StatusType&& status) { status_ = std::move(status); }
+  void SetStatus(StatusType&& status) {
+    status_ = std::move(status);
+  }
 
-  const StatusType& GetStatus() const { return status_; }
+  const StatusType& GetStatus() const {
+    return status_;
+  }
 
  private:
   std::function<void(StatusType&&)> func_;
@@ -59,19 +65,28 @@ using ExceptionCleanup = Cleanup<std::exception_ptr>;
 
 // Allows APIs which might return const references and values, to not be forced
 // to return values in the signature.
-// TODO(alanwaketan): This is clever, but is there really no std or c10 supports?
-// Needs more investigations.
+// TODO(alanwaketan): This is clever, but is there really no std or c10
+// supports? Needs more investigations.
 template <typename T>
 class MaybeRef {
  public:
   /* implicit */ MaybeRef(const T& ref) : ref_(ref) {}
-  /* implicit */ MaybeRef(T&& value) : storage_(std::move(value)), ref_(*storage_) {}
+  /* implicit */ MaybeRef(T&& value)
+      : storage_(std::move(value)), ref_(*storage_) {}
 
-  const T& Get() const { return ref_; }
-  const T& operator*() const { return Get(); }
-  operator const T&() const { return Get(); }
+  const T& Get() const {
+    return ref_;
+  }
+  const T& operator*() const {
+    return Get();
+  }
+  operator const T&() const {
+    return Get();
+  }
 
-  bool IsStored() const { return storage_.has_value(); }
+  bool IsStored() const {
+    return storage_.has_value();
+  }
 
  private:
   c10::optional<T> storage_;
@@ -93,8 +108,9 @@ std::vector<T> ToVector(const S& input) {
   return std::vector<T>(input.begin(), input.end());
 }
 
-template<typename T>
-c10::optional<std::vector<T>> ToOptionalVector(c10::OptionalArrayRef<T> arrayRef) {
+template <typename T>
+c10::optional<std::vector<T>> ToOptionalVector(
+    c10::OptionalArrayRef<T> arrayRef) {
   if (arrayRef) {
     return arrayRef->vec();
   }

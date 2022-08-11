@@ -20,7 +20,7 @@ inline std::string torch_tensor_device_name(const at::Tensor& ten) {
 
 #define TENSOR_ON_CPU(x)                                      \
   TORCH_CHECK(                                                \
-      !x.is_cuda(),                           \
+      !x.is_cuda(),                                           \
       #x " must be a CPU tensor; it is currently on device ", \
       torch_tensor_device_name(x))
 
