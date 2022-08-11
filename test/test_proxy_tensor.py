@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
@@ -131,6 +132,42 @@ def _create_new_input(x):
         return torch.rand_like(x, requires_grad=x.requires_grad)
     else:
         return torch.rand_like(x)
+
+"""
+Delays a cos being executed on the unwraptensor until its used. Simulates a CommTensor used
+"""
+class UnwrapTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor):
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            tensor.size(),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
+        r._tensor = tensor
+        return r
+
+    def __repr__(self):
+        # TODO: consider all_gather the local tensors for better debugging
+        return f"UnwrapTensor({self._tensor})"
+
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            ret = e
+            if isinstance(e, UnwrapTensor):
+                ret = e._tensor.cos()
+
+            return ret
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
     # WARNING: if any of your inputs are index tensors, DO NOT use this
@@ -252,6 +289,23 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sum(traced))
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
+
+    def test_make_fx_reentrant_dispatch(self):
+        def f(x):
+            return torch.ops.aten.norm.Scalar(x, 2.0)
+
+        def norm_decomp(x, p=2.0):
+            if p != 2.0:
+                raise RuntimeError("can't handle with p != 2")
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        decomp = {torch.ops.aten.norm.Scalar: norm_decomp}
+
+        traced = make_fx(f, decomposition_table=decomp, tracing_mode=self.tracing_mode)(torch.rand(3))
+
+        for n in traced.graph.nodes:
+            self.assertTrue("square" not in str(n.target))
+            self.assertTrue("norm" not in str(n.target))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
@@ -450,6 +504,15 @@ class TestGenericProxyTensor(TestCase):
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
 
+    def test_trace_subclasses(self):
+        def f(x):
+            x = UnwrapTensor(x)
+            y = x * 2
+            return y
+
+        inp = [torch.randn(5)]
+        self._test(f, [torch.randn(5)])
+
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -484,6 +547,7 @@ def xfail_inherited_tests(tests):
     "test_make_fx_model_fwd_bwd",
     "test_proxy_tensor",
     "test_resnet18_backward_trace",
+    "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
@@ -603,9 +667,7 @@ make_fx_failures = {
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
-    xfail('nanquantile'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('quantile'),
     xfail('tensor_split'),
     xfail('corrcoef'),
 
@@ -824,6 +886,7 @@ symbolic_tensor_failures = {
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
+    xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -917,6 +980,7 @@ symbolic_tensor_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('put', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
+    xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('rand_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
