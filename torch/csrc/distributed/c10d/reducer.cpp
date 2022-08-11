@@ -1404,7 +1404,6 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  printf("In finalize_bucket_dense, discard: %d", discard_grad_);
   for (const auto intra_bucket_index : c10::irange(bucket.variables.size())) {
     auto& variable = bucket.variables[intra_bucket_index];
 
