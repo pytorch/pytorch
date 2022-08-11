@@ -222,7 +222,11 @@ class TestExecutionGraph(TestCase):
     def payload(self, use_cuda=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
-            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            inf_val = float("inf")
+            neg_inf_val = float("-inf")
+            nan_val = float("nan")
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u),
+                                                         "hello", u, inf_val, neg_inf_val, nan_val)
             x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
@@ -231,6 +235,9 @@ class TestExecutionGraph(TestCase):
                 y = y.cuda()
             z = x + y + x * y + x * y
             z.backward(z)
+            gelu = nn.GELU()
+            m = torch.randn(2)
+            _ = gelu(m)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)

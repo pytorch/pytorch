@@ -10,10 +10,14 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <vector>
@@ -107,7 +111,12 @@ inline std::string getValueShape(
 
 inline std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
-    return std::to_string(val.toDouble());
+    double d_val = val.toDouble();
+    if (std::isinf(d_val) || std::isnan(d_val)) {
+      return fmt::format("\"{}\"", std::to_string(d_val));
+    } else {
+      return std::to_string(d_val);
+    }
   } else if (val.isInt()) {
     return std::to_string(val.toInt());
   } else if (val.isBool()) {
@@ -489,6 +498,33 @@ std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
   return nullptr;
 }
 
+inline std::string json_str_escape(const std::string& str) {
+  std::ostringstream ostream;
+  for (auto ch = str.cbegin(); ch != str.cend(); ch++) {
+    if (*ch == '"') {
+      ostream << "\\\"";
+    } else if (*ch == '\\') {
+      ostream << "\\\\";
+    } else if (*ch == '\b') {
+      ostream << "\\b";
+    } else if (*ch == '\f') {
+      ostream << "\\f";
+    } else if (*ch == '\n') {
+      ostream << "\\n";
+    } else if (*ch == '\r') {
+      ostream << "\\r";
+    } else if (*ch == '\t') {
+      ostream << "\\t";
+    } else if ('\x00' <= *ch && *ch <= '\x1f') {
+      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+              << static_cast<int>(*ch);
+    } else {
+      ostream << *ch;
+    }
+  }
+  return ostream.str();
+}
+
 void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   using RunState = ExecutionGraphObserver::RunState;
   auto ob = ObserverManager::get();
@@ -536,7 +572,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       std::string op_schema_str{};
       const auto op_schema = fn.operator_schema();
       if (op_schema.has_value()) {
-        op_schema_str = c10::toString(op_schema.value());
+        op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
       writeJsonNode(
