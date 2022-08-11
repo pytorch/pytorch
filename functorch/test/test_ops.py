@@ -115,8 +115,6 @@ def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, req
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
             result = tuple(r for r in result if torch.is_floating_point(r))
             assert len(result) > 0
         return result
@@ -142,8 +140,6 @@ def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_g
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
             result = tuple(r for r in result if torch.is_floating_point(r))
             assert len(result) > 0
         return result
