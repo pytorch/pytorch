@@ -4,7 +4,7 @@ import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
 from torch.utils._pytree import _broadcast_to_and_flatten
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
 class TestPytree(TestCase):
@@ -62,6 +62,28 @@ class TestPytree(TestCase):
         run_test((1.,))
         run_test((1., 2))
         run_test((torch.tensor([1., 2]), 2, 10, 9, 11))
+
+    def test_flatten_unflatten_odict(self):
+        def run_test(odict):
+            expected_spec = TreeSpec(
+                OrderedDict,
+                list(odict.keys()),
+                [LeafSpec() for _ in odict.values()])
+            values, treespec = tree_flatten(odict)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, list(odict.values()))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, odict)
+            self.assertTrue(isinstance(unflattened, OrderedDict))
+
+        od = OrderedDict()
+        run_test(od)
+
+        od['b'] = 1
+        od['a'] = torch.tensor(3.14)
+        run_test(od)
 
     def test_flatten_unflatten_namedtuple(self):
         Point = namedtuple('Point', ['x', 'y'])
