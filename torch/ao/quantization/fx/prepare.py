@@ -204,8 +204,8 @@ def is_input_arg_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     dtype_config: DTypeConfig,
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
@@ -267,8 +267,8 @@ def is_pattern_dtype_config_supported_by_backend(
     matched_node_pattern: Optional[NodePattern],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
     the backend or not
@@ -493,8 +493,8 @@ def get_arg_target_dtype_as_input_to_node(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> Optional[Union[torch.dtype, type]]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
@@ -518,8 +518,8 @@ def get_arg_target_compute_dtype_as_input_to_node(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Union[torch.dtype, type, None]]],
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> Union[torch.dtype, type, None]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
@@ -545,8 +545,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -687,8 +687,8 @@ def maybe_insert_input_observers_for_node(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -746,8 +746,8 @@ def maybe_insert_input_equalization_observers_for_node(
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     is_branch: bool,
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> None:
     """
     If `node` needs to be equalized, find the input/weight observers it needs in
@@ -1129,8 +1129,8 @@ def insert_observers_for_model(
     backend_config: Optional[BackendConfig],
     observed_node_names: Set[str],
     is_qat: bool,
-    weight_index_dict: Dict[str, int],
-    bias_index_dict: Dict[str, int],
+    weight_index_dict: Dict[str, List[int]],
+    bias_index_dict: Dict[str, List[int],
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
