@@ -54,11 +54,13 @@ could not be completed because the input matrix is singular.",
 
   ASSERT_TRUE(
       THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
-          "torch.cuda.OutOfMemoryError", "Exception raised when CUDA is out of memory", PyExc_RuntimeError, nullptr));
+          "torch.cuda.OutOfMemoryError",
+          "Exception raised when CUDA is out of memory",
+          PyExc_RuntimeError,
+          nullptr));
   ASSERT_TRUE(
       PyModule_AddObject(
-          module, "_OutOfMemoryError", THPException_OutOfMemoryError) ==
-      0);
+          module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
   return true;
 }
