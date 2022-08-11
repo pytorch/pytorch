@@ -28,6 +28,7 @@ enum class CompileTimeEntryType {
   DOMAIN_MAP,
   REFERENCE_TENSORS,
   VECTORIZABLE_INPUTS_AND_OUTPUTS,
+  INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS,
   UNROLLABLE_INPUTS_AND_OUTPUTS,
   REDUCTION_TVS,
   PERSISTENT_BUFFER_INFO,
@@ -60,6 +61,15 @@ class VectorizableInputsAndOutputs {
   using DataType = std::vector<TensorView*>;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS;
+};
+
+//! Entry type definition class for `INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS`,
+//!  stores the fusion's inputs and outputs grouped by inner most dimension.
+class InputsOutputsInnerDimGroups {
+ public:
+  using DataType = std::vector<std::vector<TensorView*>>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS;
 };
 
 //! Entry type definition class for `UNROLLABLE_INPUTS_AND_OUTPUTS`,

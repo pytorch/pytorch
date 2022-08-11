@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
@@ -55,29 +56,6 @@ class DomainMap : public pointwise_utils::DomainMap {
     FusionGuard fg(fusion);
     DomainMap domain_map(fusion);
     return domain_map.findReferenceTensorView() != nullptr;
-  }
-
-  // Determine if output TensorView is a valid reference tensor for this fusion.
-  // The reference tensor must map to all the iterDomains in each input.
-  bool isValidReference(TensorView* output_tv) const {
-    if (output_tv->isFusionInput()) {
-      return false;
-    }
-    for (auto input_tv :
-         ir_utils::filterByType<TensorView>(fusion_->inputs())) {
-      if (input_tv->uses().empty()) {
-        continue;
-      }
-
-      if (fusion_->getOutputAlias(output_tv) == input_tv) {
-        continue;
-      }
-
-      if (!areAllInputIdsMappedToOutput(input_tv, output_tv)) {
-        return false;
-      }
-    }
-    return true;
   }
 
  private:
