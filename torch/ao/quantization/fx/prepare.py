@@ -117,7 +117,7 @@ def is_activation_post_process_node(
     )
 
 
-def get_weight_and_bias_index_dicts(backend_config):
+def _get_weight_and_bias_index_dicts(backend_config):
     pattern_to_input_type_to_index = get_pattern_to_input_type_to_index(backend_config)
     for pattern, input_type_to_index in pattern_to_input_type_to_index.items():
         for input_type, index in input_type_to_index.items():
@@ -1735,7 +1735,7 @@ def prepare(
     pattern_to_quantize_handler = get_pattern_to_quantize_handlers(backend_config)
     pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
-    weight_index_dict, bias_index_dict = get_weight_and_bias_index_dicts(backend_config)
+    weight_index_dict, bias_index_dict = _get_weight_and_bias_index_dicts(backend_config)
 
     root_node_getter_mapping = get_fusion_pattern_to_root_node_getter(backend_config)
 
