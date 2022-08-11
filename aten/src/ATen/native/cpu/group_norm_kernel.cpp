@@ -52,13 +52,15 @@ void GroupNormKernelImplInternal(
   const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
+  using T_ACC = vec::vec_scalar_t<T>;
+
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * inner_size;
-      T mean_val;
-      T rstd_val;
+      T_ACC mean_val;
+      T_ACC rstd_val;
       std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, inner_size);
-      rstd_val = T(1) / std::sqrt(std::max(rstd_val, T(0)) + eps);
+      rstd_val = T_ACC(1) / std::sqrt(std::max(rstd_val, T_ACC(0)) + eps);
       if (gamma_null && beta_null) {
         T* Y_ptr = Y_data + i * inner_size;
         for (const auto j : c10::irange(inner_size)) {
@@ -68,8 +70,8 @@ void GroupNormKernelImplInternal(
         const int64_t g = i % G;
         for (const auto j : c10::irange(D)) {
           const int64_t c = g * D + j;
-          const T scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          const T bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
+          const T_ACC scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
+          const T_ACC bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
           X_ptr = X_data + (i * D + j) * HxW;
           T* Y_ptr = Y_data + (i * D + j) * HxW;
           for (const auto k : c10::irange(HxW)) {
