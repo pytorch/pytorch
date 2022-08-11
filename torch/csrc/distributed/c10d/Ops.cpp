@@ -146,6 +146,13 @@ TORCH_LIBRARY(c10d, m) {
   // It's important to register the op to the CompositeExplicitAutograd key to
   // enable
   // __torch_dispatch__.
+
+  // Example of support for custom classes in schema parser:
+  //    quantized::conv2d_relu.new(Tensor qx,
+  //    _torch_.torch.classes.quantized.Conv2dPackedParamsBase packed_weight,
+  //    float output_scale, int output_zero_point) -> (Tensor)
+  m.def(
+      "dummy_broadcast_(Tensor[] a, __torch__.torch.classes.c10d.ProcessGroup b, int c, int d, int e) ->  __torch__.torch.classes.c10d.Work");
   m.def(
       "broadcast_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));

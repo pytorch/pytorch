@@ -10,14 +10,13 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
-#include <c10d/ProcessGroup.hpp>
 #include <c10d/Work.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
-constexpr auto kDefaultTimeout =
+constexpr auto kProcessGroupDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
@@ -29,7 +28,7 @@ namespace c10d {
 struct TORCH_API Options : torch::CustomClassHolder {
   explicit Options(
       std::string backend,
-      std::chrono::milliseconds timeout = kDefaultTimeout)
+      std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
       : timeout(timeout), backend(backend) {}
   virtual ~Options() = default;
 

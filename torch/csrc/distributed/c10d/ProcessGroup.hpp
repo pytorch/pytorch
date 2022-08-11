@@ -10,11 +10,14 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
+#include <c10/core/DeviceType.h>
+#include <c10d/Backend.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/Work.hpp>
 #include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
+#include <c10d/DummyProcessGroupBackend.hpp>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -22,9 +25,6 @@
 // PLEASE DO NOT ADD ANY DEPENDENCIES.
 // SEE RFC: https://github.com/pytorch/pytorch/issues/39662
 // *************************************************************************
-
-constexpr auto kProcessGroupDefaultTimeout =
-    std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
@@ -78,6 +78,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
+  void setBackend(c10::DeviceType device_type, const c10::intrusive_ptr<Backend>& backend) {
+    backends_[device_type] = backend;
+  }
+
+  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType device_type) const {
+    return backends_.at(device_type);
+  }
+
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
@@ -91,6 +99,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
     // no-op for backends that have not implemented endCoalescing
   }
+
+  // TODO: [dispatch collectives] Dummy implementation for prototype only.
+  c10::intrusive_ptr<Work> _DummyBroadcast(
+      std::vector<at::Tensor>& tensors,
+      const BroadcastOptions& opts = BroadcastOptions());
 
   // Consider using ops in Ops.hpp instead of the below, which route things
   // to the dispatcher.
@@ -329,6 +342,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+
+  // Backend classes for this ProcessGroup
+  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> backends_;
 };
 
 } // namespace c10d

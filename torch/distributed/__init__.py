@@ -64,6 +64,8 @@ if is_available():
         _reduce_scatter_base,
         _create_process_group_wrapper,
         _rank_not_in_group,
+        # [TODO] This is only exported for prototyping and to access the group
+        _get_default_group,
     )
 
     from .rendezvous import (

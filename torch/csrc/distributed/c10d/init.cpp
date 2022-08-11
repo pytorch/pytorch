@@ -989,6 +989,19 @@ Arguments:
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
 
+          // TODO: [dispatch collectives] Dummy implementation for prototype
+          // only.
+          .def(
+              "_dummy_broadcast",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 const ::c10d::BroadcastOptions& opts) {
+                self->_DummyBroadcast(const_cast<std::vector<at::Tensor>&>(tensors), opts);
+              },
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::BroadcastOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
