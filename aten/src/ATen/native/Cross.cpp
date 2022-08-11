@@ -27,7 +27,7 @@ namespace native {
 
 DEFINE_DISPATCH(cross_stub);
 
-int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, IntArrayRef sizes) {
+int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, SymIntArrayRef sizes) {
   // If dimension is not given, it defaults to the first dimension found with the size 3.
   // Note that this behaviour might be unexpected.
   // _default_cross_dim is called internally inside the cross implementation to calculate
@@ -45,14 +45,15 @@ int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, IntArrayRef 
 }
 
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  auto dim = _default_cross_dim(dimension, input.sizes());
+  auto dim = _default_cross_dim(dimension, input.sym_sizes());
   return at::linalg_cross(input, other, dim);
 }
 
 Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension, Tensor & out) {
-  auto dim = _default_cross_dim(dimension, input.sizes());
+  auto dim = _default_cross_dim(dimension, input.sym_sizes());
   return at::linalg_cross_out(out, input, other, dim);
 }
+
 
 TORCH_IMPL_FUNC(linalg_cross_out)
 (const Tensor & input, const Tensor & other, const int64_t dim, const Tensor & out) {

@@ -35,7 +35,7 @@ void LayerNormKernelImplInternal(
     Tensor* rstd) {
   using T_ACC = vec::vec_scalar_t<T>;
   using Vec = vec::Vectorized<T_ACC>;
-  DCHECK_EQ(X.numel(), M * N);
+  TORCH_DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
   const T* X_data = X.data_ptr<T>();
@@ -53,9 +53,9 @@ void LayerNormKernelImplInternal(
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T mean_val;
-      T rstd_val;
-      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
+      T_ACC mean_val;
+      T_ACC rstd_val;
+      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T_ACC scale = rstd_val;
       const T_ACC bias = -rstd_val * mean_val;
@@ -117,10 +117,10 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dbeta) {
   using T_ACC = vec::vec_scalar_t<T>;
   using Vec = vec::Vectorized<T_ACC>;
-  DCHECK_EQ(dY.numel(), M * N);
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK_EQ(mean.numel(), M);
-  DCHECK_EQ(rstd.numel(), M);
+  TORCH_DCHECK_EQ(dY.numel(), M * N);
+  TORCH_DCHECK_EQ(X.numel(), M * N);
+  TORCH_DCHECK_EQ(mean.numel(), M);
+  TORCH_DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   const T* dY_data = dY.template data_ptr<T>();
   const T* X_data = X.template data_ptr<T>();
