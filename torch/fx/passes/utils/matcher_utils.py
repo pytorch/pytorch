@@ -11,20 +11,20 @@ __all__ = ['SubgraphMatcher']
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class _InternalMatch():
-    # Node from which the match was found
-    anchor: Node
+class InternalMatch():
+    # Nodes from which the match was found
+    anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
     nodes_map: Dict[Node, Node] = field(default_factory=dict)
 
     # nodes in target graph that are matched placeholder in pattern
     placeholder_nodes: List[Node] = field(default_factory=list)
 
-    # sink nodes in matched subgraph returned by output
+    # nodes in matched subgraph returned by output
     returning_nodes: List[Node] = field(default_factory=list)
 
     def __copy__(self):
-        return _InternalMatch(anchor=self.anchor, nodes_map=self.nodes_map.copy(),
+        return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
                               placeholder_nodes=self.placeholder_nodes.copy(),
                               returning_nodes=self.returning_nodes.copy())
 
@@ -33,17 +33,14 @@ class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 fully_contained: bool = True,
                  remove_overlapping_matches: bool = True) -> None:
         """
         Args:
-            pattern: the targeted matching pattern, represented in fx.Graph
+            pattern: the targeted matching pattern, represented in fx.Graph.
             match_output: If True, output node in the pattern graph will be treated as a part of the targeted pattern.
                 If False, output node is ignored during match.
             match_placeholder: If True, placeholder node in the pattern graph will be treated as a part of
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
-            fully_contained: If True, nodes (except placeholder and output_link_nodes ) can only be consumed
-                by nodes within th pattern.
             remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
                 will be returned.
         """
@@ -51,7 +48,6 @@ class SubgraphMatcher:
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
-        self.fully_contained = fully_contained
         self.remove_overlapping_matches = remove_overlapping_matches
 
         if len(pattern.nodes) == 0:
@@ -110,8 +106,8 @@ class SubgraphMatcher:
                     return False
         return True
 
-    def _remove_overlapping_matches(self, matches: List[_InternalMatch]) -> List[_InternalMatch]:
-        non_overlapping_matches: List[_InternalMatch] = list()
+    def _remove_overlapping_matches(self, matches: List[InternalMatch]) -> List[InternalMatch]:
+        non_overlapping_matches: List[InternalMatch] = list()
         nodes_matched: Set[Node] = set()
 
         for match in matches:
@@ -128,7 +124,7 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
-    def _match_nodes(self, pn: Node, gn: Node, match: _InternalMatch) -> bool:
+    def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -160,8 +156,13 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> List[_InternalMatch]:
+    def match(self, graph: Graph) -> List[InternalMatch]:
         """
+        Returns:
+            The matched subgraphs.
+            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            and nodes returned by output) can only be consumed by nodes within the matched subgraph.
+
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
 
         1. We first identify all the anchor nodes in the pattern graph. The anchor nodes
@@ -186,6 +187,10 @@ class SubgraphMatcher:
         Notice: graph traversal must be done in the reverser order because a tensor can have multiple
         consumers, but can only have a single producer. Only with reverser order, we can we jointly
         traverse the pattern and target graph in a deterministic path.
+
+        Warning: In theory, this backtracking algorithm have an **exponential** time complexity. However,
+        in practice, it's unlikely to blow up.
+
         """
 
         # find candidate nodes to match with pattern anchors
@@ -195,7 +200,7 @@ class SubgraphMatcher:
                 if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
-        matches: List[_InternalMatch] = []
+        matches: List[InternalMatch] = []
 
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
@@ -216,13 +221,11 @@ class SubgraphMatcher:
                     # revert to saved_match before matching with current anchor
                     match = copy.copy(saved_match)
 
-        # TODO: Match's anchor is set to the first of self.pattern_anchors[0] for now,
-        # need to update the sematics of this field
-        match = _InternalMatch(anchor=self.pattern_anchors[0])
+        match = InternalMatch(anchors=self.pattern_anchors)
         backtracking(0, match)
 
-        if self.fully_contained:
-            matches = [match for match in matches if self._is_contained(match.nodes_map)]
+        # filter out the matches where the subgraph is not fully_contained
+        matches = [match for match in matches if self._is_contained(match.nodes_map)]
 
         if self.remove_overlapping_matches:
             matches = self._remove_overlapping_matches(matches)
