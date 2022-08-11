@@ -93,7 +93,9 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
               << " =======\n\n"
               << code << "\n======================================\n\n";
-  } else if (isDebugDumpEnabled(DebugDumpOption::CudaToFile)) {
+  }
+  if (isDebugDumpEnabled(DebugDumpOption::CudaToFile) ||
+      isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
     std::stringstream file_name;
     file_name << "__tmp_kernel" << fusion_id_ << ".cu";
     std::cout << "PRINTING: " << file_name.str() << std::endl;
