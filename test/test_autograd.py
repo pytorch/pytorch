@@ -766,6 +766,37 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad, (x + 1) * 4)
 
+    def test_grad_fn_prehooks(self):
+        # TODO: test more cases, i.e. return None
+        a = torch.tensor([1.], requires_grad=True)
+        b = a * 2
+
+        post_counter = [0]
+        pre_counter = [0]
+
+        def posthook(grad_input, grad_output):
+            self.assertEqual(pre_counter[0], 3)
+            self.assertTrue(torch.allclose(grad_output[0], torch.ones(1) * 8))
+            self.assertTrue(torch.allclose(grad_input[0], torch.ones(1) * 16))
+            post_counter[0] += 1
+            return grad_input
+
+        def prehook(grad_output):
+            pre_counter[0] += 1
+            return (grad_output[0] * 2,)
+
+        # register posthook x 2
+        b.grad_fn.register_hook(posthook)
+        b.grad_fn.register_hook(posthook)
+        # register prehook x 3
+        b.grad_fn.register_prehook(prehook)
+        b.grad_fn.register_prehook(prehook)
+        b.grad_fn.register_prehook(prehook)
+
+        b.sum().backward()
+
+        self.assertEqual(post_counter[0], 2)
+
     def test_hooks_cpp(self):
         # Tests hooks for autograd function implemented in C++
         bn = torch.nn.BatchNorm1d(5, affine=False)
