@@ -1473,6 +1473,7 @@ class DistributedDataParallel(Module, Joinable):
         self.register_comm_hook(None, opt_hook)
 
         if optim.discard_grad:
+            print(f'======call reducer._set_discard_grad(True)')
             self.reducer._set_discard_grad(True)
     
 
