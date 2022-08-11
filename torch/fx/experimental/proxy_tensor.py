@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 import contextlib
 import functools
-from typing import Any, Dict, Optional, Tuple, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
@@ -94,6 +94,10 @@ def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
                 return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
+        if isinstance(e, list):
+            # example use case: allreduce_ returns ([tensor], work)
+            with no_dispatch():
+                return [wrap_with_proxy(ee, proxy[idx], get_constant(idx)) for idx, ee in enumerate(e)]
         else:
             return e
 
@@ -164,8 +168,16 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        args[0].proxy = proxy_res
-        proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+        if isinstance(args[0], List):
+            # e.g., c10d::allreduce_ returns a list of tensors as the first element
+            # in the output.
+            for i, a in enumerate(args[0]):
+                a.proxy = proxy_res[0][i]
+                proxy_res[0][i].node.meta['tensor_meta'] = _extract_tensor_metadata(a)
+        else:
+            args[0].proxy = proxy_res
+            proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+
     inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
 
     # Needed to sync up metadata for in-place operators that modify metadata
@@ -436,6 +448,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            flat_args = pytree.tree_flatten((args, kwargs))[0]
+            handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
+
+            # If there are any tensor subclasses, we need to handle those tensor subclasses first
+            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+                return NotImplemented
+
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
