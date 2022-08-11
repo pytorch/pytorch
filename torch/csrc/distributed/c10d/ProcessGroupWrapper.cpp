@@ -421,11 +421,10 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::barrier(
   return pg_->barrier(opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupWrapper::
-    _reduce_scatter_base(
-        at::Tensor& outputBuffer,
-        at::Tensor& inputBuffer,
-        const ReduceScatterOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
+    at::Tensor& outputBuffer,
+    at::Tensor& inputBuffer,
+    const ReduceScatterOptions& opts) {
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
   return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);

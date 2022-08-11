@@ -1317,8 +1317,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
       "ucc:alltoall");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupUCC::barrier(const BarrierOptions& opts) {
   c10::Device device = c10::Device(c10::DeviceType::CPU);
 #ifdef USE_CUDA
   auto numGPUs = c10::cuda::device_count();
