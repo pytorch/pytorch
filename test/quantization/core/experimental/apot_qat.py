@@ -22,7 +22,7 @@ model_to_quantize = copy.deepcopy(float_model)
 model_to_quantize.eval()
 
 """
-Prepare model PTQ for specified qconfig for torch.nn.Linear
+Prepare model QAT for specified qconfig for torch.nn.Linear
 """
 def prepare_qat_linear(qconfig):
     qconfig_dict = {"object_type": [(torch.nn.Linear, qconfig)]}
@@ -36,7 +36,7 @@ Prepare model with uniform activation, uniform weight
 b=8, k=2
 """
 
-prepared_model = prepare_ptq_linear(uniform_qconfig_8bit)
+prepared_model = prepare_qat_linear(uniform_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #1 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
@@ -46,7 +46,7 @@ Prepare model with uniform activation, uniform weight
 b=4, k=2
 """
 
-prepared_model = prepare_ptq_linear(uniform_qconfig_4bit)
+prepared_model = prepare_qat_linear(uniform_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #1 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
@@ -56,7 +56,7 @@ Prepare model with uniform activation, APoT weight
 (b=8, k=2)
 """
 
-prepared_model = prepare_ptq_linear(apot_weights_qconfig_8bit)
+prepared_model = prepare_qat_linear(apot_weights_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #2 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
@@ -66,7 +66,7 @@ Prepare model with uniform activation, APoT weight
 (b=4, k=2)
 """
 
-prepared_model = prepare_ptq_linear(apot_weights_qconfig_4bit)
+prepared_model = prepare_qat_linear(apot_weights_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #2 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
@@ -77,7 +77,7 @@ Prepare model with APoT activation and weight
 (b=8, k=2)
 """
 
-prepared_model = prepare_ptq_linear(apot_qconfig_8bit)
+prepared_model = prepare_qat_linear(apot_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #3 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
@@ -87,7 +87,7 @@ Prepare model with APoT activation and weight
 (b=4, k=2)
 """
 
-prepared_model = prepare_ptq_linear(apot_qconfig_4bit)
+prepared_model = prepare_qat_linear(apot_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
 print("Model #3 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
