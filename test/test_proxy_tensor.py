@@ -1072,6 +1072,8 @@ symbolic_tensor_failures = {
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
+    xfail('triu_indices', ''),  # NotImplementedError: Could not run 'aten::masked_select' with arguments from the 'Meta' backend.
+    xfail('tril_indices', ''),  # NotImplementedError: Could not run 'aten::masked_select' with arguments from the 'Meta' backend.
 }
 
 def _test_make_fx_helper(self, device, dtype, op, tracing_mode):

@@ -3644,8 +3644,8 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     h, w = a.shape[-2:]
     return a * (
         (
-            torch.arange(h, device=a.device).unsqueeze(-2)
-            - torch.arange(w, device=a.device).unsqueeze(-1)
+            torch.arange(w, device=a.device).unsqueeze(-2)
+            - torch.arange(h, device=a.device).unsqueeze(-1)
         )
         >= diagonal
     )
@@ -3660,8 +3660,8 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     h, w = a.shape[-2:]
     return a * (
         (
-            torch.arange(h, device=a.device).unsqueeze(-2)
-            - torch.arange(w, device=a.device).unsqueeze(-1)
+            torch.arange(w, device=a.device).unsqueeze(-2)
+            - torch.arange(h, device=a.device).unsqueeze(-1)
         )
         <= diagonal
     )
