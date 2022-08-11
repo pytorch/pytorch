@@ -4961,6 +4961,28 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x0, x1, x2, check_stride=True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_disable_const_chunk_propagation_for_normalization(self):
+        device = "cuda"
+        x0 = torch.randn(10, 12, device=device)
+        x1 = torch.randn(10, 4, device=device)
+        w0 = torch.randn(12, device=device)
+        w1 = torch.randn(4, device=device)
+
+        def t(x, y, w0, w1):
+            ih = torch.layer_norm(x, (12,), w0)
+            i_r, i_z, i_n = ih.chunk(3, dim=1)
+            i_n = torch.layer_norm(i_n, (4,), w1)
+            r = torch.sigmoid(i_r)
+            n = torch.tanh(i_n + r * i_z)
+            h = n + r * y
+            return h
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x0, x1, w0, w1, check_stride=True)
+
 
 class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):

@@ -4,6 +4,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -571,6 +572,7 @@ struct CudaGraphFuser {
         [&](Value* producer_for_chunk) {
           return fuser::cuda::isFusibleCudaFusionGroup(
                      consumer, producer_for_chunk->node()) &&
+              isElementWiseNode(consumer) &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
