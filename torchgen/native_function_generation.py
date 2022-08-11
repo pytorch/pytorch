@@ -257,6 +257,7 @@ def generate_function(
             cpp_no_default_args=set(),
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
+            has_composite_implicit_autograd_nested_tensor_kernel=False,
             has_composite_explicit_autograd_kernel=True,
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
@@ -311,6 +312,9 @@ def add_generated_native_functions(
             # on CompositeImplicitAutograd operators (since we let them decompose).
             are_composite_implicit = all(
                 f.has_composite_implicit_autograd_kernel for f in d.values()
+            ) \
+            or all(
+                f.has_composite_implicit_autograd_nested_tensor_kernel for f in d.values()
             )
             if are_manual or has_view_ops or are_composite_implicit:
                 continue

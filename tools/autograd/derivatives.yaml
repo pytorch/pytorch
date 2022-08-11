@@ -1350,10 +1350,6 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
-  self: _reshape_nested_backward(self, grad)
-  result: auto_linear
-
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
@@ -1726,8 +1722,13 @@
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
-  self: grad.reshape(self.sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.reshape(self.sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.reshape_as(self)
+      result: auto_linear
 
 - name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
   # TODO: add proper double backward for view.SymInt
