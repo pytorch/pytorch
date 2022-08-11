@@ -1108,24 +1108,26 @@ Tensor math_addr(const Tensor& self,
                  const Scalar& beta, const Scalar& alpha) {
   // when beta==0, values in self should be ignored,
   // nans and infs in self should not propagate.
+  Tensor out;
   if (beta.toComplexDouble() == 0.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return at::outer(vec1, vec2);
+      out = at::outer(vec1, vec2);
+    } else {
+      out = alpha * at::outer(vec1, vec2);
     }
-    return alpha * at::outer(vec1, vec2);
-  }
-
-  if (beta.toComplexDouble() == 1.0) {
+  } else if (beta.toComplexDouble() == 1.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return self + at::outer(vec1, vec2);
+      out = self + at::outer(vec1, vec2);
+    } else {
+      out = self + alpha * at::outer(vec1, vec2);
     }
-    return self + alpha * at::outer(vec1, vec2);
+  } else if (alpha.toComplexDouble() == 1.0) {
+    out = beta * self + at::outer(vec1, vec2);
+  } else {
+    out = beta * self + alpha * at::outer(vec1, vec2);
   }
-
-  if (alpha.toComplexDouble() == 1.0) {
-    return beta * self + at::outer(vec1, vec2);
-  }
-  return beta * self + alpha * at::outer(vec1, vec2);
+  auto result_type = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  return out.to(c10::TensorOptions().dtype(result_type));
 }
 
 Tensor& math_addr_out(const Tensor& self,
