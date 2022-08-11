@@ -34,3 +34,15 @@ def sync_multi(tensors, devices):
 def get_tensor_id(tensor):
     """Return a unique id of the lazy tensor maintained by LTC"""
     return torch._C._lazy._get_tensor_id(tensor)
+
+
+def to_cpu(tensors, devices=["lazy"]):
+    from .visit import flatten_tensors, visit_tensors
+
+    flattened = flatten_tensors(tensors)
+    sync_multi(flattened, devices)
+    return visit_tensors(tensors, lambda t, s: t.to("cpu"))
+
+
+def save(tensors, *args, **kwargs):
+    torch.save(to_cpu(tensors), *args, **kwargs)
