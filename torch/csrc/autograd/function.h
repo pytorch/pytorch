@@ -371,14 +371,16 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual std::string name() const;
 
   /// The difference between functions `should_compute_output` and
-  /// `task_should_compute_output`: The first one only considers the links in
-  /// the actual graph, while the second (that should only be called during the
-  /// backward/grad pass) also takes into account the current running graph task
-  /// to trim even more edges that are not needed. Specifically, the autograd
-  /// engine trims unnecessary nodes when running .grad(), or when inputs arg is
-  /// specified for .backward(). However, for an untrimmed node left on the
-  /// graph, we have to pass this graph task information for it to decide
-  /// whether a specific edge could be trimmed to save some computations.
+  /// `task_should_compute_output`:
+  /// - `should_compute_output` should only be used during graph construction
+  /// and takes into account only requires_grad information
+  /// - `task_should_compute_output` should only be called during the backward
+  /// pass (unless called directly through grad_fn) and takes into account the
+  /// current graph task.  Specifically, the autograd engine trims unnecessary
+  /// edges when `inputs` are specified, and during backward untrimmed nodes
+  /// left on the graph can/should check `task_should_compute_output` to see if
+  /// any outgoing edges have been trimmed by the engine. If that is the case,
+  /// gradient computation wrt those edges can be omitted.
   ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
