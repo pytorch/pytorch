@@ -4144,9 +4144,9 @@ class TestVisionTracing(JitTestCase):
     }
 
     @classmethod
-    def generate_test_fn(cls, name, model_fn, x, kwargs):
+    def generate_test_fn(cls, name, x, kwargs):
         def run_test(self):
-            model = model_fn(**kwargs)
+            model = torchvision_models.get_model(name, **kwargs)
             model = model.eval()
             if name in self.UNTRACEABLE_MODELS:
                 err, exc = self.UNTRACEABLE_MODELS[name]
@@ -4172,43 +4172,39 @@ class TestVisionTracing(JitTestCase):
 
     @classmethod
     def generate_classification_tests(cls):
-        for k, v in torchvision_models.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_" and k != 'get_weight':
-                test_name = 'test_torchvision_models_' + k
-                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
-                kwargs = dict(num_classes=50)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models):
+            test_name = 'test_torchvision_models_' + k
+            x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+            kwargs = dict(num_classes=50)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_segmentation_tests(cls):
-        for k, v in torchvision_models.segmentation.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_segmentation_' + k
-                x = torch.rand(1, 3, 32, 32)
-                kwargs = dict(num_classes=10, pretrained_backbone=False)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.segmentation):
+            test_name = 'test_torchvision_models_segmentation_' + k
+            x = torch.rand(1, 3, 32, 32)
+            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_detection_tests(cls):
-        for k, v in torchvision_models.detection.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_detection_' + k
-                x = [torch.rand(3, 300, 300)]
-                kwargs = dict(num_classes=10, pretrained_backbone=False)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.detection):
+            test_name = 'test_torchvision_models_detection_' + k
+            x = [torch.rand(3, 300, 300)]
+            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_video_tests(cls):
-        for k, v in torchvision_models.video.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_video_' + k
-                x = torch.rand(1, 3, 4, 112, 112) if k != 'mvit_v1_b' else torch.rand(1, 3, 16, 224, 224)
-                kwargs = dict(num_classes=50)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.video):
+            test_name = 'test_torchvision_models_video_' + k
+            x = torch.rand(1, 3, 4, 112, 112) if k != 'mvit_v1_b' else torch.rand(1, 3, 16, 224, 224)
+            kwargs = dict(num_classes=50)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_tests(cls):
