@@ -407,7 +407,6 @@ TORCH_IMPL_FUNC(norm_out_mps)
     "norm_out_mps: reduction dim must be in the range of input shape")
   }
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "norm_out_mps";
 
   using CachedGraph = native_mps::MPSUnaryCachedGraph;
 

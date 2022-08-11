@@ -243,7 +243,6 @@ def _get_view_inverse_node_usages(later_node_usages: Set[Node], self_aliases: Se
     return view_inverse_nodes
 
 
-@compatibility(is_backward_compatible=True)
 def reinplace(gm, *sample_args):
     """
     Given an fx.GraphModule, modifies it to perform "reinplacing",
