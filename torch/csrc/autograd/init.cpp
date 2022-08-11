@@ -336,6 +336,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -462,6 +464,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
+
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
