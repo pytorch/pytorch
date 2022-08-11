@@ -4548,9 +4548,6 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: softmax
-    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4575,6 +4572,8 @@
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   structured_delegate: _softmax_backward_data.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_softmax_backward
 
 - func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -12272,6 +12271,30 @@
   python_module: nn
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
+  dispatch:
+    # the NestedTensor keys are necessary because NestedTensor has been removed
+    # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch_fullcoverage
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd, NestedTensorCPU, NestedTensorCUDA: _test_autograd_multiple_dispatch_ntonly
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch_view(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: _test_autograd_multiple_dispatch_view
+
+# Note: this function is only for testing.
+- func: _test_autograd_multiple_dispatch_view_copy(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _test_autograd_multiple_dispatch_view_copy
+  tags: view_copy
 
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
