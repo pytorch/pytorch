@@ -260,7 +260,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     // Random number generator (optional)
     if (kernel_summary.max_rng_offsets >= 0) {
-      indent() << "auto offset = philox_args.captured_ ?\n";
+      indent() << "auto philox_offset = philox_args.captured_ ?\n";
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
       indent() << "  philox_args.offset_.val;\n";
@@ -290,18 +290,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                << ") extern __shared__ char array[];\n";
 
       if (has_dynamic_smem) {
-        indent() << "unsigned offset = 0;\n";
+        indent() << "unsigned smem_offset = 0;\n";
       }
 
       if (has_reductions || has_parallel_welford) {
         indent() << "void* shared_mem = array;\n";
         if (has_dynamic_smem) {
           if (has_parallel_welford) {
-            indent() << "offset += "
+            indent() << "smem_offset += "
                      << "((blockDim.x * blockDim.y * blockDim.z) * 3 * sizeof("
                      << kernel_summary.largest_smem_data_type << "));\n";
           } else {
-            indent() << "offset += "
+            indent() << "smem_offset += "
                      << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
                      << kernel_summary.largest_smem_data_type << "));\n";
           }
@@ -710,19 +710,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
         auto index = genTensorIndex(uop->in()->as<kir::TensorIndex>());
         int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
-        indent() << "nvfuser_index_t subseq" << uop->name() << " = (" << index
-                 << ") / " << multiple << ";\n";
-        indent() << "nvfuser_index_t component" << uop->name() << " = ("
+        indent() << "nvfuser_index_t rng_subseq" << uop->name() << " = ("
+                 << index << ") / " << multiple << ";\n";
+        indent() << "nvfuser_index_t rng_component" << uop->name() << " = ("
                  << index << ") % " << multiple << ";\n";
-        indent() << "nvfuser_index_t offset" << uop->name() << " = "
+        indent() << "nvfuser_index_t rng_offset" << uop->name() << " = "
                  << uop->getRNGOffset() << ";\n";
-        indent() << "if (rng_subseq != subseq" << uop->name()
-                 << " || rng_offset != offset" << uop->name() << ") {\n";
-        indent() << "  rng_result = philox(philox_args.seed_, subseq"
-                 << uop->name() << ", offset / 4 + offset" << uop->name()
-                 << ");\n";
-        indent() << "  rng_subseq = subseq" << uop->name() << ";\n";
-        indent() << "  rng_offset = offset" << uop->name() << ";\n";
+        indent() << "if (rng_subseq != rng_subseq" << uop->name()
+                 << " || rng_offset != rng_offset" << uop->name() << ") {\n";
+        indent() << "  rng_result = philox(philox_args.seed_, rng_subseq"
+                 << uop->name() << ", philox_offset / 4 + rng_offset"
+                 << uop->name() << ");\n";
+        indent() << "  rng_subseq = rng_subseq" << uop->name() << ";\n";
+        indent() << "  rng_offset = rng_offset" << uop->name() << ";\n";
         indent() << "}\n";
       }
 
@@ -764,7 +764,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
       code_ << "(";
       if (op_type == UnaryOpType::RandLike) {
-        code_ << "rng_result, component" << uop->name();
+        code_ << "rng_result, rng_component" << uop->name();
       } else {
         code_ << gen(uop->in());
       }
@@ -2329,15 +2329,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           break;
         case MemoryType::Shared:
           // Align Offset Position
-          indent() << "offset = alignBufferSize(offset, "
+          indent() << "smem_offset = alignBufferSize(smem_offset, "
                    // Always align to 128b / 16B
                    << 16 << ");\n";
           // Shared Memory Pointer
           indent() << buffer_dtype << "* " << varName(tv)
                    << " = reinterpret_cast<" << buffer_dtype << "*>"
-                   << "(array + offset);\n";
+                   << "(array + smem_offset);\n";
           // Increment Offset Position
-          indent() << "offset += (" << genInline(size) << " * sizeof("
+          indent() << "smem_offset += (" << genInline(size) << " * sizeof("
                    << buffer_dtype << "));\n";
           break;
         case MemoryType::Local: {
