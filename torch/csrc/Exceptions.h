@@ -52,58 +52,34 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   try {                                               \
     torch::PyWarningHandler __enforce_warning_buffer; \
     try {
+#define _CATCH_GENERIC_ERROR(ErrorType, PythonErrorType, retstmnt) \
+  catch (const c10::ErrorType& e) {                                \
+    auto msg = torch::get_cpp_stacktraces_enabled()                \
+        ? e.what()                                                 \
+        : e.what_without_backtrace();                              \
+    PyErr_SetString(PythonErrorType, torch::processErrorMsg(msg)); \
+    retstmnt;                                                      \
+  }
+
 // Only catch torch-specific exceptions
-#define CATCH_CORE_ERRORS(retstmnt)                                          \
-  catch (python_error & e) {                                                 \
-    e.restore();                                                             \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::IndexError& e) {                                         \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg));          \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::ValueError& e) {                                         \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg));          \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::TypeError& e) {                                          \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg));           \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::NotImplementedError& e) {                                \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::LinAlgError& e) {                                        \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));  \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (const c10::Error& e) {                                              \
-    auto msg = torch::get_cpp_stacktraces_enabled()                          \
-        ? e.what()                                                           \
-        : e.what_without_backtrace();                                        \
-    PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg));        \
-    retstmnt;                                                                \
-  }                                                                          \
-  catch (torch::PyTorchError & e) {                                          \
-    auto msg = torch::processErrorMsg(e.what());                             \
-    PyErr_SetString(e.python_type(), msg);                                   \
-    retstmnt;                                                                \
+#define CATCH_CORE_ERRORS(retstmnt)                                     \
+  catch (python_error & e) {                                            \
+    e.restore();                                                        \
+    retstmnt;                                                           \
+  }                                                                     \
+  _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
+  _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
+  _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
+  _CATCH_GENERIC_ERROR(                                                 \
+      NotImplementedError, PyExc_NotImplementedError, retstmnt)         \
+  _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
+  _CATCH_GENERIC_ERROR(                                                 \
+      OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
+  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
+  catch (torch::PyTorchError & e) {                                     \
+    auto msg = torch::processErrorMsg(e.what());                        \
+    PyErr_SetString(e.python_type(), msg);                              \
+    retstmnt;                                                           \
   }
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
@@ -169,7 +145,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-extern PyObject *THPException_FatalError, *THPException_LinAlgError;
+extern PyObject *THPException_FatalError, *THPException_LinAlgError,
+    *THPException_OutOfMemoryError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
