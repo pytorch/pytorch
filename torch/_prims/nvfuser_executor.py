@@ -14,7 +14,7 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 if torch.cuda.is_available():
     from torch._C._nvfuser import (  # type: ignore[import]
         DataType,
-        Fusion,
+        FusionManager,
         FusionDefinition,
     )
 else:
@@ -66,8 +66,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 f"Node {node} with target {node.target} does not support nvfuser"
             )
 
-    fusion = Fusion()
-    with FusionDefinition(fusion) as fd:
+    fusion_manger = FusionManager.get()
+    with FusionDefinition(fusion_manager) as fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):
@@ -99,7 +99,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         for o in flat_out:
             fd.add_output(o)
 
-    return fusion, unflatten_spec
+    return fusion_manager, unflatten_spec
 
 
 def nvfuser_execute(gm: GraphModule, *args):
@@ -113,7 +113,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     # Construction of the fusion is expensive and cached based on the GraphModule
     # and symbolic nvFuser args.
     nv_template_args = to_nvfuser_template_args(flat_args)
-    fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+    fusion_manager, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
     # Inputs to fusion.execute correspond to the same template/symbolic inputs
     # marked with `define_tensor/scalar`
@@ -122,7 +122,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     )
 
     return tree_unflatten(
-        fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
+        fusion_manager.execute(concrete_fusion_inputs),  # type: ignore[has-type]
         unflatten_spec,  # type: ignore[has-type]
     )
 
