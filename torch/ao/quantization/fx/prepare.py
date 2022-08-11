@@ -157,14 +157,14 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
 
 
 def get_weight_and_bias_index_dicts(backend_config):
+    index_dicts = {
+        "weight": {},
+        "bias": {},
+        "input": {}  # not used right now
+    }
     pattern_to_input_type_to_index = get_pattern_to_input_type_to_index(backend_config)
     for pattern, input_type_to_index in pattern_to_input_type_to_index.items():
         for input_type, index in input_type_to_index.items():
-            index_dicts = {
-                "weight": {},
-                "bias": {},
-                "input": {}  # not used right now
-            }
             assert input_type in index_dicts.keys(), \
                 f"input type must be one of {index_dicts.keys()} but got: {input_type}"
             index_dict = index_dicts[input_type]
