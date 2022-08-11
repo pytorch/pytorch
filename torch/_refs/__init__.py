@@ -2117,8 +2117,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 @out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = tuple(
-        x if x.ndim > 1 else x.reshape((x.numel(), 1))
-        for x in tensors
+        x if x.ndim > 1 else x.reshape((x.numel(), 1)) for x in tensors
     )
     return cat(aligned_tensors, 1)
 
@@ -3619,7 +3618,7 @@ def eye(
     layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
-    requires_grad: bool = False,
+    requires_grad: bool = False,  # TODO: unused
 ) -> TensorLikeType:
     """
     Reference implementation of torch.eye
@@ -3639,9 +3638,12 @@ def eye(
 
     cond = range_n.unsqueeze(-1) == range_m
     # TODO: pin_memory=pin_memory, layout=layout
-    one = torch.ones(1, dtype=dtype, device=device, requires_grad=requires_grad)
-    zero = torch.zeros(1, dtype=dtype, device=device, requires_grad=requires_grad)
+    one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
+    zero = torch.zeros(1, dtype=dtype, device=device, requires_grad=False)
     result = torch.where(cond, one, zero)
+    # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
+    # return a leaf tensor.
+    # result.requires_grad_(requires_grad)
 
     return result
 
