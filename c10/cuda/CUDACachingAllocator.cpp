@@ -482,6 +482,27 @@ class CachingAllocatorConfig {
   }
 };
 
+// records allocate/free events
+class MemoryEventTracker {
+ private:
+  mutable std::mutex mutex;
+
+ public:
+  std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
+  void append_alloc_free_event(intptr_t ptr, int size, int device) {
+    std::lock_guard<std::mutex> lock(mutex);
+    alloc_free_events[device].push_back(AllocFreeEvent{
+        ptr, // ptr
+        size, // size: of allocation in bytes
+    });
+  }
+  std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() const {
+    std::lock_guard<std::mutex> lock(mutex);
+    return alloc_free_events;
+  }
+};
+MemoryEventTracker memory_tracker;
+
 class DeviceCachingAllocator {
  private:
   // lock around all operations
@@ -1056,6 +1077,11 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
 
+    memory_tracker.append_alloc_free_event(
+        reinterpret_cast<intptr_t>(block->ptr), // ptr
+        -block->size, // size: of allocation in bytes, negative for free
+        block->device);
+
     size_t original_block_size = block->size;
 
     auto& pool = *block->pool;
@@ -1597,6 +1623,7 @@ class THCCachingAllocator {
   void init(int device_count) {
     const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
+      memory_tracker.alloc_free_events.resize(device_count);
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
         device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
@@ -1611,7 +1638,15 @@ class THCCachingAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
+    // if allocation fails we still record the event with a nullptr. ptr is
+    // modified if allocation succeeds
+    memory_tracker.append_alloc_free_event(
+        reinterpret_cast<intptr_t>(nullptr), // ptr
+        size, // size: of allocation in bytes
+        device);
     Block* block = device_allocator[device]->malloc(device, size, stream);
+    memory_tracker.alloc_free_events[device].back().ptr =
+        reinterpret_cast<intptr_t>(block->ptr);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
   }
@@ -1903,6 +1938,10 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 
 void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
+}
+
+std::vector<std::vector<AllocFreeEvent>> getAllocFreeEvents() {
+  return memory_tracker.get_alloc_free_events();
 }
 
 } // namespace CUDACachingAllocator

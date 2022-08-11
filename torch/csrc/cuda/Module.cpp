@@ -646,6 +646,22 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
+static void bindGetAllocFreeEvents(PyObject* module) {
+  // Add method to torch.cuda
+  auto m = py::handle(module).cast<py::module>();
+  pybind11::class_<c10::cuda::CUDACachingAllocator::AllocFreeEvent>(
+      m, "AllocFreeEvent")
+      .def(pybind11::init<>())
+      .def_readwrite(
+          "ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
+      .def_readwrite(
+          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size);
+  m.def(
+      "_get_alloc_free_events",
+      &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,
+      "Get allocation/free sequence");
+}
+
 // Callback for python part. Used for additional initialization of python
 // classes
 static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
@@ -688,6 +704,7 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);
+  bindGetAllocFreeEvents(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
