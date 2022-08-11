@@ -15,9 +15,6 @@ namespace jit {
 
 namespace mkldnn {
 
-static constexpr float kMin = -std::numeric_limits<float>::infinity();
-static constexpr float kMax = std::numeric_limits<float>::infinity();
-
 const std::vector<std::string> zero_scalar_operand =
     std::vector<std::string>({});
 const std::vector<std::string> one_scalar_operand =
