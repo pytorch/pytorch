@@ -466,6 +466,7 @@ NVFUSER_DEFINE_UNARY_OP(relu, Relu)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
+NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
 
 Val* randlike(Val* v) {
@@ -1428,12 +1429,6 @@ WelfordResult::WelfordResult(
     : avg(in_avg), var_sum(in_var_sum), n(in_n) {
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(var_sum->definition()));
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(n->definition()));
-}
-
-WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
-  auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  auto rf_tvs = o_tv->rFactor(axes, std::vector<TensorView*>{avg, var_sum, n});
-  return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
 }
 
 // COMPOUND OPERATIONS
