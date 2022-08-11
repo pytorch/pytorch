@@ -156,15 +156,13 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
-    print("Running cond dense", pred)
-    # print("Pred?", pred.code)
-    # if pred(tuple()):
-    if pred.elem:
-        print("True!")
+    # from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+    # with disable_proxy_modes_tracing():
+    if pred:
+        print("Operands:", operands)
         x = true_fn(*operands)
         return x
     else:
-        print("False!")
         x = false_fn(*operands)
         return x
 
@@ -192,13 +190,11 @@ def fallthrough_fn(operator, dispatch_key):
 
 def python_fallback(op):
     def inner(*args, **kwargs):
-        print("Input:", args)
         # Get all tensors. For each tensor, try their torch_dispatch
         # until one returns something other than NotImplemented
         def extract():
             tensors = get_tensors(args, kwargs)
             for tensor in tensors:
-                # print("T:", tensor)
                 ret = tensor.__torch_dispatch__(op, None, args, kwargs)
                 if ret is NotImplemented:
                     continue
@@ -207,7 +203,8 @@ def python_fallback(op):
 
         mode = torch._C._get_torch_dispatch_mode()
         if mode is not None:
-            with mode.restore():
+            # with mode.restore():
+            with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
                 return extract()
         else:
             return cond_dense(*args)
@@ -228,6 +225,7 @@ cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 """
 Test case #1: basic
 """
+print("EXAMPLE 1")
 
 def true_fn(x):
     return x.sin()
@@ -236,17 +234,11 @@ def false_fn(x):
     return x.cos()
 
 x = torch.randn(4)
-# result = cond(False, true_fn, false_fn, x)
-# assert torch.allclose(result, torch.cos(x))
+result = cond(False, true_fn, false_fn, x)
+assert torch.allclose(result, torch.cos(x))
 
 """
 Test case #2: tracing
-
-NB: We need some additional way to add a new "lowering rule" for
-lowering the cond call to an FX node. In particular,
-cond accepts a true_fn/false_fn and these need to be traced out.
-
-I've hardcoded the logic into ProxyTensor.
 """
 print("EXAMPLE 2")
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -254,45 +246,38 @@ from torch.fx.experimental.proxy_tensor import make_fx
 def f(x, y):
     return cond(y, true_fn, false_fn, x)
 
-graph = make_fx(f)(x, torch.tensor(True))
-print("graph.code:")
-print(graph.code)
-graph.graph.print_tabular()
-print("Invoking:")
-result_false = graph.forward(x, torch.tensor(True))
-print("False:", result_false)
-result_true = graph(x, torch.tensor(False))
-print("True:", result_true)
-# result_true()
-# print(graph.forward())
-
-exit(0)
+graph = make_fx(f)(x, torch.tensor(False))
+result_true = graph.forward(x, torch.tensor(True))
+result_false = graph.forward(x, torch.tensor(False))
+assert not torch.allclose(result_true, result_false)
+assert torch.allclose(result_true, torch.sin(x))
+assert torch.allclose(result_false, torch.cos(x))
 
 """
-def forward(self, x_1, pred_1):
-    _tensor_constant0 = self._tensor_constant0
-    conditional = __main___torch_cond(False, wrapped(), wrapped(), _tensor_constant0);  _tensor_constant0 = None
+def forward(self, x_1, y_1):
+    true_graph = self.true_graph
+    false_graph = self.false_graph
+    conditional = __main___torch_cond(y_1, true_graph, false_graph, x_1);  y_1 = true_graph = false_graph = x_1 = None
     return conditional
     
-opcode         name               target                                          args                                              kwargs
--------------  -----------------  ----------------------------------------------  ------------------------------------------------  --------
-placeholder    x_1                x_1                                             ()                                                {}
-placeholder    pred_1             pred_1                                          ()                                                {}
-get_attr       _tensor_constant0  _tensor_constant0                               ()                                                {}
-call_function  conditional        <__main__.PyOperator object at 0x7ff4b4480100>  (False, wrapped(), wrapped(), _tensor_constant0)  {}
-output         output             output                                          (conditional,)                                    {}
+opcode         name         target                                          args                                 kwargs
+-------------  -----------  ----------------------------------------------  -----------------------------------  --------
+placeholder    x_1          x_1                                             ()                                   {}
+placeholder    y_1          y_1                                             ()                                   {}
+get_attr       true_graph   true_graph                                      ()                                   {}
+get_attr       false_graph  false_graph                                     ()                                   {}
+call_function  conditional  <__main__.PyOperator object at 0x7f2b61df5100>  (y_1, true_graph, false_graph, x_1)  {}
+output         output       output                                          (conditional,)                       {}
 
 """
 
 """
-Test case #3: tracing complex
-
-NB: We need some additional way to add a new "lowering rule" for
-lowering the cond call to an FX node. In particular,
-cond accepts a true_fn/false_fn and these need to be traced out.
+Test case #3: tracing complex/nested
 
 I've hardcoded the logic into ProxyTensor.
 """
+print("EXAMPLE 3")
+
 from torch.fx.experimental.proxy_tensor import make_fx
 
 def true_fn(x, pred2):
@@ -302,6 +287,7 @@ def true_fn(x, pred2):
     def false_nested(y):
         return y + y
         
+    
     return cond(pred2, true_nested, false_nested, x.sin())
 
 def false_fn(x, _):
@@ -310,25 +296,46 @@ def false_fn(x, _):
 def f(x, pred, pred2):
     return cond(pred, true_fn, false_fn, (x, pred2))
 
-graph = make_fx(f)(x, False, True)
-print("graph.code:")
+graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
 print(graph.code)
 graph.graph.print_tabular()
+print(graph.true_graph)
+
+result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True)) # True + True -> x * x
+result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False)) # True + True -> x + x
+result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True)) #  False + either -> cos
+result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False)) #  False + either -> cos
+
+print(result_true_true)
+print(result_true_false)
+
+assert not torch.allclose(result_true_true, result_true_false)
+assert not torch.allclose(result_false_true, result_true_true)
+
+assert not torch.allclose(result_false_true, result_false_false)
+
+assert torch.allclose(result_true_true, x * x)
+assert torch.allclose(result_true_false, x + x)
+
+assert torch.allclose(result_false_true, torch.cos(x))
 
 """
 def forward(self, x_1, pred_1, pred2_1):
-    _tensor_constant0 = self._tensor_constant0
-    conditional = __main___torch_cond(False, wrapped(), wrapped(), (_tensor_constant0, True));  _tensor_constant0 = None
+    true_graph = self.true_graph
+    false_graph = self.false_graph
+    conditional = __main___torch_cond(False, true_graph, false_graph, [(x_1, True)]);  true_graph = false_graph = x_1 = None
     return conditional
     
-opcode         name               target                                          args                                                      kwargs
--------------  -----------------  ----------------------------------------------  --------------------------------------------------------  --------
-placeholder    x_1                x_1                                             ()                                                        {}
-placeholder    pred_1             pred_1                                          ()                                                        {}
-placeholder    pred2_1            pred2_1                                         ()                                                        {}
-get_attr       _tensor_constant0  _tensor_constant0                               ()                                                        {}
-call_function  conditional        <__main__.PyOperator object at 0x7ff4b4480100>  (False, wrapped(), wrapped(), (_tensor_constant0, True))  {}
-output         output             output                                          (conditional,)                                            {}
+opcode         name         target                                          args                                             kwargs
+-------------  -----------  ----------------------------------------------  -----------------------------------------------  --------
+placeholder    x_1          x_1                                             ()                                               {}
+placeholder    pred_1       pred_1                                          ()                                               {}
+placeholder    pred2_1      pred2_1                                         ()                                               {}
+get_attr       true_graph   true_graph                                      ()                                               {}
+get_attr       false_graph  false_graph                                     ()                                               {}
+call_function  conditional  <__main__.PyOperator object at 0x7f717b617100>  (False, true_graph, false_graph, [(x_1, True)])  {}
+output         output       output                                          (conditional,)                                   {}                                         {}
 """
 """
 More test cases (coming soon)

@@ -69,7 +69,6 @@ def _wrap_torch_dispatch(f):
             raise RuntimeError("TorchDispatchMode's torch_dispatch function " +
                                "should be a normal method not a class method")
         inner = getattr(self, "inner", None)
-
         with enable_torch_dispatch_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
