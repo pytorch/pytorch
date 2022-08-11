@@ -406,7 +406,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(self, func_overload, args, kwargs)
+            out = proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -458,9 +458,17 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                     constant = args[0].clone()
             else:
                 constant = None
-            return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
+            out = wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
         else:
-            return func_overload(*args, **kwargs)
+            out = func_overload(*args, **kwargs)
+
+        def assert_proxy_tensor(e):
+            if isinstance(e, torch.Tensor):
+                assert isinstance(e, ProxyTensor), \
+                    f"Internal Error: ProxyTensor is incorrectly baking a tensor constant into the graph: {str(e)}"
+
+        pytree.tree_map(assert_proxy_tensor, out)
+        return out
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
