@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn.functional as F
 
@@ -27,6 +28,29 @@ def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
 
 def conv_normalizer(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     return (input, weight), {'bias': bias, 'stride': stride, 'padding': padding, 'dilation': dilation, 'groups': groups}
+
+
+def conv_input_for_string_padding(func, padding_style, input, dilation, kernel_size):
+    def get_dilation(i):
+        return dilation[i] if isinstance(dilation, tuple) else dilation
+
+    if padding_style == "same":
+        padding = []
+        for i in range(conv_picker(func, 1, 2, 3)):
+            padding.append(*conv_padding_for_same(get_dilation(i), kernel_size[i]))
+        return torch.nn.functional.pad(input, padding)
+    elif padding_style == "valid":
+        return input
+    else:
+        raise RuntimeError(f"got padding type of {padding_style}, only accept 'same' or 'valid'")
+
+
+def conv_padding_for_same(dilation, kernel_size):
+    total_pad = dilation[0] * (kernel_size[0] - 1)
+    left_pad = math.floor(total_pad / 2)
+    right_pad = total_pad - left_pad
+    return left_pad, right_pad
+
 
 def conv_backward(func, ctx, grad_output):
 

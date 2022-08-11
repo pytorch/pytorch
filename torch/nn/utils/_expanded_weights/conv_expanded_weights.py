@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from .conv_utils import conv_backward, conv_args_and_kwargs, conv_picker
+from .conv_utils import conv_backward, conv_args_and_kwargs, conv_picker, conv_input_for_string_padding
 from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import forward_helper
 
@@ -11,10 +11,13 @@ from .expanded_weights_utils import forward_helper
 class ConvPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, kwarg_names, conv_fn, *expanded_args_and_kwargs):
-        if any([isinstance(i, str) for i in expanded_args_and_kwargs]):
-            raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
-                               "Please file an issue to prioritize support")
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
+        if isinstance(expanded_kwargs['padding'], str):
+            kernel_size = expanded_args[1].shape[2:]
+            padding, dilation = expanded_kwargs['padding'], expanded_kwargs['dilation']
+            input = conv_input_for_string_padding(conv_fn, padding, expanded_args[0], dilation, kernel_size)
+            expanded_args = (input, expanded_args[1])
+            expanded_kwargs['padding'] = 0
         output = forward_helper(conv_fn, expanded_args, expanded_kwargs)
         input, weight = expanded_args
         batched_dim_size = conv_picker(conv_fn, 3, 4, 5)
