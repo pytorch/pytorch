@@ -1,5 +1,15 @@
 [
    {
+      "name": "Core Maintainers",
+      "patterns": ["*"],
+      "approved_by": ["soumith", "gchanan", "ezyang", "dzhulgakov"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
       "name": "ONNX exporter",
       "patterns": [
          ".jenkins/caffe2/*",
@@ -33,7 +43,7 @@
          "torch/csrc/jit/codegen/cuda/**",
          "benchmarks/cpp/nvfuser/**"
       ],
-      "approved_by": ["csarofeen", "ngimel", "jjsjann123"],
+      "approved_by": ["csarofeen", "ngimel", "jjsjann123", "ptrblck"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -42,21 +52,15 @@
    },
    {
       "name": "OSS CI",
-      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
-      "mandatory_checks_name": [
-         "Facebook CLA Check",
-         "Lint",
-         "pull"
-      ]
-   },
-   {
-      "name": "CI Pinned Hashes",
       "patterns": [
-         ".github/ci_commit_pins/vision.txt",
-         ".github/ci_commit_pins/torchdynamo.txt"
+         ".github/**",
+         ".circleci/**",
+         ".jenkins/**",
+         "scripts/**",
+         "tools/**",
+         ".github/ci_commit_pins/*"
       ],
-      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
+      "approved_by": ["alband", "dagitses", "pytorchbot", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -64,20 +68,9 @@
       ]
    },
    {
-      "name": "XLA hash pin update",
-      "patterns": [".github/ci_commit_pins/xla.txt"],
-      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
-      "mandatory_checks_name": [
-         "Facebook CLA Check",
-         "Lint",
-         "pull / linux-bionic-py3_7-clang8-xla / build",
-         "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)"
-      ]
-   },
-   {
-      "name": "Documentation",
+      "name": "Docs / Tutorials",
       "patterns": ["docs/**", "torch/*docs.py"],
-      "approved_by": ["mruberry", "ngimel", "janeyx99", "svekars"],
+      "approved_by": ["svekars"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -87,7 +80,7 @@
    {
       "name": "Mobile",
       "patterns": ["ios/**", "android/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
+      "approved_by": ["linbinyu", "xta0", "IvanKobzarev", "dreiss", "raziel"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -108,7 +101,7 @@
          "tools/autograd/templates/python_linalg_functions.cpp",
          "test/test_linalg.py"
       ],
-      "approved_by": ["nikitaved", "mruberry", "pearu", "Lezcano", "IvanYashchuk"],
+      "approved_by": ["mruberry", "Lezcano", "IvanYashchuk"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -170,7 +163,7 @@
          "aten/src/ATen/mps/**",
          "aten/src/ATen/native/mps/**"
       ],
-      "approved_by": ["kulinseth", "razarmehr"],
+      "approved_by": ["kulinseth", "alband", "malfet", "razarmehr"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -183,7 +176,7 @@
           "torch/distributions/**",
           "test/distributions/**"
       ],
-      "approved_by": ["fritzo", "neerajprad", "alicanb", "vishwakftw"],
+      "approved_by": ["fritzo", "neerajprad", "alicanb"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
@@ -210,7 +203,19 @@
          "test/cpp/dist_autograd/**",
          "test/cpp/rpc/**"
       ],
-      "approved_by": ["mrshenli", "pritamdamania87", "d4l3k", "kiukchung", "pietern"],
+      "approved_by": [
+         "mrshenli",
+         "pritamdamania87",
+         "zhaojuanmao",
+         "rohan-varma",
+         "wanchaol",
+         "fduwjj",
+         "H-Huang",
+         "d4l3k",
+         "kiukchung",
+         "aazzolini",
+         "kwen2501"
+      ],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
