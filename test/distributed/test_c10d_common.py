@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
@@ -29,7 +30,6 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     wrap_output,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -1336,24 +1336,57 @@ instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
 def wait_comm(comm_result):
+    # This function is only used by tracing mode as a call_function node right
+    # before consuming a collective result tensor.
     comm_result._work.wait()
     return comm_result._tensor
 
 
+@dataclass
 class CommResult:
-    def __init__(self, tensor, work):
-        self._tensor = tensor
-        self._work = work
+    # a custom type wrapping both inplace output tensor and work handle
+    _tensor: torch.Tensor
+    _work: torch.classes.c10d.Work
 
 
 def wrap_comm_result(result):
+    # allreduce_ returns ([tensor], work)
+    tensor = result[0][0]
+    work = result[1]
     return ([CommResult(result[0][0], result[1])], result[1])
 
 
 class CommTensor(torch.Tensor):
+    r"""
+    A Tensor subclass to wrap input tensors for collective communications. This
+    Tensor subclass works for both eager and tracing mode.
+
+    In eager mode, it will record whether the inplace collective communication
+    has been launched using this Tensor and remember the corresponding work
+    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
+    function before subsequent operations consuming the value of the Tensor.
+
+    In tracing mode, ``CommTensor`` inserts two node into the graph using the
+    ``__torch_dispatch__`` function.
+
+    1. The first node is inserted right after the
+    communication, wrapping both the inplace output tensor and the returned
+    work handle into a custom CommResult type. We have to do this because
+    ``ProxyTensor`` only wraps Tensor objects and will treat the work handle
+    as a constant and embed that into the graph. As a result, during execution,
+    it will use the work handle created during tracing and will lead to wrong
+    result. The solution in this test is to manually create a proxy on the
+    return value of ``allreduce_`` which is ``([tensor], work)``, and wrap that
+    to ``[(CommResult(tensor, work)), work]``. In this way, subsequent nodes can
+    directly consume ``CommResult``.
+    2. The second node is inserted right before any subsequent node reads from
+    ``CommResult``. It will call ``wait()`` on the stashed work handle to ensure
+    that computation waits for communication.
+
+    It is specifically tailored for allreduce_ at the moment.
+    """
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
-
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             tensor.size(),
@@ -1363,8 +1396,10 @@ class CommTensor(torch.Tensor):
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
         )
-        r._tensor = tensor
-        r._after_comm = False
+        # The tensor object wrapped by this CommTensor
+        r._tensor: torch.Tensor = tensor
+        # Record whether communication has launched on this tensor.
+        r._after_comm: bool = False
         return r
 
     def __repr__(self):
@@ -1376,22 +1411,27 @@ class CommTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-
+        # shared states when unwrapping args
         tracing = False
         proxy_mode = None
         after_comm = False
+
+        # wrapped ._tensor if this is a CommTensor, and insert/call wait()
+        # if communication has been launched on this tensor.
         def unwrap(e):
             if isinstance(e, CommTensor):
                 nonlocal tracing, proxy_mode, after_comm
 
                 after_comm = e._after_comm
+
                 if isinstance(e._tensor, ProxyTensor):
+                    # in tracing mode, remember proxy_mode
                     tracing = True
                     proxy_mode = e._tensor.proxy_mode
 
-
                 if after_comm:
                     if tracing:
+                        # insert a node to the traced graph.
                         proxy_res = proxy_mode.tracer.create_proxy(
                             'call_function',
                             wait_comm,
@@ -1399,8 +1439,10 @@ class CommTensor(torch.Tensor):
                             {},
                             name="wait_comm"
                         )
+                        # HACK: update the proxy for the inplace output
                         e._tensor.proxy = proxy_res
                     else:
+                        # eager mode, simply wait
                         e._work.wait()
 
                 return e._tensor
@@ -1417,13 +1459,16 @@ class CommTensor(torch.Tensor):
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
         if "allreduce_" in func.__name__:
-            args[0][0]._after_comm = True
             if tracing:
+                # in tracing mode, get proxies for args
                 proxy_args = tree_map(unwrap_proxy, unwrapped_args)
                 proxy_kwargs = tree_map(unwrap_proxy, unwrapped_kwargs)
 
+                # get proxy for output tuple
                 proxy_res = func(*proxy_args, **proxy_kwargs)
-                comm_tensor_proxy = proxy_mode.tracer.create_proxy(
+                # insert a node that wraps the output tuple into
+                # CommResult(tensor, work)
+                comm_result_proxy = proxy_mode.tracer.create_proxy(
                     'call_function',
                     wrap_comm_result,
                     (proxy_res, ),
@@ -1432,23 +1477,36 @@ class CommTensor(torch.Tensor):
                 )
 
                 with no_dispatch():
+                    # disable dispatch to avoid trigger ProxyTensor logic
                     elem_args = tree_map(unwrap_elem, unwrapped_args)
                     elem_kwargs = tree_map(unwrap_elem, unwrapped_kwargs)
 
                     out = func(*elem_args, **elem_kwargs)
 
-                out = wrap_output(out, comm_tensor_proxy, constant=None, proxy_mode=proxy_mode)
+                # wrap output with the proxy of CommResult, so that subsequent
+                # ops and link to it.
+                out = wrap_output(out, comm_result_proxy, constant=None, proxy_mode=proxy_mode)
+
+                # remember work handle, and remember comm is already launched
                 args[0][0]._work = out[1]
+                args[0][0]._after_comm = True
+
+                # HACK: update the proxy on the input argument as this is an
+                # inplace collective communication.
                 unwrapped_args[0][0].proxy = out[0][0].proxy
                 return out
             else:
+                # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **kwargs)
                 args[0][0]._work = out[1]
+                args[0][0]._after_comm = True
                 return out
         else:
             if after_comm:
                 return func(*unwrapped_args, **unwrapped_kwargs)
             else:
+                # we need to propagate CommTensor wrapping until the first
+                # subsequent operation has waited for it.
                 return CommTensor(func(*unwrapped_args, **unwrapped_kwargs))
 
 
@@ -1467,12 +1525,18 @@ class CompilerTest(MultiProcessTestCase):
     def _get_process_group(self):
         raise NotImplementedError("To be implemented by subclass")
 
-    def _test_work_wait(self, x):
+    def _test_work_wait(self, x: torch.Tensor):
         pg = self._get_default_group()
 
-        def fn(x):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            # N.B.: explicitly wrapping with CommTensor instead of updating
+            # all_reduce Python implementation, as the later will need more
+            # discussion.
             y = CommTensor(x + x)
-            dist.all_reduce(y, group=pg, async_op=True)
+            work = dist.all_reduce(y, group=pg, async_op=True)
+            # this wait() will be ignored in tracing mode as ProxyTensor won't
+            # wrap non-Tensor objects
+            work.wait()
             return y * 2
 
         xx = x.clone()
@@ -1482,7 +1546,35 @@ class CompilerTest(MultiProcessTestCase):
         traced_fn.graph.lint()
         traced_fn.graph.eliminate_dead_code()
 
-        # ensure that y * 2 uses the output from wait_comm
+        if self.rank == 0:
+            traced_fn.graph.print_tabular()
+
+        # make sure the mul op indeed waits for comm
+        for node in traced_fn.graph.nodes:
+            if node.op == "call_function" and node.target.__name__ == "mul.Tensor":
+                prev = node.args[0]
+                curr = None
+                waited = False
+                commed = False
+                while prev is not None and not commed:
+                    curr = prev
+                    waited |= all([
+                        curr.op == "call_function",
+                        curr.target == wait_comm,
+                    ])
+                    commed |= all([
+                        curr.op == "call_function",
+                        "allreduce_" in curr.target.__name__
+                    ])
+
+                    prev = curr.args[0]
+
+                self.assertTrue(waited)
+                self.assertTrue(commed)
+
+
+        # Update input to make sure we are not recording it as constant during
+        # tracing.
         x += 1
         xx += 1
 
@@ -1492,6 +1584,9 @@ class CompilerTest(MultiProcessTestCase):
         # check correctness
         self.assertEqual(y, yy)
 
+        xx += 1
+        yy = traced_fn(xx)
+        self.assertFalse(y.allclose(yy))
 
 
 if __name__ == "__main__":
