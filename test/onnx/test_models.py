@@ -2,7 +2,6 @@
 
 import unittest
 
-import caffe2.python.onnx.backend as backend
 import torch
 
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
@@ -50,6 +49,8 @@ class TestModels(common_utils.TestCase):
     keep_initializers_as_inputs = False
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
+        import caffe2.python.onnx.backend as backend
+
         with torch.onnx.select_model_mode_for_export(
             model, torch.onnx.TrainingMode.EVAL
         ):
