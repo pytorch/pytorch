@@ -3,6 +3,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm
 import torch
 import itertools
+import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -176,6 +177,21 @@ class FakeTensorTest(TestCase):
             out = x / y
             self.assertEqual(out.dtype, torch.float)
             self.assertEqual(out.device.type, "cpu")
+
+    def test_from_numpy(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.tensor(np.zeros([4, 4]))
+            self.checkType(x, "cpu", [4, 4])
+
+    def test_randperm(self):
+        x = torch.randperm(10)
+        y = torch.randperm(5, device="cpu")
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x1 = torch.randperm(10)
+            prims.utils.compare_tensor_meta(x, x1)
+            y1 = torch.randperm(5, device="cpu")
+            prims.utils.compare_tensor_meta(y, y1)
+
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
