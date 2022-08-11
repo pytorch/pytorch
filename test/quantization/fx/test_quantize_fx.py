@@ -179,7 +179,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional, List
 
 
 
@@ -4082,7 +4082,6 @@ class TestQuantizeFx(QuantizationTestCase):
         for n in m.graph.nodes:
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
-        m(example_inputs)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):
