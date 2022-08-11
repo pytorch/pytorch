@@ -131,7 +131,7 @@ def get_weight_and_bias_index_dicts(backend_config):
             else:
                 index_dict[pattern] = [index]  # type: ignore[index]
 
-    return index_dict["weight"], index_dict["bias"]
+    return index_dicts["weight"], index_dicts["bias"]
 
 
 def node_arg_is_weight(node: Node, arg: Any, weight_index_dict: Dict[str, List[int]]) -> bool:
