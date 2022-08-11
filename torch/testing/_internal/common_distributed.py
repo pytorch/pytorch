@@ -80,10 +80,10 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo"}
-    backend_feature["cuda"] = {"nccl", "gloo"}
-    backend_feature["ddp"] = {"nccl", "gloo"}
-    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
 
 
