@@ -1137,6 +1137,10 @@ bool IterDomain::sameAs(const Statement* other) const {
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
   is_same =
       is_same && ScalarCheck::sameAs(stopOffset(), other_id->stopOffset());
+  is_same = is_same && (hasExpandedExtent() == other_id->hasExpandedExtent());
+  if (is_same && hasExpandedExtent()) {
+    is_same = ScalarCheck::sameAs(expandedExtent(), other_id->expandedExtent());
+  }
 
   return is_same;
 }

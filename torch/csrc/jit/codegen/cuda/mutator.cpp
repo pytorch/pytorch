@@ -58,8 +58,14 @@ void OptOutMutator::mutate(NamedScalar* ns) {}
 void OptOutMutator::mutate(IterDomain* id) {
   Val* start = maybeMutated(id->start());
   Val* extent = maybeMutated(id->extent());
+  Val* expanded_extent = nullptr;
+  if (id->hasExpandedExtent()) {
+    expanded_extent = maybeMutated(id->expandedExtent());
+  }
   Val* stop_offset = maybeMutated(id->stopOffset());
   if (start->sameAs(id->start()) && extent->sameAs(id->extent()) &&
+      (!id->hasExpandedExtent() ||
+       expanded_extent->sameAs(id->expandedExtent())) &&
       stop_offset->sameAs(id->stopOffset())) {
     return;
   }
@@ -69,6 +75,7 @@ void OptOutMutator::mutate(IterDomain* id) {
           .start(start)
           .extent(extent)
           .stop_offset(stop_offset)
+          .expanded_extent(expanded_extent)
           .build());
 }
 
