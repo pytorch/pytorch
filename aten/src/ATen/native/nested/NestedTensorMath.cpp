@@ -819,10 +819,18 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-// utilities support matmul_nested
+// utilities support `matmul_nested`
 namespace {
+// Args:
+//     self_sizes: the sizes of `self` in `matmul_nested`
+//     mat2_sizes: the sizes of `mat2` in `matmul_nested`
+//     buffer_op: the options for new buffer
+//     sizemat_op: the options for new size matrix
+// Returns:
+//     the batch size of each input underlying tensor, i.e. the product of batch-dimension sizes
+//     the empty output nested tensor
 inline std::tuple<std::vector<int64_t>, Tensor>
-matmul_nested_bmm_BatchSizes_OutputMemory(
+matmul_nested_helper(
     const std::vector<IntArrayRef>& self_sizes,
     const std::vector<IntArrayRef>& mat2_sizes,
     const c10::TensorOptions& buffer_op,
@@ -869,7 +877,7 @@ matmul_nested_bmm_BatchSizes_OutputMemory(
 }
 }
 
-// Note [nested tensor matmul] TODO
+// Note [nested tensor matmul]
 // This is really a generalized batched matmul dedicated to nested tensors,
 // where `self` and `mat2` have same number (>= 3) of dimensions.
 // The last 2 dimensions will be considered as matrix dimensions,
@@ -877,7 +885,7 @@ matmul_nested_bmm_BatchSizes_OutputMemory(
 // The leading dimensions are considered as batch dimensions,
 // and since nested tensor does not support broadcasting for now,
 // for each batch dimension `self` and `mat2` must have same size.
-// Should make full matmul semantics support some day
+// TODO: Should make full matmul semantics support some day
 Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   if (self.is_nested() && !mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
@@ -915,7 +923,7 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   // create a contiguous output
   std::vector<int64_t> batch_sizes;
   Tensor output;
-  std::tie(batch_sizes, output) = matmul_nested_bmm_BatchSizes_OutputMemory(
+  std::tie(batch_sizes, output) = matmul_nested_helper(
       self_sizes, mat2_sizes, self_buffer.options(), self_ptr->get_nested_size_tensor().options());
   // call tensor matmul
   // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
@@ -952,6 +960,8 @@ Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& 
   //       should improve it to avoid the intermediate memory usage
   Tensor function_result = at::matmul(tensor1, tensor2);
   auto function_result_ptr = get_nested_tensor_impl(function_result);
+  // TODO: this is to reproduce function_result_ptr->opt_sizes_
+  //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;
   for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
     c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
