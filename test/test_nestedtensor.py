@@ -1119,8 +1119,6 @@ class TestNestedTensorDeviceType(TestCase):
             ptT = pt.transpose(-1, -2)
             self.assertEqual(ptT, ptT_from_ntT)
 
-
-
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_reshape(self, device, dtype):

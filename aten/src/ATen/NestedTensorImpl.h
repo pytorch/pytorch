@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/MemoryOverlap.h>
 #include <ATen/Tensor.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/ArrayRef.h>
@@ -73,10 +75,9 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   }
 
   at::Tensor get_buffer() const {
-    auto buffer_key_set_ = c10::DispatchKeySet{c10::DispatchKey::Dense} |
-        c10::DispatchKeySet{this->key_set_.highestBackendKey()};
+    auto buffer_key_set_ = generate_buffer_key_set();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
-        Storage(storage_), buffer_key_set_, data_type_);
+        c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
     buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size_));
     return Tensor(buffer_tensor_impl);
   }
@@ -154,6 +155,18 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
+
+  inline c10::DispatchKeySet generate_buffer_key_set() const {
+    const auto backend = this->key_set_.highestBackendKey();
+    auto buffer_key_set = c10::DispatchKeySet{c10::DispatchKey::Dense} |
+        c10::DispatchKeySet{backend};
+    const bool Autograd = this->key_set_.has_any(c10::autograd_dispatch_keyset);
+
+    buffer_key_set = Autograd
+        ? getAutogradRelatedKeySetFromBackend(backend) | buffer_key_set
+        : buffer_key_set;
+    return buffer_key_set;
+  }
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(
