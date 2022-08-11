@@ -25,8 +25,8 @@ class InternalMatch():
 
     def __copy__(self):
         return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
-                              placeholder_nodes=self.placeholder_nodes.copy(),
-                              returning_nodes=self.returning_nodes.copy())
+                             placeholder_nodes=self.placeholder_nodes.copy(),
+                             returning_nodes=self.returning_nodes.copy())
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcher:
