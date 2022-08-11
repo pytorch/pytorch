@@ -261,7 +261,7 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSinTransposeCos_CUDA) {
 }
 
 // t0->transpose--.
-//                 \
+//                 |
 // t1->transpose---add-->sin->t5
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInput_CUDA) {
   Fusion fusion;
