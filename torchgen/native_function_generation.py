@@ -312,9 +312,9 @@ def add_generated_native_functions(
             # on CompositeImplicitAutograd operators (since we let them decompose).
             are_composite_implicit = all(
                 f.has_composite_implicit_autograd_kernel for f in d.values()
-            ) \
-            or all(
-                f.has_composite_implicit_autograd_nested_tensor_kernel for f in d.values()
+            ) or all(
+                f.has_composite_implicit_autograd_nested_tensor_kernel
+                for f in d.values()
             )
             if are_manual or has_view_ops or are_composite_implicit:
                 continue

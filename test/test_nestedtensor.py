@@ -235,11 +235,7 @@ class TestNestedTensor(TestCase):
 
         # Test non_contiguous case
         assert not nt_noncontiguous.is_contiguous()
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"clone_nested only supports memory format Preserve, but got Contiguous instead.",
-            lambda: nt_noncontiguous.contiguous()
-        )
+        self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
     @torch.inference_mode()
     def test_repr_string(self):
@@ -655,7 +651,7 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertNotEqual(ub1[i], ub2[i])
 
         nt1.clone(memory_format=torch.preserve_format)
-        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        msg = "nested tensor clone supports Preserve and Contiguous memory foramts"
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 

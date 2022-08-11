@@ -50,7 +50,8 @@ constexpr DispatchKeySet math_dispatch_keyset =
     backend_dispatch_keyset | autograd_dispatch_keyset;
 
 constexpr DispatchKeySet nested_dispatch_keyset =
-    DispatchKeySet({DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
+    DispatchKeySet(
+        {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
