@@ -41,7 +41,11 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! \todo This object will be removed when a FusionManager is added
   //! containing a cache.
   py::class_<nvfuser::FusionManager> fusion_manager(nvfuser, "FusionManager");
-  fusion_manager.def(py::init<int>(), py::arg("max_fusions")=int(256))
+  fusion_manager.def_static(
+          "get",
+          &nvfuser::FusionManager::get, 
+          py::arg("max_fusions")=int(256),
+          py::return_value_policy::reference)
       .def(
           "execute",
           [](nvfuser::FusionManager& self, const py::iterable& iter) {

@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
 namespace nvfuser {
+  
+thread_local FusionManager* FusionManager::singleton_ = nullptr;
 
 FusionCacheEntry::FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec)
     : record(rec),
@@ -15,6 +17,13 @@ FusionCacheEntry::FusionCacheEntry()
       is_terminal(true),
       fusion_executor_cache(std::make_unique<Nvf::FusionExecutorCache>(
           std::make_unique<Nvf::Fusion>())) {}
+
+FusionManager* FusionManager::get(size_t max_fusions) {
+  if (singleton_ == nullptr) {
+    singleton_ = new FusionManager(max_fusions);
+  }
+  return singleton_;
+}
 
 FusionManager::FusionManager(size_t max_fusions)
     : max_fusions_(max_fusions),

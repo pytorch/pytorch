@@ -3,7 +3,7 @@ import torch
 from torch._C._nvfuser import FusionManager, FusionDefinition
 
 # Construct and Define Fusion
-fm1 = FusionManager()
+fm1 = FusionManager.get()
 
 with FusionDefinition(fm1) as fd :
     t0 = fd.define_tensor(1)
@@ -27,7 +27,7 @@ for _ in range(5) :
 
 print(outputs[0])
 
-fm2 = FusionManager()
+fm2 = FusionManager.get()
 
 input1 = torch.ones(1, 1, 4, device='cuda')
 input2 = torch.ones(2, 3, 4, device='cuda')

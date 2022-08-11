@@ -24,8 +24,10 @@ struct FusionCacheEntry {
 };
 
 class FusionManager {
- public:
   FusionManager(size_t max_fusions);
+
+public:
+  static FusionManager* get(size_t max_fusions);
 
   //! Copy and Assignment of the FusionManager is not supported
   FusionManager(const FusionManager&) = delete;
@@ -46,6 +48,8 @@ class FusionManager {
  private:
   Nvf::FusionExecutorCache* fusionExecutorCachePtr() const;
   FusionCacheEntry* fusionCachePtr() const;
+
+  static thread_local FusionManager* singleton_;
 
   size_t max_fusions_;
   size_t num_fusions_;

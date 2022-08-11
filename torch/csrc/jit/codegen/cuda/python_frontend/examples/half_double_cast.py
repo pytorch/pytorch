@@ -3,7 +3,7 @@ import torch
 from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
 
 # Construct and Define Fusion
-fm = FusionManager()
+fm = FusionManager.get()
 
 with FusionDefinition(fm) as fd :
     t0 = fd.define_tensor(2, DataType.Half)
