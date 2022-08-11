@@ -394,6 +394,7 @@ def try_ann_to_type(ann, loc):
             return maybe_script_class
         if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
+        raise ValueError(f"Unknown class type annotation {ann}")
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):

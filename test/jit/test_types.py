@@ -316,3 +316,23 @@ class TestTypesAndAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "ErrorReason"):
             t = inferred_type.type()
+
+    def test_unsupported_annotation_tuple_type_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Unknown type name"):
+            # sanity check, make sure that ScriptObject is unscriptable (which is the basis of actual test)
+            # and that the failure occurs because ScriptObject annotation cannot be understood.
+            # If this sanity check fails because ScriptObject is supported or because annotation behavior changes,
+            # you can probably delete this test.
+            def fn(x, y) -> torch._C.ScriptObject:
+                return x * y
+
+            torch.jit.script(fn)
+
+        with self.assertRaisesRegex(ValueError, "Unknown class type annotation"):
+            # This is the actual test.
+            # We want to make sure that Tuple[UnsupportedType, ...] throws a reasonable error message, instead of
+            # just an error because Tuple[NoneType, ...] is not supported.
+            def fn(x, y) -> Tuple[torch._C.ScriptObject, torch.Tensor]:
+                return x * y, x
+
+            torch.jit.script(fn)
