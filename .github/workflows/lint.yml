@@ -122,11 +122,11 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          pr_size=$(git diff --shortstat ${BASE} ${HEAD} | grep -o '[0-9]*' | tail -1)
+          pr_size=$(git diff --shortstat "${BASE}" "${HEAD}" | grep -o '[0-9]*' | tail -1)
 
           if ((pr_size > 2000)); then
             echo
-            echo 'Your PR is '$pr_size' LOC which is more than the 2000 maximum'
+            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
             echo 'allowed within PyTorch infra. PLease make sure to split up'
             echo 'your PR into smaller pieces that can be reviewed.'
             echo 'If you think that this rule should not apply to your PR,'
