@@ -218,6 +218,78 @@
       ]
    },
    {
+      "name": "IDEEP",
+      "patterns": [
+        "third_party/ideep",
+        "caffe2/ideep/**",
+        "caffe2/python/ideep/**"
+      ],
+      "approved_by": ["XiaobingSuper", "yanbing-j"],
+      "mandatory_checks_name": [
+        "Facebook CLA Check",
+        "Lint",
+        "pull"
+      ]
+   },
+   {
+      "name": "oneDNN graph",
+      "patterns": [
+        "torch/csrc/jit/codegen/onednn/**",
+        "test/test_jit_llga_fuser.py"
+      ],
+      "approved_by": ["sanchitintel", "chunyuan-w"],
+      "mandatory_checks_name": [
+        "Facebook CLA Check",
+        "Lint",
+        "pull"
+      ]
+   },
+   {
+      "name": "CPU ATen backend",
+      "patterns": [
+        "aten/src/ATen/cpu/**",
+        "aten/src/ATen/native/cpu/**",
+        "aten/src/ATen/native/quantized/cpu/**",
+        "aten/src/ATen/native/Convolution*.cpp",
+        "aten/src/ATen/native/mkldnn/**"
+      ],
+      "approved_by": ["mingfeima", "XiaobingSuper"],
+      "mandatory_checks_name": [
+        "Facebook CLA Check",
+        "Lint",
+        "pull"
+      ]
+   },
+   {
+      "name": "CPU frontend",
+      "patterns": [
+        "torch/cpu/**",
+        "torch/utils/mkldnn.py",
+        "test/test_mkldnn.py"
+      ],
+      "approved_by": ["leslie-fang-intel", "CaoE"],
+      "mandatory_checks_name": [
+        "Facebook CLA Check",
+        "Lint",
+        "pull"
+      ]
+   },
+   {
+      "name": "Autocast",
+      "patterns": [
+        "torch/amp/**",
+        "aten/src/ATen/autocast_mode.*",
+        "torch/csrc/jit/passes/autocast.cpp",
+        "test/test_autocast.py"
+      ],
+      "approved_by": ["leslie-fang-intel", "CaoE"],
+      "mandatory_checks_name": [
+        "Facebook CLA Check",
+        "Lint",
+        "pull"
+      ]
+   },
+   {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
