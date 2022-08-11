@@ -45,6 +45,7 @@ class FusionManager {
 
  private:
   Nvf::FusionExecutorCache* fusionExecutorCachePtr() const;
+  FusionCacheEntry* fusionCachePtr() const;
 
   size_t max_fusions_;
   size_t num_fusions_;

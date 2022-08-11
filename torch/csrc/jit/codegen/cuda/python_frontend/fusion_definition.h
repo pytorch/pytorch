@@ -107,6 +107,7 @@ class FusionDefinition {
 
  private:
   void buildFusionIr();
+  FusionManager* fusionManagerPtr() const;
 
   size_t max_length_;
 

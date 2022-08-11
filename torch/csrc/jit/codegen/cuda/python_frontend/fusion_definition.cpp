@@ -49,7 +49,7 @@ FusionDefinition::FusionDefinition(FusionManager* fusion_manager, size_t max_len
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  Nvf::FusionGuard::setCurFusion(fusion_manager_->fusionPtr());
+  Nvf::FusionGuard::setCurFusion(fusionManagerPtr()->fusionPtr());
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
@@ -58,19 +58,25 @@ void FusionDefinition::buildFusionIr() {
   Nvf::FusionGuard::setCurFusion(nullptr);
 }
 
+FusionManager* FusionDefinition::fusionManagerPtr() const {
+  TORCH_INTERNAL_ASSERT(fusion_manager_ != nullptr,
+      "FusionManager pointer is null!");
+  return fusion_manager_;
+}
+
 FusionDefinition* FusionDefinition::enter() {
-  fusion_manager_->resetFusionCachePtr();
+  fusionManagerPtr()->resetFusionCachePtr();
   return this;
 }
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
-  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(end_record_);
+  auto cache_entry = fusionManagerPtr()->lookupFusionCacheEntry(end_record_);
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    fusion_manager_->createTerminalFusionCacheEntry(end_record_);
-    fusion_manager_->traverseFusionCache(end_record_);
+    fusionManagerPtr()->createTerminalFusionCacheEntry(end_record_);
+    fusionManagerPtr()->traverseFusionCache(end_record_);
     
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
@@ -81,7 +87,7 @@ void FusionDefinition::exit() {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
-    fusion_manager_->traverseFusionCache(end_record_);
+    fusionManagerPtr()->traverseFusionCache(end_record_);
   }
 }
   
@@ -115,7 +121,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "operations.  The max_length for FusionDefintion's might need to be ",
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
-  auto cache_entry = fusion_manager_->lookupFusionCacheEntry(recording_.back());
+  auto cache_entry = fusionManagerPtr()->lookupFusionCacheEntry(recording_.back());
   if (cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
@@ -126,16 +132,16 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" <<
           std::hex << record->hash() << ") missed in Fusion Cache.\n";
     }
-    fusion_manager_->createFusionCacheEntry(recording_.back());
+    fusionManagerPtr()->createFusionCacheEntry(recording_.back());
   }
-  fusion_manager_->traverseFusionCache(recording_.back());
+  fusionManagerPtr()->traverseFusionCache(recording_.back());
 }
 
 void FusionDefinition::addInput(Nvf::Val* input) {
-  fusion_manager_->fusionPtr()->addInput(input);
+  fusionManagerPtr()->fusionPtr()->addInput(input);
 }
 void FusionDefinition::addOutput(Nvf::Val* output) {
-  fusion_manager_->fusionPtr()->addOutput(output);
+  fusionManagerPtr()->fusionPtr()->addOutput(output);
 }
 
 Nvf::Val* FusionDefinition::getFusionState(size_t index) const {
