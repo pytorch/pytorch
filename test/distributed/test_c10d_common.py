@@ -27,7 +27,9 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     ProxyTensor,
     make_fx,
+    wrap_output,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -41,6 +43,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize
 )
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._pytree import tree_map
 from torch.utils.checkpoint import checkpoint
 
@@ -1332,18 +1335,19 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
-def wait_comm(comm_tensor):
-    comm_tensor._work.wait()
-    return comm_tensor._tensor
+def wait_comm(comm_result_tensor):
+    comm_result_tensor._work.wait()
+    return comm_result_tensor._tensor
 
 
-class CommTensor(torch.Tensor):
+class CommResultTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, tensor: torch.Tensor, work: torch.distributed._Work):
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             tensor.size(),
+            strides=list(tensor.stride()),
             dtype=tensor.dtype,
             device=tensor.device,
             layout=tensor.layout,
@@ -1354,9 +1358,9 @@ class CommTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"CommTensor({self._tensor})"
+        return f"CommResultTensor({self._tensor})"
 
-    # disable __torch_function__ so that CommTensor can recursively dispatch
+    # disable __torch_function__ so that CommResultTensor can recursively dispatch
     # ProxyTensor in make_fx
     __torch_function__ = _disabled_torch_function_impl
 
@@ -1373,11 +1377,12 @@ class CommTensor(torch.Tensor):
                     proxy_res = t.proxy_mode.tracer.create_proxy(
                         'call_function',
                         wait_comm,
-                        (e,),
+                        (t.proxy, ),
                         {},
                         name="wait_comm"
                     )
                     t.proxy = proxy_res
+                    #proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(t)
                     return t
                 else:
                     # in eager mode, simply wait
@@ -1390,6 +1395,85 @@ class CommTensor(torch.Tensor):
         kwargs = tree_map(unwrap, kwargs)
 
         return func(*args, **kwargs)
+
+
+def wrap_comm_result(result):
+    return ([CommResultTensor(result[0][0], result[1])], result[1])
+
+
+class CommTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor):
+
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            tensor.size(),
+            strides=list(tensor.stride()),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
+        r._tensor = tensor
+        return r
+
+    def __repr__(self):
+        return f"CommTensor({self._tensor})"
+
+    # disable __torch_function__ so that CommTensor can recursively dispatch
+    # ProxyTensor in make_fx
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+
+        tracing = False
+        proxy_mode = None
+        def unwrap(e):
+            if isinstance(e, CommTensor):
+                nonlocal tracing, proxy_mode
+                if isinstance(e._tensor, ProxyTensor):
+                    tracing = True
+                    proxy_mode = e._tensor.proxy_mode
+                return e._tensor
+            else:
+                return e
+
+        def unwrap_proxy(e):
+            return e.proxy if isinstance(e, ProxyTensor) else e
+
+        def unwrap_elem(e):
+            return e.elem if isinstance(e, ProxyTensor) else e
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+
+        if "allreduce_" in func.__name__:
+            if tracing:
+                proxy_args = tree_map(unwrap_proxy, args)
+                proxy_kwargs = tree_map(unwrap_proxy, kwargs)
+
+                proxy_res = func(*proxy_args, **proxy_kwargs)
+                comm_tensor_proxy = proxy_mode.tracer.create_proxy(
+                    'call_function',
+                    wrap_comm_result,
+                    (proxy_res, ),
+                    {},
+                    name="comm_result"
+                )
+
+                with no_dispatch():
+                    elem_args = tree_map(unwrap_elem, args)
+                    elem_kwargs = tree_map(unwrap_elem, kwargs)
+
+                    out = func(*elem_args, **elem_kwargs)
+
+                return wrap_output(out, comm_tensor_proxy, constant=None, proxy_mode=proxy_mode)
+            else:
+                tensor, work = func(*args, **kwargs)
+                return CommResultTensor(tensor, work)
+        else:
+            return CommTensor(func(*args, **kwargs))
 
 
 class CompilerTest(MultiProcessTestCase):
@@ -1408,29 +1492,49 @@ class CompilerTest(MultiProcessTestCase):
         raise NotImplementedError("To be implemented by subclass")
 
     def _test_work_wait(self, x):
+        if self.rank == 0:
+            os.environ['MASTER_ADDR'] = 'localhost'
+            os.environ['MASTER_PORT'] = '6789'
+            dist.init_process_group("gloo", rank=0, world_size=1)
+
+            def fn(x):
+                y = CommTensor(x + x)
+                dist.all_reduce(y, async_op=True)
+                return y * 2
+
+            xx = x.clone()
+
+            # trace fn into a GraphModule
+            traced_fn = make_fx(fn)(xx)
+
+            traced_fn.graph.print_tabular()
+
+
+        """
         pg = self._get_default_group()
 
         def fn(x):
-            y = x + x
-            work = dist.all_reduce(y, group=pg, async_op=True)
-            y = CommTensor(y, work)
+            y = CommTensor(x + x)
+            dist.all_reduce(y, group=pg, async_op=True)
             return y * 2
 
         xx = x.clone()
 
         # trace fn into a GraphModule
         traced_fn = make_fx(fn)(xx)
+        traced_fn.graph.lint()
+        traced_fn.graph.eliminate_dead_code()
 
         # ensure that y * 2 uses the output from wait_comm
-        for node in traced_fn.graph.nodes:
-            if node.op == "call_function" and node.name == "mul_tensor":
-                self.assertEqual(node.args[0].name, "wait_comm")
+        x += 1
+        xx += 1
 
         y = fn(x)
-        yy = traced_fn(xx).elem
+        yy = traced_fn(xx)
 
         # check correctness
-        self.assertEqual(y, yy)
+        self.assertEqual(y, yy.elem)
+        """
 
 
 if __name__ == "__main__":
