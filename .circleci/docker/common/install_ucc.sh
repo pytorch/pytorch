@@ -12,6 +12,7 @@ function install_ucx() {
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
+      --with-cuda=/usr/local/cuda/    \
       --enable-profiling              \
       --enable-stats
   time make -j
