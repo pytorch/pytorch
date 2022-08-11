@@ -178,6 +178,7 @@ jobs:
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
+      sync-tag: macos-12-py3-arm64-build
       build-environment: macos-12-py3-arm64
       xcode-version: "13.3.1"
       runner-type: macos-12-xl
@@ -193,6 +194,7 @@ jobs:
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-12-py3-arm64-build
     with:
+      sync-tag: macos-12-py3-arm64-mps-test
       build-environment: macos-12-py3-arm64
 
   macos-12-py3-arm64-test:
