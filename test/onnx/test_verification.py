@@ -91,6 +91,8 @@ class TestVerification(common_utils.TestCase):
             pytorch_outs,
             rtol=1e-5,
             atol=1e-6,
+            check_shape=True,
+            check_dtype=False,
             acceptable_error_percentage=0.3,
         )
 
@@ -105,5 +107,7 @@ class TestVerification(common_utils.TestCase):
                 pytorch_outs,
                 rtol=1e-5,
                 atol=1e-6,
+                check_shape=True,
+                check_dtype=False,
                 acceptable_error_percentage=None,
             )
