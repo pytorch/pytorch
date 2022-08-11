@@ -36,23 +36,6 @@ pytree._register_pytree_node(
         {key: value for key, value in zip(c, x)}
     ),
 )
-import torch.fx as fx
-import typing
-class ListCodeGen(fx.CodeGen):
-    def gen_fn_def(self, free_vars, maybe_return_annotation):
-        lst_unpack = f"""
-def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {''.join(f"{x}," for x in free_vars)} = args_list
-    args_list.clear()
-    """
-        return lst_unpack
-
-    def additional_globals(self):
-        return [('List', typing.List)]
-
-    def process_inputs(self, *inputs):
-        assert(len(inputs) == 1)
-        return inputs[0]
 
 aten = torch.ops.aten
 
