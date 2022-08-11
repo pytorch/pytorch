@@ -129,7 +129,8 @@ std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
     {"TORCH_UCC_ENABLE_COMMS_LOGGER", "0"},
 };
 
-// trim implementation borrowed from https://stackoverflow.com/a/17976541
+// trim: remove spaces before and after the string view
+// implementation borrowed from https://stackoverflow.com/a/17976541
 inline c10::string_view trim(c10::string_view s) {
   auto wsfront = std::find_if_not(
       s.begin(), s.end(), [](int c) { return std::isspace(c); });
