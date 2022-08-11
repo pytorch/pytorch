@@ -1,6 +1,7 @@
 from typing import Any
-from trymerge import gh_post_pr_comment, BOT_COMMANDS_WIKI
+from trymerge import gh_post_pr_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from trymerge_explainer import BOT_COMMANDS_WIKI
 import os
 
 
