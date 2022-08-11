@@ -306,22 +306,23 @@ class ProxyTensor(torch.Tensor):
 
         if func_overload.__name__ == 'torch.cond':
             # TODO: need to parse
+            print("In cond")
             assert kwargs is None or not kwargs
             pred, true_fn, false_fn, *operands = args
-
             true_graph = get_isolated_graphmodule(true_fn, *operands, {})
             false_graph = get_isolated_graphmodule(false_fn, *operands, {})
             
             # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now
+                
             proxy_mode.tracer.root.register_module("true_graph", true_graph)
             proxy_mode.tracer.root.register_module("false_graph", false_graph)
 
             # For a smaller graph that esentially does the same thing, comment out these two lines and replace args with 
             # true_graph / false_graph
-            get_true_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})
-            get_false_proxy = proxy_mode.tracer.create_proxy("get_attr", "false_graph", tuple(*operands), {})            
+            # get_true_proxy = proxy_mode.tracer.create_proxy("get_attr", "true_graph", tuple(*operands), {})
+            # get_false_proxy = proxy_mode.tracer.create_proxy("get_attr", "false_graph", tuple(*operands), {})            
             
-            args = (pred, get_true_proxy, get_false_proxy, *operands)
+            args = (pred, true_graph, false_graph, *operands)
             proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name="conditional") # Does this need random slug appended so as not to collide?
 
@@ -425,6 +426,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
+            print("Proxy for?", func_overload.__name__)
             return proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -591,6 +593,7 @@ a bug if you need this)""")
         else:
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
+        print("Args are:", *args)
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
 

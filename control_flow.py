@@ -156,14 +156,16 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
-    print("Into cond dense:", true_fn, false_fn)
-    if pred:
+    print("Running cond dense", pred)
+    # print("Pred?", pred.code)
+    # if pred(tuple()):
+    if pred.elem:
+        print("True!")
         x = true_fn(*operands)
-        print("Out of cond dense:", x)
         return x
     else:
+        print("False!")
         x = false_fn(*operands)
-        print("Out of cond dense:", x)
         return x
 
 
@@ -196,10 +198,10 @@ def python_fallback(op):
         def extract():
             tensors = get_tensors(args, kwargs)
             for tensor in tensors:
+                # print("T:", tensor)
                 ret = tensor.__torch_dispatch__(op, None, args, kwargs)
                 if ret is NotImplemented:
                     continue
-                print("Output:", ret)
                 return ret
             return NotImplemented
 
@@ -234,8 +236,8 @@ def false_fn(x):
     return x.cos()
 
 x = torch.randn(4)
-result = cond(False, true_fn, false_fn, x)
-assert torch.allclose(result, torch.cos(x))
+# result = cond(False, true_fn, false_fn, x)
+# assert torch.allclose(result, torch.cos(x))
 
 """
 Test case #2: tracing
@@ -246,19 +248,20 @@ cond accepts a true_fn/false_fn and these need to be traced out.
 
 I've hardcoded the logic into ProxyTensor.
 """
+print("EXAMPLE 2")
 from torch.fx.experimental.proxy_tensor import make_fx
 
-def f(x, pred):
-    return cond(pred, true_fn, false_fn, x)
+def f(x, y):
+    return cond(y, true_fn, false_fn, x)
 
-graph = make_fx(f)(x, False)
+graph = make_fx(f)(x, torch.tensor(True))
 print("graph.code:")
 print(graph.code)
 graph.graph.print_tabular()
 print("Invoking:")
-result_false = graph.forward(x, False)
+result_false = graph.forward(x, torch.tensor(True))
 print("False:", result_false)
-result_true = graph(x, True)
+result_true = graph(x, torch.tensor(False))
 print("True:", result_true)
 # result_true()
 # print(graph.forward())
