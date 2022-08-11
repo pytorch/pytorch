@@ -156,7 +156,7 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
         is_activation_post_process(modules[str(node.target)])
 
 
-def get_weight_and_bias_index_dicts(backend_config: BackendConfig):
+def _get_weight_and_bias_index_dicts(backend_config: BackendConfig):
     index_dicts: Dict[str, Dict[str, List[int]]] = {
         "weight": {},
         "bias": {},
@@ -1558,7 +1558,7 @@ def prepare(
     pattern_to_quantize_handler = get_pattern_to_quantize_handlers(backend_config)
     pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
-    weight_index_dict, bias_index_dict = get_weight_and_bias_index_dicts(backend_config)
+    weight_index_dict, bias_index_dict = _get_weight_and_bias_index_dicts(backend_config)
 
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)
