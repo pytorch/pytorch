@@ -177,7 +177,7 @@ def create_type_hint(x):
             return ret_type(base_type)
     except Exception as e:
         # We tried to create a type hint for list but failed.
-        torch.warnings.warn(f"We were not able to successfully create type hint from the type {x}")
+        warnings.warn(f"We were not able to successfully create type hint from the type {x}")
         pass
     return x
 
