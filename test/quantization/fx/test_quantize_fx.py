@@ -179,7 +179,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 
 
 
@@ -4082,6 +4082,30 @@ class TestQuantizeFx(QuantizationTestCase):
         for n in m.graph.nodes:
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
+        m(example_inputs)
+
+    def test_lstm_scriptable(self):
+        """ Test that quantized LSTM is scriptable. """
+
+        class MyLSTM(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+
+            def forward(self, inputs: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor]):
+                h = hidden[0]
+                c = hidden[1]
+                return self.lstm(inputs, (h, c))
+
+        m = MyLSTM().eval()
+        h0 = torch.randn(1, 3, 50)
+        c0 = torch.randn(1, 3, 50)
+        example_inputs = ((torch.randn(5, 3, 50), (h0, c0)),)
+        qconfig_mapping = QConfigMapping().set_object_type(nn.LSTM, default_dynamic_qconfig)
+        m = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
+        m(*example_inputs[0])
+        m = convert_fx(m)
+        self.checkScriptable(m, example_inputs, check_save_load=True)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):
