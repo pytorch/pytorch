@@ -416,6 +416,7 @@ TORCH_IMPL_FUNC(sigmoid_out_mps)(
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support sigmoid op with int64 input")
 
   if(output.numel() == 0)
     return;

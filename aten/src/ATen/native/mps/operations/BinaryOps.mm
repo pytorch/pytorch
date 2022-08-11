@@ -27,6 +27,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
                     const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
+
   // it's possible to receive empty tensors here
   if (self.numel() == 0 || other.numel() == 0) {
     return;
@@ -203,6 +204,9 @@ Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) {
 
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                   \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
+  TORCH_CHECK(!(self.scalar_type() == ScalarType::Long &&                                       \
+               (#func_stub == "power" || #func_stub == "atan2")),                               \
+               "MPS does not support ", #func_stub, " op with int64 input")                   \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
       MPSGraph* mpsGraph = cachedGraph->graph();                                                \
