@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <ATen/NestedTensorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 #include <vector>
 
@@ -46,18 +47,17 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
    * @return A newly constructed view tensor
    */
   inline at::Tensor create_nested_view_tensor(
-      at::Tensor base,
+      const at::Tensor& base,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
-      const std::vector<int64_t>& offsets) {
-    auto base_impl = get_nested_tensor_impl(base);
+      std::vector<int64_t>&& offsets) {
 
     return at::detail::make_tensor<NestedTensorImpl>(
-        base_impl->storage(),
+        c10::TensorImpl::VIEW,
         base,
-        std::move(nested_size_tensor),
-        std::move(nested_stride_tensor),
-        offsets);
+        nested_size_tensor,
+        nested_stride_tensor,
+        std::move(offsets));
   }
 
 // The sizes of the underlying tensors

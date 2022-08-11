@@ -127,7 +127,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     // NOLINTNEXTLINE(performance-move-const-arg)
-    : TensorImpl(Storage{}, key_set, data_type, std::move(device_opt)) {}
+    : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
