@@ -115,8 +115,6 @@ def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, req
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
             result = tuple(r for r in result if torch.is_floating_point(r))
             assert len(result) > 0
         return result
@@ -142,8 +140,6 @@ def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_g
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
             result = tuple(r for r in result if torch.is_floating_point(r))
             assert len(result) > 0
         return result
@@ -558,10 +554,10 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('nanquantile'),  # checks q via a .item() call
+        xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
-        xfail('quantile'),  # checks q via a .item() call
+        xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('stft'),
         xfail('view_as_complex'),
 

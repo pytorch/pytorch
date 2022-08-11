@@ -1800,6 +1800,9 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 namespace torch {
 namespace jit {
 
+#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
+namespace flatbuffers = flatbuffers_fbsource;
+#endif
 /**
  * An Allocator that can only deallocate (using delete []), counting
  * the number of times that it has been asked to deallocate.
