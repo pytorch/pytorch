@@ -4,8 +4,9 @@ from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -112,9 +113,9 @@ class _ForkerIterDataPipe(IterDataPipe):
                 UserWarning
             )
         self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
-        self.slowest_ptr = 0
-        self.leading_ptr = 0
-        self.end_ptr: Optional[int] = None
+        self.slowest_ptr = 0  # The index to read by the slowest child
+        self.leading_ptr = 0  # The index to read by the fastest child
+        self.end_ptr: Optional[int] = None  # The index to stop child
 
     def __len__(self):
         return len(self.main_datapipe)
@@ -122,34 +123,39 @@ class _ForkerIterDataPipe(IterDataPipe):
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None:
             self._datapipe_iterator = iter(self.main_datapipe)
-        while self.end_ptr is None or self.child_pointers[instance_id] < self.end_ptr:
-            if not self.buffer or self.child_pointers[instance_id] > self.leading_ptr:
+            self._snapshot_state = _SnapshotState.Iterating
+        while self.end_ptr is None or self.child_pointers[instance_id] + 1 < self.end_ptr:
+            self.child_pointers[instance_id] += 1
+            # Use buffer
+            if self.buffer and self.child_pointers[instance_id] <= self.leading_ptr:
+                idx = self.child_pointers[instance_id] - self.slowest_ptr - 1
+                return_val = self.buffer[idx]
+            else:  # Retreive one element from main datapipe
                 self.leading_ptr = self.child_pointers[instance_id]
-                if self.buffer_size >= 0 and self.leading_ptr - self.slowest_ptr + 1 > self.buffer_size:
-                    raise BufferError("ForkerIterDataPipe buffer overflow," +
-                                      f"buffer size {self.buffer_size} is insufficient.")
                 try:
-                    self.buffer.append(next(self._datapipe_iterator))
-                    self.child_pointers[instance_id] += 1
-                    yield self.buffer[-1]
+                    return_val = next(self._datapipe_iterator)
+                    self.buffer.append(return_val)
                 except StopIteration:
                     self.end_ptr = self.leading_ptr
-            else:  # Child pointer is slower than or equal to the leading_ptr
-                buffer_index = self.child_pointers[instance_id] - self.slowest_ptr
-                return_val = self.buffer[buffer_index]
-                self.child_pointers[instance_id] += 1
-                if self.child_pointers[instance_id] - 1 == self.slowest_ptr:
-                    new_min = min(self.child_pointers)  # Can optimize by avoiding the call to min()
-                    if self.slowest_ptr < new_min:
-                        self.slowest_ptr = new_min
-                        self.buffer.popleft()
-                yield return_val
-        if self.end_ptr and self.child_pointers[instance_id] == self.end_ptr and\
-           all(p == self.end_ptr for p in self.child_pointers):
+                    continue
+            if self.child_pointers[instance_id] == self.slowest_ptr + 1:
+                new_min = min(self.child_pointers)  # Can optimize by avoiding the call to min()
+                if self.slowest_ptr < new_min:
+                    self.slowest_ptr = new_min
+                    self.buffer.popleft()
+            if self.buffer_size >= 0 and self.leading_ptr > self.buffer_size + self.slowest_ptr:
+                raise BufferError("ForkerIterDataPipe buffer overflow," +
+                                  f"buffer size {self.buffer_size} is insufficient.")
+            yield return_val
+
+        if all(p + 1 == self.end_ptr for p in self.child_pointers):
             self._datapipe_iterator = None
 
     def is_every_instance_exhausted(self) -> bool:
-        return all(self.end_ptr == ptr for ptr in self.child_pointers)
+        # Due to the implementation of `get_next_element_by_instance`, `self.end_ptr` will end up
+        # equaling to `len(main_datapipe) + 1`, hence the check for `self.end_ptr - 1 == ptr` below.
+        return self.end_ptr is not None and\
+            all(self.end_ptr == ptr or self.end_ptr - 1 == ptr for ptr in self.child_pointers)
 
     def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
@@ -167,6 +173,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -175,6 +183,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.buffer = deque()
@@ -300,7 +310,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        _check_lambda_fn(classifier_fn)
+        _check_unpickable_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -345,6 +355,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
+                StreamWrapper.close_streams(value)
                 continue
             if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
@@ -360,6 +371,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
+            self._snapshot_state = _SnapshotState.Iterating  # This is necessary for the DataPipe to reset properly.
         stop = False
         while not stop:
             if self.child_buffers[instance_id]:
@@ -392,6 +404,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -402,6 +416,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
@@ -469,6 +485,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         state = (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -476,6 +494,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.buffer = []
 
@@ -510,8 +530,21 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
-        for data in zip(*self.datapipes):
-            yield data
+        iterators = [iter(datapipe) for datapipe in self.datapipes]
+        try:
+            for data in zip(*iterators):
+                yield data
+        finally:
+            unused = []
+            for iterator in iterators:
+                try:
+                    unused += list(iterator)
+                except RuntimeError:  # Some iterators may have been invalidated by single iterator constraints
+                    pass
+
+            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+            for item in unused:
+                StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:

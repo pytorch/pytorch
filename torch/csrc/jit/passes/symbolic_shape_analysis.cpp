@@ -342,7 +342,9 @@ struct SymbolicShapeOpAnalyzer {
         // def cat(x, y, dim: int)
         //     tensors = [x, y]
         //     body
-        TORCH_INTERNAL_ASSERT(!seen_tensor_list, "SSA doesn't handle case with multiple tensor lists")
+        TORCH_INTERNAL_ASSERT(
+            !seen_tensor_list,
+            "SSA doesn't handle case with multiple tensor lists")
         seen_tensor_list = true;
 
         uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);

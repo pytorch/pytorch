@@ -83,6 +83,9 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::TensorIndex:
       ptr(handler)->handle(val->as<kir::TensorIndex>());
       return;
+    case ValType::IntPair:
+      ptr(handler)->handle(val->as<kir::IntPair>());
+      return;
     default:
       break;
   }
@@ -126,8 +129,14 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Merge:
       ptr(handler)->handle(expr->as<Merge>());
       return;
+    case ExprType::Swizzle2D:
+      ptr(handler)->handle(expr->as<Swizzle2D>());
+      return;
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
+      return;
+    case ExprType::ExpandOp:
+      ptr(handler)->handle(expr->as<ExpandOp>());
       return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
@@ -180,6 +189,12 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::AllocateFusedReduction:
       ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
+      return;
+    case ExprType::Swizzle2DInt:
+      ptr(handler)->handle(expr->as<kir::Swizzle2DInt>());
+      return;
+    case ExprType::PairSelect:
+      ptr(handler)->handle(expr->as<kir::PairSelect>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -239,6 +254,9 @@ void Val::constDispatch(T handler, const Val* val) {
     case ValType::TensorIndex:
       ptr(handler)->handle(val->as<kir::TensorIndex>());
       return;
+    case ValType::IntPair:
+      ptr(handler)->handle(val->as<kir::IntPair>());
+      return;
     default:
       break;
   }
@@ -282,8 +300,14 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Merge:
       ptr(handler)->handle(expr->as<Merge>());
       return;
+    case ExprType::Swizzle2D:
+      ptr(handler)->handle(expr->as<Swizzle2D>());
+      return;
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
+      return;
+    case ExprType::ExpandOp:
+      ptr(handler)->handle(expr->as<ExpandOp>());
       return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
@@ -336,6 +360,12 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::AllocateFusedReduction:
       ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
+      return;
+    case ExprType::Swizzle2DInt:
+      ptr(handler)->handle(expr->as<kir::Swizzle2DInt>());
+      return;
+    case ExprType::PairSelect:
+      ptr(handler)->handle(expr->as<kir::PairSelect>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -403,6 +433,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
     case ValType::TensorIndex:
       ptr(mutator)->mutate(val->as<kir::TensorIndex>());
       return;
+    case ValType::IntPair:
+      ptr(mutator)->mutate(val->as<kir::IntPair>());
+      return;
     default:
       break;
   }
@@ -446,8 +479,14 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::Merge:
       ptr(mutator)->mutate(expr->as<Merge>());
       return;
+    case ExprType::Swizzle2D:
+      ptr(mutator)->mutate(expr->as<Swizzle2D>());
+      return;
     case ExprType::TransposeOp:
       ptr(mutator)->mutate(expr->as<TransposeOp>());
+      return;
+    case ExprType::ExpandOp:
+      ptr(mutator)->mutate(expr->as<ExpandOp>());
       return;
     case ExprType::ShiftOp:
       ptr(mutator)->mutate(expr->as<ShiftOp>());
@@ -500,6 +539,12 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::AllocateFusedReduction:
       ptr(mutator)->mutate(expr->as<kir::AllocateFusedReduction>());
+      return;
+    case ExprType::Swizzle2DInt:
+      ptr(mutator)->mutate(expr->as<kir::Swizzle2DInt>());
+      return;
+    case ExprType::PairSelect:
+      ptr(mutator)->mutate(expr->as<kir::PairSelect>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -639,6 +684,9 @@ void OptOutConstDispatch::handle(const kir::Predicate* stmt) {
 void OptOutConstDispatch::handle(const kir::TensorIndex* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::IntPair* stmt) {
+  unhandled(stmt);
+}
 
 // Exprs
 void OptOutConstDispatch::handle(const UnaryOp* stmt) {
@@ -675,7 +723,13 @@ void OptOutConstDispatch::handle(const Split* stmt) {
 void OptOutConstDispatch::handle(const Merge* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const Swizzle2D* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const TransposeOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const ExpandOp* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const ShiftOp* stmt) {
@@ -730,6 +784,12 @@ void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
 void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::Swizzle2DInt* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::PairSelect* stmt) {
+  unhandled(stmt);
+}
 
 void OptOutDispatch::unhandled(Statement*) {}
 
@@ -763,6 +823,9 @@ void OptOutDispatch::handle(kir::Predicate* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::TensorIndex* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::IntPair* stmt) {
   unhandled(stmt);
 }
 
@@ -801,7 +864,13 @@ void OptOutDispatch::handle(Split* stmt) {
 void OptOutDispatch::handle(Merge* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(Swizzle2D* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(TransposeOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ExpandOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ShiftOp* stmt) {
@@ -854,6 +923,12 @@ void OptOutDispatch::handle(kir::GridWelford* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::Swizzle2DInt* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::PairSelect* stmt) {
   unhandled(stmt);
 }
 

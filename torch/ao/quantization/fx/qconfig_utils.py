@@ -1,11 +1,15 @@
 import torch
 from collections import defaultdict, OrderedDict
-from typing import Callable, Any, Dict, Tuple, Set, Optional, List
+from typing import Callable, Any, Dict, Tuple, Set, List
 from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
+from torch.ao.quantization.backend_config import (
+    DTypeConfig,
+)
+
 from torch.fx import (
     GraphModule,
 )
@@ -33,12 +37,8 @@ from ..qconfig_mapping_utils import (
 # TODO: revisit this list. Many helper methods shouldn't be public
 __all__ = [
     "check_is_valid_config_dict",
-    "check_is_valid_convert_custom_config_dict",
-    "check_is_valid_fuse_custom_config_dict",
-    "check_is_valid_prepare_custom_config_dict",
     "compare_prepare_convert_qconfig_mappings",
     "generate_qconfig_map",
-    "get_standalone_module_configs",
     "is_qconfig_supported_by_dtype_configs",
     "maybe_adjust_qconfig_for_module_name_object_type_order",
     "update_qconfig_for_fusion",
@@ -202,57 +202,6 @@ def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_na
                 '\' instead.')
 
 
-def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
-    r""" Checks if the given prepare_custom_config_dict has the correct keys
-
-    Args:
-      `prepare_custom_config_dict`: customization configuration dictionary for
-      quantization tool
-    """
-    if not prepare_custom_config_dict:
-        return
-
-    prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
-                                               "standalone_module_class",
-                                               "float_to_observed_custom_module_class",
-                                               "non_traceable_module_name",
-                                               "non_traceable_module_class",
-                                               "input_quantized_idxs",
-                                               "output_quantized_idxs",
-                                               "preserved_attributes"}
-    check_is_valid_config_dict(prepare_custom_config_dict,
-                               prepare_custom_config_dict_allowed_keys, "prepare_custom_config_dict")
-
-
-def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
-    r""" Checks if the given convert_custom_config_dict has the correct keys
-
-    Args:
-      `convert_custom_config_dict`: dictionary for custom configurations for
-      convert function
-    """
-    if not convert_custom_config_dict:
-        return
-
-    convert_custom_config_dict_allowed_keys = {"observed_to_quantized_custom_module_class",
-                                               "preserved_attributes"}
-    check_is_valid_config_dict(convert_custom_config_dict,
-                               convert_custom_config_dict_allowed_keys, "convert_custom_config_dict")
-
-
-def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
-    r""" Checks if the given fuse_custom_config_dict has the correct keys
-
-    Args:
-      `fuse_custom_config_dict`: dictionary for custom configurations for fuse_fx
-    """
-    if not fuse_custom_config_dict:
-        return
-
-    fuse_custom_config_dict_allowed_keys = {"preserved_attributes"}
-    check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
-
-
 def compare_prepare_convert_qconfig_mappings(
         prepare_qconfig_mapping: QConfigMapping,
         convert_qconfig_mapping: QConfigMapping):
@@ -284,13 +233,15 @@ def compare_prepare_convert_qconfig_mappings(
                 "Expected convert QConfigMapping to have the same qconfig as prepare for key {} {}; \
                 prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
-def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):
+def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
     for dtype_config in dtype_configs:
-        is_dynamic = dtype_config.get("is_dynamic", False)
-        input_dtype = dtype_config.get("input_dtype", torch.float)
-        weight_dtype = dtype_config.get("weight_dtype", torch.float)
-        bias_dtype = dtype_config.get("bias_dtype", torch.float)
-        output_dtype = dtype_config.get("output_dtype", torch.float)
+        is_dynamic = dtype_config.is_dynamic
+        if is_dynamic is None:
+            is_dynamic = False
+        input_dtype = dtype_config.input_dtype or torch.float
+        weight_dtype = dtype_config.weight_dtype or torch.float
+        bias_dtype = dtype_config.bias_dtype or torch.float
+        output_dtype = dtype_config.output_dtype or torch.float
         qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
             get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
@@ -310,19 +261,3 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         if is_match:
             return True
     return False
-
-# TODO: rename this file to config_utils
-def get_standalone_module_configs(
-        module_name: str,
-        module_type: Callable,
-        custom_config_dict: Dict[str, Any]):
-    standalone_module_name_configs = \
-        custom_config_dict.get("standalone_module_name", [])
-    standalone_module_class_configs = \
-        custom_config_dict.get("standalone_module_class", [])
-    class_config_map = {x[0]: (x[1], x[2], x[3], x[4]) for x in standalone_module_class_configs}
-    name_config_map = {x[0]: (x[1], x[2], x[3], x[4]) for x in standalone_module_name_configs}
-    config = class_config_map.get(module_type, (None, None, None, None))
-    # name config has precedence over type config
-    config = name_config_map.get(module_name, config)
-    return config

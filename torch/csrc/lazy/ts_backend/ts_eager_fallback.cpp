@@ -1,13 +1,13 @@
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
-#include <ATen/Functions.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
-#include <torch/csrc/lazy/core/config.h>
 #include <torch/library.h>
 #include <sstream>
 #include <unordered_map>
@@ -153,7 +153,7 @@ bool force_eager_fallback(c10::Symbol op) {
       return true;
     }
   }
-  if(op == at::aten::nonzero){
+  if (op == at::aten::nonzero) {
     // When symbolic shape mode is not enabled, the nonzero shape function
     // returns an incorrect result.
     return !symbolicShapeEnabled();
@@ -165,8 +165,8 @@ bool force_eager_fallback(c10::Symbol op) {
 void ltc_eager_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  // TODO(whc) this FN_TRACK thing hasn't been used so far in LTC iirc but could land/re-enable it
-  // LTC_FN_TRACK(3);;
+  // TODO(whc) this FN_TRACK thing hasn't been used so far in LTC iirc but could
+  // land/re-enable it LTC_FN_TRACK(3);;
   const auto name = c10::toString(op.operator_name());
 
   // Manually applying the TORCH_LAZY_COUNTER macro.
@@ -183,7 +183,7 @@ void ltc_eager_fallback(
   auto arguments = torch::jit::last(stack, args.size());
 
   // Log each tensor argument.
-  for (const auto & ivalue : arguments) {
+  for (const auto& ivalue : arguments) {
     if (ivalue.isTensor()) {
       VLOG(3) << ivalue.toTensor().toString();
     }
@@ -323,8 +323,8 @@ void ts_eager_fallback(
               "mutable alias: ",
               schema_returns[idx]);
         } else {
-          c10::optional<c10::Device> tgt_device =
-              compute_target_device(tensor_args, tensorlist_args, opt_tensorlist_args);
+          c10::optional<c10::Device> tgt_device = compute_target_device(
+              tensor_args, tensorlist_args, opt_tensorlist_args);
           if (alias_info != nullptr && !alias_info->isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and
             // not creating a view.
@@ -337,7 +337,11 @@ void ts_eager_fallback(
             } else {
               dev_str << "<none>";
             }
-            TORCH_WARN(
+            // We should never hit this for a view op,
+            // because LazyTensor should provide a lowering for the
+            // corresponding view_copy operator. The functionalization pass will
+            // take care of calling the view_copy operator intead of the view.
+            TORCH_CHECK(
                 false,
                 "The operator ",
                 op.schema().operator_name(),

@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -19,7 +18,10 @@ from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     TEST_GPU_NUM,
     ShardedTensorTestBase,
@@ -169,7 +171,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
             optim.step()
             sharded_optim = ShardedOptimizer(
-                dict(named_params_with_sharded_tensor(megatron_lm)),
+                dict(megatron_lm.named_parameters()),
                 torch.optim.SGD,
                 lr=0.1,
             )
@@ -329,3 +331,37 @@ class TestShardingPlan(ShardedTensorTestBase):
         self.assertTrue(isinstance(megatron_lm.fc2.weight, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc1.bias, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc2.bias, ShardedTensor))
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_shard_module_sub_process_group(self):
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
+        colwise_sharding_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
+            ],
+        )
+        rowwise_sharding_spec = ChunkShardingSpec(
+            dim=1,
+            placements=[
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
+            ],
+        )
+        sharding_plan = ShardingPlan(
+            plan={
+                "fc1.weight": colwise_sharding_spec,
+                "fc2.weight": rowwise_sharding_spec
+            }
+        )
+
+        pg = dist.new_group([2, 3])
+
+        if self.rank >= 2:
+            shard_module(megatron_lm, sharding_plan, process_group=pg)
+
+if __name__ == "__main__":
+    run_tests()

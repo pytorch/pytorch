@@ -4,7 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
-from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
+from torch.ao.quantization.quant_type import QuantType
 from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
@@ -168,8 +168,7 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
         corresponding observed/quantized custom module class for input custom module instance
     """
     quant_type = get_quant_type(qconfig)
-    quant_type_str = quant_type_to_str(quant_type)
-    class_mapping = custom_module_class_mapping.get(quant_type_str, {})
+    class_mapping = custom_module_class_mapping.get(quant_type, {})
     assert type(custom_module) in class_mapping, "did not find corresponding observed " \
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]

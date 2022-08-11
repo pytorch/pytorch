@@ -47,9 +47,6 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
 {%- if cross_compile_arm64 %}
@@ -64,7 +61,7 @@ jobs:
     {%- if config["package_type"] == "libtorch" %}
     runs-on: macos-10.15
     {%- else %}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     {%- endif %}
 {%- if config["package_type"] == "libtorch" %}
     # libtorch builds take a long time on github hosted runners

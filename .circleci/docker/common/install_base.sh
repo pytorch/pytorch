@@ -15,9 +15,20 @@ install_ubuntu() {
   elif [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
     cmake3="cmake=3.16*"
     maybe_libiomp_dev=""
+  elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    cmake3="cmake=3.22*"
+    maybe_libiomp_dev=""
   else
     cmake3="cmake=3.5*"
     maybe_libiomp_dev="libiomp-dev"
+  fi
+
+  if [[ "$CLANG_VERSION" == 12 ]]; then
+    maybe_libomp_dev="libomp-12-dev"
+  elif [[ "$CLANG_VERSION" == 10 ]]; then
+    maybe_libomp_dev="libomp-10-dev"
+  else
+    maybe_libomp_dev=""
   fi
 
   # TODO: Remove this once nvidia package repos are back online
@@ -29,10 +40,12 @@ install_ubuntu() {
   apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
+  deploy_deps="libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev"
   numpy_deps="gfortran"
   apt-get install -y --no-install-recommends \
     $ccache_deps \
     $numpy_deps \
+    ${deploy_deps} \
     ${cmake3} \
     apt-transport-https \
     autoconf \
@@ -49,14 +62,31 @@ install_ubuntu() {
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
+    ${maybe_libomp_dev} \
     software-properties-common \
     wget \
     sudo \
-    vim
+    vim \
+    jq \
+    libtool
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
+
+  # cuda-toolkit does not work with gcc-11.2.0 which is default in Ubunutu 22.04
+  # see: https://github.com/NVlabs/instant-ngp/issues/119
+  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    apt-get install -y g++-10
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 30
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 30
+    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-10 30
+
+    # https://www.spinics.net/lists/libreoffice/msg07549.html
+    sudo rm -rf /usr/lib/gcc/x86_64-linux-gnu/11
+    wget https://github.com/gcc-mirror/gcc/commit/2b2d97fc545635a0f6aa9c9ee3b017394bc494bf.patch -O noexecpt.patch
+    sudo patch  /usr/include/c++/10/bits/range_access.h noexecpt.patch
+  fi
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean

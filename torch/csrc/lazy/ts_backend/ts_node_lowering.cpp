@@ -7,11 +7,10 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
-#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
-#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch {
@@ -33,7 +32,8 @@ TSOpVector LowerBuiltin(
 }
 
 TSOpVector LowerTSBuiltin(
-    std::shared_ptr<torch::jit::GraphFunction> function, c10::Symbol sym,
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    c10::Symbol sym,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments) {
   auto builtin =
@@ -55,21 +55,20 @@ TSOpVector LowerTSBuiltin(
   return {sv->getValue()};
 }
 
-
 torch::jit::Value* GenerateClone(
-        torch::jit::Value* val,
-        std::shared_ptr<torch::jit::GraphFunction> function) {
+    torch::jit::Value* val,
+    std::shared_ptr<torch::jit::GraphFunction> function) {
   std::vector<torch::jit::NamedValue> clone_arguments;
   clone_arguments.emplace_back(val);
   TSOpVector cloned = LowerBuiltin(at::aten::clone, function, clone_arguments);
-  CHECK_EQ(cloned.size(), 1);
+  TORCH_CHECK_EQ(cloned.size(), 1);
   return cloned.front();
 }
 
 void GenerateCopy(
-        torch::jit::Value* destination,
-        torch::jit::Value* source,
-        std::shared_ptr<torch::jit::GraphFunction> function) {
+    torch::jit::Value* destination,
+    torch::jit::Value* source,
+    std::shared_ptr<torch::jit::GraphFunction> function) {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(destination);
   arguments.emplace_back(source);
@@ -77,9 +76,12 @@ void GenerateCopy(
 }
 
 torch::jit::Value* GenerateSlice(
-        torch::jit::Value* base, int64_t dim,
-        int64_t start, int64_t end, int64_t step,
-        std::shared_ptr<torch::jit::GraphFunction> function) {
+    torch::jit::Value* base,
+    int64_t dim,
+    int64_t start,
+    int64_t end,
+    int64_t step,
+    std::shared_ptr<torch::jit::GraphFunction> function) {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(base);
   arguments.emplace_back(dim);
@@ -87,15 +89,16 @@ torch::jit::Value* GenerateSlice(
   arguments.emplace_back(end);
   arguments.emplace_back(step);
   TSOpVector selected = LowerBuiltin(at::aten::slice, function, arguments);
-  CHECK_EQ(selected.size(), 1);
+  TORCH_CHECK_EQ(selected.size(), 1);
   return selected.front();
 }
 
 // Node Lowerings
 
 // Default node lowering
-TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-                         TSLoweringContext* loctx) const {
+TSOpVector TsNode::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   for (const torch::lazy::Output& output : operands()) {
     arguments.emplace_back(loctx->GetOutputOp(output));
@@ -103,44 +106,9 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   return LowerBuiltin(this, function, arguments);
 }
 
-// TS specific ops
-TSOpVector TSNativeBatchNormForward::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
-    TSLoweringContext* loctx) const {
-  std::vector<torch::jit::NamedValue> arguments;
-  for (size_t i = 0; i < 5; ++i) {
-    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
-  }
-  arguments.emplace_back(training_);
-  arguments.emplace_back(momentum_);
-  arguments.emplace_back(eps_);
-  return LowerBuiltin(this, function, arguments);
-}
-
-TSOpVector TSNativeBatchNormBackward::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
-    TSLoweringContext* loctx) const {
-  std::vector<torch::jit::NamedValue> arguments;
-  for (size_t i = 0; i < 3; ++i) {
-    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
-  }
-  c10::optional<at::Tensor> null_arg;
-  if (operands().size() == 5) {
-    arguments.emplace_back(null_arg);
-    arguments.emplace_back(null_arg);
-  }
-  for (size_t i = 3; i < operands().size(); ++i) {
-    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
-  }
-  arguments.emplace_back(training_);
-  arguments.emplace_back(eps_);
-  arguments.emplace_back(output_mask_);
-  return LowerBuiltin(this, function, arguments);
-}
-
-
 // Non-native ops
-torch::lazy::TSOpVector Cast::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Cast::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -148,17 +116,21 @@ torch::lazy::TSOpVector Cast::Lower(std::shared_ptr<torch::jit::GraphFunction> f
   return LowerBuiltin(at::aten::to, function, arguments);
 }
 
-torch::lazy::TSOpVector DeviceData::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector DeviceData::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   auto infoptr = data_->info();
-  auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
+  auto deviceDataInfoPtr =
+      (torch::lazy::LazyGraphExecutor::DeviceDataInfo*)infoptr;
   if (GRAPH_DUMP_ENABLED) {
-    LOG(ERROR) << "Lowering device data node, tensor id " << deviceDataInfoPtr->tensor_id << std::endl;
+    LOG(ERROR) << "Lowering device data node, tensor id "
+               << deviceDataInfoPtr->tensor_id << std::endl;
   }
   return {loctx->GetParameter(data_)};
 }
 
-torch::lazy::TSOpVector Expand::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Expand::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -169,40 +141,40 @@ torch::lazy::TSOpVector Expand::Lower(std::shared_ptr<torch::jit::GraphFunction>
     // of rank 0. This leads to false positives when checking for internal
     // memory overlap, because at::has_internal_overlap returns
     // MemOverlap::YES when a stride is set to 0.
-    CHECK_EQ(expand_out.size(), 1);
+    TORCH_CHECK_EQ(expand_out.size(), 1);
     return {GenerateClone(expand_out.front(), function)};
   }
   return expand_out;
 }
 
-torch::lazy::TSOpVector Scalar::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Scalar::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   auto options =
       at::TensorOptions()
           .device(torch::lazy::getBackend()->EagerFallbackDeviceType())
           .dtype(shape().scalar_type());
-  return {
-      loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
+  return {loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
 }
 
 // View Ops
 
-torch::lazy::TSOpVector AsStrided::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector AsStrided::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
-
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
   arguments.emplace_back(size);
   arguments.emplace_back(stride);
   arguments.emplace_back(storage_offset);
   TSOpVector as_strided_out = LowerBuiltin(this, function, arguments);
-  CHECK_EQ(as_strided_out.size(), 1);
+  TORCH_CHECK_EQ(as_strided_out.size(), 1);
   return {GenerateClone(as_strided_out.front(), function)};
 }
 
-torch::lazy::TSOpVector AsStridedViewUpdate::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector AsStridedViewUpdate::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
-
   torch::jit::Value* destination =
       GenerateClone(loctx->GetOutputOp(operand(0)), function);
   const torch::lazy::Output& input_op = operand(1);
@@ -216,15 +188,15 @@ torch::lazy::TSOpVector AsStridedViewUpdate::Lower(std::shared_ptr<torch::jit::G
   dest_arguments.emplace_back(storage_offset);
   TSOpVector as_strided_out =
       LowerBuiltin(at::aten::as_strided, function, dest_arguments);
-  CHECK_EQ(as_strided_out.size(), 1);
+  TORCH_CHECK_EQ(as_strided_out.size(), 1);
   torch::jit::Value* as_strided = as_strided_out.front();
   GenerateCopy(as_strided, loctx->GetOutputOp(input_op), function);
   return {destination};
 }
 
-torch::lazy::TSOpVector Diagonal::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Diagonal::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
-
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
   arguments.emplace_back(offset);
@@ -233,13 +205,15 @@ torch::lazy::TSOpVector Diagonal::Lower(std::shared_ptr<torch::jit::GraphFunctio
   return LowerBuiltin(this, function, arguments);
 }
 
-torch::lazy::TSOpVector DiagonalViewUpdate::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector DiagonalViewUpdate::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   // Since we promise the backends that we never generate any aliased
   // inplace update IR, therefore we clone the target first and then
   // update the clone inplace instead. Since the clone is transient,
   // it will never be aliased, and therefore it's safe.
-  torch::jit::Value* destination = GenerateClone(loctx->GetOutputOp(operand(0)), function);
+  torch::jit::Value* destination =
+      GenerateClone(loctx->GetOutputOp(operand(0)), function);
 
   // Replay the diagonal.
   std::vector<torch::jit::NamedValue> arguments;
@@ -256,41 +230,52 @@ torch::lazy::TSOpVector DiagonalViewUpdate::Lower(std::shared_ptr<torch::jit::Gr
   return {destination};
 }
 
-torch::lazy::TSOpVector Narrow::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Narrow::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   const torch::lazy::Output& input = operand(0);
   torch::jit::Value* base = loctx->GetOutputOp(input);
   const torch::lazy::Shape& input_shape = input.shape();
-  CHECK_EQ(sizes.size(), base_indices.size());
-  CHECK_EQ(input_shape.dim(), base_indices.size());
+  TORCH_CHECK_EQ(sizes.size(), base_indices.size());
+  TORCH_CHECK_EQ(input_shape.dim(), base_indices.size());
   for (size_t dim = 0; dim < base_indices.size(); ++dim) {
     int64_t start = base_indices[dim];
-    base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
-                         /*end=*/start + sizes[dim], /*step=*/1,
-                         /*function=*/function);
+    base = GenerateSlice(
+        /*base=*/base,
+        /*dim=*/dim,
+        /*start=*/start,
+        /*end=*/start + sizes[dim],
+        /*step=*/1,
+        /*function=*/function);
   }
   return {base};
 }
 
-torch::lazy::TSOpVector NarrowViewUpdate::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector NarrowViewUpdate::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   torch::jit::Value* dest =
       GenerateClone(loctx->GetOutputOp(operand(0)), function);
   const torch::lazy::Output& source_argument = operand(1);
   const torch::lazy::Shape& source_shape = source_argument.shape();
-  CHECK_EQ(source_shape.dim(), base_indices.size());
+  TORCH_CHECK_EQ(source_shape.dim(), base_indices.size());
   torch::jit::Value* base = dest;
   for (size_t dim = 0; dim < base_indices.size(); ++dim) {
     int64_t start = base_indices[dim];
-    base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
-                         /*end=*/start + source_shape.size(dim), /*step=*/1,
-                         /*function=*/function);
+    base = GenerateSlice(
+        /*base=*/base,
+        /*dim=*/dim,
+        /*start=*/start,
+        /*end=*/start + source_shape.size(dim),
+        /*step=*/1,
+        /*function=*/function);
   }
   GenerateCopy(base, loctx->GetOutputOp(source_argument), function);
   return {dest};
 }
 
-torch::lazy::TSOpVector Permute::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Permute::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -298,9 +283,9 @@ torch::lazy::TSOpVector Permute::Lower(std::shared_ptr<torch::jit::GraphFunction
   return LowerBuiltin(this, function, arguments);
 }
 
-torch::lazy::TSOpVector Resize::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Resize::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
-
   std::vector<torch::jit::NamedValue> arguments;
   for (const torch::lazy::Output& output : operands()) {
     arguments.emplace_back(loctx->GetOutputOp(output));
@@ -308,28 +293,39 @@ torch::lazy::TSOpVector Resize::Lower(std::shared_ptr<torch::jit::GraphFunction>
   return LowerBuiltin(this, function, arguments);
 }
 
-torch::lazy::TSOpVector Select::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Select::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   int64_t step = torch::lazy::GetStride(start, end, stride);
   torch::jit::Value* base = loctx->GetOutputOp(operand(0));
-  return {GenerateSlice(/*base=*/base, /*dim=*/dim,
-                        /*start=*/start, /*end=*/end,
-                        /*step=*/step, /*function=*/function)};
+  return {GenerateSlice(
+      /*base=*/base,
+      /*dim=*/dim,
+      /*start=*/start,
+      /*end=*/end,
+      /*step=*/step,
+      /*function=*/function)};
 }
 
-torch::lazy::TSOpVector SelectViewUpdate::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector SelectViewUpdate::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   torch::jit::Value* dest =
       GenerateClone(loctx->GetOutputOp(operand(0)), function);
   int64_t step = torch::lazy::GetStride(start, end, stride);
   torch::jit::Value* selected = GenerateSlice(
-      /*base=*/dest, /*dim=*/dim, /*start=*/start,
-      /*end=*/end, /*step=*/step, /*function=*/function);
+      /*base=*/dest,
+      /*dim=*/dim,
+      /*start=*/start,
+      /*end=*/end,
+      /*step=*/step,
+      /*function=*/function);
   GenerateCopy(selected, loctx->GetOutputOp(operand(1)), function);
   return {dest};
 }
 
-torch::lazy::TSOpVector Squeeze::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Squeeze::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -339,7 +335,8 @@ torch::lazy::TSOpVector Squeeze::Lower(std::shared_ptr<torch::jit::GraphFunction
   return LowerBuiltin(this, function, arguments);
 }
 
-torch::lazy::TSOpVector Unsqueeze::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector Unsqueeze::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -347,7 +344,8 @@ torch::lazy::TSOpVector Unsqueeze::Lower(std::shared_ptr<torch::jit::GraphFuncti
   return LowerBuiltin(this, function, arguments);
 }
 
-torch::lazy::TSOpVector View::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+torch::lazy::TSOpVector View::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
@@ -355,5 +353,5 @@ torch::lazy::TSOpVector View::Lower(std::shared_ptr<torch::jit::GraphFunction> f
   return LowerBuiltin(at::aten::reshape, function, arguments);
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch
