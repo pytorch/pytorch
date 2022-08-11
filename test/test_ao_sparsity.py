@@ -32,6 +32,7 @@ from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F
 # Data Sparsifier
 from ao.sparsity.test_data_sparsifier import TestBaseDataSparsifier  # noqa: F401
 from ao.sparsity.test_data_sparsifier import TestNormDataSparsifiers  # noqa: F401
+from ao.sparsity.test_data_sparsifier import TestQuantizationUtils  # noqa: F401
 
 # Data Scheduler
 from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
