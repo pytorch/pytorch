@@ -29,7 +29,7 @@ def read_sub_write(path: str, prefix_pat: str, new_default: int) -> None:
     print("modified", path)
 
 
-def main(args: Any):
+def main(args: Any) -> None:
     pytorch_dir = pathlib.Path(__file__).parent.parent.parent.resolve()
     onnx_dir = pytorch_dir / "third_party" / "onnx"
     os.chdir(onnx_dir)
