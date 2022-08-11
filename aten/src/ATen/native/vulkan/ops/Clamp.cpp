@@ -368,6 +368,11 @@ Tensor hardshrink(const Tensor& self_arg, const Scalar& lambd) {
   return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(hardshrink));
 }
 
+Tensor softshrink(const Tensor& self_arg, const Scalar& lambd) {
+  float abs_lambd = std::abs(lambd.to<float>());
+  return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(softshrink));
+}
+
 Tensor& hardshrink_(Tensor& self, const Scalar& lambd) {
   float abs_lambd = std::abs(lambd.to<float>());
   return ops::activation_scalar_(self, abs_lambd, VK_KERNEL(hardshrink_));
@@ -407,6 +412,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), hardshrink);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), hardshrink_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::softshrink"), softshrink);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), hardswish);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), hardswish_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), hardtanh);
