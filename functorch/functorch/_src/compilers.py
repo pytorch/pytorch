@@ -4,7 +4,7 @@ import torch.nn as nn
 from functools import partial
 from typing import Callable, Optional, Tuple, Union
 
-from .aot_autograd import aot_function, aot_module, make_boxed_func
+from .aot_autograd import aot_function, aot_module, make_boxed_compiler
 from .decompositions import get_decompositions
 from .partitioners import draw_graph, min_cut_rematerialization_partition, default_partition
 from .compile_utils import strip_overloads
@@ -25,7 +25,7 @@ def _canonicalize(fx_g):
     return fx_g
 
 
-@make_boxed_func
+@make_boxed_compiler
 def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
@@ -69,7 +69,7 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     return f
 
 
-@make_boxed_func
+@make_boxed_compiler
 def _draw_graph_compile(fx_g, _, name, clear_meta=True):
     print(fx_g.code)
     draw_graph(fx_g, name, clear_meta=clear_meta)
@@ -80,7 +80,7 @@ def draw_graph_compile(name):
     return partial(_draw_graph_compile, name=name)
 
 
-@make_boxed_func
+@make_boxed_compiler
 def nop(fx_g: fx.GraphModule, _) -> Callable:
     """
     Returns the :attr:`fx_g` Fx graph module as it is. This is a no-op compiler
@@ -93,7 +93,7 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
     return fx_g
 
 
-@make_boxed_func
+@make_boxed_compiler
 def simple_ts_compile(fx_g, _):
     strip_overloads(fx_g)
     f = torch.jit.script(fx_g)
@@ -101,7 +101,7 @@ def simple_ts_compile(fx_g, _):
     return f
 
 
-@make_boxed_func
+@make_boxed_compiler
 def nnc_jit(f, static_argnums=None):
     return aot_function(f, simple_ts_compile, static_argnums=static_argnums)
 
