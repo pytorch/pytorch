@@ -100,7 +100,11 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, False],
             [torch.channels_last, True],
         ]:
-            for eltwise_fn in [torch.relu]:
+            for eltwise_fn, op_name in [
+                [torch.relu, 'aten::relu'],
+                [torch.sigmoid, 'aten::sigmoid'],
+                [torch.tanh, 'aten::tanh'],
+            ]:
                 for bias in [True, False]:
                     for oC in [1, 10]:
                         m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
@@ -108,7 +112,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         graph = self._check_model(m, x)
                         if enabled:
-                            self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                            self.assertFused(graph, ['aten::conv2d', 'aten::' + op_name])
                             self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
                         else:
                             self.assertGraphContains(graph, kind='aten::conv2d')

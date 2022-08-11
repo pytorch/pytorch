@@ -22,6 +22,8 @@ const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
     fusion_rewrite_map = {
         {"none", {}},
         {"relu", {}},
+        {"sigmoid", {}},
+        {"tanh", {}},
 };
 
 } // namespace mkldnn
