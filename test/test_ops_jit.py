@@ -77,7 +77,7 @@ class TestJit(JitCommonTestCase):
 
                 tested = True
                 try:
-                    self.indiv_variant_test_jit(dtype, device, op, sample, func_type, variant, has_fake_function)
+                    self.indiv_variant_test_jit(device, dtype, op, sample, func_type, variant, has_fake_function)
                 except Exception as e:
                     variant_error_info = dedent(f"""
                         Error testing {op.name} {func_type} variant
@@ -88,7 +88,7 @@ class TestJit(JitCommonTestCase):
 
         assert tested, "JIT Test does not execute any logic"
 
-    def indiv_variant_test_jit(self, device, dtype, op, func_type, sample, variant, has_fake_function):
+    def indiv_variant_test_jit(self, device, dtype, op, sample, func_type,  variant, has_fake_function):
         _requires_grad = (dtype in op.supported_backward_dtypes(torch.device(device).type))
         support_script = op.supports_scripting
         # Create accessor for script function variant
