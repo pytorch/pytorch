@@ -55,9 +55,7 @@ ${type_derived_method_definitions}
 
 namespace {
 
-TORCH_LIBRARY_IMPL(aten, Autograd, m) {
-  ${wrapper_registrations}
-}
+${wrapper_registrations}
 
 }
 
