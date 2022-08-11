@@ -1408,6 +1408,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
+
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
