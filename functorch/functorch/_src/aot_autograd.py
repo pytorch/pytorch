@@ -16,6 +16,7 @@ from .partitioners import default_partition
 from .named_members_polyfill import _named_parameters, _named_buffers
 from typing import Callable, List, Dict, Any, Tuple, Optional
 from functools import wraps
+import logging
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -52,23 +53,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
     def process_inputs(self, *inputs):
         assert(len(inputs) == 1)
         return inputs[0]
-
-# TODO - move this to PyTorch core. This overrides the pytree implementation for
-# dict to maintain parity with Deepmind pytree.
-Context = Any
-
-
-def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    keys = sorted(d.keys())
-    values = [d[key] for key in keys]
-    return values, keys
-
-
-def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return {key: value for key, value in zip(context, values)}
-
-
-pytree._register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 
 aten = torch.ops.aten
 
@@ -180,13 +164,26 @@ def track_graph_compiling(graph_name, increment_index=False):
         nth_graph += 1
     graph_being_compiled = None
 
-def call_func_with_args(f, args, own_args=False):
-    if not own_args:
+def make_boxed_func(f):
+    def g(args):
+        return f(*args)
+    g._boxed_call = True
+    return g
+
+def call_func_with_args(f, args, steal_args=False):
+    if not steal_args:
         args = list(args)
     assert isinstance(args, list)
-    if config.aot_clear_list:
+    # TODO: Please remove soon
+    # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
+    if hasattr(f, "_boxed_call"):
         return normalize_as_list(f(args))
     else:
+        logging.warn(
+            "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+            "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
+            "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+        )
         return normalize_as_list(f(*args))
 
 def create_aot_autograd_function(
@@ -263,13 +260,6 @@ def create_aot_autograd_function(
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
-                if config.aot_clear_list:
-                    fw_module.graph.set_codegen(ListCodeGen())
-                    fw_module.recompile()
-
-                    bw_module.graph.set_codegen(ListCodeGen())
-                    bw_module.recompile()
-
                 if config.debug_graphs:
                     print(fw_module.code, bw_module.code)
 
@@ -303,7 +293,7 @@ def create_aot_autograd_function(
             contiguous_args = [t.contiguous() for t in flat_args]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
             ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(compiled_bw, all_args, own_args=True)
+            out = call_func_with_args(compiled_bw, all_args, steal_args=True)
 
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
             return tuple(out)
@@ -316,12 +306,6 @@ class _CompileCache(CompileCache):
 
 
 # using a C++-based pytree reduces the overhead by about 50%
-try:
-    import tree
-
-    HAS_TREE = True
-except ImportError:
-    HAS_TREE = False
 compile_cache = None
 
 
@@ -518,10 +502,7 @@ def aot_function(
             ) = filter_tensor_and_static_args(args, static_argnums)
 
         # Now flatten the tensor args
-        if HAS_TREE:
-            flat_tensor_args = tree.flatten((tensor_args, kwargs))
-        else:
-            flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
+        flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
 
         # Check if the fn is already compiled
         num_tensor_args = len(flat_tensor_args)
