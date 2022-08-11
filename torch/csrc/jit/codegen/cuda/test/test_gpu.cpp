@@ -23870,7 +23870,7 @@ TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
   fusion.addInput(tv0);
 
   // [I, B]
-  auto tv1 = sum(tv0, 1, true);
+  auto tv1 = sum(tv0, {1}, true);
   // [I]
   auto tv2 = squeeze(tv1, {shape[0], 1});
   fusion.addOutput(tv2);
@@ -24870,7 +24870,7 @@ TEST_F(NVFuserTest, FusionRepro1860_CUDA) {
   fusion.addInput(tv22);
 
   auto tv3 = add(tv0, tv1);
-  auto tv4 = softmax(tv3, {0});
+  auto tv4 = softmax(tv3, 0);
   auto tv5 = add(tv4, tv22);
   fusion.addOutput(tv5);
 
