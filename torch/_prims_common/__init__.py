@@ -747,6 +747,13 @@ def type_to_dtype(typ: type) -> torch.dtype:
     raise ValueError("Invalid type!")
 
 
+def get_dtype(x: Union[torch.Tensor, NumberType]):
+    if isinstance(x, torch.Tensor):
+        return x.dtype
+    else:
+        return type_to_dtype(type(x))
+
+
 _ordered_types = (bool, int, float, complex)
 
 
