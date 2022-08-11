@@ -23870,7 +23870,7 @@ TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
   fusion.addInput(tv0);
 
   // [I, B]
-  auto tv1 = sum(tv0, {1}, true);
+  auto tv1 = sum(tv0, 1, true);
   // [I]
   auto tv2 = squeeze(tv1, {shape[0], 1});
   fusion.addOutput(tv2);
