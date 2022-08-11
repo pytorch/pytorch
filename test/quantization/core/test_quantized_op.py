@@ -2826,8 +2826,7 @@ class TestQuantizedOps(TestCase):
                 jit_qmodule = torch.jit.trace(lstm_quantized, qx)
 
                 # Script
-                # TODO: Fix the scripting in the torch/nn/quantizable/modules/rnn.py
-                # jit_qmodule = torch.jit.script(lstm_quantized)
+                jit_qmodule = torch.jit.script(lstm_quantized)
 
     @override_qengines
     def test_custom_module_multi_head_attention(self):
