@@ -135,6 +135,9 @@ ALLOW_LIST = [
     ("aten::new_empty.SymInt_out", datetime.date(2022, 11, 30)),
     ("aten::zeros.SymInt", datetime.date(2022, 11, 30)),
     ("aten::zeros.SymInt_out", datetime.date(2022, 11, 30)),
+    # nested tensor temporary auxiliary ops
+    ("aten::_reshape_nested", datetime.date(9999, 1, 1)),
+    ("aten::_reshape_nested_backward", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
