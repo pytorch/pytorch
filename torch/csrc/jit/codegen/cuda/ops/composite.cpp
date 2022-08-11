@@ -73,6 +73,26 @@ LstmResult lstm(
   return {cell, hidden};
 }
 
+namespace {
+template <typename T>
+TORCH_CUDA_CU_API T* sign(T* x) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  auto zero = IrBuilder::create<Double>(x->container(), 0.);
+  auto one = IrBuilder::create<Double>(x->container(), 1.);
+  auto minus_one = IrBuilder::create<Double>(x->container(), -1.);
+  auto sign = where(gt(x, zero), one, where(lt(x, zero), minus_one, zero));
+  return castOp(x->getDataType().value(), sign);
+}
+} // namespace
+
+TORCH_CUDA_CU_API TensorView* sign(TensorView* x) {
+  return sign<TensorView>(x);
+}
+
+TORCH_CUDA_CU_API Val* sign(Val* x) {
+  return sign<Val>(x);
+}
+
 TensorView* softplus(TensorView* x, Val* beta, Val* threshold) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   TORCH_INTERNAL_ASSERT(beta != nullptr, "Beta is invalid.");
@@ -182,6 +202,13 @@ TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x) {
   auto sub_tanh_sq = sub(one, tanh_sq);
   auto dx = mul(dy, sub_tanh_sq);
   return dx;
+}
+
+TensorView* leaky_relu(TensorView* x, Val* negative_slope) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "input is invalid.");
+  TORCH_INTERNAL_ASSERT(negative_slope != nullptr, "negative_slope is invalid");
+  auto zero = IrBuilder::create<Double>(x->container(), 0.);
+  return where(ge(x, zero), x, mul(negative_slope, x));
 }
 
 TensorView* view_as_real(TensorView* x) {
