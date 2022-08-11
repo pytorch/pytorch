@@ -13,6 +13,14 @@
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
 #     are defining derivatives for, and an argument specification.
+#   - An optional 'dispatch' entry which can be used to specify
+#     per-autograd dispatch key derivatives. If this entry is not
+#     specified, then the gradient entries will be taken as the
+#     default gradients (i.e. registered for every backward dispatch
+#     key). (see _test_autograd_multiple_dispatch for an example
+#     of how to register separate derivates for different dispatch keys).
+#     The list of allowed dispatch keys (in addition to 'Default' which
+#     represents the Autograd alias key) is torchgen/model.py:AUTOGRAD_KEYS.
 #   - One or more gradients entries, mapping differentiable input
 #     names to a formula specifying how to compute its gradient.
 #     Note that a single gradient entry can specify the gradient
@@ -2790,6 +2798,28 @@
 
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
   self: warn_backwards(grad)
+
+- name: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
+  dispatch:
+    Default:
+      self: grad.expand(self.sizes()) + 1
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.mul(grad)
+    AutogradCUDA:
+      self: grad.expand(self.sizes()) * 2
+
+- name: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
+  dispatch:
+    AutogradNestedTensor:
+      self: grad.mul(grad).add(grad)
+
+- name: _test_autograd_multiple_dispatch_view(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    Default:
+      self: grad.reshape_as(self)
+    AutogradCUDA:
+      self: grad.reshape_as(self) + 1
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
