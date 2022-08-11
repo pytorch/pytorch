@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
-from torch.fx import immutable_collections
+from torch.fx import immutable_collections, Interpreter
+import torch.fx.traceback as fx_traceback
 from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -123,6 +124,11 @@ aot_autograd_decompositions = {}
 @register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
 def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
+
+
+@register_decomposition(aten.new_zeros, aot_autograd_decompositions)
+def new_zeros(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
+    return torch.zeros(size, dtype=inp.dtype, device=inp.device)
 
 
 @register_decomposition(aten.new_full, aot_autograd_decompositions)
@@ -652,7 +658,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         with _stateless.reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            out = mod(*args[params_len:], **kwargs)
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.override_stack_trace():
+                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "
