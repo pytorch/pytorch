@@ -12,6 +12,7 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/Work.hpp>
 #include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
@@ -22,40 +23,10 @@
 // SEE RFC: https://github.com/pytorch/pytorch/issues/39662
 // *************************************************************************
 
-constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
-
-constexpr const char* const kSeqNumStoreKey = "SEQ_NUM_STORE_KEY";
-
-enum class OpType : std::uint8_t {
-  BROADCAST = 0,
-  ALLREDUCE = 1,
-  ALLREDUCE_COALESCED = 2,
-  REDUCE = 3,
-  ALLGATHER = 4,
-  _ALLGATHER_BASE = 5,
-  ALLGATHER_COALESCED = 6,
-  GATHER = 7,
-  SCATTER = 8,
-  REDUCE_SCATTER = 9,
-  ALLTOALL_BASE = 10,
-  ALLTOALL = 11,
-  SEND = 12,
-  RECV = 13,
-  RECVANYSOURCE = 14,
-  BARRIER = 15,
-  _REDUCE_SCATTER_BASE = 16,
-  UNKNOWN = 100,
-};
-
-// Converts OpType to human readable string.
-TORCH_API std::string opTypeToString(OpType opType);
-
-// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -79,103 +50,6 @@ TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
-  // Please do not use ProcessGroup::Work API, it is going away, to be
-  // replaced by ivalue::Future.
-  // Python binding for this class might change, please do not assume
-  // this will be bound using pybind.
-  class TORCH_API Work : public torch::CustomClassHolder {
-   public:
-    Work(
-        int rank = -1,
-        OpType opType = OpType::UNKNOWN,
-        const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt);
-
-    virtual ~Work();
-
-    // Checks if request has completed. Non-blocking operation.
-    virtual bool isCompleted();
-
-    // Returns if the work completed successfully.
-    // If false, the exception function can be called to get details.
-    virtual bool isSuccess() const;
-
-    // Returns exception if isSuccess() returned false.
-    virtual std::exception_ptr exception() const;
-
-    // Returns source rank if this objects represents a recv-from-any.
-    virtual int sourceRank() const;
-
-    // Returns result tensors, if applicable.
-    // If work is not supposed to have result, we return empty list.
-    virtual std::vector<at::Tensor> result();
-
-    // Ensures that operations on the output tensors that are invoked
-    // after this function returns are correctly sequenced after the
-    // asynchronous completion of this work.
-    //
-    // For CUDA tensors, it inserts stream synchronization such that
-    // the streams of the caller wait for completion of the
-    // asynchronous operations on the destination tensors.
-    //
-    // For CPU tensors, it is currently a nop.
-    //
-    // This function should only be used if the caller polls for
-    // completion through the `isCompleted` function, it has returned
-    // true, and the `isSuccess` function also has returned true.
-    //
-    virtual void synchronize();
-
-    // Waits until request completes. Blocking operation.
-    // Throws if the work completed with an exception.
-    // Returns false if the work is aborted.
-    // Otherwise, it always returns true, indicating the work is completed.
-    //
-    // Functionally equivalent to:
-    //
-    //   while (!isCompleted()) { /* nop */ }
-    //   auto success = isSuccess();
-    //   if (!success) { std::rethrow_exception(exception()); }
-    //   return success;
-    //
-    virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
-
-    virtual void abort();
-
-    // Returns a Future object that will be associated with the completion of
-    // work. Only NCCL backend is currently supported.
-    virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
-
-    OpType retrieveOpType();
-
-    static c10::intrusive_ptr<Work> create_from_future(c10::intrusive_ptr<c10::ivalue::Future>);
-
-   protected:
-    // Completes the work object and optionally sets the exception in a
-    // thread-safe manner. Notifies all waiting condition variables as well.
-    void finish(std::exception_ptr exception = nullptr);
-
-    // Similar to finish, but throws an exception if one is already set or
-    // provided by the user.
-    void finishAndThrow(std::exception_ptr exception);
-
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    bool completed_ = false;
-    std::exception_ptr exception_;
-
-    // Current rank of the node.
-    const int rank_;
-
-    // Operation type that this work object refers to.
-    OpType opType_;
-
-    // When profiling, the callback to record end of operation event. This
-    // callback needs to be called when collective operation is complete.
-    std::function<void()> recordFunctionEndCallback_;
-  };
-
   // ProcessGroup Options is a base struct that defines the basic options
   // when constructing a ProcessGroup. Each ProcessGroup subclass should
   // extend this struct and define its options if it wants to provide more
@@ -214,14 +88,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual void endCoalescing(
-      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& /* reqs */) {
+      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
     // no-op for backends that have not implemented endCoalescing
   }
 
   // Consider using ops in Ops.hpp instead of the below, which route things
   // to the dispatcher.
   // TODO: Find a way to force the above rule programmatically.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
@@ -230,7 +104,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support broadcast"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  virtual c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
@@ -239,9 +113,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support allreduce"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  virtual c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
+      const AllreduceCoalescedOptions& /* opts */ =
+          AllreduceCoalescedOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -250,7 +125,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support allreduce_coalesced"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  virtual c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& /* tensors */,
       const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
@@ -258,7 +133,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  virtual c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -272,7 +147,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
+  virtual c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -288,7 +163,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // * do not add dependencies on this function,
   // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+  virtual c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -300,7 +175,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support allgather_coalesced"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
+  virtual c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const GatherOptions& /* opts */ = GatherOptions()) {
@@ -309,7 +184,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str("ProcessGroup ", getBackendName(), "does not support gather"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ScatterOptions& /* opts */ = ScatterOptions()) {
@@ -319,7 +194,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support scatter"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  virtual c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
@@ -331,7 +206,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support reduce_scatter"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
@@ -343,7 +218,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support _reduce_scatter_base"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  virtual c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       std::vector<int64_t>& /* outputSplitSizes */,
@@ -357,7 +232,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support alltoall_base"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+  virtual c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) {
@@ -405,7 +280,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             " does not yet support sequence numbers."));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> send(
+  virtual c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& /* tensors */,
       int /* dstRank */,
       int /* tag */) {
@@ -414,7 +289,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str("ProcessGroup ", getBackendName(), "does not support send"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
+  virtual c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& /* tensors */,
       int /* srcRank */,
       int /* tag */) {
@@ -423,7 +298,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str("ProcessGroup ", getBackendName(), "does not support recv"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  virtual c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& /* tensors */,
       int /* tag */) {
     TORCH_CHECK(
@@ -434,7 +309,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "does not support recvAnysource"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) {
     TORCH_CHECK(
         false,

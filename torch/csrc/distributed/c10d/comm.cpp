@@ -48,7 +48,7 @@ class BroadcastWork {
 
  private:
   // The broadcast work that is kicked off upon construction.
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::Work> work_;
 };
 
 } // namespace

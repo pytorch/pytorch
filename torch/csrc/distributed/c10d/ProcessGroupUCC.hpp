@@ -153,18 +153,18 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     std::exception_ptr eptr_;
   };
 
-  class WorkUCC : public ProcessGroup::Work {
+  class WorkUCC : public Work {
     friend class ProcessGroupUCC;
     friend class Comm;
 
    public:
     WorkUCC(OpType opType, const char* prof_title)
-        : ProcessGroup::Work(-1, opType, prof_title) {}
+        : Work(-1, opType, prof_title) {}
     WorkUCC(
         OpType opType,
         const char* prof_title,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-        : ProcessGroup::Work(-1, opType, prof_title), logger_(logger) {}
+        : Work(-1, opType, prof_title), logger_(logger) {}
     ~WorkUCC();
     void setException();
     void setAndThrowException();
@@ -215,7 +215,7 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
   void runHealthCheck();
 
   template <typename PreProcess, typename PostProcess>
-  c10::intrusive_ptr<ProcessGroup::Work> collective_post(
+  c10::intrusive_ptr<Work> collective_post(
       OpType opType,
       PreProcess preproc,
       PostProcess postproc,
@@ -226,74 +226,74 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       const char* prof_title);
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
+  c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+  c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
@@ -358,7 +358,7 @@ class Comm {
 
   void ucc_destroy_team(ucc_team_h& team);
 
-  c10::intrusive_ptr<ProcessGroup::Work> enqueue_p2p(
+  c10::intrusive_ptr<Work> enqueue_p2p(
       OpType opType,
       ucc_coll_req_h request,
       const char* prof_title);

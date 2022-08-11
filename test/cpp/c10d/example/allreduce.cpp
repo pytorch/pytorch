@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
   }
 
   // Kick off work
-  std::vector<c10::intrusive_ptr<ProcessGroup::Work>> pending;
+  std::vector<c10::intrusive_ptr<Work>> pending;
   for (const auto i : c10::irange(ntensors)) {
     std::vector<at::Tensor> tmp = {tensors[i]};
     pending.push_back(pg.allreduce(tmp));
