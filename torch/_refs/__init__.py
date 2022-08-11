@@ -1060,8 +1060,9 @@ def _floor_divide(
         else:
             b = prims.device_put(b, device=a.device)
 
+    assert isinstance(a, Tensor) and isinstance(b, Tensor)
     dtype = a.dtype
-    if dtype.is_float_dtype(dtype):
+    if utils.is_float_dtype(dtype):
         return _floor_divide_float(a, b)
     elif utils.is_integer_dtype(dtype):
         return _floor_divide_integer(a, b)
@@ -1077,7 +1078,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return (prims.div(a, b) - prims.convert_element_type(offset, a.dtype))
+    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1464,7 +1465,8 @@ true_divide = _make_elementwise_binary_reference(
 def _trunc_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
-    if utils.is_integer_dtype(a.dtype):
+    dtype = utils.get_dtype(a)
+    if utils.is_integer_dtype(dtype):
         return prims.div(a, b)
 
     return trunc(prims.div(a, b))
