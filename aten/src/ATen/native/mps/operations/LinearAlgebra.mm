@@ -246,8 +246,6 @@ Tensor& addmm_out_mps_impl(
 
   MPSStream* stream = getCurrentMPSStream();
 
-  MPSGraph* mpsGraph = make_mps_graph();
-
   bool transpose_mat1_times_mat2 = false;
   bool transpose_mat1            = false;
   bool transpose_mat2            = false;
