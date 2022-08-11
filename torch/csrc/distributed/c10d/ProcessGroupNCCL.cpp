@@ -2036,8 +2036,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       "nccl:_reduce_scatter_base");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       rank_, // rank
       "barrier", // colName

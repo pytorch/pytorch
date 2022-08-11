@@ -29,10 +29,9 @@ c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allreduce(
   return next()->allreduce(tensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupRoundRobin::
-    allreduce_coalesced(
-        std::vector<at::Tensor>& tensors,
-        const AllreduceCoalescedOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
   return next()->allreduce_coalesced(tensors, opts);
 }
 
@@ -49,11 +48,10 @@ c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allgather(
   return next()->allgather(outputs, inputs, opts);
 };
 
-c10::intrusive_ptr<Work> ProcessGroupRoundRobin::
-    allgather_coalesced(
-        std::vector<std::vector<at::Tensor>>& outputTensorLists,
-        std::vector<at::Tensor>& inputTensors,
-        const AllgatherOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   return next()->allgather(outputTensorLists, inputTensors, opts);
 }
 

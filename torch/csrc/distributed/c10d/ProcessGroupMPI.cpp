@@ -915,8 +915,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);

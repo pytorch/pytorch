@@ -2704,8 +2704,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupGloo::barrier(const BarrierOptions& opts) {
   std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
 
   // Snapshot all in progress and pending work as weak_ptr.
@@ -2768,69 +2767,67 @@ void ProcessGroupGloo::monitoredBarrier(
     recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
-  auto waitLoop =
-      [&](const std::map<int, c10::intrusive_ptr<Work>>& works) {
-        std::vector<int> processedRanks;
-        for (auto& work : works) {
-          bool rankResponded = false;
-          try {
-            // Note: if waitAllRanks=false, we recompute the time remaining in
-            // barrier and use this recomputed time in wait(). However, if
-            // waitAllRanks=true, we use the original timeout, since if we use
-            // up the entire timeout waiting for response from rank n, then we
-            // won't have any timeout left to query ranks beginning with n + 1.
-            auto remainingTime = getRemainingTime(
-                startTime, monitoredBarrierTimeout, waitAllRanks);
-            if (!waitAllRanks) {
-              checkRemainingTime(
-                  monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-            }
-            work.second->wait(remainingTime);
-            rankResponded = true;
-          } catch (const std::exception& e) {
-            const std::string error = c10::str(
-                "[Rank 0]: Rank ",
-                work.first,
-                " failed to pass monitoredBarrier in ",
-                monitoredBarrierTimeout.count(),
-                " ms");
-            if (waitAllRanks) {
-              LOG(ERROR) << error;
-            } else {
-              logAndThrow(
-                  error,
-                  c10::str(error, "\n Original exception: \n", e.what()));
-            }
-          }
-          if (rankResponded) {
-            processedRanks.push_back(work.first);
-          }
+  auto waitLoop = [&](const std::map<int, c10::intrusive_ptr<Work>>& works) {
+    std::vector<int> processedRanks;
+    for (auto& work : works) {
+      bool rankResponded = false;
+      try {
+        // Note: if waitAllRanks=false, we recompute the time remaining in
+        // barrier and use this recomputed time in wait(). However, if
+        // waitAllRanks=true, we use the original timeout, since if we use
+        // up the entire timeout waiting for response from rank n, then we
+        // won't have any timeout left to query ranks beginning with n + 1.
+        auto remainingTime =
+            getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
+        if (!waitAllRanks) {
+          checkRemainingTime(
+              monitoredBarrierTimeout, remainingTime, processedRanks, rank);
         }
-        // If we are collecting all failed ranks, check if we need to throw if
-        // some ranks have not responded.
-        // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
-        // processed.
-        auto rankFailure = (processedRanks.size() != size_ - 1);
-        if (waitAllRanks && rankFailure) {
-          std::vector<int> failedRanks;
-          for (const auto i : c10::irange(1, size_)) {
-            if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
-                processedRanks.end()) {
-              failedRanks.push_back(i);
-            }
-          }
+        work.second->wait(remainingTime);
+        rankResponded = true;
+      } catch (const std::exception& e) {
+        const std::string error = c10::str(
+            "[Rank 0]: Rank ",
+            work.first,
+            " failed to pass monitoredBarrier in ",
+            monitoredBarrierTimeout.count(),
+            " ms");
+        if (waitAllRanks) {
+          LOG(ERROR) << error;
+        } else {
+          logAndThrow(
+              error, c10::str(error, "\n Original exception: \n", e.what()));
+        }
+      }
+      if (rankResponded) {
+        processedRanks.push_back(work.first);
+      }
+    }
+    // If we are collecting all failed ranks, check if we need to throw if
+    // some ranks have not responded.
+    // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
+    // processed.
+    auto rankFailure = (processedRanks.size() != size_ - 1);
+    if (waitAllRanks && rankFailure) {
+      std::vector<int> failedRanks;
+      for (const auto i : c10::irange(1, size_)) {
+        if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+            processedRanks.end()) {
+          failedRanks.push_back(i);
+        }
+      }
 
-          TORCH_INTERNAL_ASSERT(!failedRanks.empty());
-          const std::string ranksStr = c10::Join(", ", failedRanks);
-          const std::string error = c10::str(
-              "[Rank 0]: Ranks ",
-              ranksStr,
-              " failed to pass monitoredBarrier in ",
-              monitoredBarrierTimeout.count(),
-              " ms");
-          logAndThrow(error, error);
-        }
-      };
+      TORCH_INTERNAL_ASSERT(!failedRanks.empty());
+      const std::string ranksStr = c10::Join(", ", failedRanks);
+      const std::string error = c10::str(
+          "[Rank 0]: Ranks ",
+          ranksStr,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
+      logAndThrow(error, error);
+    }
+  };
 
   waitLoop(recvWorkMap);
   // If we've reached here successfully, this means all ranks have acked in

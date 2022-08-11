@@ -200,9 +200,7 @@ class BroadcastNCCLTest : public NCCLTest {
   BroadcastNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::Work> run(
-      int rootRank,
-      int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -221,9 +219,7 @@ class ReduceNCCLTest : public NCCLTest {
   ReduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::Work> run(
-      int rootRank,
-      int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 

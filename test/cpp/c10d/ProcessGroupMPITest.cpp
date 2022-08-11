@@ -64,8 +64,7 @@ void testAllreduce(int iter = 1000) {
     std::vector<at::Tensor> tensors = {tensor};
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work =
-        pg->allreduce(tensors);
+    c10::intrusive_ptr<::c10d::Work> work = pg->allreduce(tensors);
     works.push_back(std::move(work));
   }
 
@@ -100,8 +99,7 @@ void testBroadcast(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work =
-        pg->broadcast(tensors);
+    c10::intrusive_ptr<::c10d::Work> work = pg->broadcast(tensors);
     works.push_back(std::move(work));
   }
 
@@ -169,8 +167,7 @@ void testAllgather(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work =
-        pg->allgather(outputs, tensors);
+    c10::intrusive_ptr<::c10d::Work> work = pg->allgather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -212,8 +209,7 @@ void testGather(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work =
-        pg->gather(outputs, tensors);
+    c10::intrusive_ptr<::c10d::Work> work = pg->gather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -263,8 +259,7 @@ void testScatter(int iter = 1) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work =
-        pg->scatter(tensors, inputs);
+    c10::intrusive_ptr<::c10d::Work> work = pg->scatter(tensors, inputs);
     works.push_back(std::move(work));
   }
 
@@ -298,8 +293,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       sendTensors[i] = std::vector<at::Tensor>({tensor});
 
       // Queue the work.
-      c10::intrusive_ptr<::c10d::Work> work =
-          pg->send(sendTensors[i], 1, 0);
+      c10::intrusive_ptr<::c10d::Work> work = pg->send(sendTensors[i], 1, 0);
       works.push_back(std::move(work));
     } else {
       auto tensor = at::zeros({16, 16});
@@ -307,8 +301,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
 
       // Queue the work.
       if (!recvAnysource) {
-        c10::intrusive_ptr<::c10d::Work> work =
-            pg->recv(recvTensors, 0, 0);
+        c10::intrusive_ptr<::c10d::Work> work = pg->recv(recvTensors, 0, 0);
         works.push_back(std::move(work));
       } else {
         c10::intrusive_ptr<::c10d::Work> work =

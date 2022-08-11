@@ -1611,22 +1611,22 @@ Example::
       .def(
           "is_success",
           [](::c10d::Work& work) -> bool {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "Work::is_success"));
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::is_success"));
             return work.isSuccess();
           })
       .def(
           "exception",
           [](::c10d::Work& work) -> std::exception_ptr {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "Work::exception"));
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::exception"));
             return work.exception();
           })
       .def(
           "source_rank",
           [](::c10d::Work& work) -> int {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "Work::source_rank"));
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::source_rank"));
             return work.sourceRank();
           })
       .def("_source_rank", &::c10d::Work::sourceRank)
@@ -1638,8 +1638,8 @@ Example::
       .def(
           "synchronize",
           [](::c10d::Work& work) -> void {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "Work::synchronize"));
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::synchronize"));
             work.synchronize();
           })
       .def(
@@ -1649,8 +1649,7 @@ Example::
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_future",
-          [](::c10d::Work& work)
-              -> std::shared_ptr<jit::PythonFutureWrapper> {
+          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
