@@ -211,13 +211,8 @@ def is_input_arg_dtype_supported_by_backend(
     is supported by the backend or not
     """
     if isinstance(arg, (list, tuple)):
-        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a,
-                                                                         node,
-                                                                         node_name_to_target_dtype,
-                                                                         dtype_config,
-                                                                         weight_index_dict,
-                                                                         bias_index_dict),
-                       arg))
+        return all(is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype,
+                                                           dtype_config, weight_index_dict, bias_index_dict) for a in arg)
     if not isinstance(arg, Node):
         return True
     # TODO: support check for standalone module
