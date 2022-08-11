@@ -73,6 +73,7 @@ class ModelReport:
             - Line plot
 
     Example (with QuantizationTracer):
+        >>> # xdoctest: +SKIP
         >>> # get the necessary qconfig
         >>> config = PrepareCustomConfig()
         >>> skipped_module_names, skipped_module_classes = get_skipped_module_name_and_classes(config, False)
