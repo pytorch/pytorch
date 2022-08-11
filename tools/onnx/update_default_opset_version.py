@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 from subprocess import DEVNULL
+from typing import Any
 
 
 def read_sub_write(path: str, prefix_pat: str, new_default: int) -> None:
@@ -28,7 +29,7 @@ def read_sub_write(path: str, prefix_pat: str, new_default: int) -> None:
     print("modified", path)
 
 
-def main(args):
+def main(args: Any):
     pytorch_dir = pathlib.Path(__file__).parent.parent.parent.resolve()
     onnx_dir = pytorch_dir / "third_party" / "onnx"
     os.chdir(onnx_dir)
