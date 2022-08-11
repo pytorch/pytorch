@@ -83,18 +83,54 @@ def allreduce_hook(state: DefaultState, grad: torch.Tensor):
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks.
     """
+    # Average grad by pre-division factor. Together pre- and post-division factors
+    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+    # This is a two-step process to avoid potential underflow and overflow.
     if state.gradient_predivide_factor > 1:
         grad.div_(state.gradient_predivide_factor)
     dist.all_reduce(grad, group=state.process_group)
+    # Average grad by post-division factor. Together pre- and post-division factors
+    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+    # This is a two-step process to avoid potential underflow and overflow.
     if state.gradient_postdivide_factor > 1:
         grad.div_(state.gradient_postdivide_factor)
 
-def lower_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor):
-    grad.data = grad.data.to(prec)
-    allreduce_hook(state, grad)
-    _decompress(state, grad)
+def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.Tensor):
+    r"""
+    This FSDP communication hook implements ``reduce_scatter`` algorithm for
+    sharded FSDP strategies and a necessary pre- and post-division of gradients.
 
-def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
+    Args:
+        state (DefaultState): State information, configures pre- and post-division factors
+        grad (torch.Tensor): A full gradient for the local batch that needs to be
+        communicated across ranks.
+        output (torch.Tensor): A single shard of the summed gradient.
+    """
+    # Average grad by pre-division factor. Together pre- and post-division factors
+    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+    # This is a two-step process to avoid potential underflow and overflow.
+    if state.gradient_predivide_factor > 1:
+        grad.div_(state.gradient_predivide_factor)
+    dist._reduce_scatter_base(
+        output, grad, group=state.process_group
+    )
+    # Average grad's shard by post-division factor. Together pre- and post-division factors
+    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+    # This is a two-step process to avoid potential underflow and overflow.
+    if state.gradient_postdivide_factor > 1:
+        output.div_(state.gradient_postdivide_factor)
+
+def lower_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+    grad.data = grad.data.to(prec)
+    if output is not None:
+        output.data = output.data.to(prec)
+        reduce_scatter_hook(state, grad, output)
+        _decompress(state, output)
+    else:
+        allreduce_hook(state, grad)
+        _decompress(state, grad)
+
+def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
@@ -105,11 +141,12 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
+        output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
     fp16_hook = functools.partial(lower_precision_hook, torch.float16)
-    return fp16_hook(state, grad)
+    return fp16_hook(state, grad, output)
 
-def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
+def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
@@ -120,6 +157,7 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
+        output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
     bf16_hook = functools.partial(lower_precision_hook, torch.bfloat16)
-    return bf16_hook(state, grad)
+    return bf16_hook(state, grad, output)
