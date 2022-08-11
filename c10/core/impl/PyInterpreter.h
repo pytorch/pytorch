@@ -193,8 +193,8 @@ struct C10_API PyInterpreter {
       sym_sizes_sig* sym_sizes,
       layout_sig* layout,
       sym_numel_sig* sym_numel,
-      GPUTraceFunctionWrapper trace_gpu_functions,
-      sym_strides_sig* sym_strides)
+      sym_strides_sig* sym_strides,
+      GPUTraceFunctionWrapper trace_gpu_functions)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
