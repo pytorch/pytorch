@@ -18817,7 +18817,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.signbit",

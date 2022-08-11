@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ops/composite.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
@@ -292,6 +293,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("round", round)
   NVFUSER_PYTHON_BINDING_UNARY_OP("rsqrt", rsqrt)
   NVFUSER_PYTHON_BINDING_UNARY_OP("set", set)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("sign", sign)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sigmoid", sigmoid)
   NVFUSER_PYTHON_BINDING_UNARY_OP("silu", silu)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sin", sin)
