@@ -205,7 +205,7 @@ def is_input_arg_dtype_supported_by_backend(
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     dtype_config: DTypeConfig,
     weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int],
+    bias_index_dict: Dict[str, List[int]],
 ) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
