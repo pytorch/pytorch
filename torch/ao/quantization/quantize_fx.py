@@ -297,6 +297,9 @@ def prepare_fx(
               .set_module_name("module2", qconfig2) \
               .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
 
+
+          The precedence of different settings:
+          set_global < set_object_type < set_module_name_regex < set_module_name < set_module_name_object_type_order
       * `example_inputs`: (required) Example inputs for forward function of the model
 
       * `prepare_custom_config`: customization configuration for quantization tool.
@@ -380,16 +383,16 @@ def prepare_fx(
 
         # We can customize qconfig_mapping in different ways.
         # e.g. set the global qconfig, which means we will use the same qconfig for
-        # all operators in the model
+        # all operators in the model, this can be overwritten by other settings
         # qconfig_mapping = QConfigMapping().set_global(qconfig)
         # e.g. quantize the linear submodule with a specific qconfig
         # qconfig_mapping = QConfigMapping().set_module_name("linear", qconfig)
         # e.g. quantize all nn.Linear modules with a specific qconfig
         # qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
-        # for a more complete list, please see the docstring for `qconfig_mapping`
+        # for a more complete list, please see the docstring for :class:`torch.ao.quantization.QConfigMapping`
         # argument
 
-        # example inputs is a tuple of inputs, that is used to infer the type of the
+        # example_inputs is a tuple of inputs, that is used to infer the type of the
         # outputs in the model
         # currently it's not used, but please make sure model(*example_inputs) runs
         example_inputs = (torch.randn(1, 3, 224, 224),)
@@ -397,22 +400,22 @@ def prepare_fx(
         # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
         # e.g. backend_config = get_default_backend_config("fbgemm")
         # `prepare_fx` inserts observers in the model based on qconfig_mapping and
-        # backend_config, if the configuration for an operator in qconfig_mapping
+        # backend_config. If the configuration for an operator in qconfig_mapping
         # is supported in the backend_config (meaning it's supported by the target
         # hardware), we'll insert observer modules according to the qconfig_mapping
         # otherwise the configuration in qconfig_mapping will be ignored
         #
         # Example:
-        # in qconfig_mapping, user sets linear module to be quantized with int8 for
-        # both activation and weight:
+        # in qconfig_mapping, user sets linear module to be quantized with quint8 for
+        # activation and qint8 for weight:
         # qconfig = torch.ao.quantization.QConfig(
         #     observer=MinMaxObserver.with_args(dtype=torch.quint8),
         #     weight=MinMaxObserver.with-args(dtype=torch.qint8))
         # Note: current qconfig api does not support setting output observer, but
-        # we may have extend this to support these more fine grained control in the
+        # we may extend this to support these more fine grained control in the
         # future
         #
-        # qconfig_mapping = QConfigMapping.set_object_type(torch.nn.Linear, qconfig)
+        # qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
         # in backend config, linear module also supports in this configuration:
         # weighted_int8_dtype_config = DTypeConfig(
         #   input_dtype=torch.quint8,
@@ -426,7 +429,9 @@ def prepare_fx(
         #    ...
 
         # backend_config = BackendConfig().set_backend_pattern_config(linear_pattern_config)
-        #
+        # `prepare_fx` will check that the setting requested by suer in qconfig_mapping
+        # is supported by the backend_config and insert observers and fake quant modules
+        # in the model
         prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)
         # Run calibration
         calibrate(prepared_model, sample_inference_data)
@@ -520,7 +525,7 @@ def prepare_qat_fx(
         # the doctring for :func:`~torch.ao.quantization.prepare_fx` for different ways
         # to configure this
 
-        # example inputs is a tuple of inputs, that is used to infer the type of the
+        # example_inputs is a tuple of inputs, that is used to infer the type of the
         # outputs in the model
         # currently it's not used, but please make sure model(*example_inputs) runs
         example_inputs = (torch.randn(1, 3, 224, 224),)
