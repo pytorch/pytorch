@@ -3567,26 +3567,6 @@ class TestSparse(TestSparseBase):
 
         self.assertRaises(TypeError, assign_to)
 
-    def test_cpu_sparse_dense_mul(self, device):
-        # general multiplication is not supported, but 0dim multiplication is supported
-        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
-        t23 = s.to_dense()
-        t0 = torch.tensor(2.0, device=device)
-        r = s * 2.0
-        self.assertEqual(r, 2.0 * s)
-        self.assertEqual(r, t0 * s)
-        self.assertEqual(r, s * t0)
-        if device == 'cpu':
-            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse, dense\) is not supported"):
-                s * t23
-            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse\) is not supported"):
-                t23 * s
-        elif device == 'cuda':
-            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
-                s * t23
-            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
-                t23 * s
-
     @dtypes(torch.double, torch.cdouble)
     def test_full_broadcast_to(self, device, dtype):
         def can_broadcast(s0, s1):
@@ -3631,6 +3611,105 @@ class TestSparse(TestSparseBase):
         test(4, 6, [7, 3, 1, 3, 0], [2, 7, 3, 1, 3, 0])
         test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
+
+    @coalescedonoff
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    def test_sparse_dense_mul(self, device, dtype, coalesced):
+        skipTestIfUncoalesced = False
+        # This case always coalesce inputs and that could lead to loss of precision,
+        # hence it is inhibited for float16/bfloat16 by providing already coalesced tensors.
+        if not coalesced and dtype in {torch.float16, torch.bfloat16}:
+            skipTestIfUncoalesced = True
+        # to_dense is problematic for boolean non-coalesced CUDA tensors
+        # see https://github.com/pytorch/pytorch/issues/81648
+        if not coalesced and dtype == torch.bool and torch.device(device).type == "cuda":
+            skipTestIfUncoalesced = True
+
+        if skipTestIfUncoalesced:
+            self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
+
+        shape = (2, 3, 4, 10)
+        nnz = 10
+
+        def check(self, s, d):
+            res = d * s
+
+            # check commutativity
+            self.assertEqual(res, s * d)
+
+            # check correctness
+            self.assertEqual(res.to_dense(), s.to_dense() * d)
+
+            # check in-placeness for dense
+            if d.dim() >= s.dim():
+                dc = d.clone()
+                self.assertEqual(d.mul_(s), dc.mul_(s.to_dense()))
+
+            # check in-placeness for sparse
+            if s.dim() >= d.dim():
+                # for sparse
+                sc = s.clone()
+                self.assertEqual(s.mul_(d).to_dense(), sc.to_dense().mul_(d))
+
+        for dim in range(len(shape) + 1):
+            sub_shape = shape[dim:]
+            sparse_dim = len(sub_shape) // 2
+
+            def check_empty(sparse_shape, nnz, dense_shape, coalesce):
+                from itertools import product
+                for nnz_val, shape_suffix in product((nnz, 0), ((), (0,))):
+                    empty_sparse_shape = sparse_shape + shape_suffix
+                    empty_dense_shape = dense_shape + shape_suffix
+                    s = self._gen_sparse(sparse_dim, nnz_val, empty_sparse_shape, dtype, device, coalesce)[0]
+                    d = make_tensor(empty_dense_shape, dtype=dtype, device=device)
+                    check(self, s, d)
+
+            # check scalar multiplication
+            s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            for scalar in (True, 1, 1.0):
+                res_sparse_right = s * scalar
+                res_sparse_left = scalar * s
+                res_dense = s.to_dense() * scalar
+                # check correctness and dtype
+                self.assertEqual(s.to(res_sparse_right.dtype), res_sparse_right)
+                self.assertEqual(res_sparse_right, res_sparse_left)
+                self.assertEqual(res_sparse_right.dtype, res_dense.dtype)
+                self.assertEqual(res_sparse_left.dtype, res_dense.dtype)
+                # check scalar as 0-dim sparse tensor
+                tscalar = torch.tensor(scalar, device=device)
+                sscalar = tscalar.to_sparse()
+                res_sparse_right = s * sscalar
+                res_sparse_left = sscalar * s
+                self.assertEqual(res_sparse_right, res_sparse_left)
+                self.assertEqual(s.to(res_sparse_right.dtype), res_sparse_right)
+
+            # check non-coalesced 0-dim scalar
+            # we skip torch.bool because for such tensors
+            # coalesce.to_dense != to_dense
+            if dtype == torch.bool:
+                return
+
+            for scalar_dtype in (int, float):
+                scalar = scalar_dtype(1)
+                idx = torch.tensor([], device=device).reshape(0, 2)
+                val = torch.tensor([scalar, scalar], device=device)
+                sscalar = torch.sparse_coo_tensor(idx, val, ())
+                res_dense = s.to_dense() * sscalar.to_dense()
+                self.assertEqual((s * sscalar).to_dense(), res_dense)
+                self.assertEqual((sscalar * s).to_dense(), res_dense)
+
+            # Case 1: sparse broadcasts over dense
+            s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            d = make_tensor(shape, dtype=dtype, device=device)
+            check(self, s, d)
+            check_empty(sub_shape, nnz, shape, coalesced)
+
+            # Case 2: dense broadcasts over sparse
+            s = self._gen_sparse(3, nnz, shape, dtype, device, coalesced)[0]
+            d = make_tensor(sub_shape, dtype=dtype, device=device)
+            check(self, s, d)
+            check_empty(shape, nnz, sub_shape, coalesced)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy is not availible")
     @onlyCPU
