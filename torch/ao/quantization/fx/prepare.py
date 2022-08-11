@@ -157,7 +157,7 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
 
 
 def get_weight_and_bias_index_dicts(backend_config):
-    index_dicts = {
+    index_dicts: Dict[str, Dict[str, int]] = {
         "weight": {},
         "bias": {},
         "input": {}  # not used right now
@@ -211,7 +211,13 @@ def is_input_arg_dtype_supported_by_backend(
     is supported by the backend or not
     """
     if isinstance(arg, (list, tuple)):
-        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype, dtype_config, weight_index_dict, bias_index_dict), arg))
+        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a,
+                                                                         node,
+                                                                         node_name_to_target_dtype,
+                                                                         dtype_config,
+                                                                         weight_index_dict,
+                                                                         bias_index_dict),
+                       arg))
     if not isinstance(arg, Node):
         return True
     # TODO: support check for standalone module
@@ -585,7 +591,12 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             qconfig.activation
 
         arg_as_output_target_dtype = get_arg_target_dtype_as_output(arg, modules, node_name_to_target_dtype)
-        arg_as_input_target_dtype = get_arg_target_dtype_as_input_to_node(arg, node, modules, node_name_to_target_dtype, weight_index_dict, bias_index_dict)
+        arg_as_input_target_dtype = get_arg_target_dtype_as_input_to_node(arg,
+                                                                          node,
+                                                                          modules,
+                                                                          node_name_to_target_dtype,
+                                                                          weight_index_dict,
+                                                                          bias_index_dict)
         arg_as_input_target_compute_dtype = \
             get_arg_target_compute_dtype_as_input_to_node(
                 arg, node, modules, node_name_to_target_dtype, weight_index_dict, bias_index_dict)
