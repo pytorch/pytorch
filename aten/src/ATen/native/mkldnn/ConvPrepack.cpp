@@ -25,10 +25,12 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::vector<int64_t> dilation,
     int64_t groups,
     std::vector<int64_t> input_size,
-    std::string attr) {
-  auto it = fusion_attr_map.find(attr);
-  TORCH_CHECK(it != fusion_attr_map.end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = it->second;
+    std::string attr,
+    std::vector<c10::optional<at::Scalar>> scalars,
+    c10::optional<std::string> algorithm) {
+  auto it = fusion_attr_map().find(attr);
+  TORCH_CHECK(it != fusion_attr_map().end(), "Fusion behavior undefined.");
+  ideep::attr_t op_attr = it->second(scalars, algorithm);
 
   return mkldnn::MkldnnConvOpContext::create_context(
       std::move(weight),

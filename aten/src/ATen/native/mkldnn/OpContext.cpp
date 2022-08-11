@@ -7,6 +7,28 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
+#define ATTR_FUNC(NAME)                              \
+  [](std::vector<c10::optional<at::Scalar>> scalars, \
+     c10::optional<std::string> algorithm) {         \
+    return ideep::attr_t::fuse_##NAME();             \
+  }
+
+AttrFunction attr_func_none = [](std::vector<c10::optional<at::Scalar>> scalars,
+                                 c10::optional<std::string> algorithm) {
+  const static ideep::attr_t empty_attr = ideep::attr_t();
+  return empty_attr;
+};
+
+const std::map<std::string, AttrFunction>& fusion_attr_map() {
+  static const std::map<std::string, AttrFunction> fusion_attr_map{
+      {"none", attr_func_none},
+      {"relu", ATTR_FUNC(relu)},
+      {"sigmoid", ATTR_FUNC(sigmoid)},
+      {"tanh", ATTR_FUNC(tanh)},
+  };
+  return fusion_attr_map;
+};
+
 c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
