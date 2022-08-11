@@ -173,8 +173,13 @@ def _compare_ort_pytorch_outputs(
                     np.isclose(ort_out, pt_out, rtol=rtol, atol=atol)
                 ) / np.prod(ort_out.shape)
                 if error_percentage <= acceptable_error_percentage:
+                    warnings.warn(
+                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"Error percentage {error_percentage} "
+                        f"within acceptable range {acceptable_error_percentage}."
+                    )
                     continue
-            raise e
+            raise
 
 
 def _prepare_input_for_pytorch(args, kwargs):
