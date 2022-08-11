@@ -2662,7 +2662,7 @@ class FullyShardedDataParallel(nn.Module):
             # `_rebuild_full_params()` should really be side-effect-free if the
             # `FlatParameter` is already unsharded
             if param.size() != param._unsharded_size or param.device != self.compute_device:
-                self._rebuild_full_params(params)
+                self._rebuild_full_params([param])
                 all_gathered = True
         if all_gathered:
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
@@ -3244,7 +3244,7 @@ class FullyShardedDataParallel(nn.Module):
                     all_gathered = False
                     for param in params:
                         if param.size() != param._unsharded_size or param.device != self.compute_device:
-                            self._rebuild_full_params(params)
+                            self._rebuild_full_params([param])
                             all_gathered = True
                     if all_gathered:
                         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
