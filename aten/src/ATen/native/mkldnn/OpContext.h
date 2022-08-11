@@ -10,10 +10,11 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
-const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
-    {"none", ideep::attr_t()},
-    {"relu", ideep::attr_t::fuse_relu()},
-};
+using AttrFunction = std::function<ideep::attr_t(
+    std::vector<c10::optional<at::Scalar>>,
+    c10::optional<std::string>)>;
+
+const std::map<std::string, AttrFunction>& fusion_attr_map();
 
 using SerializationTypeConvPrePack = std::tuple<
     Tensor,
@@ -23,7 +24,9 @@ using SerializationTypeConvPrePack = std::tuple<
     std::vector<int64_t>,
     int64_t,
     std::vector<int64_t>,
-    std::string>;
+    std::string,
+    std::vector<c10::optional<at::Scalar>>,
+    c10::optional<std::string>>;
 
 class ConvOpContext : public torch::jit::CustomClassHolder {
  protected:
@@ -35,6 +38,8 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
   int64_t groups_;
   std::vector<int64_t> input_size_;
   std::string attr_;
+  std::vector<c10::optional<at::Scalar>> scalars_;
+  c10::optional<std::string> algorithm_;
 
  public:
   SerializationTypeConvPrePack unpack() {
@@ -46,7 +51,9 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
         dilation_,
         groups_,
         input_size_,
-        attr_);
+        attr_,
+        scalars_,
+        algorithm_);
   }
 
   virtual Tensor run(const Tensor& input) = 0;

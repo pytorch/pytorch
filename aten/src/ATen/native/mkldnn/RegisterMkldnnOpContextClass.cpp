@@ -32,13 +32,15 @@ TORCH_LIBRARY(mkldnn, m) {
                 // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
                 std::move(std::get<6>(state)),
                 // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
-                std::move(std::get<7>(state)));
+                std::move(std::get<7>(state)),
+                std::move(std::get<8>(state)),
+                std::move(std::get<9>(state)));
           });
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.mkldnn.ConvOpContext"));
+      "mkldnn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr, Scalar?[] scalars, str? algorithm) -> __torch__.torch.classes.mkldnn.ConvOpContext"));
 
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> Tensor Y"));

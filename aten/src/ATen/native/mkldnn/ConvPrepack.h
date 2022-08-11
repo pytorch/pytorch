@@ -20,7 +20,9 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::vector<int64_t> dilation,
     int64_t groups,
     std::vector<int64_t> input_size,
-    std::string attr);
+    std::string attr,
+    std::vector<c10::optional<at::Scalar>> scalars,
+    c10::optional<std::string> algorithm);
 
 Tensor conv_run(
     const Tensor& input,
