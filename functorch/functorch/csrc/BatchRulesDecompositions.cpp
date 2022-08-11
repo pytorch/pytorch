@@ -233,6 +233,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(vsplit, int);
   OP_DECOMPOSE2(vsplit, array);
   OP_DECOMPOSE(vstack);
+  OP_DECOMPOSE2(where, ScalarOther);
+  OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE(orgqr);
   OP_DECOMPOSE2(unflatten, int);
   OP_DECOMPOSE(_convolution_double_backward);

@@ -356,7 +356,7 @@ class TransformerEncoderLayer(Module):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to attention and feedforward
-            operations, respectivaly. Otherwise it's done after. Default: ``False`` (after).
+            operations, respectively. Otherwise it's done after. Default: ``False`` (after).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -510,7 +510,11 @@ class TransformerEncoderLayer(Module):
                     self.linear1.bias,
                     self.linear2.weight,
                     self.linear2.bias,
-                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
+                    # TODO: if src_mask and src_key_padding_mask merge to single 4-dim mask
+                    src_mask if src_mask is not None else src_key_padding_mask,
+                    1 if src_key_padding_mask is not None else
+                    0 if src_mask is not None else
+                    None,
                 )
 
         x = src
@@ -557,7 +561,7 @@ class TransformerDecoderLayer(Module):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to self attention, multihead
-            attention and feedforward operations, respectivaly. Otherwise it's done after.
+            attention and feedforward operations, respectively. Otherwise it's done after.
             Default: ``False`` (after).
 
     Examples::

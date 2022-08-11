@@ -204,6 +204,7 @@ algorithms.
     lr_scheduler.ConstantLR
     lr_scheduler.LinearLR
     lr_scheduler.ExponentialLR
+    lr_scheduler.PolynomialLR
     lr_scheduler.CosineAnnealingLR
     lr_scheduler.ChainedScheduler
     lr_scheduler.SequentialLR
