@@ -1,11 +1,22 @@
 import dataclasses
 import typing
 import unittest
+from typing import Dict
 
 import torchgen.model
 
 from tools.autograd import gen_autograd_functions, load_derivatives
-from torchgen.gen import get_native_function_schema_registrations
+from torchgen.gen import (
+    get_native_function_declarations,
+    get_native_function_schema_registrations,
+)
+from torchgen.model import (
+    BackendIndex,
+    BackendMetadata,
+    DispatchKey,
+    NativeFunction,
+    OperatorName,
+)
 from torchgen.selective_build.selector import SelectiveBuilder
 
 
@@ -29,19 +40,19 @@ class TestCreateDerivative(unittest.TestCase):
         schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
-        differentiability_info = load_derivatives.create_differentiability_info(
-            defn={
+        _, differentiability_info = load_derivatives.create_differentiability_info(
+            defn_dict={
                 "name": specification,
-                "a": "grads[0]",
-                "b": "grads[2]",
+                "dispatch": {"Default": {"a": "grads[0]", "b": "grads[2]"}},
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
 
         self.assertSequenceEqual(
-            differentiability_info.available_named_gradients,
+            differentiability_info["Default"].available_named_gradients,
             # grad_y is not present because y is a
             # bool and thus not differentiable.
             ["grad_x", "grad_z"],
@@ -70,16 +81,21 @@ class TestCreateDerivative(unittest.TestCase):
             RuntimeError, 'illegally mixes use of "grad_RETURN_NAME"'
         ):
             load_derivatives.create_differentiability_info(
-                defn={
+                defn_dict={
                     "name": specification,
                     # Uh-oh, the derivatives reference gradients by
                     # name and by index.
-                    "a": "grad_x",
-                    "b": "grads[1]",
+                    "dispatch": {
+                        "Default": {
+                            "a": "grad_x",
+                            "b": "grads[1]",
+                        }
+                    },
                 },
                 functions_by_signature={schema.signature(): [native_function]},
                 functions_by_schema={specification: native_function},
                 op_counter=typing.Counter[str](),
+                used_dispatch_keys=set(),
             )
 
 
@@ -89,18 +105,24 @@ class TestGenAutogradFunctions(unittest.TestCase):
         schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
-        differentiability_info = load_derivatives.create_differentiability_info(
-            defn={
+        _, differentiability_info = load_derivatives.create_differentiability_info(
+            defn_dict={
                 "name": specification,
-                "a": "grad_x",
-                "b": "grad_z",
+                "dispatch": {
+                    "Default": {
+                        "a": "grad_x",
+                        "b": "grad_z",
+                    }
+                },
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
         definition = gen_autograd_functions.process_function(
-            differentiability_info, gen_autograd_functions.FUNCTION_DEFINITION
+            differentiability_info["Default"],
+            gen_autograd_functions.FUNCTION_DEFINITION,
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
@@ -112,24 +134,70 @@ class TestGenAutogradFunctions(unittest.TestCase):
         schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
-        differentiability_info = load_derivatives.create_differentiability_info(
-            defn={
+        _, differentiability_info = load_derivatives.create_differentiability_info(
+            defn_dict={
                 "name": specification,
-                "a": "grad_x",
-                "b": "grad_z",
+                "dispatch": {
+                    "Default": {
+                        "a": "grad_x",
+                        "b": "grad_z",
+                    },
+                    "AutogradNestedTensor": {
+                        "a": "grad_z",
+                        "b": "grad_x",
+                    },
+                },
                 "output_differentiability": [True, False, True],
             },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
             op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
         )
-        definition = gen_autograd_functions.process_function(
-            differentiability_info, gen_autograd_functions.FUNCTION_DEFINITION
+        default_definition = gen_autograd_functions.process_function(
+            differentiability_info["Default"],
+            gen_autograd_functions.FUNCTION_DEFINITION,
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
-        assert "grad_z = grads[2]" not in definition
-        assert "grad_z = grads[1]" in definition
+        assert "grad_z = grads[2]" not in default_definition
+        assert "grad_z = grads[1]" in default_definition
+
+        nested_tensor_definition = gen_autograd_functions.process_function(
+            differentiability_info["AutogradNestedTensor"],
+            gen_autograd_functions.FUNCTION_DEFINITION,
+        )
+        assert "grad_z = grads[2]" not in nested_tensor_definition
+        assert "grad_z = grads[1]" in nested_tensor_definition
+
+    def test_register_bogus_dispatch_key(self) -> None:
+        specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
+        schema = torchgen.model.FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
+        ):
+            load_derivatives.create_differentiability_info(
+                defn_dict={
+                    "name": specification,
+                    "dispatch": {
+                        "Default": {
+                            "a": "grad_x",
+                            "b": "grad_z",
+                        },
+                        "AutogradRandomTensor": {
+                            "a": "grad_x",
+                            "b": "grad_z",
+                        },
+                    },
+                },
+                functions_by_signature={schema.signature(): [native_function]},
+                functions_by_schema={specification: native_function},
+                op_counter=typing.Counter[str](),
+                used_dispatch_keys=set(),
+            )
 
 
 class TestGenSchemaRegistration(unittest.TestCase):
@@ -196,6 +264,67 @@ TORCH_LIBRARY(custom, m) {
                 ],
                 schema_selector=self.selector,
             )
+
+
+class TestGenNativeFunctionDeclaration(unittest.TestCase):
+    def setUp(self) -> None:
+        self.op_1_native_function, op_1_backend_index = NativeFunction.from_yaml(
+            {"func": "op_1() -> bool", "dispatch": {"CPU": "kernel_1"}},
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
+        self.op_2_native_function, op_2_backend_index = NativeFunction.from_yaml(
+            {
+                "func": "op_2() -> bool",
+                "dispatch": {"CPU": "kernel_2", "QuantizedCPU": "custom::kernel_3"},
+            },
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+            DispatchKey.CPU: {},
+            DispatchKey.QuantizedCPU: {},
+        }
+        BackendIndex.grow_index(backend_indices, op_1_backend_index)
+        BackendIndex.grow_index(backend_indices, op_2_backend_index)
+        self.backend_indices = {
+            k: BackendIndex(
+                dispatch_key=k,
+                use_out_as_primary=True,
+                external=False,
+                device_guard=False,
+                index=backend_indices[k],
+            )
+            for k in backend_indices
+        }
+
+    def test_native_function_declaration_1_op_2_ns_error(self) -> None:
+        with self.assertRaises(AssertionError):
+            get_native_function_declarations(
+                grouped_native_functions=[
+                    self.op_1_native_function,
+                    self.op_2_native_function,
+                ],
+                backend_indices=self.backend_indices,
+            )
+
+    def test_native_function_declaration_1_op_1_ns_valid(self) -> None:
+        self.assertIsInstance(self.op_1_native_function, NativeFunction)
+        declaration = get_native_function_declarations(
+            grouped_native_functions=[
+                self.op_1_native_function,
+            ],
+            backend_indices=self.backend_indices,
+        )
+        target = """
+namespace at {
+namespace native {
+TORCH_API bool kernel_1();
+} // namespace native
+} // namespace at
+        """
+        self.assertEqual("\n".join(declaration), target)
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()

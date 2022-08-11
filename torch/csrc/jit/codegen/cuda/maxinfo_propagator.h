@@ -29,8 +29,9 @@ namespace cuda {
  * MaxInfoSpanningTree::Information and implement `operator<` which is used to
  * tell which path contains more information, and `operator bool` which is used
  * to tell if there is any information stored. You also need to implement
- * computeInfoPasC and computeInfoCasP, which are the functions that compute
- * information of the `to` tensor from the information of the `from` tensor.
+ * computeInfoPasC, computeInfoCasP, and computeInfoSibling, which are the
+ * functions that compute information of the `to` tensor from the information of
+ * the `from` tensor.
  */
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API MaxInfoSpanningTree {
@@ -38,15 +39,19 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   // Class to subclass in order to stop traversal, by which limits the nodes in
   // the spanning tree.
   struct Selector {
-    virtual bool allowPasC(TensorView* from, TensorView* to) = 0;
-    virtual bool allowCasP(TensorView* from, TensorView* to) = 0;
+    virtual bool allowC2P(TensorView* from, TensorView* to) = 0;
+    virtual bool allowP2C(TensorView* from, TensorView* to) = 0;
+    virtual bool allowSibling(TensorView* from, TensorView* to) = 0;
     virtual ~Selector() {}
   };
 
   // This is the interface to implement the actual propagation
   struct Propagator {
-    virtual void propagateTvPasC(TensorView* from, TensorView* to) = 0;
-    virtual void propagateTvCasP(TensorView* from, TensorView* to) = 0;
+    virtual void setUp() {}
+    virtual void tearDown() {}
+    virtual void propagateC2P(TensorView* from, TensorView* to) = 0;
+    virtual void propagateP2C(TensorView* from, TensorView* to) = 0;
+    virtual void propagateSibling(TensorView* from, TensorView* to) = 0;
     virtual ~Propagator() {}
   };
 
@@ -73,6 +78,7 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
 
  private:
   enum class NextHopType {
+    SIBLING,
     C_AS_P,
     P_AS_C,
   };
@@ -119,6 +125,10 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
   virtual std::shared_ptr<Information> computeInfoCasP(
+      TensorView* from,
+      TensorView* to,
+      std::shared_ptr<Information> from_info) const = 0;
+  virtual std::shared_ptr<Information> computeInfoSibling(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
@@ -201,6 +211,10 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const override;
+  virtual std::shared_ptr<Information> computeInfoSibling(
+      TensorView* from,
+      TensorView* to,
+      std::shared_ptr<Information> from_info) const override;
 
  private:
   static std::shared_ptr<RootDomainInfo> getReferenceRootIDInfo(TensorView* tv);
@@ -229,6 +243,36 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
             reference,
             getReferenceRootIDInfo(reference, leaf_pos),
             selector) {}
+};
+
+class TORCH_CUDA_CU_API SpanningTreePrinter
+    : public MaxInfoSpanningTree::Propagator {
+  std::ostream& stream_;
+
+ public:
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
+  SpanningTreePrinter(std::ostream& stream = std::cout) : stream_(stream) {}
+};
+
+// Simple selector for selecting subgraphs to build spanning trees. The selector
+// allows propagation only to the given set of selected tensorviews, except for
+// sibiling propagation, which we should never block.
+class TORCH_CUDA_CU_API SetSelector : public MaxInfoSpanningTree::Selector {
+  std::unordered_set<TensorView*> selected_;
+
+ public:
+  virtual bool allowC2P(TensorView* from, TensorView* to) override;
+  virtual bool allowP2C(TensorView* from, TensorView* to) override;
+  virtual bool allowSibling(TensorView* from, TensorView* to) override;
+
+  SetSelector(std::unordered_set<TensorView*> selected)
+      : selected_(std::move(selected)) {}
+
+  const std::unordered_set<TensorView*>& selected() const {
+    return selected_;
+  }
 };
 
 } // namespace cuda

@@ -70,6 +70,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Split*) override;
   void handle(Merge*) override;
   void handle(Expr*) override;
+  void handle(Swizzle2D*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
   Val* getExtent(IterDomain* id) const;
@@ -128,6 +129,13 @@ class IndexCompute : public BackwardVisitor {
   // Temporary flag which tells IndexCompute to use concrete id's from the exact
   // map rather than the actual IDs used in the ID expressions.
   bool concrete_id_pass_ = false;
+
+  // Mode of swizzle that are activated in this index compute
+  //  instance. Will treat swizzles of different mode as no-op.
+  // Currently data mode swizzles are handled same as before in IndexSwizzle
+  //  pass, while loop mode swizzles are handled early on in concrete indexing
+  //  pass. See also [Note on swizzle mode]
+  SwizzleMode swizzle_mode_ = SwizzleMode::NoSwizzle;
 
  public:
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
@@ -204,12 +212,22 @@ class IndexSwizzle : public IndexCompute {
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> zero_merged_in);
 
+  IndexSwizzle(
+      const TensorView* tv,
+      const TensorDomain* domain,
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> zero_merged_in);
+
   void run() override;
 
  protected:
   using IndexCompute::handle;
 
   void handle(Expr* e) override;
+
+  void handle(Swizzle2D* swizzle_2d) override;
 
  private:
   const TensorView* tv_ = nullptr;
@@ -345,24 +363,11 @@ class Index {
   //! this is not a bool value as if we have an unswitch loop with a vectorized
   //! loop inside, we only want to base the "unswitch" like predicate on the
   //! vectorized loop.
-  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
-  getReferenceRootPredicates(
+  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
-
-  // Determine if we may run into over reuse of predicates or registers in the
-  // compiler. If the loop can be unrolled and the index and domain are not
-  // "simple" we likely want the loop protected.
-  //
-  // Magic zero protection should only be done for global memory and predicates.
-  // We should avoid use on registers. Shared memory does not require it, but
-  // likely wouldn't hurt.
-  static bool protectWithMagicZero(
-      kir::ForLoop* loop,
-      IterDomain* reference_domain = nullptr,
-      Val* ind = nullptr);
 };
 
 // Used for local and shared index mapping. Returns a map from loops
