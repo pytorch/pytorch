@@ -176,6 +176,7 @@ GENERATED_H_CUDA = [
 ]
 
 GENERATED_CPP_CUDA = [
+    "DispatchlessCUDA.cpp",
     "RegisterCUDA.cpp",
     "RegisterNestedTensorCUDA.cpp",
     "RegisterSparseCUDA.cpp",
@@ -185,6 +186,9 @@ GENERATED_CPP_CUDA = [
 
 GENERATED_CPP = [
     "Functions.cpp",
+    "DispatchlessCPU.cpp",
+    "DispatchlessMeta.cpp",
+    "DispatchlessCompositeExplicitAutograd.cpp",
     "RegisterBackendSelect.cpp",
     "RegisterCPU.cpp",
     "RegisterQuantizedCPU.cpp",
