@@ -96,7 +96,7 @@ def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
                 return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
         if isinstance(e, list):
             with no_dispatch():
-                return [wrap_with_proxy(ee, proxy(idx), get_constant(idx)) for idx, ee in enumerate(e)]
+                return [wrap_with_proxy(ee, proxy[idx], get_constant(idx)) for idx, ee in enumerate(e)]
         else:
             return e
 

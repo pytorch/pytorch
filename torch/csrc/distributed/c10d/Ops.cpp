@@ -30,6 +30,8 @@ allreduce_(
       AllreduceOptions{
           static_cast<ReduceOp>(reduce_op),
           std::chrono::milliseconds(timeout)});
+
+  //
   return std::
       tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
           std::move(tensor_vec), work);
@@ -146,7 +148,11 @@ TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
   m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
-  m.class_<ProcessGroup::Work>("Work").def(torch::init<>());
+  m.class_<ProcessGroup::Work>("Work")
+      .def(torch::init<>())
+      .def("wait", [](const c10::intrusive_ptr<ProcessGroup::Work>& self) {
+        self->wait();
+      });
   // It's important to register the op to the CompositeExplicitAutograd key to
   // enable
   // __torch_dispatch__.
