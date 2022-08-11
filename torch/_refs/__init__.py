@@ -207,6 +207,7 @@ __all__ = [
     "hsplit",
     "hstack",
     "meshgrid",
+    "movedim",
     "narrow",
     "native_layer_norm",
     "permute",
@@ -3002,13 +3003,7 @@ def diag_embed(
         last_dim += builtins.abs(offset)
 
     # preserve original data, but place 1 at dim1 and move last dim to dim2
-    # # TODO: use movedim here once it's available:
-    # t = t.unsqueeze(dim1).movedim(-1, dim2)
-    t = t.unsqueeze(dim1)
-    t_dims = list(range(t.ndim))
-    t_dims.insert(dim2, t_dims[-1])
-    t_dims.pop()
-    t = torch.permute(t, t_dims)
+    t = t.unsqueeze(dim1).movedim(-1, dim2)
 
     # generate ranges shifting indices based on offset
     a_range = torch.arange(last_dim, device=t.device, dtype=torch.int64)
@@ -3521,6 +3516,57 @@ def meshgrid(
         grids[0], grids[1] = grids[1], grids[0]
 
     return grids
+
+
+# CompositeImplicitAutograd - don't register decomp
+def movedim(
+    input: TensorLikeType,
+    source: Union[int, DimsSequenceType],
+    destination: Union[int, DimsSequenceType],
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.movedim
+    """
+    if type(source) is int:
+        source = (source,)
+    if type(destination) is int:
+        destination = (destination,)
+
+    rank = input.ndim
+    ss = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in source]  # type: ignore[union-attr]
+    ds = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in destination]  # type: ignore[union-attr]
+
+    sss = set(ss)
+    dss = set(ds)
+
+    utils.check(
+        len(ss) == len(sss),
+        lambda: f"movedim: repeated dim in `source` {source}",
+    )
+    utils.check(
+        len(ds) == len(dss),
+        lambda: f"movedim: repeated dim in `destination` {destination}",
+    )
+
+    m = dict(zip(ds, ss))
+    dims = []
+    si = 0  # source index
+    for di in range(rank):
+        # check if the destination index is in the mapping
+        s = m.get(di)
+        if s is not None:
+            # insert source index if found
+            dims.append(s)
+        else:
+            # insert source index sequentially, skipping indices from the mapping
+            while si in sss:
+                si += 1
+            dims.append(si)
+            si += 1
+
+    result = torch.permute(input, tuple(dims))
+
+    return result
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
