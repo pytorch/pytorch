@@ -222,7 +222,11 @@ class TestExecutionGraph(TestCase):
     def payload(self, use_cuda=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
-            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            inf_val = float("inf")
+            neg_inf_val = float("-inf")
+            nan_val = float("nan")
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u),
+                                                         "hello", u, inf_val, neg_inf_val, nan_val)
             x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
@@ -231,6 +235,9 @@ class TestExecutionGraph(TestCase):
                 y = y.cuda()
             z = x + y + x * y + x * y
             z.backward(z)
+            gelu = nn.GELU()
+            m = torch.randn(2)
+            _ = gelu(m)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -281,6 +288,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -310,6 +318,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -345,6 +354,7 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        found_root_node = False
         for n in nodes:
             assert "name" in n
             if "[pytorch|profiler|execution_graph|process]" in n["name"]:
@@ -353,6 +363,40 @@ class TestExecutionGraph(TestCase):
                 loop_count += 1
         assert found_root_node
         assert loop_count == expected_loop_events
+
+    def test_execution_graph_repeat_in_loop(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        iter_list = {3, 4, 6, 8}
+        expected_loop_events = len(iter_list)
+        output_files = []
+        for idx in range(10):
+            if idx in iter_list:
+                # Create a temp file to save execution graph data.
+                fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+                fp.close()
+                output_files.append(fp.name)
+                eg = ExecutionGraphObserver()
+                eg.register_callback(fp.name)
+                eg.start()
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+            if idx in iter_list:
+                eg.stop()
+                eg.unregister_callback()
+
+        event_count = 0
+        for eg_file in output_files:
+            nodes = self.get_execution_graph_root(eg_file)
+            found_root_node = False
+            for n in nodes:
+                assert "name" in n
+                if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                    assert n["id"] == 1
+                    found_root_node = True
+                if n["name"].startswith("## LOOP "):
+                    event_count += 1
+            assert found_root_node
+        assert event_count == expected_loop_events
 
     def test_execution_graph_no_capture(self):
         fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
