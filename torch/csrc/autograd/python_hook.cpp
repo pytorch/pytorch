@@ -26,12 +26,12 @@ static void check_single_result(
 namespace torch {
 namespace autograd {
 
-PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
+PyFunctionTensorPreHook::PyFunctionTensorPreHook(PyObject* dict, int value_idx)
     : dict(dict), value_idx(value_idx) {
   Py_INCREF(dict);
 }
 
-PyFunctionPreHook::~PyFunctionPreHook() {
+PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
@@ -39,7 +39,7 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   }
 }
 
-auto PyFunctionPreHook::operator()(const variable_list& values)
+auto PyFunctionTensorPreHook::operator()(const variable_list& values)
     -> variable_list {
   pybind11::gil_scoped_acquire gil;
 

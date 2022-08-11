@@ -1198,7 +1198,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionPreHook>(obj, 0));
+        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2023,7 +2023,7 @@ static int THPVariable_subclass_traverse(
       }
 
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }
