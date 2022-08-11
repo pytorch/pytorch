@@ -22,6 +22,11 @@ graph {
     output: "onnx::Shape_4"
     name: "Reshape_1"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     output: "onnx::Reshape_5"
@@ -43,6 +48,11 @@ graph {
     output: "onnx::Shape_6"
     name: "Reshape_3"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     output: "onnx::Reshape_7"
@@ -64,6 +74,11 @@ graph {
     output: "onnx::Shape_8"
     name: "Reshape_5"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Shape_4"
@@ -129,6 +144,11 @@ graph {
     output: "onnx::Expand_15"
     name: "Reshape_12"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Expand_15"
@@ -170,6 +190,11 @@ graph {
     output: "onnx::Expand_19"
     name: "Reshape_16"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Expand_19"
@@ -211,6 +236,11 @@ graph {
     output: "onnx::Expand_23"
     name: "Reshape_20"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Expand_23"
@@ -318,5 +348,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }
