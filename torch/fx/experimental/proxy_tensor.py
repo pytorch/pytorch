@@ -146,19 +146,26 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         # TODO: need to parse
         assert kwargs is None or not kwargs
         pred, true_fn, false_fn, operands = args
-
+    
         true_graph = get_isolated_graphmodule(true_fn, operands, {})
         false_graph = get_isolated_graphmodule(false_fn, operands, {})
-        # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now                
-        proxy_mode.tracer.root.register_module("true_graph", true_graph)
-        proxy_mode.tracer.root.register_module("false_graph", false_graph)
+        # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now    
+        import random
+        import string
+        rand_slug = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+        
+        true_name = "true_graph_"+rand_slug
+        false_name = "false_graph_"+rand_slug
+        proxy_mode.tracer.root.register_module(true_name, true_graph)
+        proxy_mode.tracer.root.register_module(false_name, false_graph)
         
         if isinstance(operands, ProxyTensor):
             operands = [operands] # Prevent unwanted unpacking
 
-        args = (pred, true_graph, false_graph, operands)
+        args = (pred, eval(f"proxy_mode.tracer.root.{true_name}"), eval(f"proxy_mode.tracer.root.{false_name}"), operands)
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, ProxyTensor) else e
+
         proxy_args = pytree.tree_map(unwrap_proxy, args)
 
         proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,

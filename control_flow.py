@@ -3,6 +3,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 import torch._C as _C
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch.overrides import handle_torch_function, has_torch_function
+from torch.fx.experimental.proxy_tensor import make_fx
 
 """
 Structured control flow operators prototype.
@@ -73,6 +74,11 @@ class PyDispatcher:
         print(f"PyDispatcher.redispatch {key}")
         return dispatch(key, operator, args, kwargs)
 
+    def force_redispatch_to(self, operator, args, kwargs, key):
+        # Redispatch doesn't go to the top
+        print(f"PyDispatcher.redispatch {key}")
+        return dispatch(key, operator, args, kwargs)
+
     def reset_dispatch_record(self):
         self.current_dispatching_op = None
         self.already_dispatched_keys = None
@@ -123,7 +129,7 @@ def compute_dispatch_key(PyOperator, args, kwargs, additional_exclude=None):
 def dispatch(dispatch_key, operator, args, kwargs):
     print("Dispatching:", dispatch_key, operator.__name__)
     if dispatch_key not in SUPPORTED_KEYS:
-        raise RuntimeError(f'NYI: {dispatch_key}')
+        raise RuntimeError(f'NYI: {dispatch_key} {SUPPORTED_KEYS}')
     assert dispatch_key in operator.table
     kernel = operator.table[dispatch_key]
     return kernel(*args, **kwargs)
@@ -156,10 +162,16 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 def cond_dense(pred, true_fn, false_fn, *operands):
-    # from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
-    # with disable_proxy_modes_tracing():
+    mode = torch._C._get_torch_dispatch_mode()
+    if mode:
+        # TODO (Pack this into a nice util)
+        args = (pred, true_fn, false_fn, operands)
+        torch._C._set_torch_dispatch_mode(None)
+        ret = mode.__torch_dispatch__(cond, None, args, {})
+        torch._C._set_torch_dispatch_mode(mode)
+        return ret
+        
     if pred:
-        print("Operands:", operands)
         x = true_fn(*operands)
         return x
     else:
@@ -202,15 +214,14 @@ def python_fallback(op):
             return NotImplemented
 
         mode = torch._C._get_torch_dispatch_mode()
+       
         if mode is not None:
             torch._C._set_torch_dispatch_mode(None)
-
-            # with mode.restore():
-            # with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
             ret = mode.__torch_dispatch__(op, None, args, kwargs)
             torch._C._set_torch_dispatch_mode(mode)
             return ret
         else:
+            print("Python")
             return cond_dense(*args)
 
     return inner
@@ -228,7 +239,7 @@ cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 
 """
 Test case #1: basic
-"""
+# """
 print("EXAMPLE 1")
 
 def true_fn(x):
@@ -245,7 +256,6 @@ assert torch.allclose(result, torch.cos(x))
 Test case #2: tracing
 """
 print("EXAMPLE 2")
-from torch.fx.experimental.proxy_tensor import make_fx
 
 def f(x, y):
     return cond(y, true_fn, false_fn, x)
@@ -282,17 +292,19 @@ I've hardcoded the logic into ProxyTensor.
 """
 print("EXAMPLE 3")
 
-from torch.fx.experimental.proxy_tensor import make_fx
+def true_nested(y):
+    return y * y 
+
+def false_nested(y):
+    return y + y
 
 def true_fn(x, pred2):
-    def true_nested(y):
-        return y * y 
+    mode = torch._C._get_torch_dispatch_mode()
 
-    def false_nested(y):
-        return y + y
-        
-    
-    return cond(pred2, true_nested, false_nested, x.sin())
+    print("True fn time", mode)
+    # import pdb
+    # pdb.set_trace()
+    return cond(pred2, true_nested, false_nested, x)
 
 def false_fn(x, _):
     return x.cos()
@@ -304,9 +316,10 @@ graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
 print(graph.code)
 graph.graph.print_tabular()
-print(graph.true_graph)
+print("invoking \n\n")
 
 result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True)) # True + True -> x * x
+exit(0)
 result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False)) # True + True -> x + x
 result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True)) #  False + either -> cos
 result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False)) #  False + either -> cos
