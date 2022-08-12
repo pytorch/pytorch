@@ -767,7 +767,6 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, (x + 1) * 4)
 
     def test_grad_fn_prehooks(self):
-        # TODO: test more cases, i.e. return None
         a = torch.tensor([1.], requires_grad=True)
         b = a * 2
 
@@ -790,12 +789,93 @@ class TestAutograd(TestCase):
         b.grad_fn.register_hook(posthook)
         # register prehook x 3
         b.grad_fn.register_prehook(prehook)
+        b.grad_fn.register_prehook(lambda x: None)
         b.grad_fn.register_prehook(prehook)
         b.grad_fn.register_prehook(prehook)
+        b.grad_fn.register_prehook(lambda x: x)
+        b.grad_fn.register_prehook(lambda x: None)
 
         b.sum().backward()
 
         self.assertEqual(post_counter[0], 2)
+        self.assertEqual(pre_counter[0], 3)
+
+        # Return None
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a * 2
+
+        def prehook(grad_output):
+            pre_counter[0] += 1
+            return None
+
+        b.grad_fn.register_prehook(prehook)
+        b.sum().backward()
+        self.assertEqual(pre_counter[0], 4)
+        self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+
+    def test_grad_fn_prehooks_multiple_outputs(self):
+        # Compute gradients without hooks
+        b = torch.rand(3, 3, requires_grad=True)
+        var, mean = torch.var_mean(b, dim=0)
+        (var + mean).sum().backward()
+
+        # Compute gradients with hooks
+        a = b.detach().requires_grad_()
+        counter = [0]
+        def prehook(grad_output):
+            gvar, gmean = grad_output
+            counter[0] += 1
+            return (gvar * 2, gmean * 2)
+
+        var, mean = torch.var_mean(a, dim=0)
+        mean.grad_fn.register_prehook(prehook)
+        (var + mean).sum().backward()
+
+        self.assertEqual(counter[0], 1)
+        # Compare
+        self.assertTrue(torch.allclose(a.grad, b.grad * 2))
+
+    def test_grad_fn_prehooks_remove_hooks(self):
+        # Simply remove hooks
+
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a * 2
+        counter = [0]
+
+        def prehook(grad_output):
+            counter[0] += 1
+            return None
+
+        handle = b.grad_fn.register_prehook(prehook)
+        b.grad_fn.register_prehook(prehook)
+        handle.remove()
+        b.sum().backward()
+        self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+        self.assertEqual(counter[0], 1)
+
+        # Remove hooks during backward
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a * 2
+        counter = [0]
+
+        def prehook1(grad_output):
+            handle2.remove()
+            # Remove hook that is already removed is OK
+            handle3.remove()
+            return None
+
+        def prehook2(grad_output):
+            counter[0] += 1
+            return None
+
+        # Hooks that registered first run first
+        b.grad_fn.register_prehook(prehook1)
+        handle2 = b.grad_fn.register_prehook(prehook2)
+        handle3 = b.grad_fn.register_prehook(prehook2)
+        handle3.remove()
+        b.sum().backward()
+        self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+        self.assertEqual(counter[0], 1)
 
     def test_hooks_cpp(self):
         # Tests hooks for autograd function implemented in C++
