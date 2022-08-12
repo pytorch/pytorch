@@ -11,7 +11,7 @@ validation:
     - "miniconda/"
   ossci-linux:
     - "test/"
-    - "cuda/",
+    - "cuda/"
     - "cudnn/"
   ossci-macos:
     - "test/"
