@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -811,7 +812,7 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* noargs) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
-  if (!cdata->retain_variables) {
+  if (!get_current_graph_task_keep_graph()) {
     cdata->release_variables();
   }
   Py_RETURN_NONE;
