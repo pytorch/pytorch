@@ -46,8 +46,9 @@ Tensor _mps_linear(
 
   TORCH_CHECK(output.is_mps());
 
-  if(output.numel() == 0)
+  if(output.numel() == 0) {
     return output;
+  }
 
   MPSStream *stream = getCurrentMPSStream();
 

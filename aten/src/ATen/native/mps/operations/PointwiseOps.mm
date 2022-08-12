@@ -19,8 +19,9 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
     output.resize_(output.sizes());
   }
 
-  if(output.numel() == 0)
+  if(output.numel() == 0) {
     return output;
+  }
 
   MPSStream* mpsStream = getCurrentMPSStream();
 
