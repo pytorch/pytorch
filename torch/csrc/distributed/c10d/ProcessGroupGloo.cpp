@@ -2842,7 +2842,6 @@ void ProcessGroupGloo::monitoredBarrier(
   }
 
   waitLoop(sendWorkMap);
-
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {
