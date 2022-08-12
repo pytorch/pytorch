@@ -22,7 +22,6 @@ struct PyFunctionPreHook : public FunctionPreHook {
   PyObject* dict;
 };
 
-
 struct PyFunctionPostHook : public FunctionPostHook {
   PyFunctionPostHook(PyObject* dict);
   ~PyFunctionPostHook() override;
