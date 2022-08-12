@@ -15,6 +15,7 @@ import torch.fx as fx
 from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
+import inspect
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -25,6 +26,12 @@ __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enabl
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+
+def fake_signature(fn, nargs):
+    """FX gets confused by varargs, de-confuse it"""
+    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 
 class ProxySymInt(object):
@@ -144,7 +151,12 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        with proxy_mode.restore():
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+    with proxy_mode.restore():
+        r = func_overload.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
     if func_overload == aten._local_scalar_dense.default:
         t, = args
         assert not kwargs
@@ -436,6 +448,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            flat_args = pytree.tree_flatten((args, kwargs))[0]
+            handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
+
+            # If there are any tensor subclasses, we need to handle those tensor subclasses first
+            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+                return NotImplemented
+
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
@@ -495,6 +514,18 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
+
+def wrapper_and_args_for_make_fx(func, args, kwargs):
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped(flat_args):
+        fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
+        return func(*fn_args, **fn_kwargs)
+    return wrapped, flat_args
+
+
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
     if tracing_mode != "real" and not trace_factory_functions:
         raise ValueError("""\
@@ -552,8 +583,15 @@ a bug if you need this)""")
         else:
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
+        if not hasattr(f, '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
+            # FX doesn't support varargs, so we gotta fake up a wrapper
+            # TODO: Would be nice to fix this at the source...
+            func = fake_signature(f, len(phs))
+        else:
+            func = f
+
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
-            t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(func, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env  # type: ignore[assignment]
@@ -592,13 +630,7 @@ def get_isolated_graphmodule(func, args, kwargs):
     It detaches the args and kwargs from the current tracer so that the trace of
     the current graph module can be created without any side-effects.
     """
-    # make_fx doesn't support kwargs, so we need to do this flattening
-    # and then unflatten the args before calling func
-    all_args, spec = pytree.tree_flatten((args, kwargs))
-
-    def wrapped(args):
-        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
-        return func(*fn_args, **fn_kwargs)
+    wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     unwrapped_all_args = [unwrap_elem(a) for a in all_args]
 
