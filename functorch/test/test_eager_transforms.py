@@ -3111,12 +3111,13 @@ def forward(self, x_1) -> torch.Tensor:
 
         fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.arange(4, device=device, dtype=torch.float32))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4])
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4]);  add_tensor = None
@@ -3137,13 +3138,14 @@ def forward(self, inpt_1) -> torch.Tensor:
 
         fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.arange(8, device=device, dtype=torch.float32))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
     aminmax_default = torch.ops.aten.aminmax.default(view_copy_default_1, dim = 0);  view_copy_default_1 = None
@@ -3162,12 +3164,13 @@ def forward(self, inpt_1) -> torch.Tensor:
             return x
 
         out = make_fx(functionalize(f))(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, x_1) -> torch.Tensor:
-    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_default = torch.ops.aten.view.default(x_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
     view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
@@ -3183,6 +3186,7 @@ def forward(self, x_1) -> torch.Tensor:
             return global_out
 
         out = make_fx(functionalize(f))()
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
@@ -3202,6 +3206,7 @@ def forward(self) -> torch.Tensor:
         a = torch.arange(4).reshape(2, 2)
         b = torch.ones(2, dtype=torch.long)
         out = make_fx(functionalize(f))(a, b)
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
