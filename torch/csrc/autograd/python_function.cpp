@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -806,6 +807,18 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_maybe_clear_saved_tensors(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  if (!get_current_graph_task_keep_graph()) {
+    cdata->release_variables();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -1184,6 +1197,10 @@ static struct PyGetSetDef THPFunction_properties[] = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
+    {(char*)"maybe_clear_saved_tensors",
+     THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
     {(char*)"_register_hook_dict",
      THPFunction__register_hook_dict,
