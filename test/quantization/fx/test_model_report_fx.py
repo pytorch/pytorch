@@ -1146,8 +1146,50 @@ class TestFxModelReportClass(QuantizationTestCase):
         Tests for generation of qconfigs by ModelReport API
         - Tests that qconfigmapping is generated
         - Tests that mappings include information for for relavent modules
+        - Edge case with no detectors
+        - Errors if tried before report generation
         """
-        pass
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(DynamicStaticDetector())
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the models
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # try to generate mapping without generating report, should throw error
+            # only really need to test one of them here
+            with self.assertRaises(Exception):
+                qconfig_mapping = mod_report.generate_qconfig_mapping()
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+            # get the two mappings without error now
+            qconfig_mapping = mod_report.generate_qconfig_mapping()
+
+            # for the non_empty one, we should have 6 because we have outlier detector
+            # so should have suggestions for each module named
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 6)
+
+            # make sure these can actually be used to prepare the model
+            prepared = quantize_fx.prepare_fx(TwoThreeOps(), qconfig_mapping, example_input)
+
+            # now convert the model to ensure no errors in conversion
+            converted = quantize_fx.convert_fx(prepared)
 
     @skipIfNoFBGEMM
     def test_equalization_mapping_generation(self):
@@ -1155,6 +1197,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         Tests for generation of qconfigs by ModelReport API
         - Tests that equalization config generated when input-weight equalization detector used
         - Tests that mappings include information for for relavent modules
+        - Errors if tried before report generation
         """
         pass
 

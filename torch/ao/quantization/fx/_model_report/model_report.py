@@ -6,12 +6,24 @@ from torch.ao.quantization.fx._model_report.detector import (
     DETECTOR_OBS_ARGS_KEY,
     DETECTOR_OBS_TO_INSERT_KEY,
     DETECTOR_IS_POST_OBS_KEY,
-    DETECTOR_TARGET_NODE_KEY
+    DETECTOR_TARGET_NODE_KEY,
+    DynamicStaticDetector,
+    PerChannelDetector
 )
 from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
-from torch.ao.quantization.qconfig_mapping import QConfigMapping
+from torch.ao.quantization.qconfig_mapping import QConfigMapping, QConfig
+from torch.ao.quantization.qconfig import (
+    default_qconfig,
+    assert_valid_qconfig,
+)
+from torch.ao.quantization.observer import (
+    default_dynamic_quant_observer,
+    default_per_channel_weight_observer,
+    default_observer,
+    default_weight_observer,
+)
 
 class ModelReport:
     r"""
@@ -436,7 +448,76 @@ class ModelReport:
 
         Returns a QConfigMapping for the quantization configuration
         """
-        pass
+        # first check if user has at least done report generation
+        if len(self._generated_reports) == 0:
+            raise Exception("Unable to generate QConfigMapping without first generating reports and suggestions")
+
+        # we can use the report suggestions from each detector to compose our mappings
+        # get the reformatted reports
+        reformatted: Dict[str, Dict[str, Any]] = self._reformat_reports_for_visualizer()
+
+        # now we create a high level mapping with a default qconfig
+        return_mapping = QConfigMapping()
+        return_mapping.set_global(default_qconfig)
+
+        # get the set of modules that are support per channel
+        current_backend = torch.backends.quantized.engine
+        per_channel_supported_modules: Tuple = tuple(
+            PerChannelDetector.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[current_backend]
+        )
+
+        # get set of modules that support dynamic quantization
+        dynamic_supported_modules: Tuple = tuple(DynamicStaticDetector.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED)
+
+        # get the keys that we care about
+        dynamic_rec_key: str = DynamicStaticDetector.DEFAULT_DYNAMIC_REC_KEY
+
+        # loop through the modules in the model and see which ones we have reports for
+        for fqn, module in self._model.named_modules():
+            # if we have a report for this module
+            if fqn in reformatted:
+                feature_dict: Dict[str, Any] = reformatted[fqn]
+
+                per_channel_supported: bool = False
+                dynamic_supported: bool = False
+                dynamic_recommended: bool = False
+
+                # see if per channel is supported for the module
+                if isinstance(module, per_channel_supported_modules):
+                    per_channel_supported = True
+
+                # dynamic supported
+                if isinstance(module, dynamic_supported_modules):
+                    dynamic_recommended = feature_dict[dynamic_rec_key]
+
+                # now apply suggestions to new qconfig
+                module_qconfig = default_qconfig
+
+                # keep track of dynamic and per_channel recommendations
+                recommendations_list = []
+                # append as if a list of combinations
+                recommendations_list.append((dynamic_recommended, per_channel_supported))
+                recommendations_list.append((dynamic_recommended, False))  # only trying dynamic rec
+                recommendations_list.append((False, per_channel_supported))  # only trying dynamic
+
+                for rec in recommendations_list:
+                    # rec[0] -> dynamic recommended
+                    # rec[1] -> per channel recommended
+                    activation = default_dynamic_quant_observer if rec[0] else default_observer
+                    weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
+                    test_config = QConfig(activation, weight)
+                    try:
+                        assert_valid_qconfig(test_config, module)
+                        module_qconfig = test_config
+                        break
+                    except AssertionError:
+                        # if not a valid configuration, we move on to the next one in priority
+                        pass
+
+                # set the valid mapping for the module
+                return_mapping.set_module_name(fqn, module_qconfig)
+
+        return return_mapping
 
     def generate_equalization_mapping(self) -> QConfigMapping:
         r"""
