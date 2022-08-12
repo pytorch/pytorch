@@ -3,7 +3,8 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
-from torch.utils._pytree import _broadcast_to_and_flatten
+from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
+from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
 from collections import namedtuple, OrderedDict
 from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
@@ -180,6 +181,21 @@ class TestPytree(TestCase):
             ]
             for case in cases:
                 run_test(case)
+
+
+    def test_tree_only(self):
+        self.assertEqual(tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"])
+
+
+    def test_tree_all_any(self):
+        self.assertTrue(tree_all(lambda x: x % 2, [1, 3]))
+        self.assertFalse(tree_all(lambda x: x % 2, [0, 1]))
+        self.assertTrue(tree_any(lambda x: x % 2, [0, 1]))
+        self.assertFalse(tree_any(lambda x: x % 2, [0, 2]))
+        self.assertTrue(tree_all_only(int, lambda x: x % 2, [1, 3, "a"]))
+        self.assertFalse(tree_all_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertTrue(tree_any_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertFalse(tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
 
 
     def test_treespec_repr(self):

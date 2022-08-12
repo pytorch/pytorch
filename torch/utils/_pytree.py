@@ -1,5 +1,9 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar
+import functools
 from collections import namedtuple, OrderedDict
+
+T = TypeVar('T')
+S = TypeVar('S')
 
 """
 Contains utility functions for working with nested python data structures.
@@ -185,6 +189,54 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
+
+def map_only(ty: Type[T]) -> Callable[[Callable[[T], Any]], Callable[[Any], Any]]:
+    """
+    Suppose you are writing a tree_map over tensors, leaving everything
+    else unchanged.  Ordinarily you would have to write:
+
+        def go(t):
+            if isinstance(t, Tensor):
+                return ...
+            else:
+                return t
+
+    With this function, you only need to write:
+
+        @map_only(Tensor)
+        def go(t):
+            return ...
+
+    You can also directly use 'tree_map_only'
+    """
+    def deco(f: Callable[[T], Any]) -> Callable[[Any], Any]:
+        @functools.wraps(f)
+        def inner(x: T) -> Any:
+            if isinstance(x, ty):
+                return f(x)
+            else:
+                return x
+        return inner
+    return deco
+
+def tree_map_only(ty: Type[T], fn: Callable[[T], Any], pytree: PyTree) -> PyTree:
+    return tree_map(map_only(ty)(fn), pytree)
+
+def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
+    flat_args, _ = tree_flatten(pytree)
+    return all(map(pred, flat_args))
+
+def tree_any(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
+    flat_args, _ = tree_flatten(pytree)
+    return any(map(pred, flat_args))
+
+def tree_all_only(ty: Type[T], pred: Callable[[T], bool], pytree: PyTree) -> bool:
+    flat_args, _ = tree_flatten(pytree)
+    return all(pred(x) for x in flat_args if isinstance(x, ty))
+
+def tree_any_only(ty: Type[T], pred: Callable[[T], bool], pytree: PyTree) -> bool:
+    flat_args, _ = tree_flatten(pytree)
+    return any(pred(x) for x in flat_args if isinstance(x, ty))
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
 # values. If this is not possible, then this function returns None.
