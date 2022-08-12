@@ -186,6 +186,7 @@ class GraphTaskGuard {
 
 TORCH_API const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info();
+TORCH_API bool get_current_graph_task_keep_graph();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
 } // namespace autograd
