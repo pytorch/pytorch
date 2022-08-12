@@ -110,9 +110,14 @@ private:
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+template <class T, class Iterator>
+class ListIterator final : public std::iterator<
+                               std::random_access_iterator_tag,
+                               T,
+                               std::ptrdiff_t,
+                               T*,
+                               ListElementReference<T, Iterator>> {
+ public:
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
