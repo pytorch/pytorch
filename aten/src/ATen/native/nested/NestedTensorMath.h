@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
 
 #include <vector>
 
@@ -34,7 +35,7 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
 }
 
   /**
-   * Create a new nested tensor that is a view of base
+   * Create a new nested tensor that is a view of a base nested tensor
    *
    * create_view_tensor calls a specialized constructor that copys the
    * the keys from base onto the new view tensor being created
@@ -51,7 +52,7 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
       std::vector<int64_t>&& offsets) {
-
+    TORCH_INTERNAL_ASSERT(base.is_nested(), "This function can only be used to create nested tensor views");
     return at::detail::make_tensor<NestedTensorImpl>(
         c10::TensorImpl::VIEW,
         base,

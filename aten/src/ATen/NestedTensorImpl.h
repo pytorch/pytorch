@@ -163,15 +163,29 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
 
+  /**
+   * Generates a non-nested key_set from a nested tensor.
+   *
+   * For many nested tensor kernel implementations a buffer tensor
+   * is generated and redispatched to a non-nested kernel this function
+   * generates the key set used by that buffer tensor
+   *
+   *@return  New key set:
+   *nt.key_set() - NestedTensor(backend) - NestedAutograd + Dense +
+   *Autograd(backend)
+   *
+   * @return A newly constructed view tensor
+   */
   inline c10::DispatchKeySet generate_buffer_key_set() const {
     const auto backend = this->key_set_.highestBackendKey();
     auto buffer_key_set = c10::DispatchKeySet{c10::DispatchKey::Dense} |
-        c10::DispatchKeySet{backend};
+        c10::DispatchKeySet{backend} |
+        getAutocastRelatedKeySetFromBackend(backend);
     const bool Autograd = this->key_set_.has_any(c10::autograd_dispatch_keyset);
-
     buffer_key_set = Autograd
         ? getAutogradRelatedKeySetFromBackend(backend) | buffer_key_set
         : buffer_key_set;
+
     return buffer_key_set;
   }
 };
