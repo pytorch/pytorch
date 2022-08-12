@@ -22,7 +22,7 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -145,16 +145,17 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        with proxy_mode.restore():
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     with proxy_mode.restore():
         r = func_overload.decompose(*args, **kwargs)
         if r is not NotImplemented:
             return r
-    if torch.Tag.data_dependent_output in func_overload.tags:
+    if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
         all_constant = True
 
-        def unwrap_constant(t):
+        def try_unwrap_constant(t):
             nonlocal all_constant
             if isinstance(t, ProxyTensor):
                 if t.constant is not None:
@@ -165,7 +166,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
             else:
                 return t
 
-        const_args, const_kwargs = pytree.tree_map(unwrap_constant, (args, kwargs))
+        const_args, const_kwargs = pytree.tree_map(try_unwrap_constant, (args, kwargs))
 
         if all_constant:
             with maybe_disable_fake_tensor_mode():
@@ -456,6 +457,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            flat_args = pytree.tree_flatten((args, kwargs))[0]
+            handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
+
+            # If there are any tensor subclasses, we need to handle those tensor subclasses first
+            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+                return NotImplemented
+
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
