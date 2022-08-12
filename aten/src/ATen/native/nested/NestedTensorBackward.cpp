@@ -109,7 +109,7 @@ Tensor nested_softmax_backward(
 }
 
 // Rudimentary sum backward assuming the conditions in #82387
-Tensor NestedTensor_sum_dim_backward_CPU(
+Tensor _nested_sum_backward_cpu(
   const Tensor& grad,
   const Tensor& nested_self,
   OptionalIntArrayRef opt_dims,

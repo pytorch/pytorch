@@ -154,12 +154,19 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
         ? impl::version_counter(data_).current_version()
         : version_counter_.current_version();
 
+
+
     if (saved_version_ != current_version) {
       std::stringstream message;
       message
           << "one of the variables needed for gradient computation has been "
              "modified by an inplace operation: ["
-          << data_.toString() << " " << data_.sizes() << "]";
+          << data_.toString() << " ";
+       if (data_.is_nested()) {
+          message << data_._nested_tensor_size() << "]";
+       } else {
+          message << data_.sizes() << "]";
+       }
       if (grad_fn) {
         message << ", which is output " << output_nr_ << " of "
                 << grad_fn->name() << ",";

@@ -8986,6 +8986,25 @@ class TestAutogradMultipleDispatch(TestCase):
             # Default gradient registered is grad.reshape_as(self)
             self.assertEqual(t.grad, grad.reshape_as(t))
 
+    @onlyCPU
+    def test_per_dispatch_key_input_saving(self, device):
+        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
+        def foo(x):
+            # Don't modify the input inplace
+            x = x.clone()
+            res = x.sum(-1, keepdim=True)
+            x.add_(x)
+            return res
+
+        inp = torch.rand(2, device=device, requires_grad=True)
+        # sum's input is not saved for regular Tensors
+        foo(inp).backward()
+
+        # sum's input is saved for Nested Tensors
+        nt = torch.nested_tensor([torch.rand(2), torch.rand(2)], device=device).requires_grad_()
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            foo(nt).backward(torch.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.

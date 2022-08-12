@@ -4774,7 +4774,7 @@
 # TODO: this function will be replaced once nested expand semantics have been settled on
 - func: _nested_sum_backward(Tensor grad, Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
   dispatch:
-    NestedTensorCPU: NestedTensor_sum_dim_backward_CPU
+    NestedTensorCPU: _nested_sum_backward_cpu
 
 - func: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
