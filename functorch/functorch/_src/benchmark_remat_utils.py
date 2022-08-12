@@ -11,12 +11,15 @@ from torch.profiler import profile, ProfilerActivity
 from functorch._src.compile_utils import strip_overloads, fx_graph_cse
 from torch.nn.utils.stateless import functional_call
 from functorch.compile import ts_compile
-from functorch.compile import default_decompositions
+from functorch.compile import default_decompositions as decompositions
 import torch.utils._pytree as pytree
 from functorch.experimental import functionalize
 from torchdynamo.testing import reduce_to_scalar_loss
+from functorch._src.aot_autograd import aot_autograd_decompositions
 
 USE_FUNCTIONALIZATION = True
+
+default_decompositions = {**aot_autograd_decompositions, **decompositions}
 
 test_cases_joint = ['torch_bench_graphs/hf_Bert/hf_Bert_joint_1',
  'torch_bench_graphs/hf_Bert/hf_Bert_joint_2',
@@ -538,13 +541,14 @@ def trace_model(model, inputs, use_decomp = True):
     
     params = dict(model.named_parameters())
     if use_decomp:
+        # aot_decompositions = {**aot_autograd_decompositions, **default_decompositions}
         traced_graph = make_fx(f, decomposition_table=default_decompositions)(params, inputs)
     else:
         traced_graph = make_fx(f)(params, inputs)
     return traced_graph, params
 
 
-def trace_model_functionalization(model, inputs):
+def trace_model_functionalization(model, inputs, use_decomp = True):
     """
     Get the full graph (both forward and backward) of `model` on `inputs`
     The moddel should have a single forward and a single backward graph
@@ -559,7 +563,12 @@ def trace_model_functionalization(model, inputs):
     traced_graph = make_fx(f, decomposition_table=default_decompositions)(params, inputs)
     def fake_fn(params, inputs):
         return traced_graph(params, inputs)
-    fx_g = make_fx(functionalize(fake_fn))(params, inputs)
+    if use_decomp:
+        # aot_decompositions = {**aot_autograd_decompositions, **default_decompositions}
+        traced_graph = make_fx(functionalize(fake_fn), decomposition_table=default_decompositions)(params, inputs)
+    else:
+        fx_g = make_fx(functionalize(fake_fn))(params, inputs)
+    
     return fx_g, params
 
 
@@ -598,6 +607,18 @@ def profile_model(name, model, inputs):
     avg_cuda_time_h, _, remat_memory = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
 
     print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
+
+
+def check_remat_info_model(name, model, inputs):
+    """
+    Print the information about rematerialization on `model` (torchbench models)
+    The moddel should have a single forward and a single backward graph
+    """
+    # if USE_FUNCTIONALIZATION:
+    #     traced_graph, params = trace_model_functionalization(model, inputs)
+    # else:
+    traced_graph, params = trace_model(model, inputs)
+    check_remat_info(name, traced_graph, inputs)
 
 
 def profile_model_script(name, model, inputs):
@@ -681,14 +702,3 @@ def check_remat_info_gm(name, gm, inputs):
         traced_graph = make_fx(fake_fn, decomposition_table=default_decompositions)(inputs)
     check_remat_info(name, traced_graph, inputs)
 
-
-def check_remat_info_model(name, model, inputs):
-    """
-    Print the information about rematerialization on `model` (torchbench models)
-    The moddel should have a single forward and a single backward graph
-    """
-    # if USE_FUNCTIONALIZATION:
-    #     traced_graph, params = trace_model_functionalization(model, inputs)
-    # else:
-    traced_graph, params = trace_model(model, inputs)
-    check_remat_info(name, traced_graph, inputs)
