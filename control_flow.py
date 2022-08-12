@@ -169,7 +169,7 @@ def suspend_mode(mode):
     torch._C._set_torch_dispatch_mode(None)
     yield
     torch._C._set_torch_dispatch_mode(mode)
-    
+
 
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
@@ -185,7 +185,7 @@ def cond_dense(pred, true_fn, false_fn, operands):
     except Exception as e:
         # Do something proper here, someday
         print("Exception", e)
-        
+
 
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
@@ -212,7 +212,7 @@ def fallthrough_fn(operator, dispatch_key):
 def python_fallback(op):
     def inner(*args, **kwargs):
         mode = torch._C._get_torch_dispatch_mode()
-       
+
         if mode:
             with suspend_mode(mode):
                 return mode.__torch_dispatch__(op, None, args, kwargs)
@@ -268,7 +268,7 @@ def forward(self, x_1, y_1):
     false_graph = self.false_graph
     conditional = __main___torch_cond(y_1, true_graph, false_graph, x_1);  y_1 = true_graph = false_graph = x_1 = None
     return conditional
-    
+
 opcode         name         target                                          args                                 kwargs
 -------------  -----------  ----------------------------------------------  -----------------------------------  --------
 placeholder    x_1          x_1                                             ()                                   {}
@@ -288,7 +288,7 @@ I've hardcoded the logic into ProxyTensor.
 print("EXAMPLE 3")
 
 def true_nested(y):
-    return y * y 
+    return y * y
 
 def false_nested(y):
     return y + y
@@ -320,13 +320,15 @@ assert torch.allclose(result_true_false, x + x)
 
 assert torch.allclose(result_false_true, torch.cos(x))
 
+print("Done, all tests passed")
+
 """
 def forward(self, x_1, pred_1, pred2_1):
     true_graph = self.true_graph
     false_graph = self.false_graph
     conditional = __main___torch_cond(False, true_graph, false_graph, [(x_1, True)]);  true_graph = false_graph = x_1 = None
     return conditional
-    
+
 opcode         name         target                                          args                                             kwargs
 -------------  -----------  ----------------------------------------------  -----------------------------------------------  --------
 placeholder    x_1          x_1                                             ()                                               {}

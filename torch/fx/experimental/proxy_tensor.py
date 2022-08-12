@@ -145,7 +145,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if func_overload.__name__ == 'torch.cond':
         assert kwargs is None or not kwargs
         pred, true_fn, false_fn, operands = args
-        
+
         if isinstance(operands, ProxyTensor):
             operands = [operands] # Little hack because * on a single ProxyTensor unpacks it
         else:
@@ -157,7 +157,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         false_name = "false_graph"
         proxy_mode.tracer.root.register_module(true_name, true_graph)
         proxy_mode.tracer.root.register_module(false_name, false_graph)
-        
+
         if isinstance(operands, ProxyTensor):
             operands = [operands] # Prevent unwanted unpacking
 
