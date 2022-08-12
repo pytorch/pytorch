@@ -82,7 +82,7 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         # The old-style DLPack usage, with an intermediate capsule object
         >>> capsule = torch.utils.dlpack.to_dlpack(t)
         >>> capsule
-        <capsule object "dltensor" at 0x7f6017d14300>
+        <capsule object "dltensor" at ...>
         >>> t3 = torch.from_dlpack(capsule)
         >>> t3
         tensor([-1, -1,  2,  3])
