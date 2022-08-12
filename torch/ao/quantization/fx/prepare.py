@@ -155,20 +155,21 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
-
-def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
+def node_arg_is_weight(node: Node, arg: Any, backend_config: Optional[BackendConfig]) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function' or not backend_config:
         weight_index = backend_config.configs[node.target]._input_type_to_index.get('weight')
-        return (weight_index and  weight_index < len(node.args) and node.args[weight_index] is arg) or node.kwargs.get('weight') is arg
+        if weight_index and weight_index < len(node.args) and node.args[weight_index] is arg:
+            return True
+        return node.kwargs.get('weight') is arg
     return False
 
-
-def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
+def node_arg_is_bias(node: Node, arg: Any, backend_config: Optional[BackendConfig]) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function' or not backend_config:
         bias_index = backend_config.configs[node.target]._input_type_to_index.get('bias')
-        return (bias_index and bias_index < len(node.args) and node.args[bias_index] is arg) or node.kwargs.get('bias') is arg
+        if bias_index and bias_index < len(node.args) and node.args[bias_index] is arg:
+            return True
+        return node.kwargs.get('bias') is arg
     return False
-
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -207,7 +208,6 @@ def is_input_arg_dtype_supported_by_backend(
     else:  # bias
         bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or node_name_to_target_dtype[node.name]["bias_dtype"] == bias_dtype
-
 
 def is_output_dtype_supported_by_backend(
     node: Node,
