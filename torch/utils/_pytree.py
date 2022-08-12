@@ -1,5 +1,5 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 """
 Contains utility functions for working with nested python data structures.
@@ -63,10 +63,18 @@ def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
 def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
+def _odict_flatten(d: 'OrderedDict[Any, Any]') -> Tuple[List[Any], Context]:
+    return list(d.values()), list(d.keys())
+
+def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, Any]':
+    return OrderedDict((key, value) for key, value in zip(context, values))
+
+
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 _register_pytree_node(list, _list_flatten, _list_unflatten)
 _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 _register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
