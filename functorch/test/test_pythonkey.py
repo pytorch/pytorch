@@ -328,6 +328,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapz'),
         xfail('corrcoef'),
         xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
