@@ -1957,7 +1957,7 @@ class Module:
                         p.grad.detach_()
                     else:
                         p.grad.requires_grad_(False)
-                    tmp_group.append(p)
+                    tmp_group.append(p.grad)
         if tmp_group:
             torch._foreach_zero_(tmp_group)
 

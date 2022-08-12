@@ -261,7 +261,7 @@ class Optimizer(object):
                             else:
                                 p.grad.requires_grad_(False)
                             if (not foreach or p.grad.is_sparse):
-                                tmp_group.append(p)
+                                tmp_group.append(p.grad)
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
                 if tmp_group:
