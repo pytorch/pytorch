@@ -21,6 +21,7 @@ class ConvPerSampleGrad(torch.autograd.Function):
             padding, dilation = expanded_kwargs['padding'], expanded_kwargs['dilation']
             input = conv_input_for_string_padding(conv_fn, padding, expanded_args[0], dilation, kernel_size)
             expanded_args = (input, expanded_args[1])
+            # since we've already done the padding, don't need any more
             expanded_kwargs['padding'] = 0
 
         output = forward_helper(conv_fn, expanded_args, expanded_kwargs)
