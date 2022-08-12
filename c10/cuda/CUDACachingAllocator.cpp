@@ -664,7 +664,7 @@ class DeviceCachingAllocator {
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
       TORCH_CHECK_WITH(
-          CUDAOutOfMemoryError,
+          OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
@@ -1796,7 +1796,7 @@ struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
-        CUDAOutOfMemoryError,
+        OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;

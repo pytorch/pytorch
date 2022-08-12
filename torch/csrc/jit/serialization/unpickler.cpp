@@ -334,6 +334,7 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(readFloat());
       break;
     case PickleOpCode::TUPLE: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
@@ -390,7 +391,11 @@ PickleOpCode Unpickler::readInstruction() {
           c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case PickleOpCode::APPENDS: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
+      TORCH_CHECK(
+          start > 0 && start <= stack_.size(),
+          "Parsing error: wrong start index for stack_");
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
     } break;
@@ -400,6 +405,7 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.push_back(std::move(list_ivalue));
     } break;
     case PickleOpCode::DICT: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
@@ -410,8 +416,12 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(std::move(dict));
     } break;
     case PickleOpCode::SETITEMS: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          start > 0 && start <= stack_.size(),
+          "Parsing error: wrong start index for stack_");
       auto dict = stack_.at(start - 1).toGenericDict();
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
@@ -446,6 +456,9 @@ PickleOpCode Unpickler::readInstruction() {
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
       // stack is: <functor_arg>
+      TORCH_CHECK(
+          idx < globals_.size(),
+          "Parsing error: out of bounds access to globals_");
       globals_.at(idx)();
     } break;
     case PickleOpCode::BINPERSID: {
@@ -918,6 +931,7 @@ std::string Unpickler::readBytes(size_t length) {
 // Pop all the list items off of the stack and append them to the list at
 // the corresponding MARK
 void Unpickler::readList(IValue list_ivalue) {
+  TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
   size_t start = marks_.back();
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
