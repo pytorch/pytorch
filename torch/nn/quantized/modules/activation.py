@@ -21,6 +21,7 @@ class ReLU6(torch.nn.ReLU):
 
         >>> m = nn.quantized.ReLU6()
         >>> input = torch.randn(2)
+        >>> # xdoctest: +SKIP
         >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """

@@ -115,15 +115,29 @@ class TORCH_CUDA_CU_API WarpMmaSwizzler {
       MmaOptions options = MmaOptions());
 
  private:
-  //! Swizzle implementations for Volta mma.
+  //! Operand swizzle implementations for Volta mma.
   static void scheduleVoltaOperandRead(TensorView* tv, MmaOptions options);
+
+  //! Accumulator swizzle implementations for Volta mma.
   static void scheduleVoltaM16N16K4Fp32Output(
       TensorView* tv,
       const MmaOptions& options);
 
-  //! Swizzle implementations for Turing mma.
+  //! Operand swizzle implementations for Turing and Ampere mma.
   static void scheduleTuringOperandRead(TensorView* tv, MmaOptions options);
+
+  //! Accumulator swizzle implementation for Turing and Ampere mma.
   static void scheduleTuringM16N8K16MmaWarpOutput(
+      TensorView* tv,
+      const MmaOptions& options);
+
+  //! Accumulator swizzle implementation for emulated 16x16x16 mma tile
+  //!  that enables using ldmatrix.x4.
+  //! Note:
+  //!   Keeping both this option and the ldmatrix.x2 variant above for
+  //! now for wider scheduler exploration space. Eventually both of
+  //! these can be unified with a single affine utility.
+  static void scheduleTuringM16N16K16MmaWarpOutput(
       TensorView* tv,
       const MmaOptions& options);
 
