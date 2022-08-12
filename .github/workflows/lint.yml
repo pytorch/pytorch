@@ -117,15 +117,18 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: -1
       - name: PR size check
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -x
+
           ancestor=$(git merge-base "${BASE}" "${HEAD}")
           details=$(git diff --shortstat "$ancestor" "${HEAD}")
-          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*')
-          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*')
+          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
+          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
 
           pr_size=0
           if [ "$add" ]; then
