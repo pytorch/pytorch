@@ -33,10 +33,6 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
 
   void release_variables() override;
-  bool retain_variables = true;
-  void will_release_variables() override {
-    retain_variables = false;
-  }
   std::string name() const override;
   bool is_traceable() override;
 
