@@ -155,19 +155,19 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
-        weight_index = backend_config.configs[node.target]._input_type_to_index.get('weight')
-        if weight_index and weight_index < len(node.args) and node.args[weight_index] is arg:
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config:
+        weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
+        if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
             return True
-        return node.kwargs.get('weight') is arg
+        return node.kwargs.get("weight") is arg
     return False
 
 def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
-        bias_index = backend_config.configs[node.target]._input_type_to_index.get('bias')
-        if bias_index and bias_index < len(node.args) and node.args[bias_index] is arg:
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config:
+        bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
+        if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
             return True
-        return node.kwargs.get('bias') is arg
+        return node.kwargs.get("bias") is arg
     return False
 
 def is_input_arg_dtype_supported_by_backend(
