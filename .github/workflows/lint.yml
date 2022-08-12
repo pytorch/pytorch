@@ -117,6 +117,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: -1
       - name: PR size check
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
