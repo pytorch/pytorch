@@ -180,7 +180,7 @@ test_python_shard() {
   time python test/run_test.py \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    $SLOW_GRADCHECK_INC_EXC \
+    "$SLOW_GRADCHECK_INC_EXC" \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 
