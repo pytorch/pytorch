@@ -8,7 +8,7 @@ import warnings
 
 import torch
 from functorch._src.torchbench_utils import *
-from functorch._src.benchmark_remat_utils import profile_model, check_remat_info_model, profile_model_eager
+from functorch._src.benchmark_remat_utils import profile_model, check_remat_info_model, profile_model_eager, profile_model_script
 
 
 """
@@ -40,31 +40,31 @@ log = logging.getLogger(__name__)
 
 
 models_to_run = [
-    # "BERT_pytorch",
-    # "LearningToPaint",
+    "BERT_pytorch",
+    "LearningToPaint",
     # "alexnet",
     # "dcgan",
     # "densenet121",
     "hf_Albert",
-    # "hf_Bart",
-    # "hf_Bert",
+    "hf_Bart",
+    "hf_Bert",
     "hf_GPT2",
-    # "hf_T5",
-    "mnasnet1_0",
-    "mobilenet_v2",
-    # "mobilenet_v3_large",
-    # "nvidia_deeprecommender",
+    "hf_T5",
+    # "mnasnet1_0",
+    # "mobilenet_v2",
+    "mobilenet_v3_large",
+    "nvidia_deeprecommender",
     # "pytorch_unet",
     # "resnet18",
-    "resnet50",
+    # "resnet50",
     # "resnext50_32x4d",
-    "shufflenet_v2_x1_0",
-    "squeezenet1_1",
-    "timm_efficientnet",
-    "timm_regnet",
-    "timm_resnest",
+    # "shufflenet_v2_x1_0",
+    # "squeezenet1_1",
+    # "timm_efficientnet",
+    # "timm_regnet",
+    # "timm_resnest",
     # "timm_vision_transformer",
-    "timm_vovnet",
+    # "timm_vovnet",
     # "vgg16"
 ]
 
@@ -80,6 +80,9 @@ def main():
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
         "--eager", action="store_true", help="run model in eager mode"
+    )
+    parser.add_argument(
+        "--script", action="store_true", help="run model in torchscript"
     )
     # parser.add_argument(
     #     "--mem", action="store_true", help="run model in eager mode to benchmark memory"
@@ -116,6 +119,8 @@ def main():
             else:
                 if args.eager:
                     profile_model_eager(name, model, example_inputs)
+                elif args.script:
+                    profile_model_script(name, model, example_inputs)
                 else:
                     # if args.mem:
                     #     profile_model_memory(name, model, example_inputs)
@@ -126,7 +131,10 @@ def main():
         if args.info:
             print("name, num_fusion_group, num_remat_group, memory_reduced, num_node_pairs", flush=True)
         else:
-            print("name, eager_time, scripted_cuda_time, fused_cuda_time, remat_cuda_time, num_fusion_group, num_remat_group, memory_reduced, num_node_pairs_touching, eager_memory, fused_memory, remat_memory", flush=True)
+            if args.script:
+                print("name, eager_time, scripted_cuda_time, script_memory", flush=True)
+            else:
+                print("name, eager_time, scripted_cuda_time, fused_cuda_time, remat_cuda_time, num_fusion_group, num_remat_group, memory_reduced, num_node_pairs_touching, eager_memory, fused_memory, remat_memory", flush=True)
         os.chdir(current_dir)
         for name in iter_model_names(args):
             if len(models_to_run) > 0 and name not in models_to_run:

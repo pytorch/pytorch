@@ -567,7 +567,7 @@ def profile_model(name, model, inputs):
     """
     Profile a model on inputs
     """
-    # traced_graph, params = trace_model(model, inputs, use_decomp=False) # eager mode does not use deocomposition
+    # traced_graph, params = trace_model(model, inputs)
     # traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
     # eager_time, eager_memory = benchmark_GPU_time(traced_graph, (params, inputs), True) # can't strip overloads here
     # print(f"{name}, {eager_time}, 0, 0, 0, 0, 0, 0, 0, {eager_memory}, 0, 0", flush=True)
@@ -598,6 +598,18 @@ def profile_model(name, model, inputs):
     avg_cuda_time_h, _, remat_memory = profile_fused_graph(fused_graph, arg_list, True, overload_dict = overload_dict)
 
     print(f"{name}, {eager_time}, {avg_cuda_time_f}, {avg_cuda_time_g}, {avg_cuda_time_h}, {num_fusion_group}, {num_remat_group}, {memory_reduced}, {num_node_pairs}, {eager_memory}, {fused_memory}, {remat_memory}", flush=True)
+
+
+def profile_model_script(name, model, inputs):
+    """
+    Profile a model on inputs
+    """
+    traced_graph, params = trace_model(model, inputs)
+    traced_graph.graph.set_codegen(torch.fx.graph.CodeGen())  # avoid recursive pytree
+    arg_list, spec  = pytree.tree_flatten([params, inputs])
+    script_f = ts_compile(traced_graph, 0)
+    avg_cuda_time_f, script_mem = benchmark_GPU_time(script_f, arg_list, True)# profile_scripted_graph(traced_graph, inp, True)
+    print(f"{name}, 0, {avg_cuda_time_f}, {script_mem}", flush=True)
 
 # def profile_model_memory(name, model, inputs):
 #     """
