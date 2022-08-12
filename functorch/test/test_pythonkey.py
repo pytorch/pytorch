@@ -547,6 +547,41 @@ class TestAOTModuleSimplified(TestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    def test_aot_module_simplified_preserves_stack_trace(self):
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule())
+        mod = torch.fx.GraphModule(tracer.root, graph)
+
+        for node in mod.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_pythonkey.py' in node.stack_trace
+
+        def assert_compiler(gm: torch.fx.GraphModule, _):
+            for node in gm.graph.nodes:
+                if node.op == 'output' or node.op == 'placeholder':
+                    continue
+                self.assertTrue(node.stack_trace is not None)
+                assert 'test_pythonkey.py' in node.stack_trace
+            return gm.forward  # return a python callable
+
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+        inputs = [x, y]
+        res = aot_mod(*inputs)
 
 class TestRandom(TestCase):
     def test_preserve_random(self):
