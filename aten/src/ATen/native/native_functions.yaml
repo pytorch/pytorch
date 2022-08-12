@@ -1135,10 +1135,6 @@
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
-- func: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _NestedTensor_GeneralizedBMM
-
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
   device_guard: False
@@ -3148,8 +3144,18 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: matmul
+    NestedTensorCPU, NestedTensorCUDA: matmul_nested
+
+- func: matmul_backward(Tensor grad, Tensor self, Tensor other, bool[2] mask) -> (Tensor, Tensor)
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: matmul_backward_nested
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeImplicitAutograd: matmul_out
+    NestedTensorCPU, NestedTensorCUDA: matmul_out_nested
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 
