@@ -155,7 +155,7 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config:
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
         weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
         if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
             return True
@@ -163,7 +163,7 @@ def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> b
     return False
 
 def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config:
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
         bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
         if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
             return True
