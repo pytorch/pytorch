@@ -1441,9 +1441,11 @@ class CommTensor(torch.Tensor):
                         )
                         # HACK: update the proxy for the inplace output
                         e._tensor.proxy = proxy_res
-                    else:
-                        # eager mode, simply wait
-                        e._work.wait()
+                    # For eager mode, simply wait.
+                    # During tracing, still need to wait here, to make sure the
+                    # execution during tracing is correct.
+                    e._work.wait()
+
 
                 return e._tensor
             else:
@@ -1487,8 +1489,11 @@ class CommTensor(torch.Tensor):
                 # ops and link to it.
                 out = wrap_output(out, comm_result_proxy, constant=None, proxy_mode=proxy_mode)
 
-                # remember work handle, and remember comm is already launched
+                # N.B.: we still need to remember the work handle here, and wait
+                # for it later to make sure the execution during tracing is
+                # correct.
                 args[0][0]._work = out[1]
+                # remember comm is already launched
                 args[0][0]._after_comm = True
 
                 # HACK: update the proxy on the input argument as this is an
