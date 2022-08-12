@@ -89,8 +89,8 @@ PyFunctionPreHook::~PyFunctionPreHook() {
 
 // This is almost the same as PyFunctionPostHook::operator()
 // except we only need to pass in grad_outputs
-auto PyFunctionPreHook::operator()(
-    const variable_list& grad_outputs_) -> variable_list {
+auto PyFunctionPreHook::operator()(const variable_list& grad_outputs_)
+    -> variable_list {
   pybind11::gil_scoped_acquire gil;
 
   THPObjectPtr grad_outputs(wrap_variables(grad_outputs_));
@@ -100,8 +100,8 @@ auto PyFunctionPreHook::operator()(
   const auto len = PyList_Size(hooks);
   for (Py_ssize_t idx = 0; idx < len; ++idx) {
     const auto hook = PyList_GetItem(hooks, idx);
-    THPObjectPtr res(PyObject_CallFunctionObjArgs(
-        hook, grad_outputs.get(), nullptr));
+    THPObjectPtr res(
+        PyObject_CallFunctionObjArgs(hook, grad_outputs.get(), nullptr));
     if (!res)
       throw python_error();
     if (res == Py_None)
@@ -112,7 +112,6 @@ auto PyFunctionPreHook::operator()(
 
   return unwrap_variables(grad_outputs.get());
 }
-
 
 PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
