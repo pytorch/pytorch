@@ -15,6 +15,13 @@ struct PyFunctionTensorPreHook : public FunctionPreHook {
   int value_idx;
 };
 
+struct PyFunctionPreHook : public FunctionPreHook {
+  PyFunctionPreHook(PyObject* dict);
+  ~PyFunctionPreHook() override;
+  variable_list operator()(const variable_list& values) override;
+  PyObject* dict;
+};
+
 struct PyFunctionPostHook : public FunctionPostHook {
   PyFunctionPostHook(PyObject* dict);
   ~PyFunctionPostHook() override;
