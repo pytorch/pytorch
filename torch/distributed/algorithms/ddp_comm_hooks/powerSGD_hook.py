@@ -379,6 +379,7 @@ def powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
                                   start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
@@ -687,6 +688,7 @@ def batched_powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
     """  # noqa: B950
