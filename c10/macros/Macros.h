@@ -243,8 +243,7 @@ using namespace c10::hip;
 #define C10_FALLTHROUGH
 #endif
 
-#include <sstream>
-#include <string>
+#include <cstdint>
 
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
