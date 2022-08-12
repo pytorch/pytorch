@@ -45,7 +45,6 @@ def main(args: Any) -> None:
     tag_tups = []
     semver_pat = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
     for tag in onnx_tags.splitlines():
-        print(tag)
         match = semver_pat.match(tag)
         if match:
             tag_tups.append(tuple(int(x) for x in match.groups()))
@@ -88,9 +87,14 @@ def main(args: Any) -> None:
         r"(onnx_default_opset = )\d+",
         new_default,
     )
+    read_sub_write(
+        os.path.join("torch", "onnx", "utils.py"),
+        r"(opset_version \(int, default )\d+",
+        new_default,
+    )
 
-    if not args.skip_recompile:
-        print("Recompiling PyTorch...")
+    if not args.skip_build:
+        print("Building PyTorch...")
         subprocess.check_call(
             ("python", "setup.py", "develop"),
         )
@@ -103,6 +107,6 @@ def main(args: Any) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--skip_recompile", action="store_true", help="recompile pytorch"
+        "--skip_build", action="store_true", help="Skip building pytorch"
     )
     main(parser.parse_args())
