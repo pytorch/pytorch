@@ -91,7 +91,7 @@ from ..utils import (
 
 from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
-    p get_module_to_qat_module,
+    get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
 )
 from ..backend_config import (
