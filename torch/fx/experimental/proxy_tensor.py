@@ -336,12 +336,16 @@ class DecompositionInterpreter(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
+        proxy = torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer)
+        wrap_output(out, proxy, constant=None, proxy_mode=self.mode)
         # TODO handle case where the first character of target is '*'
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer), proxy_mode=self.mode)
+        return out
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer), proxy_mode=self.mode)
+        proxy = torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
+        wrap_output(out, proxy, constant=None, proxy_mode=self.mode)
+        return out
 
     # call_function, call_method, call_module get traced automatically by the ProxyTensors.
 
