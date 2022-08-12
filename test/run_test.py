@@ -348,6 +348,20 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
+            # Enable xdoctest
+            # TODO: enable xdoctest later
+            # Many doctests assume the existence of these variables
+            # xdoctest_global_exec_lines = r'\n'.join([
+            #     'from torch import nn',
+            #     'import torch.nn.functional as F',
+            #     'import torch',
+            # ])
+            # executable += [
+            #     "--xdoctest",
+            #     "--xdoctest-style=google",
+            #     f"--xdoctest-global-exec='{xdoctest_global_exec_lines}'",
+            #     "--xdoctest-options=+IGNORE_WHITESPACE"
+            # ]
         else:
             print_to_stderr(
                 "Pytest cannot be used for this test. Falling back to unittest."

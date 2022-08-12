@@ -1197,7 +1197,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> renamed_imgs = imgs.rename(None)
             >>> renamed_imgs.names
-            (None,)
+            (None, None, None, None)
 
             >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
             >>> renamed_imgs.names
