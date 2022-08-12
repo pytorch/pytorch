@@ -822,6 +822,7 @@ class TestAutograd(TestCase):
         # Compute gradients with hooks
         a = b.detach().requires_grad_()
         counter = [0]
+
         def prehook(grad_output):
             gvar, gmean = grad_output
             counter[0] += 1
