@@ -7,6 +7,7 @@ from torch.ao.quantization.experimental.quantization_helper import (
     prepare_data_loaders
 )
 
+# validation dataset: full ImageNet dataset
 data_path = '~/my_imagenet/'
 
 data_loader, data_loader_test = prepare_data_loaders(data_path)

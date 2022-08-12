@@ -5,6 +5,7 @@ from torch.ao.quantization.experimental.quantization_helper import (
     training_loop
 )
 
+# training and validation dataset: full ImageNet dataset
 data_path = '~/my_imagenet/'
 
 train_batch_size = 30
