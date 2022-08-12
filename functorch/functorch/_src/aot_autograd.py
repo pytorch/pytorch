@@ -6,6 +6,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+from functorch import make_fx
+from torch.fx import immutable_collections, Interpreter
+import torch.fx.traceback as fx_traceback
+from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
@@ -20,6 +25,10 @@ from . import config
 from .decompositions import register_decomposition
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+from .named_members_polyfill import _named_parameters, _named_buffers
+from typing import Callable, List, Dict, Any, Tuple, Optional
+from functools import wraps
+import warnings
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -184,7 +193,7 @@ def call_func_with_args(f, args, steal_args=False):
     else:
         # TODO: Please remove soon
         # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-        logging.warn(
+        warnings.warn(
             "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
             "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
             "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
@@ -746,7 +755,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            out = mod(*args[params_len:], **kwargs)
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.override_stack_trace():
+                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "
