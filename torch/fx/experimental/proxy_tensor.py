@@ -143,26 +143,25 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         kwargs = {}
 
     if func_overload.__name__ == 'torch.cond':
-        # TODO: need to parse
         assert kwargs is None or not kwargs
         pred, true_fn, false_fn, operands = args
-    
+        
+        if isinstance(operands, ProxyTensor):
+            operands = [operands] # Little hack because * on a single ProxyTensor unpacks it
+        else:
+            operands = operands
+
         true_graph = get_isolated_graphmodule(true_fn, operands, {})
         false_graph = get_isolated_graphmodule(false_fn, operands, {})
-        # Note - all the fixed strings here will need random postfix/prefix to not collide, fine for now    
-        import random
-        import string
-        rand_slug = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-        
-        true_name = "true_graph_"+rand_slug
-        false_name = "false_graph_"+rand_slug
+        true_name = "true_graph"
+        false_name = "false_graph"
         proxy_mode.tracer.root.register_module(true_name, true_graph)
         proxy_mode.tracer.root.register_module(false_name, false_graph)
         
         if isinstance(operands, ProxyTensor):
             operands = [operands] # Prevent unwanted unpacking
 
-        args = (pred, eval(f"proxy_mode.tracer.root.{true_name}"), eval(f"proxy_mode.tracer.root.{false_name}"), operands)
+        args = (pred, true_graph, false_graph, operands)
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, ProxyTensor) else e
 
@@ -534,9 +533,6 @@ def wrapper_and_args_for_make_fx(func, args, kwargs):
 
     def wrapped(flat_args):
         fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
-        # Do not unpack single arg/ PT input.
-        if isinstance(fn_args, ProxyTensor) and len(fn_kwargs) == 0:
-            return func(fn_args, **fn_kwargs)
         return func(*fn_args, **fn_kwargs)
     return wrapped, flat_args
 

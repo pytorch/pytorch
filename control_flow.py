@@ -56,10 +56,11 @@ class PyDispatcher:
     def __init__(self):
         self.current_dispatching_op = None
         self.already_dispatched_keys = None
+        self.current_key = None
 
     def call(self, operator, args, kwargs):
         try:
-            key = compute_dispatch_key(operator, args, kwargs)
+            key = compute_dispatch_key(operator, args, kwargs, self.current_key)
             self.record_dispatch(key, operator)
             print(f"PyDispatcher.call {key}")
             return dispatch(key, operator, args, kwargs)
@@ -69,13 +70,8 @@ class PyDispatcher:
     def redispatch(self, operator, args, kwargs):
         # Redispatch doesn't go to the top
         assert operator == self.currently_dispatching_op
-        key = compute_dispatch_key(operator, args, kwargs, self.already_dispatched_keys)
+        key = compute_dispatch_key(operator, args, kwargs, self.current_key, self.already_dispatched_keys)
         self.record_dispatch(key, operator)
-        print(f"PyDispatcher.redispatch {key}")
-        return dispatch(key, operator, args, kwargs)
-
-    def force_redispatch_to(self, operator, args, kwargs, key):
-        # Redispatch doesn't go to the top
         print(f"PyDispatcher.redispatch {key}")
         return dispatch(key, operator, args, kwargs)
 
@@ -85,6 +81,7 @@ class PyDispatcher:
 
     def record_dispatch(self, dispatch_key, operator):
         self.currently_dispatching_op = operator
+        self.current_key = dispatch_key
         if self.already_dispatched_keys is None:
             self.already_dispatched_keys = DispatchKeySet(dispatch_key)
         else:
@@ -97,6 +94,7 @@ class PyOperator:
     def __init__(self, name):
         self.name = name
         self.table = {}
+        self.entrance_rules = {}
 
         # TODO: torch_dispatch expects PyOperator to be an instance of a torch.ops.aten op.
         self.overloadpacket = self
@@ -104,13 +102,15 @@ class PyOperator:
         # Hack for FX tracing
         self.__name__ = f'torch.{name}'
 
-    def impl(self, dispatch_key, fn):
+    def impl(self, dispatch_key, fn, reentrant=False):
         assert dispatch_key not in self.table
         self.table[dispatch_key] = fn
+        self.entrance_rules[dispatch_key] = reentrant
 
     def fallthrough(self, dispatch_key):
         assert dispatch_key not in self.table
         self.table[dispatch_key] = fallthrough_fn(self, dispatch_key)
+        self.entrance_rules[dispatch_key] = False
 
     def __call__(self, *args, **kwargs):
         flat_args = to_flat_tuple(args, kwargs)
@@ -120,14 +120,16 @@ class PyOperator:
         return dispatcher_singleton.call(self, args, kwargs)
 
 
-def compute_dispatch_key(PyOperator, args, kwargs, additional_exclude=None):
+def compute_dispatch_key(operator, args, kwargs, current_key, additional_exclude=None):
+    if current_key is not None and operator.entrance_rules[current_key]:
+        return current_key
+
     tensors = get_tensors(args, kwargs)
     dispatch_key = key_extractor(tensors, additional_exclude)
     return dispatch_key
 
 
 def dispatch(dispatch_key, operator, args, kwargs):
-    print("Dispatching:", dispatch_key, operator.__name__)
     if dispatch_key not in SUPPORTED_KEYS:
         raise RuntimeError(f'NYI: {dispatch_key} {SUPPORTED_KEYS}')
     assert dispatch_key in operator.table
@@ -160,23 +162,30 @@ def get_tensors(args, kwargs):
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
+from contextlib import contextmanager
 
-def cond_dense(pred, true_fn, false_fn, *operands):
+@contextmanager
+def suspend_mode(mode):
+    torch._C._set_torch_dispatch_mode(None)
+    yield
+    torch._C._set_torch_dispatch_mode(mode)
+    
+
+def cond_dense(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
     if mode:
-        # TODO (Pack this into a nice util)
-        args = (pred, true_fn, false_fn, operands)
-        torch._C._set_torch_dispatch_mode(None)
-        ret = mode.__torch_dispatch__(cond, None, args, {})
-        torch._C._set_torch_dispatch_mode(mode)
-        return ret
+        with suspend_mode(mode):
+            args = (pred, true_fn, false_fn, operands)
+            return mode.__torch_dispatch__(cond, None, args, {})
+    try:
+        if pred:
+            return true_fn(operands)
+        else:
+            return false_fn(operands)
+    except Exception as e:
+        # Do something proper here, someday
+        print("Exception", e)
         
-    if pred:
-        x = true_fn(*operands)
-        return x
-    else:
-        x = false_fn(*operands)
-        return x
 
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
@@ -202,33 +211,19 @@ def fallthrough_fn(operator, dispatch_key):
 
 def python_fallback(op):
     def inner(*args, **kwargs):
-        # Get all tensors. For each tensor, try their torch_dispatch
-        # until one returns something other than NotImplemented
-        def extract():
-            tensors = get_tensors(args, kwargs)
-            for tensor in tensors:
-                ret = tensor.__torch_dispatch__(op, None, args, kwargs)
-                if ret is NotImplemented:
-                    continue
-                return ret
-            return NotImplemented
-
         mode = torch._C._get_torch_dispatch_mode()
        
-        if mode is not None:
-            torch._C._set_torch_dispatch_mode(None)
-            ret = mode.__torch_dispatch__(op, None, args, kwargs)
-            torch._C._set_torch_dispatch_mode(mode)
-            return ret
+        if mode:
+            with suspend_mode(mode):
+                return mode.__torch_dispatch__(op, None, args, kwargs)
         else:
-            print("Python")
             return cond_dense(*args)
 
     return inner
 
 
 cond = PyOperator('cond')
-cond.impl(DispatchKey.CPU, cond_dense)
+cond.impl(DispatchKey.CPU, cond_dense, True)
 cond.impl(DispatchKey.AutogradCPU, cond_autograd)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
@@ -299,11 +294,6 @@ def false_nested(y):
     return y + y
 
 def true_fn(x, pred2):
-    mode = torch._C._get_torch_dispatch_mode()
-
-    print("True fn time", mode)
-    # import pdb
-    # pdb.set_trace()
     return cond(pred2, true_nested, false_nested, x)
 
 def false_fn(x, _):
@@ -314,23 +304,16 @@ def f(x, pred, pred2):
 
 graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
-print(graph.code)
-graph.graph.print_tabular()
-print("invoking \n\n")
-
 result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True)) # True + True -> x * x
-exit(0)
 result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False)) # True + True -> x + x
 result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True)) #  False + either -> cos
 result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False)) #  False + either -> cos
 
-print(result_true_true)
-print(result_true_false)
 
 assert not torch.allclose(result_true_true, result_true_false)
 assert not torch.allclose(result_false_true, result_true_true)
 
-assert not torch.allclose(result_false_true, result_false_false)
+assert torch.allclose(result_false_true, result_false_false)
 
 assert torch.allclose(result_true_true, x * x)
 assert torch.allclose(result_true_false, x + x)
