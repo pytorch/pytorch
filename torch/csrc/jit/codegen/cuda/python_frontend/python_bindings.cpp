@@ -42,14 +42,13 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! \todo This object will be removed when a FusionManager is added
   //! containing a cache.
   py::class_<nvfuser::FusionManager> fusion_manager(nvfuser, "FusionManager");
-  fusion_manager.def_static(
-          "get",
-          &nvfuser::FusionManager::get, 
-          py::arg("max_fusions")=int(4096),
-          py::return_value_policy::reference)
+  fusion_manager
       .def_static(
-          "reset",
-          &nvfuser::FusionManager::reset) 
+          "get",
+          &nvfuser::FusionManager::get,
+          py::arg("max_fusions") = int(4096),
+          py::return_value_policy::reference)
+      .def_static("reset", &nvfuser::FusionManager::reset)
       .def(
           "execute",
           [](nvfuser::FusionManager& self, const py::iterable& iter) {
@@ -74,15 +73,17 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! define the set the operations and connections between operations for
   //! nvFuser to create.
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
-  fusion_def.def(
+  fusion_def
+      .def(
           py::init<nvfuser::FusionManager*, int>(),
           py::arg("fusion_manager"),
-          py::arg("max_length")=int(256))
+          py::arg("max_length") = int(256))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",
           [](nvfuser::FusionDefinition& self) -> nvfuser::FusionDefinition* {
-            Nvf::inst::Trace::instance()->beginEvent("FusionDefinition Context Manager");
+            Nvf::inst::Trace::instance()->beginEvent(
+                "FusionDefinition Context Manager");
             return self.enter();
           })
       .def(
@@ -91,7 +92,7 @@ void initNvFuserPythonBindings(PyObject* module) {
              void* exc_type,
              void* exc_value,
              void* traceback) {
-            self.exit(); 
+            self.exit();
             // End FusionDefinition Context Manager
             Nvf::inst::Trace::instance()->endEvent(nullptr);
           })
@@ -106,17 +107,15 @@ void initNvFuserPythonBindings(PyObject* module) {
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
-            self.defineRecord(
-                new nvfuser::OutputRecord<Nvf::Val>(
-                    {*static_cast<nvfuser::State*>(output)}));
+            self.defineRecord(new nvfuser::OutputRecord<Nvf::Val>(
+                {*static_cast<nvfuser::State*>(output)}));
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
-            self.defineRecord(
-                new nvfuser::OutputRecord<Nvf::TensorView>(
-                    {*static_cast<nvfuser::State*>(output)}));
+            self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
+                {*static_cast<nvfuser::State*>(output)}));
           })
       .def(
           "define_tensor",
@@ -149,8 +148,12 @@ void initNvFuserPythonBindings(PyObject* module) {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (default)");
 
             for (size_t i = 0; i < symbolic_sizes.size(); ++i) {
-              TORCH_CHECK(symbolic_sizes[i] == -1 || symbolic_sizes[i] == 1,
-                  "The value ", symbolic_sizes[i], " at index ", i,
+              TORCH_CHECK(
+                  symbolic_sizes[i] == -1 || symbolic_sizes[i] == 1,
+                  "The value ",
+                  symbolic_sizes[i],
+                  " at index ",
+                  i,
                   " was neither broadcast(1) or symbolic(-1).");
             }
 
@@ -1056,7 +1059,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                         \
          nvfuser::Tensor* arg,                                               \
          const std::vector<int>& axes,                                       \
-         bool keepdim,                                                      \
+         bool keepdim,                                                       \
          Nvf::DataType dtype) -> nvfuser::Tensor* {                          \
         FUSER_PERF_SCOPE("Operators." op_str);                               \
         nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
@@ -1135,7 +1138,9 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
             {*static_cast<nvfuser::State*>(arg)},
             {*static_cast<nvfuser::State*>(output)},
-            axes, correction, keepdim));
+            axes,
+            correction,
+            keepdim));
         return output;
       },
       py::arg("arg"),
@@ -1158,7 +1163,9 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::BroadcastOpRecord(
             {*static_cast<nvfuser::State*>(arg)},
             {*static_cast<nvfuser::State*>(output)},
-            "ops.broadcast_in_dim", output_shape, broadcast_dims));
+            "ops.broadcast_in_dim",
+            output_shape,
+            broadcast_dims));
         return output;
       },
       py::arg("arg"),

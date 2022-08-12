@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
 namespace nvfuser {
-  
+
 thread_local FusionManager* FusionManager::singleton_ = nullptr;
 
 FusionCacheEntry::FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec)
@@ -71,8 +71,10 @@ void FusionManager::createFusionCacheEntry(
 void FusionManager::createTerminalFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
   ++num_fusions_;
-  TORCH_CHECK(num_fusions_ <= max_fusions_,
-      "The number of fusions in nvfuser has exceeded ", max_fusions_,
+  TORCH_CHECK(
+      num_fusions_ <= max_fusions_,
+      "The number of fusions in nvfuser has exceeded ",
+      max_fusions_,
       "fusions.  The max_fusions for the FusionManager might need to be ",
       "increased if the max number is not being exceeded due to an error.");
   fusion_cache_ptr_->record_hash_map[rec] =
@@ -86,7 +88,8 @@ void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
 }
 
 FusionCacheEntry* FusionManager::fusionCachePtr() const {
-  TORCH_INTERNAL_ASSERT(fusion_cache_ptr_ != nullptr,
+  TORCH_INTERNAL_ASSERT(
+      fusion_cache_ptr_ != nullptr,
       "The fusion cache entry is unexpectedly null.");
   return fusion_cache_ptr_;
 }
@@ -99,7 +102,8 @@ Nvf::FusionExecutorCache* FusionManager::fusionExecutorCachePtr() const {
   }
 }
 Nvf::Fusion* FusionManager::fusionPtr() const {
-  TORCH_INTERNAL_ASSERT(fusionExecutorCachePtr()->fusion() != nullptr,
+  TORCH_INTERNAL_ASSERT(
+      fusionExecutorCachePtr()->fusion() != nullptr,
       "The fusion pointer is null.");
   return fusionExecutorCachePtr()->fusion();
 }

@@ -38,7 +38,9 @@ const char* dtypeToPyString(Nvf::DataType t) {
   return nullptr;
 }
 
-FusionDefinition::FusionDefinition(FusionManager* fusion_manager, size_t max_length)
+FusionDefinition::FusionDefinition(
+    FusionManager* fusion_manager,
+    size_t max_length)
     : max_length_(max_length),
       fusion_manager_(fusion_manager),
       end_record_(new EndRecord()),
@@ -59,8 +61,8 @@ void FusionDefinition::buildFusionIr() {
 }
 
 FusionManager* FusionDefinition::fusionManagerPtr() const {
-  TORCH_INTERNAL_ASSERT(fusion_manager_ != nullptr,
-      "FusionManager pointer is null!");
+  TORCH_INTERNAL_ASSERT(
+      fusion_manager_ != nullptr, "FusionManager pointer is null!");
   return fusion_manager_;
 }
 
@@ -77,13 +79,13 @@ void FusionDefinition::exit() {
     }
     fusionManagerPtr()->createTerminalFusionCacheEntry(end_record_);
     fusionManagerPtr()->traverseFusionCache(end_record_);
-    
+
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
     }
 
     buildFusionIr();
-    
+
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::FusionIrPresched)) {
       fusionManagerPtr()->printIr();
     }
@@ -94,14 +96,14 @@ void FusionDefinition::exit() {
     fusionManagerPtr()->traverseFusionCache(end_record_);
   }
 }
-  
+
 void FusionDefinition::print(std::ostream& os) const {
   os << "\ndef nvfuser_fusion(fd : FusionDefinition) -> None :\n";
   os << std::dec;
-  for (auto &rec : recording_) {
+  for (auto& rec : recording_) {
     os << "    ";
     rec->print(os);
-    os  << "\n";
+    os << "\n";
   }
   os << "\n";
 }
@@ -120,21 +122,24 @@ Tensor* FusionDefinition::defineTensor() {
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
-  TORCH_CHECK(recording_.size() <= max_length_,
-      "The fusion definition has exceeded ", max_length_,
+  TORCH_CHECK(
+      recording_.size() <= max_length_,
+      "The fusion definition has exceeded ",
+      max_length_,
       "operations.  The max_length for FusionDefintion's might need to be ",
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
-  auto cache_entry = fusionManagerPtr()->lookupFusionCacheEntry(recording_.back());
+  auto cache_entry =
+      fusionManagerPtr()->lookupFusionCacheEntry(recording_.back());
   if (cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
-      std::cout << "\nFusionDefinition: Record (hash: 0x" <<
-          std::hex << record->hash() << ") hit in Fusion Cache.\n";
+      std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
+                << record->hash() << ") hit in Fusion Cache.\n";
     }
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
-      std::cout << "\nFusionDefinition: Record (hash: 0x" <<
-          std::hex << record->hash() << ") missed in Fusion Cache.\n";
+      std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
+                << record->hash() << ") missed in Fusion Cache.\n";
     }
     fusionManagerPtr()->createFusionCacheEntry(recording_.back());
   }

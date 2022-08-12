@@ -16,7 +16,9 @@ struct FusionCacheEntry {
   FusionCacheEntry();
 
   std::shared_ptr<RecordFunctor> record;
-  std::unordered_map<std::shared_ptr<RecordFunctor>, std::unique_ptr<FusionCacheEntry>>
+  std::unordered_map<
+      std::shared_ptr<RecordFunctor>,
+      std::unique_ptr<FusionCacheEntry>>
       record_hash_map;
 
   bool is_terminal;

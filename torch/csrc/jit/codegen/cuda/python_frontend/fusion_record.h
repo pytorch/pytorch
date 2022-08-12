@@ -97,9 +97,9 @@ struct RecordFunctor {
   //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) {}
 
-  virtual void print(std::ostream& os, bool close_function=true) const {
+  virtual void print(std::ostream& os, bool close_function = true) const {
     bool first_output = true;
-    for (auto &output : outputs_) {
+    for (auto& output : outputs_) {
       if (first_output) {
         first_output = false;
       } else {
@@ -107,7 +107,7 @@ struct RecordFunctor {
       }
       if (output.stype == StateType::Scalar) {
         os << "S";
-      } else if(output.stype == StateType::Tensor) {
+      } else if (output.stype == StateType::Tensor) {
         os << "T";
       } else {
         TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
@@ -115,12 +115,13 @@ struct RecordFunctor {
       os << output.index;
     }
     if (outputs_.size() > 0) {
-      os << " = " << "fd." << name_ << "(";
+      os << " = "
+         << "fd." << name_ << "(";
     } else {
       os << "fd." << name_ << "(";
     }
     bool first_arg = true;
-    for (auto &arg : args_) {
+    for (auto& arg : args_) {
       if (first_arg) {
         first_arg = false;
       } else {
@@ -128,7 +129,7 @@ struct RecordFunctor {
       }
       if (arg.stype == StateType::Scalar) {
         os << "S";
-      } else if(arg.stype == StateType::Tensor) {
+      } else if (arg.stype == StateType::Tensor) {
         os << "T";
       } else {
         TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
@@ -167,7 +168,11 @@ struct OpRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::string _name,
       std::function<OutType(ArgTypes...)> fusion_op)
-      : RecordFunctor(std::move(_args), std::move(_outputs), _name, RecordType::Op),
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            _name,
+            RecordType::Op),
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
 
@@ -188,20 +193,25 @@ struct OpRecord : RecordFunctor {
         // Match the nvFuser arith function types
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
-        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
-          std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x" <<
-              fusion_op_.target_type().name() << "] [other: 0x" <<
-              child_ptr->fusion_op_.target_type().name() << "]\n";
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x"
+                    << fusion_op_.target_type().name() << "] [other: 0x"
+                    << child_ptr->fusion_op_.target_type().name() << "]\n";
         }
         // Match the nvFuser arith function pointers
         result = result &&
             (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
-             *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>());
-        if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
-          std::cout << "\nOpRecord: " << name_ << " Target  Ptr [self: 0x" <<
-              std::hex << (size_t) *fusion_op_.template target<OutType (*)(ArgTypes...)>()
-              << "] [other: 0x" <<
-              std::hex << (size_t) *child_ptr->fusion_op_.template target<OutType (*)(ArgTypes...)>()
+             *child_ptr->fusion_op_
+                  .template target<OutType (*)(ArgTypes...)>());
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout
+              << "\nOpRecord: " << name_ << " Target  Ptr [self: 0x" << std::hex
+              << (size_t)*fusion_op_.template target<OutType (*)(ArgTypes...)>()
+              << "] [other: 0x" << std::hex
+              << (size_t)*child_ptr->fusion_op_
+                     .template target<OutType (*)(ArgTypes...)>()
               << "]\n";
         }
       }
@@ -310,7 +320,8 @@ struct BroadcastOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
 
     const auto& arg_domains_nr = arg->domain()->noReductions();
     const auto arg_ndims = arg_domains_nr.size();
@@ -352,7 +363,8 @@ struct BroadcastOpRecord : RecordFunctor {
           output_shape_[idx] != -1) {
         // TODO: this would be tricky to handle on dynamic shapes, we'll
         // need to pass-in a symbol instead somehow.
-        output_shape_on_bcast[idx] = Nvf::IrBuilder::create<Nvf::Int>(output_shape_[idx]);
+        output_shape_on_bcast[idx] =
+            Nvf::IrBuilder::create<Nvf::Int>(output_shape_[idx]);
         has_expand = true;
       } else {
         output_shape_on_bcast[idx] = Nvf::IrBuilder::create<Nvf::Int>(-1);
@@ -366,7 +378,7 @@ struct BroadcastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function=true) const {
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << ", output_shape=[";
     bool first_arg = true;
@@ -454,8 +466,8 @@ struct CastOpRecord : RecordFunctor {
     auto output = fusion_op_(dtype_, arg);
     fd.setFusionState(outputs_.at(0).index, output);
   }
-  
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -475,7 +487,11 @@ struct CastOpRecord : RecordFunctor {
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
   ConstantRecord(std::vector<State> _outputs, ValueType val)
-      : RecordFunctor({}, std::move(_outputs), "define_constant", RecordType::Constant),
+      : RecordFunctor(
+            {},
+            std::move(_outputs),
+            "define_constant",
+            RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
 
@@ -500,15 +516,15 @@ struct ConstantRecord : RecordFunctor {
     Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
- 
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
-    if(std::is_same<ValueType, bool>::value) {
+    if (std::is_same<ValueType, bool>::value) {
       os << (value_ ? "True" : "False");
     } else {
       os << std::showpoint << value_;
     }
- 
+
     if (close_function) {
       os << ")";
     }
@@ -552,7 +568,11 @@ struct TensorRecord : RecordFunctor {
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
       Nvf::DataType _dtype)
-      : RecordFunctor({}, std::move(_outputs), "define_tensor", RecordType::Tensor),
+      : RecordFunctor(
+            {},
+            std::move(_outputs),
+            "define_tensor",
+            RecordType::Tensor),
         symbolic_sizes_(std::move(_symbolic_sizes)),
         contiguous_info_(std::move(_contiguous_info)),
         dtype_(_dtype) {}
@@ -621,14 +641,14 @@ struct TensorRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, tv);
     fd.addInput(tv);
   }
-  
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << "symbolic_sizes=[";
     bool first_arg = true;
     for (auto ss : symbolic_sizes_) {
       if (first_arg) {
-        first_arg = false; 
+        first_arg = false;
       } else {
         os << ", ";
       }
@@ -638,7 +658,7 @@ struct TensorRecord : RecordFunctor {
     first_arg = true;
     for (auto ci : contiguous_info_) {
       if (first_arg) {
-        first_arg = false; 
+        first_arg = false;
       } else {
         os << ", ";
       }
@@ -778,12 +798,13 @@ struct ReductionOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
-  
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << ", axes=[";
     bool first_arg = true;
@@ -821,7 +842,11 @@ struct ReductionOpRecord : RecordFunctor {
 
 struct ScalarRecord : RecordFunctor {
   ScalarRecord(std::vector<State> _outputs, Nvf::DataType dtype)
-      : RecordFunctor({}, std::move(_outputs), "define_scalar", RecordType::Scalar),
+      : RecordFunctor(
+            {},
+            std::move(_outputs),
+            "define_scalar",
+            RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
 
@@ -858,8 +883,8 @@ struct ScalarRecord : RecordFunctor {
     fd.addInput(output);
     fd.setFusionState(outputs_.at(0).index, output);
   }
-  
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << "dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -961,8 +986,8 @@ struct VarianceOpRecord : RecordFunctor {
         torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
-  
-  virtual void print(std::ostream& os, bool close_function=true) const {
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     os << ", axes=[";
     bool first_arg = true;
@@ -1000,14 +1025,19 @@ using namespace nvfuser;
 
 template <>
 struct hash<std::shared_ptr<RecordFunctor>> {
-  size_t operator()(const std::shared_ptr<RecordFunctor> &p) const {
+  size_t operator()(const std::shared_ptr<RecordFunctor>& p) const {
     return p->hash();
   }
 };
 template <>
 struct equal_to<std::shared_ptr<RecordFunctor>>
-    : public binary_function<std::shared_ptr<RecordFunctor>, std::shared_ptr<RecordFunctor>, bool> {
-  bool operator()(const std::shared_ptr<RecordFunctor> &p, const std::shared_ptr<RecordFunctor> &q) const {
+    : public binary_function<
+          std::shared_ptr<RecordFunctor>,
+          std::shared_ptr<RecordFunctor>,
+          bool> {
+  bool operator()(
+      const std::shared_ptr<RecordFunctor>& p,
+      const std::shared_ptr<RecordFunctor>& q) const {
     return p->operator==(*q);
   }
 };
