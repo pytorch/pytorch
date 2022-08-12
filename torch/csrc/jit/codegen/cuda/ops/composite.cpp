@@ -184,6 +184,13 @@ TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x) {
   return dx;
 }
 
+TensorView* leaky_relu(TensorView* x, Val* negative_slope) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "input is invalid.");
+  TORCH_INTERNAL_ASSERT(negative_slope != nullptr, "negative_slope is invalid");
+  auto zero = IrBuilder::create<Double>(x->container(), 0.);
+  return where(ge(x, zero), x, mul(negative_slope, x));
+}
+
 TensorView* view_as_real(TensorView* x) {
   auto input_type = x->getDataType().value();
   TORCH_CHECK(
