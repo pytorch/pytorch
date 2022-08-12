@@ -1649,8 +1649,8 @@ class DistributedDataParallel(Module, Joinable):
             hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]
             and
             (
-                torch.version.cuda is None
-                or int(torch.version.cuda.split('.')[0]) < 11
+                (torch.version.cuda is None and torch.version.hip is None)
+                or (torch.version.cuda is not None and int(torch.version.cuda.split('.')[0]) < 11)
                 or not dist.is_available()
                 or not dist.is_nccl_available()
                 or torch.cuda.nccl.version() < (2, 10)

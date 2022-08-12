@@ -3,15 +3,18 @@ from __future__ import annotations
 import functools
 import inspect
 import sys
+import typing
 import warnings
 from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
+
+from typing_extensions import Literal
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch, _type_utils  # noqa: F401
+from torch.onnx import _patch_torch, _type_utils, errors  # noqa: F401
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -77,69 +80,105 @@ __all__ = [
 # Helper functions
 # ---------------------------------------------------------------------------------
 
+_ValueDescriptor = Literal[
+    "v",
+    "i",
+    "is",
+    "f",
+    "fs",
+    "b",
+    "s",
+    "t",
+    "none",
+]
 
-def _parse_arg(value, desc, arg_name=None, node_name=None):
+
+def _parse_arg(
+    value,
+    desc: _ValueDescriptor,
+    arg_name: Optional[str] = None,
+    node_name: Optional[str] = None,
+):
     if desc == "none":
         return value
     if desc == "v" or not _is_value(value):
         return value
-    if value.node().mustBeNone():
+
+    node = value.node()
+    if node.mustBeNone():
         return None
-    if value.node().kind() == "onnx::Constant":
-        tval = _node_get(value.node(), "value")
+    if node.kind() == "onnx::Constant":
+        node_val = _node_get(node, "value")
         if desc == "i":
-            return int(tval)
+            return int(node_val)
         elif desc == "f":
-            return float(tval)
+            return float(node_val)
         elif desc == "b":
-            return bool(tval)
+            return bool(node_val)
         elif desc == "s":
-            return str(tval)
+            return str(node_val)
         elif desc == "t":
-            return tval
+            return node_val
         elif desc == "is":
-            return [int(v) for v in tval]
+            return [int(v) for v in node_val]
         elif desc == "fs":
-            return [float(v) for v in tval]
+            return [float(v) for v in node_val]
         else:
-            raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
-    elif value.node().kind() == "prim::ListConstruct":
+            raise errors.SymbolicValueError(
+                f"ONNX symbolic does not understand the Constant node '{node}' "
+                f"specified with descriptor '{desc}'.",
+                value,
+            )
+    elif node.kind() == "prim::ListConstruct":
         if desc == "is":
-            for v in value.node().inputs():
-                if v.node().kind() != "onnx::Constant":
-                    raise RuntimeError(
-                        "Failed to export an ONNX attribute '"
-                        + v.node().kind()
-                        + "', since it's not constant, please try to make "
-                        "things (e.g., kernel size) static if possible"
+            for v in node.inputs():
+                element_node = v.node()
+                if element_node.kind() != "onnx::Constant":
+                    raise errors.SymbolicValueError(
+                        f"Failed to export a node '{element_node}' "
+                        f"(in list node {node}) "
+                        f"because it is not constant. "
+                        f"Please try to make things (e.g. kernel sizes) static if possible.",
+                        value,
                     )
             return [int(_node_get(v.node(), "value")) for v in value.node().inputs()]
         else:
-            raise RuntimeError(
-                "ONNX symbolic doesn't know to interpret ListConstruct node"
+            raise errors.SymbolicValueError(
+                f"ONNX symbolic does not know how to unpack the ListConstruct node that "
+                f"is not a list of integers: '{node}'",
+                value,
             )
 
     if arg_name is None or node_name is None:
-        raise RuntimeError(
-            f"Expected node type 'onnx::Constant', got '{value.node().kind()}'."
+        raise errors.SymbolicValueError(
+            f"Expected node type 'onnx::Constant', got '{node.kind()}'.",
+            value,
         )
-    else:
-        raise RuntimeError(
-            "Expected node type 'onnx::Constant' "
-            f"for argument '{arg_name}' of node '{node_name}', "
-            f"got '{value.node().kind()}'."
-        )
+
+    raise errors.SymbolicValueError(
+        "Expected node type 'onnx::Constant' "
+        f"for argument '{arg_name}' of node '{node_name}', got '{node.kind()}'.",
+        value,
+    )
 
 
 def _node_get(node: _C.Node, key: str):
     """Gets attributes of a node which is polymorphic over return type."""
+    assert isinstance(node, _C.Node)
     sel = node.kindOf(key)
     return getattr(node, sel)(key)
 
 
-def _maybe_get_const(value, desc):
-    if _is_value(value) and value.node().kind() == "onnx::Constant":
-        return _parse_arg(value, desc)
+def _is_onnx_constant(value: _C.Value):
+    """Whether a Value is an ONNX constant."""
+    return value.node().kind() == "onnx::Constant"
+
+
+def _maybe_get_const(value: _C.Value, descriptor: _ValueDescriptor):
+    # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
+    # otherwise it'd be converted to onnx::Constant
+    if _is_value(value) and _is_onnx_constant(value):
+        return _parse_arg(value, descriptor)
     return value
 
 
@@ -152,36 +191,43 @@ def _maybe_get_scalar(value):
 
 def _get_const(value, desc, arg_name):
     if not _is_constant(value):
-        raise RuntimeError(
-            f"ONNX symbolic expected a constant value of the {arg_name} argument, "
-            f"got `{value}`"
+        raise errors.SymbolicValueError(
+            f"ONNX symbolic expected a constant value of the '{arg_name}' argument, "
+            f"got '{value}'",
+            value,
         )
     return _parse_arg(value, desc)
 
 
 def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     list_node = list_value.node()
-    assert list_node.kind() == "prim::ListConstruct"
+    if list_node.kind() != "prim::ListConstruct":
+        raise errors.SymbolicValueError(
+            f"ONNX symbolic expected node type prim::ListConstruct, "
+            f"got '{list_node}'.",
+            list_value,
+        )
     return list(list_node.inputs())
 
 
-def _unpack_tuple(tuple_value):
+def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
-        raise RuntimeError(
-            f"ONNX symbolic expected node type `prim::TupleConstruct`, "
-            f"got `{tuple_node}`"
+        raise errors.SymbolicValueError(
+            f"ONNX symbolic expected node type 'prim::TupleConstruct', "
+            f"got '{tuple_node.kind()}'.",
+            tuple_value,
         )
-    return list(tuple_node.inputs())
+    return tuple(tuple_node.inputs())
 
 
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
-def _is_packed_list(list_value):
+def _is_packed_list(list_value: _C.Value) -> bool:
     return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
 
 
-def parse_args(*arg_descriptors):
+def parse_args(*arg_descriptors: _ValueDescriptor):
     """A decorator which converts args from torch._C.Value to built-in types.
 
     For example:
@@ -349,7 +395,7 @@ def quantized_args(
     return decorator
 
 
-def _scalar(x):
+def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     if isinstance(x, torch.Tensor) and x.shape == ():
         return x.item()
@@ -374,96 +420,108 @@ def _if_scalar_type_as(g: _C.Graph, self, tensor):
     return self
 
 
-def _is_none(x):
+def _is_none(x: _C.Value) -> bool:
     return x.node().mustBeNone()
 
 
-def _is_value(x):
+def _is_value(x: Any) -> bool:
     return isinstance(x, _C.Value)
 
 
-def _is_constant(value):
-    return not _is_value(value) or value.node().kind() in (
+def _is_constant(value: Any) -> bool:
+    return not _is_value(value) or value.node().kind() in {
         "onnx::Constant",
         "prim::Constant",
-    )
+    }
 
 
-def _is_tensor(x):
+def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
-def _is_list(x):
-    return isinstance(x.type(), _C.ListType)
+def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
+    if isinstance(jit_type, _C.ListType):
+        return jit_type
+    return None
 
 
-def _is_tensor_list(x):
-    return _is_list(x) and isinstance(x.type().getElementType(), _C.TensorType)
+def _is_list(x: _C.Value) -> bool:
+    return _as_list_type(x.type()) is not None
 
 
-def _is_scalar_list(x):
+def _is_tensor_list(x: _C.Value) -> bool:
+    x_type = _as_list_type(x.type())
+    if x_type is None:
+        return False
+    return isinstance(x_type.getElementType(), _C.TensorType)
+
+
+def _is_scalar_list(x: _C.Value) -> bool:
     """Checks if x is a scalar list, for example: List[float], List[int].
 
     Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
-    element_type = str(x.type().getElementType())
+    x_type = _as_list_type(x.type())
+    if x_type is None:
+        return False
+    element_type = str(x_type.getElementType())
     return (
-        _is_list(x)
-        and _type_utils.valid_torch_name(element_type)
+        _type_utils.valid_torch_name(element_type)
         and _type_utils.JitScalarType.from_name(element_type).onnx_compatible()
     )
 
 
-def is_caffe2_aten_fallback():
+def is_caffe2_aten_fallback() -> bool:
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
-def _get_tensor_rank(x):
+def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
-    return x.type().dim()
+    x_type = x.type()
+    x_type = typing.cast(_C.TensorType, x_type)
+    return x_type.dim()
 
 
-def _get_tensor_sizes(x, allow_nonstatic=True):
+def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     if not _is_tensor(x) or x.type() is None:
         return None
+    x_type = x.type()
+    x_type = typing.cast(_C.TensorType, x_type)
     if allow_nonstatic:
         # Each individual symbol is returned as None.
         # e.g. [1, "a", "b"] -> [1, None, None]
-        return x.type().varyingSizes()
+        return x_type.varyingSizes()
     # returns None, if exists any symbol in sizes.
     # e.g. [1, "a", "b"] -> None
-    return x.type().sizes()
+    return x_type.sizes()
 
 
-def _get_tensor_dim_size(x, dim):
-    try:
-        sizes = _get_tensor_sizes(x)
-        return sizes[dim]
-    except Exception:
-        # FIXME(justinchuby): Avoid catching Exception.
-        # Catch a more specific exception instead.
-        pass
-    return None
+def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
+    sizes = _get_tensor_sizes(x)
+    return sizes[dim] if sizes else None
 
 
-def _get_dim_for_cross(input, dim):
+def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     if dim == -1:
-        return dim + _get_tensor_rank(input)
+        tensor_rank = _get_tensor_rank(x)
+        assert tensor_rank is not None
+        return dim + tensor_rank
     # If dim is not given, it defaults to the first dimension found with the size 3
     if dim is None:
-        sizes = _get_tensor_sizes(input)
+        sizes = _get_tensor_sizes(x)
+        assert sizes is not None
         for index, size in enumerate(sizes):
             if size is not None and size == 3:
                 return index
     return dim
 
 
-def _unimplemented(op, msg):
+def _unimplemented(op: str, msg: str):
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
         warnings.warn(
@@ -473,28 +531,30 @@ def _unimplemented(op, msg):
         _onnx_unsupported(f"{op}, {msg}")
 
 
-def _onnx_unsupported(op_name):
+def _onnx_unsupported(op_name: str):
     raise RuntimeError(
         f"Unsupported: ONNX export of operator {op_name}. "
         "Please feel free to request support or submit a pull request on PyTorch GitHub."
     )
 
 
-def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
+def _onnx_opset_unsupported(op_name: str, current_opset: int, supported_opset: int):
     raise RuntimeError(
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
     )
 
 
-def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
+def _onnx_opset_unsupported_detailed(
+    op_name: str, current_opset: int, supported_opset: int, reason: str
+):
     raise RuntimeError(
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
 
 
-def _block_list_in_opset(name):
+def _block_list_in_opset(name: str):
     def symbolic_fn(*args, **kwargs):
         raise RuntimeError(
             f"ONNX export failed on {name}, which is not implemented for opset "
@@ -671,8 +731,8 @@ def _unsqueeze_helper(g, input, axes_i):
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
-        raise ValueError(
-            f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}"
+        raise errors.SymbolicValueError(
+            "Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
         )
     return g.op("Unsqueeze", input, axes_i[0])
 
@@ -685,14 +745,15 @@ def _squeeze_helper(g, input, axes_i):
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
-        raise ValueError(
-            f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}"
+        raise errors.SymbolicValueError(
+            "Opset version must be >= 13 for Squeeze with dynamic axes.", input
         )
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
+    assert axes_rank is not None
     if axes_rank > 1:
-        raise ValueError(
-            "For Squeeze axses as input, the axes rank must be one in ONNX spec."
+        raise errors.SymbolicValueError(
+            "For Squeeze axses as input, the axes rank must be one in ONNX spec.", input
         )
     elif axes_rank == 0:
         # The axes is a scalar. Unsqueeze it to a rank 1 tensor.
@@ -1164,8 +1225,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
 
     if weight is None or _is_none(weight):
         if channel_size is None:
-            raise RuntimeError(
-                "Unsupported: ONNX export of batch_norm for unknown " "channel size."
+            raise errors.SymbolicValueError(
+                "Unsupported: ONNX export of batch_norm for unknown channel size.",
+                input,
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
@@ -1176,8 +1238,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
         if channel_size is None:
-            raise RuntimeError(
-                "Unsupported: ONNX export of batch_norm for unknown " "channel size."
+            raise errors.SymbolicValueError(
+                "Unsupported: ONNX export of batch_norm for unknown channel size.",
+                input,
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
@@ -1318,6 +1381,8 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
+    input_scalar_type = tensor.type().scalarType()
+    assert input_scalar_type is not None
     input_qdtype = _type_utils.JitScalarType.from_name(tensor.type().scalarType())
     if qdtype is None:
         if input_qdtype is not None:
