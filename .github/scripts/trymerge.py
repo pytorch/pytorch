@@ -6,15 +6,36 @@ import os
 import re
 import time
 import urllib.parse
-from datetime import datetime
 from dataclasses import dataclass
-from urllib.request import urlopen, Request
-from urllib.error import HTTPError
-from typing import Iterable, Pattern, cast, Any, Callable, Dict, List, Optional, Tuple, Union
-from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
+from datetime import datetime
 from functools import lru_cache
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Pattern,
+    Tuple,
+    Union,
+    cast,
+)
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from warnings import warn
 
+from gitutils import (
+    GitRepo,
+    get_git_remote_name,
+    get_git_repo_dir,
+    patterns_to_regex,
+)
+from trymerge_explainer import (
+    TryMergeExplainer,
+    get_land_check_troubleshooting_message,
+    get_revert_message,
+)
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
@@ -373,7 +394,6 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
-BOT_COMMANDS_WIKI = 'https://github.com/pytorch/pytorch/wiki/Bot-commands'
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -886,11 +906,6 @@ class GitHubPR:
         repo._run_git('checkout', "-b", land_check_branch)
         repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
-        gh_post_pr_comment(self.org, self.project, self.pr_num,
-                           '@pytorchbot successfully started a merge and created land time checks.' +
-                           f' See merge status [here]({os.getenv("GH_RUN_URL")}) ' +
-                           f'and [land check]({BOT_COMMANDS_WIKI}) '
-                           f'progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}).')
         return commit
 
 
@@ -1174,15 +1189,23 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
+    explainer = TryMergeExplainer(force, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
+    on_green, land_checks = explainer.get_flags()
+    land_check_commit = None
+
     check_for_sev(org, project, force)
+
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
+        gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message())
         return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
-    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+
+    gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
+    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
@@ -1213,7 +1236,7 @@ def merge(pr_num: int, repo: GitRepo,
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            if land_checks:
+            if land_checks and land_check_commit is not None:
                 validate_land_time_checks(org, project, land_check_commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
@@ -1233,28 +1256,21 @@ def main() -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
-    land_checks = args.land_checks and not has_label(pr.get_labels(), CIFLOW_TRUNK_LABEL)
 
     def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
         msg += f" due to {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
-        if land_checks:
-            msg += (" If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`" +
-                    ' (optionally with the "ciflow/trunk" to get land signals)' +
-                    ' or use `@pytorchbot merge -f "some reason here"`.' +
-                    f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}).")
+        if args.land_checks:
+            msg += get_land_check_troubleshooting_message()
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
-    if not land_checks:
-        msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
-        msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
-        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
+            gh_post_pr_comment(org, project, args.pr_num, get_revert_message(org, project, pr.pr_num), args.dry_run)
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
@@ -1269,14 +1285,13 @@ def main() -> None:
         return
 
     try:
-        on_green = args.on_green or has_label(pr.get_labels(), CIFLOW_LABEL)
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               force=args.force,
               comment_id=args.comment_id,
-              on_green=on_green,
+              on_green=args.on_green,
               mandatory_only=args.on_mandatory,
-              land_checks=land_checks)
+              land_checks=args.land_checks)
     except Exception as e:
         handle_exception(e)
 
