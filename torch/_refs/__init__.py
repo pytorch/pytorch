@@ -2627,16 +2627,17 @@ def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
     """Reference implementation of :func:`torch.rot90`."""
-    dims_ = utils.canonicalize_dims(a.ndim, dims)
-    # Required to silence MyPy errors
-    assert isinstance(dims_, (tuple, list))
-    dims = dims_
     if len(dims) != 2:
         raise RuntimeError(
             f"expected total rotation dims == 2, but got dims = {len(dims)}"
         )
     if a.ndim < 2:
         raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+
+    # Do this after the initial checks to be compatible with the behavior in
+    # core.
+    dims = utils.canonicalize_dims(a.ndim, dims)
+
     if dims[0] == dims[1]:
         raise RuntimeError(
             f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
