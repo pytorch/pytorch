@@ -2057,7 +2057,7 @@ class Arguments:
             arguments = dataclasses.replace(
                 arguments,
                 pre_self_positional=tuple(
-                    [x.symint_to_int() for x in arguments.pre_self_positional]
+                    x.symint_to_int() for x in arguments.pre_self_positional
                 ),
             )
 
@@ -2065,20 +2065,17 @@ class Arguments:
             arguments = dataclasses.replace(
                 arguments,
                 post_tensor_options_kwarg_only=tuple(
-                    [
-                        x.symint_to_int()
-                        for x in arguments.post_tensor_options_kwarg_only
-                    ]
+                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
                 ),
             )
 
         arguments = dataclasses.replace(
             arguments,
             post_self_positional=tuple(
-                [x.symint_to_int() for x in arguments.post_self_positional]
+                x.symint_to_int() for x in arguments.post_self_positional
             ),
             pre_tensor_options_kwarg_only=tuple(
-                [x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only]
+                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
             ),
         )
 
