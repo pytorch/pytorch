@@ -481,7 +481,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                 assert isinstance(e, ProxyTensor), \
                     f"Internal Error: ProxyTensor is incorrectly baking a tensor constant into the graph: {str(e)}"
 
-        pytree.tree_map(assert_proxy_tensor, out)
+        # When we trace factory functions, we expect that tensor outputs are *always* ProxyTensors.
+        # (Except for torch.tensor() constants handled through lift(), which is handled
+        # specially further up).
+        if self.trace_factory_functions:
+            pytree.tree_map(assert_proxy_tensor, out)
         return out
 
 
