@@ -17,6 +17,7 @@ class LinearReLU(nnqd.Linear):
 
         >>> m = nn.intrinsic.quantized.dynamic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
