@@ -8,6 +8,9 @@ a new MaskedTensor as a result.
 
 import torch
 
+__all__ = []
+
+
 PASSTHROUGH_FNS = [
     torch.ops.aten.select,
     torch.ops.aten.transpose,
