@@ -559,17 +559,21 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     return dim
 
 
-def _unimplemented(op: str, msg: str):
+def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(
-            "ONNX export failed on " + op + " because " + msg + " not supported"
-        )
+        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
     elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
-        _onnx_unsupported(f"{op}, {msg}")
+        _onnx_unsupported(f"{op}, {msg}", value)
 
 
-def _onnx_unsupported(op_name: str):
+def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> None:
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            f"Unsupported: ONNX export of operator {op_name}. "
+            "Please feel free to request support or submit a pull request on PyTorch GitHub.",
+            value,
+        )
     raise RuntimeError(
         f"Unsupported: ONNX export of operator {op_name}. "
         "Please feel free to request support or submit a pull request on PyTorch GitHub."

@@ -210,7 +210,8 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
         return g.op("ReduceSum", output, keepdims_i=0)
     else:
         return symbolic_helper._onnx_unsupported(
-            "binary_cross_entropy_with_logits with reduction other than none, mean, or sum"
+            "binary_cross_entropy_with_logits with reduction other than none, mean, or sum",
+            input,
         )
 
 
