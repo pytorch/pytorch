@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <array>
 #include <cctype>
@@ -25,6 +26,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
+  if (input.is_mps()) {
+   return at::_mps_linear(input, weight, *bias);
+  }
 #if defined(C10_MOBILE)
   if (xnnpack::use_linear(input, weight, *bias)) {
     return xnnpack::linear(input, weight, *bias);
@@ -42,7 +46,13 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
-    output.add_(*bias);
+    // for composite compliance use out-of-place version of `add`
+    if (isTensorSubclassLike(*bias) ||
+        bias->_fw_grad(/*level*/ 0).defined()) {
+      output = at::add(output, *bias);
+    } else {
+      output.add_(*bias);
+    }
   }
   return output;
 }

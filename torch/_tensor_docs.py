@@ -522,7 +522,7 @@ In-place version of :meth:`~Tensor.arcsinh`
 """)
 
 add_docstr_all('as_strided', r"""
-as_strided(size, stride, storage_offset=0) -> Tensor
+as_strided(size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided`
 """)
@@ -1201,9 +1201,16 @@ See :func:`torch.diagonal`
 
 add_docstr_all('diagonal_scatter',
                r"""
-diagonal(src, offset=0, dim1=0, dim2=1) -> Tensor
+diagonal_scatter(src, offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal_scatter`
+""")
+
+add_docstr_all('as_strided_scatter',
+               r"""
+as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+
+See :func:`torch.as_strided_scatter`
 """)
 
 add_docstr_all('fill_diagonal_',
@@ -1816,6 +1823,12 @@ The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+For a 3-D tensor the output is given as::
+
+    self[index[i], :, :] += alpha * src[i, :, :]  # if dim == 0
+    self[:, index[i], :] += alpha * src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] += alpha * src[:, :, i]  # if dim == 2
+
 Note:
     {forward_reproducibility_note}
 
@@ -1929,6 +1942,73 @@ index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 """)
+
+add_docstr_all('index_reduce_',
+               r"""
+index_reduce_(dim, index, source, reduce, *, include_self=True) -> Tensor
+
+Accumulate the elements of ``source`` into the :attr:`self`
+tensor by accumulating to the indices in the order given in :attr:`index`
+using the reduction given by the ``reduce`` argument. For example, if ``dim == 0``,
+``index[i] == j``, ``reduce == prod`` and ``include_self == True`` then the ``i``\ th
+row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
+:obj:`include_self="True"`, the values in the :attr:`self` tensor are included
+in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
+to are treated as if they were filled with the reduction identites.
+
+The :attr:`dim`\ th dimension of ``source`` must have the same size as the
+length of :attr:`index` (which must be a vector), and all other dimensions must
+match :attr:`self`, or an error will be raised.
+
+For a 3-D tensor with :obj:`reduce="prod"` and :obj:`include_self=True` the
+output is given as::
+
+    self[index[i], :, :] *= src[i, :, :]  # if dim == 0
+    self[:, index[i], :] *= src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] *= src[:, :, i]  # if dim == 2
+
+Note:
+    {forward_reproducibility_note}
+
+.. note::
+
+    This function only supports floating point tensors.
+
+.. warning::
+
+    This function is in beta and may change in the near future.
+
+Args:
+    dim (int): dimension along which to index
+    index (Tensor): indices of ``source`` to select from,
+        should have dtype either `torch.int64` or `torch.int32`
+    source (FloatTensor): the tensor containing values to accumulate
+    reduce (str): the reduction operation to apply
+        (:obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+
+Keyword args:
+    include_self (bool): whether the elements from the ``self`` tensor are
+        included in the reduction
+
+Example::
+
+    >>> x = torch.empty(5, 3).fill_(2)
+    >>> t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]], dtype=torch.float)
+    >>> index = torch.tensor([0, 4, 2, 0])
+    >>> x.index_reduce_(0, index, t, 'prod')
+    tensor([[20., 44., 72.],
+            [ 2.,  2.,  2.],
+            [14., 16., 18.],
+            [ 2.,  2.,  2.],
+            [ 8., 10., 12.]])
+    >>> x = torch.empty(5, 3).fill_(2)
+    >>> x.index_reduce_(0, index, t, 'prod', include_self=False)
+    tensor([[10., 22., 36.],
+            [ 2.,  2.,  2.],
+            [ 7.,  8.,  9.],
+            [ 2.,  2.,  2.],
+            [ 4.,  5.,  6.]])
+""".format(**reproducibility_notes))
 
 add_docstr_all('index_select',
                r"""
@@ -2761,11 +2841,26 @@ See :func:`torch.numel`
 
 add_docstr_all('numpy',
                r"""
-numpy() -> numpy.ndarray
+numpy(*, force=False) -> numpy.ndarray
 
-Returns :attr:`self` tensor as a NumPy :class:`ndarray`. This tensor and the
-returned :class:`ndarray` share the same underlying storage. Changes to
-:attr:`self` tensor will be reflected in the :class:`ndarray` and vice versa.
+Returns the tensor as a NumPy :class:`ndarray`.
+
+If :attr:`force` is ``False`` (the default), the conversion
+is performed only if the tensor is on the CPU, does not require grad,
+does not have its conjugate bit set, and is a dtype and layout that
+NumPy supports. The returned ndarray and the tensor will share their
+storage, so changes to the tensor will be reflected in the ndarray
+and vice versa.
+
+If :attr:`force` is ``True`` this is equivalent to
+calling ``t.detach().cpu().resolve_conj().resolve_neg().numpy()``.
+If the tensor isn't on the CPU or the conjugate or negative bit is set,
+the tensor won't share its storage with the returned ndarray.
+Setting :attr:`force` to ``True`` can be a useful shorthand.
+
+Args:
+    force (bool): if ``True``, the ndarray may be a copy of the tensor
+               instead of always sharing memory, defaults to ``False``.
 """)
 
 add_docstr_all('orgqr',
@@ -3344,7 +3439,7 @@ add_docstr_all('scatter_add_',
                r"""
 scatter_add_(dim, index, src) -> Tensor
 
-Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
+Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
 :meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
 an index in :attr:`self` which is specified by its index in :attr:`src`
@@ -3619,13 +3714,6 @@ Example::
     >>> t.size(dim=1)
     4
 
-""")
-
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
 """)
 
 add_docstr_all('sort',
@@ -4245,6 +4333,21 @@ Example::
 
 """)
 
+add_docstr_all('to_sparse_bsr',
+               r"""
+to_sparse_bsr(blocksize) -> Tensor
+Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
+
+Example::
+
+    >>> dense = torch.randn(10, 10)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse_bsr = sparse.to_sparse_bsr((5, 5))
+    >>> sparse_bsr.col_indices()
+    tensor([0, 1, 0, 1])
+
+""")
+
 add_docstr_all('to_mkldnn',
                r"""
 to_mkldnn() -> Tensor
@@ -4752,21 +4855,16 @@ See :func:`torch.dsplit`
 """)
 
 add_docstr_all('stft',
-               "stft(n_fft, hop_length=None, win_length=None, window=None, center=True, "
-               "pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor"
                r"""
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
-
-.. warning::
-   This function changed signature at version 0.4.1. Calling with
-   the previous signature may cause error or return incorrect result.
 """)
 
 add_docstr_all('istft',
-               "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
-               "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor"
                r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
 """)
@@ -4891,6 +4989,14 @@ masked_fill(mask, value) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
+add_docstr_all('grad',
+               r"""
+This attribute is ``None`` by default and becomes a Tensor the first time a call to
+:func:`backward` computes gradients for ``self``.
+The attribute will then contain the gradients computed and future calls to
+:func:`backward` will accumulate (add) gradients into it.
+""")
+
 add_docstr_all('retain_grad',
                r"""
 retain_grad() -> None
@@ -4979,6 +5085,11 @@ add_docstr_all('is_cuda',
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 """)
 
+add_docstr_all('is_cpu',
+               r"""
+Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
+""")
+
 add_docstr_all('is_ipu',
                r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
@@ -4998,6 +5109,11 @@ add_docstr_all('is_meta',
                r"""
 Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
 are like normal tensors, but they carry no data.
+""")
+
+add_docstr_all('is_mps',
+               r"""
+Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 """)
 
 add_docstr_all('is_sparse',
@@ -5140,5 +5256,55 @@ Example::
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
+""")
+
+add_docstr_all('to_padded_tensor',
+               r"""
+to_padded_tensor(padding, output_size=None) -> Tensor
+
+Returns a new (non-nested) Tensor by padding the nested tensor.
+The leading entries will be filled with the nested data,
+while the trailing entries will be padded.
+
+.. warning::
+
+    :func:`to_padded_tensor` always copies the underlying data,
+    since the nested and the non-nested tensors differ in memory layout.
+
+Args:
+    padding (float): The padding value for the trailing entries.
+    output_size (Tuple[int]): The size of the output tensor.
+                              If given, it must be large enough to contain all nested data;
+                              else, will infer by taking the max size of each nested sub-tensor along each dimension.
+
+Example::
+
+    >>> nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))])
+    nested_tensor([
+      tensor([[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
+              [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995]]),
+      tensor([[-1.8546, -0.7194, -0.2918, -0.1846],
+              [ 0.2773,  0.8793, -0.5183, -0.6447],
+              [ 1.8009,  1.8468, -0.9832, -1.5272]])
+    ])
+    >>> pt_infer = nt.to_padded_tensor(0.0)
+    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
+             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995],
+             [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000]],
+            [[-1.8546, -0.7194, -0.2918, -0.1846,  0.0000],
+             [ 0.2773,  0.8793, -0.5183, -0.6447,  0.0000],
+             [ 1.8009,  1.8468, -0.9832, -1.5272,  0.0000]]])
+    >>> pt_large = nt.to_padded_tensor(1.0, (2, 4, 6))
+    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276,  1.0000],
+             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]],
+            [[-1.8546, -0.7194, -0.2918, -0.1846,  1.0000,  1.0000],
+             [ 0.2773,  0.8793, -0.5183, -0.6447,  1.0000,  1.0000],
+             [ 1.8009,  1.8468, -0.9832, -1.5272,  1.0000,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]]])
+    >>> pt_small = nt.to_padded_tensor(2.0, (2, 2, 2))
+    RuntimeError: Value in output_size is less than NestedTensor padded size. Truncation is not supported.
 
 """)

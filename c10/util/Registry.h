@@ -114,11 +114,12 @@ class Registry {
   }
 
   ObjectPtrType Create(const SrcType& key, Args... args) {
-    if (registry_.count(key) == 0) {
+    auto it = registry_.find(key);
+    if (it == registry_.end()) {
       // Returns nullptr if the key is not registered.
       return nullptr;
     }
-    return registry_[key](args...);
+    return it->second(args...);
   }
 
   /**

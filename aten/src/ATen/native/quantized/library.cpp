@@ -1,7 +1,7 @@
 #include <torch/library.h>
 
-#include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <torch/custom_class.h>
 
 int register_linear_params();

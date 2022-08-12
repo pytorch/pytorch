@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -21,23 +22,80 @@ namespace cuda {
 
 namespace {
 
-//! A parallel type validation pass to make sure all the outputs of
-//!   welford ops are parallelized the same way. Will infer and modify serial
-//!   parallel types if other output/s are parallelized, so that
-//!   user wouldn't have to specify the same parallelization
-//!   3 times. Will throw if conflicts are detected, i.e.
-//!   TIDx vs BIDx etc.
-class ValidateParallelType : public IterVisitor {
+//! Validate multiple output tensors of the same expression, i.e.,
+//! siblings, have valid domains and parallel types. Since siblings
+//! are placed in the same loop nest, they must be parallelized the
+//! same way. Will infer and modify serial parallel types if other
+//! output/s are parallelized, so that user wouldn't have to specify
+//! the same parallelization 3 times. Will throw if conflicts are
+//! detected, i.e. TIDx vs BIDx etc.
+class ValidateSiblings : public IterVisitor {
  public:
   static void validate(Fusion* fusion) {
-    ValidateParallelType VPT;
-    VPT.traverse(fusion);
+    ValidateSiblings validator;
+    validator.traverse(fusion);
   }
 
  private:
   using IterVisitor::handle;
+
+  void handle(Expr* expr) final {
+    if (!ir_utils::isTvOp(expr) || expr->outputs().size() < 2) {
+      IterVisitor::handle(expr);
+      return;
+    }
+
+    auto ref_output = expr->outputs().at(0)->as<TensorView>();
+    auto ref_ndims = ref_output->nDims();
+    const auto& ref_root = ref_output->getRootDomain();
+    std::unordered_map<IterDomain*, IterDomain*> id_map;
+
+    for (const auto sibling :
+         ir_utils::filterByType<TensorView>(expr->outputs())) {
+      if (ref_output == sibling) {
+        continue;
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          sibling->nDims() == ref_ndims,
+          "Mismatched dimensionality detected. Expr: ",
+          expr->toString(),
+          "Ref output: ",
+          ref_output->toString(),
+          ". Sibling: ",
+          sibling->toString());
+
+      for (const auto i : c10::irange(ref_ndims)) {
+        validateParallelTypes(ref_output->axis(i), sibling->axis(i));
+      }
+
+      for (const auto i : c10::irange(ref_root.size())) {
+        id_map[ref_root[i]] = sibling->getRootDomain().at(i);
+      }
+
+      BestEffortReplay replay(
+          sibling->domain()->domain(), ref_output->domain()->domain(), id_map);
+      for (const auto i : c10::irange(ref_ndims)) {
+        auto it = replay.getReplay().find(ref_output->axis(i));
+        TORCH_INTERNAL_ASSERT(
+            it != replay.getReplay().end(),
+            "Matching sibling ID not found. Expr: ",
+            expr->toString(),
+            "Ref ID: ",
+            ref_output->axis(i)->toString());
+        auto sibling_id = it->second;
+        TORCH_INTERNAL_ASSERT(
+            sibling->axis(i) == sibling_id,
+            "Invalid matching sinbling ID detected. Expr: ",
+            expr->toString(),
+            "Sibling ID: ",
+            sibling_id->toString());
+      }
+    }
+  }
+
   // Parallelize id1 and id0 consistently if one is serial and the other isn't
-  void convertIterDomain(IterDomain* id0, IterDomain* id1) {
+  void validateParallelTypes(IterDomain* id0, IterDomain* id1) {
     const auto ptype0 = id0->getParallelType();
     const auto ptype1 = id1->getParallelType();
 
@@ -63,20 +121,6 @@ class ValidateParallelType : public IterVisitor {
       if (ptype1 == ParallelType::Serial) {
         id1->parallelize(ptype0);
       }
-    }
-  }
-
-  void handle(WelfordOp* wop) override {
-    auto out_avg = wop->outAvg()->as<TensorView>();
-    auto out_var = wop->outVar()->as<TensorView>();
-    auto out_n = wop->outN()->as<TensorView>();
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
-    for (const auto i : c10::irange(out_avg->nDims())) {
-      // TODO: can be cleaner.
-      convertIterDomain(out_avg->axis(i), out_var->axis(i));
-      convertIterDomain(out_avg->axis(i), out_n->axis(i));
-      convertIterDomain(out_n->axis(i), out_var->axis(i));
     }
   }
 };
@@ -133,26 +177,8 @@ void validateIr(Fusion* fusion) {
 
   fusion->validateInputs();
 
-  // Convert all input broadcast iterdomains to strided
-  for (auto tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    for (auto id : tv->getMaybeRFactorDomain()) {
-      if (id->isBroadcast()) {
-        id->toStridedBroadcast();
-      }
-    }
-  }
-
-  // Convert all output broadcast iterdomains to strided
-  for (auto tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
-    for (auto id : tv->getMaybeRFactorDomain()) {
-      if (id->isBroadcast()) {
-        id->toStridedBroadcast();
-      }
-    }
-  }
-
   // Validate Parallelization
-  ValidateParallelType::validate(fusion);
+  ValidateSiblings::validate(fusion);
 
   validateIterDomainUsage(fusion);
 }
@@ -289,87 +315,6 @@ class VectorizeValidator : public OptInDispatch {
     }
 
     return producer_contiguity;
-  }
-
-  //! Find the contig root domains that a vectorized leaf domain
-  //! depends on.
-  static void fillVectorizedContigRootDomains(
-      TensorView* consumer_tv,
-      VectorizedSetInfo& info) {
-    auto producer_tv =
-        consumer_tv->definition()->inputs().at(0)->as<TensorView>();
-
-    // For each of the producer and consumer vectorized root domains,
-    // find the contig merged domain if exists. The extent of the
-    // domain is the size that must be divisible by the vectorization
-    // word size. Both of the producer and consumer domains must be
-    // divisible, so pick the one that has the smaller number of
-    // merged domains.
-
-    ContigIDs consumer_contig_finder(
-        consumer_tv->domain()->domain(),
-        consumer_tv->getRootDomain(),
-        consumer_tv->domain()->contiguity());
-
-    // info.vectorized_root_id is validated at this point to be the
-    // last concrete root domain in consumer.
-    auto consumer_root_id = info.vectorized_root_id;
-
-    // Find the root domains that are dependency of the merged contig domain.
-    auto consumer_indexed_it =
-        consumer_contig_finder.rootToIndexedID().find(consumer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        consumer_indexed_it != consumer_contig_finder.rootToIndexedID().end(),
-        "Contiguity information not found for root domain: ",
-        consumer_root_id->toString());
-    auto consumer_indexed_id = consumer_indexed_it->second;
-    // Actual indexed root domains for this consumer root domain. If
-    // contig merge is done, multiple root domains are included.
-    std::unordered_set<IterDomain*> consumer_indexed_root_ids;
-    if (consumer_indexed_id == consumer_root_id) {
-      // Indexed domain is equal to the root domain, meaning no contig
-      // merge is involved.
-      consumer_indexed_root_ids.insert(consumer_root_id);
-    } else {
-      auto consumer_within_contig_it =
-          consumer_contig_finder.withinContigIDs().find(consumer_indexed_id);
-      TORCH_INTERNAL_ASSERT(
-          consumer_within_contig_it !=
-          consumer_contig_finder.withinContigIDs().end());
-      consumer_indexed_root_ids = consumer_within_contig_it->second;
-    }
-
-    // Note: we use the consumer domain with the producer
-    // contiguity.
-    ContigIDs producer_contig_finder(
-        consumer_tv->domain()->domain(),
-        consumer_tv->getRootDomain(),
-        mapProducerContiguity(producer_tv, consumer_tv));
-
-    auto producer_indexed_it =
-        producer_contig_finder.rootToIndexedID().find(consumer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        producer_indexed_it != producer_contig_finder.rootToIndexedID().end(),
-        "Contiguity information not found for root domain: ",
-        consumer_root_id->toString());
-    auto producer_indexed_id = producer_indexed_it->second;
-    std::unordered_set<IterDomain*> producer_indexed_root_ids;
-    if (producer_indexed_id == consumer_root_id) {
-      producer_indexed_root_ids.insert(consumer_root_id);
-    } else {
-      auto producer_within_contig_it =
-          producer_contig_finder.withinContigIDs().find(producer_indexed_id);
-      TORCH_INTERNAL_ASSERT(
-          producer_within_contig_it !=
-          producer_contig_finder.withinContigIDs().end());
-      producer_indexed_root_ids = producer_within_contig_it->second;
-    }
-
-    // Pick the smaller merged domain
-    info.contig_root_ids =
-        consumer_indexed_root_ids.size() < producer_indexed_root_ids.size()
-        ? consumer_indexed_root_ids
-        : producer_indexed_root_ids;
   }
 
  private:
@@ -529,10 +474,8 @@ class VectorizeValidator : public OptInDispatch {
     // For aligned vectorize, the extent of a vectorized domain must
     // be divisible by the vector word size. The domain is usually
     // just one of the root domains, but can be a merged domain of
-    // contiguous domains.
-    if (!misaligned_vectorize) {
-      fillVectorizedContigRootDomains(tv, vectorized_set_info);
-    }
+    // contiguous domains. Those domains are saved in
+    // VectorizedSetInfo.contig_root_ids at the time of indexing.
     GpuLower::current()->vectorizedSetInfo().emplace_back(vectorized_set_info);
   }
 };
@@ -563,7 +506,8 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
     for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->axis(i);
       IterDomain* concrete_id =
-          GpuLower::current()->caParallelMap().getConcreteMappedID(id);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              id, IdMappingMode::LOOP);
 
       auto ptype = concrete_id->getParallelType();
 
@@ -599,7 +543,8 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
           tv->definition() == nullptr ||
               (tv->definition()->isA<UnaryOp>() &&
                tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
-                   UnaryOpType::Set),
+                   UnaryOpType::Set) ||
+              tv->definition()->isA<LoadStoreOp>(),
           "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.",
           "TensorView: ",
           tv);
@@ -612,6 +557,110 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
       VectorizeValidator::validate(tv);
     }
   }
+}
+
+namespace {
+
+void fillVectorizedContigRootDomains(
+    const TensorView* tv,
+    const ContigIDs& contig_finder,
+    IterDomain* vectorized_root_id,
+    VectorizedSetInfo& info) {
+  const auto& root_dom = tv->getMaybeRFactorDomain();
+
+  // Find the root domains that are dependency of the merged contig
+  // domain.
+
+  auto consumer_indexed_it =
+      contig_finder.rootToIndexedID().find(vectorized_root_id);
+  TORCH_INTERNAL_ASSERT(
+      consumer_indexed_it != contig_finder.rootToIndexedID().end(),
+      "Contiguity information not found for root domain: ",
+      vectorized_root_id->toString());
+  auto consumer_indexed_id = consumer_indexed_it->second;
+
+  // Actual indexed root domains for this root domain. If
+  // contig merge is done, multiple root domains are included.
+  std::unordered_set<IterDomain*> indexed_root_ids;
+
+  if (consumer_indexed_id == vectorized_root_id) {
+    // Indexed domain is equal to the root domain, meaning no contig
+    // merge is involved.
+    indexed_root_ids.insert(vectorized_root_id);
+  } else {
+    auto consumer_within_contig_it =
+        contig_finder.withinContigIDs().find(consumer_indexed_id);
+    TORCH_INTERNAL_ASSERT(
+        consumer_within_contig_it != contig_finder.withinContigIDs().end());
+    const auto& within_ids = consumer_within_contig_it->second;
+    std::copy_if(
+        root_dom.begin(),
+        root_dom.end(),
+        std::inserter(indexed_root_ids, indexed_root_ids.end()),
+        [&](IterDomain* root_id) {
+          return within_ids.find(root_id) != within_ids.end();
+        });
+  }
+
+  // Store the contig merged root domains. If it is already set, pick
+  // the smaller one as it is used for validating divisibility of the
+  // merged extent.
+  if (info.contig_root_ids.empty() ||
+      indexed_root_ids.size() < info.contig_root_ids.size()) {
+    info.contig_root_ids = indexed_root_ids;
+  }
+}
+
+} // namespace
+
+void fillConsumerVectorizedContigRootDomains(
+    const TensorView* consumer_tv,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(), info_vector.end(), [&consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
+  }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  fillVectorizedContigRootDomains(
+      consumer_tv, contig_finder, consumer_root_id, info);
+}
+
+void fillProducerVectorizedContigRootDomains(
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& c2p_map,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(),
+      info_vector.end(),
+      [&producer_tv, &consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv &&
+            info.producer_tv == producer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
+  }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  auto root_id = c2p_map.at(consumer_root_id);
+
+  fillVectorizedContigRootDomains(producer_tv, contig_finder, root_id, info);
 }
 
 namespace {
@@ -802,6 +851,11 @@ namespace {
 //! Utility to make sure targeted gpu capability is
 //!  higher than provided major.minor.
 void validateMinimumArch(int major, int minor) {
+  // Skip checking arch if disabled.
+  if (isDisabled(DisableOption::ArchCheck)) {
+    return;
+  }
+
   auto prop = at::cuda::getCurrentDeviceProperties();
   TORCH_INTERNAL_ASSERT(prop->major >= major);
   if (prop->major == major) {
@@ -834,8 +888,8 @@ void validateMmaTensors(MmaOp* mma) {
               GpuLower::current()->parallelDimensionMap();
           TORCH_INTERNAL_ASSERT(
               paralel_dim_map.isExact(ptype) &&
-                  paralel_dim_map.get(ptype)->getInt().has_value() &&
-                  paralel_dim_map.get(ptype)->getInt().value() ==
+                  paralel_dim_map.get(ptype)->isConstInt() &&
+                  paralel_dim_map.get(ptype)->evaluateInt() ==
                       at::cuda::warp_size(),
               "TIDx is reserved for lane id in mma kernels, and it needs to be exactly a warp");
           tidx_validated = true;
@@ -863,6 +917,84 @@ void validateMmaTensors(MmaOp* mma) {
   validate_operand_ids(mma->inB()->as<TensorView>());
 }
 
+//! Note and TODO:
+//!   Currently relying on ldmatrix to
+//!     obtain the correct data layout for turing/ampere
+//!     mma's.
+//!   This restriction will eventually not
+//!    be necessary once the scatter swizzle is ready.
+void validateTuringMmaInput(TensorView* tv) {
+  // Pattern matching here to make sure LDMatrix is the right format.
+  //  Format is done through swizzling in the scheduling and
+  //  we check that swizzling to make sure it's correctly setup for LDMatrix.
+  //  We could in theory support patterns LDMatrix doesn't support,
+  //  but that would also mean the MMA isn't supported and
+  //  so we would have to lower to something completely different.
+
+  // MemCpy async is a more generic utility that we can use.
+  // Currently only allowed input paths are:
+  //  ldmatrix -> mma or
+  //  ldmatrix -> broadcast -> mma
+  // We actually wouldn't want too much flexibility here since
+  //  this path is very perf critical. But the check itself
+  //  can be made cleaner once we have the correct swizzle
+  //  labeling.
+  // The most generic support would involve build out to
+  //  support any pointwise ops that does not change the
+  //  datalayout.
+  auto tv_def = tv->definition();
+  TORCH_INTERNAL_ASSERT(tv_def);
+  if (tv_def->isA<BroadcastOp>()) {
+    tv_def = tv_def->input(0)->definition();
+  }
+  TORCH_INTERNAL_ASSERT(tv_def);
+  TORCH_INTERNAL_ASSERT(ir_utils::isLdMatrixOp(tv_def));
+}
+
+// Output of ldmatrix is swizzled with the mma format, so it
+//  currently should not be fused with any pointwise ops. This
+//  check is to protect against these cases.
+// This would also not be needed once scatter swizzle ready, should
+//  just become a swizzle format check if we wanted to fuse ldmatrix
+//  with any op other than mma.
+void validateLdMatrixOutput(TensorView* tv) {
+  const auto& out_uses = tv->fusion()->unordered_uses(tv);
+  if (out_uses.empty()) {
+    return;
+  }
+  // TODO: restricting to single use pipelines for now which
+  //  is true to matmul mainloop. This Could be relaxed to
+  //  support more complex mma usage.
+  TORCH_INTERNAL_ASSERT(out_uses.size() == 1);
+  auto out_use = *(out_uses.begin());
+
+  if (out_use->isA<BroadcastOp>()) {
+    validateLdMatrixOutput(out_use->output(0)->as<TensorView>());
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      out_use->isA<MmaOp>(),
+      "validateLdMatrixOutput: currently only supports single mma use for ldmatrix",
+      out_use);
+}
+
+// Checks that the memory ops are supported on the targeted GPU
+void validateArchMemoryOp(LoadStoreOp* ldst) {
+  switch (ldst->opType()) {
+    case LoadStoreOpType::LdMatrix:
+    case LoadStoreOpType::LdMatrixTranspose:
+      validateMinimumArch(7, 5);
+      validateLdMatrixOutput(ldst->out()->as<TensorView>());
+      return;
+    case LoadStoreOpType::CpAsync:
+      validateMinimumArch(8, 0);
+      return;
+    default:
+      return;
+  }
+}
+
 } // namespace
 
 //! Validate data format and GPU arch compatibility of scheduled
@@ -878,10 +1010,29 @@ void validateMma(Fusion* fusion) {
         case MmaOptions::MacroType::Volta_16_16_4:
           validateMinimumArch(7, 0);
           break;
+        case MmaOptions::MacroType::Turing_16_8_16:
+          validateMinimumArch(7, 5);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
+        case MmaOptions::MacroType::Ampere_16_8_16:
+          validateMinimumArch(8, 0);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
         default:
           TORCH_INTERNAL_ASSERT(false, "validate mma: unsupported macro");
           break;
       }
+    }
+    if (auto ldst = dynamic_cast<LoadStoreOp*>(expr)) {
+      validateArchMemoryOp(ldst);
     }
   }
 }

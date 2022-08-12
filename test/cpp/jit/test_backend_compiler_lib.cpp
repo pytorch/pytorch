@@ -119,7 +119,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       IValue val = token;
       auto instruction = val.toTupleRef().elements()[0].toStringRef();
       auto debug_handle = val.toTupleRef().elements()[1].toInt();
-      double const_val = 1.0;
 #ifndef NO_PROFILING
       auto start_time_us = torch::profiler::impl::getTime() / 1000;
 #endif
@@ -132,8 +131,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
               instruction);
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           auto sub = instruction.substr(15);
-          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-          const_val = stod(sub);
         } else if (instruction == "aten::add" || instruction == "aten::sub") {
           TORCH_CHECK(x.sizes() == h.sizes());
           if (x.dim() > 1 || (x.dim() == 1 && x.size(0) > 1)) {

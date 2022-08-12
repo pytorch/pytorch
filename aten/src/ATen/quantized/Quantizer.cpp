@@ -4,7 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -357,7 +357,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     // NOLINTNEXTLINE
     strides[i] = 1;
     while (--i >= 0) {
-      strides[i] = sizes[i] * strides[i + 1];
+      strides[i] = sizes[i + 1] * strides[i + 1];
     }
   }
   return from_blob_quantized_per_tensor_affine(

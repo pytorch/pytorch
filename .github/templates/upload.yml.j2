@@ -52,7 +52,7 @@
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
 {%- if use_s3 %}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: !{{ common.download_artifact_s3_action }}
 {%- else %}
       - uses: actions/download-artifact@v2
 {%- endif %}

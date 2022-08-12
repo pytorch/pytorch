@@ -1057,11 +1057,11 @@ void addGlobalMethods(py::module& m) {
   m.attr("has_mkldnn") = py::bool_(false);
 
   m.attr("use_mkldnn") = py::bool_(
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
       true
-#else // CAFFE2_USE_MKLDNN
+#else // USE_MKLDNN
       false
-#endif // CAFFE2_USE_MKLDNN
+#endif // USE_MKLDNN
   );
 
   // if the binary is built with USE_ROCM, this is a ROCm build

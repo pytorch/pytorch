@@ -10,7 +10,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -110,17 +110,13 @@ static void NvFuserScheduler_InstanceNorm(
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 
-  const size_t kSize = channels_last_3d
-      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
-          input_shape[4]
-      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
   // Write: y, running_mean, running_var
   benchmark_state.SetBytesProcessed(
       benchmark_state.iterations() *
-      ((kChannels * 2 + kSize * 2) * dataTypeSize(dtype) +
+      ((kChannels * 2 + at_x.numel() * 2) * dataTypeSize(dtype) +
        (kChannels * 2 * 2) * dataTypeSize(DataType::Float)));
 }
 
@@ -191,17 +187,13 @@ static void Baseline_InstanceNorm(
     cudaDeviceSynchronize();
   }
 
-  const size_t kSize = channels_last_3d
-      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
-          input_shape[4]
-      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
   // Write: y, running_mean, running_var
   benchmark_state.SetBytesProcessed(
       benchmark_state.iterations() *
-      ((kChannels * 2 + kSize * 2) * dataTypeSize(dtype) +
+      ((kChannels * 2 + at_x.numel() * 2) * dataTypeSize(dtype) +
        (kChannels * 2 * 2) * dataTypeSize(DataType::Float)));
 }
 
@@ -231,6 +223,18 @@ NVFUSER_BENCHMARK_DEFINE(
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp32)
     // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_InstanceNorm_fp16,
+    setupInstanceNorm,
+    NvFuserScheduler_InstanceNorm,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -271,17 +275,6 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_InstanceNorm_fp16,
-    setupInstanceNorm,
-    NvFuserScheduler_InstanceNorm,
-    DataType::Half);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp16)
-    // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_InstanceNorm_fp32)

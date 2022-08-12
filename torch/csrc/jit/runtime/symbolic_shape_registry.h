@@ -24,9 +24,7 @@ shape.
 
 The shape graph should return a new, unaliased List[int] (or tuple of lists for
 multiple returns) and should not modify any input lists. This allows the shape
-graphs to be composed and executed. Additionally, when there are multiple
-tensors to return, there must be only one `return` statement, and it must have a
-tuple constructor.
+graphs to be composed and executed.
 
 The shape analysis (particularly for non-complete, or symbolic shapes) works by
 partially evaluating the JIT IR. It may be possible for a Graph to be registered
@@ -48,11 +46,19 @@ supported. Concat has been special cased and could be generalized as needed.
 Please file an issue.
 */
 
+struct BoundedShapeGraphs {
+  std::shared_ptr<Graph> lower_bound;
+  std::shared_ptr<Graph> upper_bound;
+};
+
 TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g);
 
 TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+    const FunctionSchema& schema);
+
+TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema);
 
 TORCH_API std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas();

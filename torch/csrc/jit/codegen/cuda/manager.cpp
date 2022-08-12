@@ -64,6 +64,8 @@ void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_set<Symbol> alias_copy_op(
       {prim::view_copy,
        prim::reshape_copy,
+       prim::expand_copy,
+       prim::expand_as_copy,
        prim::squeeze_copy,
        prim::unsqueeze_copy});
 
@@ -239,7 +241,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
           __FUNCTION__,
           ". This is an indication that codegen Failed for some reason.\n"
           "To debug try disable codegen fallback path via setting the env"
-          " variable `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`\n"
+          " variable `export PYTORCH_NVFUSER_DISABLE=fallback`\n"
           "To report the issue, try enable logging via setting the env"
           "variable ` export PYTORCH_JIT_LOG_LEVEL=manager.cpp`\n");
       GRAPH_DUMP("`compile_fusion` hits fallback on graph\n", graph);
@@ -331,7 +333,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           __FUNCTION__,
           ". This is an indication that codegen Failed for some reason.\n"
           "To debug try disable codegen fallback path via setting the env"
-          " variable `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`\n");
+          " variable `export PYTORCH_NVFUSER_DISABLE=fallback`\n");
       take_fallback(stack);
     }
   } else {

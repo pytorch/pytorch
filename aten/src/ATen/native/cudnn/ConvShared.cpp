@@ -63,6 +63,7 @@ namespace at { namespace native {
 
 std::ostream& operator<<(std::ostream & out, const ConvolutionParams& params) {
   out << "ConvolutionParams \n"
+    << "    memory_format = " << params.memory_format << "\n"
     << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
     << "    padding = " << ArrayRef<int>{params.padding} << "\n"
     << "    stride = " << ArrayRef<int>{params.stride} << "\n"
@@ -83,7 +84,7 @@ void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool deterministic, bool allow_tf32) {
+    int64_t groups, bool deterministic, bool allow_tf32, at::MemoryFormat memory_format) {
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -91,7 +92,7 @@ void setConvolutionParams(
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
   params->input_dim = input.dim();
-  params->memory_format = input.suggest_memory_format();
+  params->memory_format = memory_format;
   for (int i = 0; i != params->input_dim; ++i) {
     params->input_size[i] = (int) input.sizes()[i];
     params->weight_size[i] = (int) weight.sizes()[i];
@@ -150,69 +151,6 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "torch.cuda.synchronize()\n\n";
 
   return ss.str();
-}
-
-// ---------------------------------------------------------------------
-//
-// Checking
-//
-// ---------------------------------------------------------------------
-
-// Used on pad, stride and dilation
-static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
-{
-  TORCH_CHECK(args.size() <= expected_size,
-           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
-  TORCH_CHECK(args.size() >= expected_size,
-           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
-
-  auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
-  if (num_negative_values > 0){
-    std::stringstream ss;
-    ss << arg_name << " should be greater than zero but got (";
-    std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
-    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    AT_ERROR(ss.str());
-  }
-}
-
-
-// NOTE [ Convolution checks ]
-//
-// NB: For many call sites, it is not strictly necessary to check all of
-// these relationships (for example, for forward convolution, we compute
-// the size of output ourselves, so we don't actually need to check
-// output.  However, writing a single function that does everything
-// means we get to reuse it for both forwards and all backwards
-// variants, even when the set of "real" inputs varies.  The magic of
-// relational computing!
-//
-// (There is one downside, which is that it is slightly harder to write
-// error messages which are able to distinguish between real inputs
-// (which the user can change) and computed inputs (which the user can
-// only indirectly affect).  It would be an interesting exercise to
-// come up with a general framework to handle such situations.)
-static void convolution_shape_check(
-    CheckedFrom c,
-    const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
-{
-  check_args(c, padding, input->dim() - 2, "padding");
-  check_args(c, stride, padding.size(), "stride");
-  check_args(c, dilation, padding.size(), "dilation");
-
-  // Input
-  checkDimRange(c, input, 3, 6 /* exclusive */);
-  checkSize(c, input, input_channels_dim, weight->size(1) * groups);
-
-  // Weight
-  checkSameDim(c, input, weight);
-
-  // TODO: check that output->size() matches output_sizes
-  // TODO: check that weight matches output->sizes()
-  checkSameDim(c, input, output);
 }
 
 // ---------------------------------------------------------------------

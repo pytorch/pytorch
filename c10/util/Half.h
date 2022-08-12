@@ -426,6 +426,28 @@ struct alignas(4) complex<Half> {
   constexpr C10_HOST_DEVICE Half imag() const {
     return imag_;
   }
+
+  C10_HOST_DEVICE complex<Half>& operator+=(const complex<Half>& other) {
+    real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<Half>& operator-=(const complex<Half>& other) {
+    real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
+    auto a = static_cast<float>(real_);
+    auto b = static_cast<float>(imag_);
+    auto c = static_cast<float>(other.real());
+    auto d = static_cast<float>(other.imag());
+    real_ = a * c - b * d;
+    imag_ = a * d + b * c;
+    return *this;
+  }
 };
 
 // In some versions of MSVC, there will be a compiler error when building.

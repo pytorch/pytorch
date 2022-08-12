@@ -152,19 +152,19 @@ __device__ constexpr int alignBufferSize(int buffer, int size) {
 }
 
 __device__ double clamp(double x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax(x, minv), maxv);
 }
 
 __device__ float clamp(float x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax((double)x, minv), maxv);
 }
 
 __device__ int clamp(int x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max((int64_t)x, minv), maxv);
 }
 
 __device__ int64_t clamp(int64_t x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max(x, minv), maxv);
 }
 
 __device__ double frac(double x) {
@@ -518,4 +518,13 @@ bool isreal(T x) {
 template <typename T>
 bool isreal(std::complex<T> x) {
   return std::imag(x) == 0;
+}
+
+// Return the current value of the cycle counter
+__device__ inline int64_t readCycleCounter() {
+  // Ensures preceding memory operations are completed. Doing this
+  // would make sense for measuring elapsed times enclosed with this
+  // function.
+  __threadfence();
+  return clock64();
 }

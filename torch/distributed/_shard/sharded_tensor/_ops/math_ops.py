@@ -2,10 +2,9 @@ import torch
 from torch import Tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    sharded_op_impl
+    _sharded_op_impl
 )
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
-
 from torch.distributed._shard._utils import narrow_tensor
 
 def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
@@ -75,7 +74,7 @@ def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
             f"kwargs: {kwargs} not supported yet for ShardedTensor!")
 
 def register_math_op(op):
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     def binary_math_op(types, args=(), kwargs=None, pg=None):
         return binary_math_op_impl(op, types, args, kwargs, pg)
 
@@ -83,21 +82,25 @@ binary_ops = [
     # add
     torch.add,
     Tensor.add,
+    Tensor.add_,
     Tensor.__add__,
     Tensor.__radd__,
     # sub
     torch.sub,
     Tensor.sub,
+    Tensor.sub_,
     Tensor.__sub__,
     Tensor.__rsub__,
     # mul
     torch.mul,
     Tensor.mul,
+    Tensor.mul_,
     Tensor.__mul__,
     Tensor.__rmul__,
     # div
     torch.div,
     Tensor.div,
+    Tensor.div_,
     Tensor.__div__,
     Tensor.__rdiv__,
 ]

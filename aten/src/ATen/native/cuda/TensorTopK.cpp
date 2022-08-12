@@ -20,6 +20,7 @@
 namespace at {
 namespace native {
 
+// TODO: remove this when CUDA <11.6 is no longer supported
 void topk_out_with_sort(
   const Tensor& self,
   int64_t k, int64_t dim, bool largest,
@@ -32,7 +33,10 @@ void topk_out_with_sort(
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
 
+// TODO: remove this when CUDA <11.6 is no longer supported
+bool disable_sort_for_topk();
 bool should_use_sort(const Tensor& self, int64_t dim) {
+  if (disable_sort_for_topk()) return false;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
   if (self.dim() == 0) return false;
   if (self.dtype() == kBool) return false; // Bool is not support by topk

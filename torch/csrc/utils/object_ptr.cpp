@@ -2,7 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 
-template<>
+template <>
 void THPPointer<PyObject>::free() {
   if (ptr)
     Py_DECREF(ptr);

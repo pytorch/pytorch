@@ -7,7 +7,7 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
-  std::string debugString(const std::string& file, uint32_t line) {
+  std::string debugString(const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -15,7 +15,7 @@ namespace {
 #endif
   }
 
-  std::string debugString(std::string debug, const std::string& file, uint32_t line) {
+  std::string debugString(std::string debug, const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -89,7 +89,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
 // merge everything
 
 #define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
-Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name) & {
+Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name, const std::vector<at::Tag>& tags) & {
   TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
     DEF_PRELUDE,
     "Cannot define an operator inside of a ", toString(kind_), " block.  "
@@ -128,7 +128,8 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   registrars_.emplace_back(
     c10::Dispatcher::singleton().registerDef(
       std::move(schema),
-      debugString(file_, line_)
+      debugString(file_, line_),
+      tags
     )
   );
   return *this;

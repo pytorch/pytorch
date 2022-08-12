@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Geometric']
 
 class Geometric(Distribution):
     r"""
@@ -70,6 +71,10 @@ class Geometric(Distribution):
     @property
     def mean(self):
         return 1. / self.probs - 1.
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.probs)
 
     @property
     def variance(self):

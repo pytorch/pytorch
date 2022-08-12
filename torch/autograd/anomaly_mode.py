@@ -3,6 +3,8 @@ import warnings
 
 from typing import Any
 
+__all__ = ["detect_anomaly", "set_detect_anomaly"]
+
 class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
 

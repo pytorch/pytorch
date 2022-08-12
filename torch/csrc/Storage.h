@@ -1,20 +1,22 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
-#include <torch/csrc/THConcat.h>
 
-#define THPStorageStr TH_CONCAT_STRING_3(torch.,Real,Storage)
-#define THPStorageClass TH_CONCAT_3(THP,Real,StorageClass)
-#define THPStorage_(NAME) TH_CONCAT_4(THP,Real,Storage_,NAME)
+#include <torch/csrc/Types.h>
 
-#define THPByteStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPByteStorageClass)
+#define THPStorageStr "torch._UntypedStorage"
+#define THPStorageBaseStr "StorageBase"
 
-#define THPByteStorage_CData(obj)           (obj)->cdata
+struct THPStorage {
+  PyObject_HEAD c10::StorageImpl* cdata;
+};
 
-#define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
-#define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
+TORCH_PYTHON_API PyObject* THPStorage_New(
+    c10::intrusive_ptr<c10::StorageImpl> ptr);
+extern PyObject* THPStorageClass;
 
-#include <torch/csrc/generic/Storage.h>
-#include <torch/csrc/THGenerateByteType.h>
+bool THPStorage_init(PyObject* module);
+void THPStorage_postInit(PyObject* module);
+
+extern PyTypeObject THPStorageType;
 
 #endif
