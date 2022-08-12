@@ -151,24 +151,15 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         r = func_overload.decompose(*args, **kwargs)
         if r is not NotImplemented:
             return r
+
+    all_constant = pytree.tree_all_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
+
     if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
-        all_constant = True
-
-        def try_unwrap_constant(t):
-            nonlocal all_constant
-            if isinstance(t, ProxyTensor):
-                if t.constant is not None:
-                    return t.constant
-                else:
-                    all_constant = False
-                    return NotImplemented
-            else:
-                return t
-
-        const_args, const_kwargs = pytree.tree_map(try_unwrap_constant, (args, kwargs))
-
         if all_constant:
+            const_args, const_kwargs = pytree.tree_map_only(
+                ProxyTensor, lambda t: t.constant, (args, kwargs)
+            )
             with maybe_disable_fake_tensor_mode():
                 return func_overload(*const_args, **const_kwargs)
         raise RuntimeError(
@@ -176,18 +167,16 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
             "It's likely that this is caused by data-dependent control flow or similar."
         )
 
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    proxy_args = pytree.tree_map(unwrap_proxy, args)
-    proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
-
+    proxy_args, proxy_kwargs = pytree.tree_map_only(ProxyTensor, lambda e: e.proxy, (args, kwargs))
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
+
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
         args[0].proxy = proxy_res
         proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-    inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
+
+    elem_args, elem_kwargs = pytree.tree_map(unwrap_elem, (args, kwargs))
+    inner_res = func_overload(*elem_args, **elem_kwargs)
 
     # Needed to sync up metadata for in-place operators that modify metadata
     # TODO: instead forward the metadata to the inner tensor so updating
@@ -217,33 +206,16 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # element constant computation by testing the numel of the result before
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
-    all_constant = True
-    any_constant = False
-
-    def check_constant(e):
-        nonlocal all_constant, any_constant
-        if isinstance(e, ProxyTensor):
-            if e.constant is None:
-                all_constant = False
-            else:
-                any_constant = True
-
-    pytree.tree_map(check_constant, args)
-    pytree.tree_map(check_constant, kwargs)
-
-    def unwrap_constant(e):
-        if isinstance(e, ProxyTensor):
-            return e.constant
-        return e
+    any_constant = pytree.tree_any_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
 
     constant = None
     # NB: do NOT include factories as constants
     if all_constant and any_constant:
         with maybe_disable_fake_tensor_mode():
-            constant = func_overload(
-                *pytree.tree_map(unwrap_constant, args),
-                **pytree.tree_map(unwrap_constant, kwargs)
+            const_args, const_kwargs = pytree.tree_map_only(
+                ProxyTensor, lambda t: t.constant, (args, kwargs)
             )
+            constant = func_overload(*const_args, **const_kwargs)
 
     # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
     # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
