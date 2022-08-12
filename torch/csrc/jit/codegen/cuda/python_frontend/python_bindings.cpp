@@ -45,7 +45,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   fusion_manager.def_static(
           "get",
           &nvfuser::FusionManager::get, 
-          py::arg("max_fusions")=int(256),
+          py::arg("max_fusions")=int(4096),
           py::return_value_policy::reference)
       .def_static(
           "reset",

@@ -24,6 +24,7 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type);
 enum class DebugDumpOption {
   FusionIr, //!< Dump the Fusion IR before lowering
   FusionIrMath, //!< Dump just the compute (math) part of the Fusion IR
+  FusionIrPresched, //!< Dump the Fusion IR before it is scheduled.
   KernelIr, //!< Dump the compiler Kernel IR
   ComputeAtMap, //!< Dump the computeAt map
   CudaKernel, //!< Dump the generated CUDA C++ kernel code

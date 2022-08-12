@@ -83,6 +83,10 @@ void FusionDefinition::exit() {
     }
 
     buildFusionIr();
+    
+    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::FusionIrPresched)) {
+      fusionManagerPtr()->printIr();
+    }
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";

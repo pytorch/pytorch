@@ -18,6 +18,7 @@ auto parseDebugDumpOptions() {
   std::unordered_map<DebugDumpOption, bool> options_map = {
       {DebugDumpOption::FusionIr, false},
       {DebugDumpOption::FusionIrMath, false},
+      {DebugDumpOption::FusionIrPresched, false},
       {DebugDumpOption::KernelIr, false},
       {DebugDumpOption::ComputeAtMap, false},
       {DebugDumpOption::CudaKernel, false},
@@ -51,6 +52,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionIr] = true;
       } else if (token == "fusion_ir_math") {
         options_map[DebugDumpOption::FusionIrMath] = true;
+      } else if (token == "fusion_ir_presched") {
+        options_map[DebugDumpOption::FusionIrPresched] = true;
       } else if (token == "kernel_ir") {
         options_map[DebugDumpOption::KernelIr] = true;
       } else if (token == "ca_map") {
