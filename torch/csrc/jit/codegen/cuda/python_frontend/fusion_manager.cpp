@@ -24,6 +24,12 @@ FusionManager* FusionManager::get(size_t max_fusions) {
   }
   return singleton_;
 }
+void FusionManager::reset() {
+  if (singleton_ != nullptr) {
+    delete singleton_;
+    singleton_ = nullptr;
+  }
+}
 
 FusionManager::FusionManager(size_t max_fusions)
     : max_fusions_(max_fusions),

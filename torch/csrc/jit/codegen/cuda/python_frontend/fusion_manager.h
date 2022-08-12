@@ -26,8 +26,9 @@ struct FusionCacheEntry {
 class FusionManager {
   FusionManager(size_t max_fusions);
 
-public:
+ public:
   static FusionManager* get(size_t max_fusions);
+  static void reset();
 
   //! Copy and Assignment of the FusionManager is not supported
   FusionManager(const FusionManager&) = delete;

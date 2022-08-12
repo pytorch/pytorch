@@ -66,7 +66,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 f"Node {node} with target {node.target} does not support nvfuser"
             )
 
-    fusion_manger = FusionManager.get()
+    fusion_manager = FusionManager.get()
     with FusionDefinition(fusion_manager) as fd:
 
         def _to_nvfuser_constant(arg):
