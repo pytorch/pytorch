@@ -45,9 +45,6 @@ std::vector<at::Tensor> FusionManager::execute(
 void FusionManager::printIr() const {
   fusionExecutorCachePtr()->printFusion();
 }
-void FusionManager::printKernel() const {
-  fusionPtr()->printKernel();
-}
 
 c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) const {

@@ -59,10 +59,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             return self.execute(inputs);
           },
           py::return_value_policy::reference)
-      .def("print_ir", [](nvfuser::FusionManager& self) { self.printIr(); })
-      .def("print_kernel", [](nvfuser::FusionManager& self) {
-        self.printKernel();
-      });
+      .def("print_ir", [](nvfuser::FusionManager& self) { self.printIr(); });
 
   //! These are the FusionDefinition supported object types that are either
   //! defined as inputs or the output of an operation.

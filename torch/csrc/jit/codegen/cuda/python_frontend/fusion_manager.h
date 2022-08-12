@@ -27,18 +27,17 @@ struct FusionCacheEntry {
 
 class FusionManager {
   FusionManager(size_t max_fusions);
+  
+  //! Copy and Assignment of the FusionManager is not supported
+  FusionManager(const FusionManager&) = delete;
+  FusionManager& operator=(const FusionManager&) = delete;
 
  public:
   static FusionManager* get(size_t max_fusions);
   static void reset();
 
-  //! Copy and Assignment of the FusionManager is not supported
-  FusionManager(const FusionManager&) = delete;
-  FusionManager& operator=(const FusionManager&) = delete;
-
   std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
   void printIr() const;
-  void printKernel() const;
   Nvf::Fusion* fusionPtr() const;
 
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
