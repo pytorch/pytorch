@@ -272,7 +272,9 @@ default_decompositions = {
     aten.hardtanh,
     aten.hardswish,
     aten.hardsigmoid,
-    aten.conj_physical
+    aten.conj_physical,
+    aten.native_dropout,
+    aten.native_dropout_backward,
 }
 
 default_decompositions = get_decompositions(default_decompositions)
