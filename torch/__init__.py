@@ -14,7 +14,6 @@ import sys
 import platform
 import textwrap
 import ctypes
-import warnings
 import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -40,7 +39,7 @@ __all__ = [
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    '_TypedStorage',
+    'TypedStorage', 'UntypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
@@ -319,6 +318,7 @@ def set_default_tensor_type(t):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
         torch.float32
         >>> torch.set_default_tensor_type(torch.DoubleTensor)
@@ -355,6 +355,7 @@ def set_default_dtype(d):
                                   Either torch.float32 or torch.float64.
 
     Example:
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> # initial default for floating point is torch.float32
         >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
@@ -455,6 +456,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -493,14 +495,15 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> torch.randn(10).index_copy(0, torch.tensor([0]), torch.randn(1))
+        >>> # xdoctest: +SKIP
+        >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
-        RuntimeError: index_copy does not have a deterministic implementation...
+        RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
         # Backward mode nondeterministic error
-        >>> torch.randn(10, requires_grad=True, device='cuda').index_select(0, torch.tensor([0], device='cuda')).backward()
+        >>> torch.nn.AvgPool3d(1)(torch.randn(3, 4, 5, 6, requires_grad=True).cuda()).sum().backward()
         ...
-        RuntimeError: index_add_cuda_ does not have a deterministic implementation...
+        RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
@@ -656,10 +659,10 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, _LegacyStorage, _UntypedStorage
+from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
-# dtype, use torch.storage._TypedStorage directly.
+# dtype, use torch.storage.TypedStorage directly.
 
 class ByteStorage(_LegacyStorage):
     @classproperty
@@ -747,11 +750,11 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 _storage_classes = {
-    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
-    _TypedStorage
+    TypedStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()

@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from functorch import make_fx
-from torch.fx import immutable_collections
+from torch.fx import immutable_collections, Interpreter
+import torch.fx.traceback as fx_traceback
 from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -135,6 +136,35 @@ def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=
     return torch.full(size, value, dtype=inp.dtype, device=inp.device)
 
 
+graph_being_compiled: str = None
+nth_graph: int = 0
+model_name: str = "model"
+
+
+def set_model_name(name):
+    global model_name
+    model_name = name
+
+
+def get_graph_being_compiled() -> str:
+    """
+    Returns the name of the graph being compiled.
+    """
+    global model_name, graph_being_compiled, nth_graph
+    return f"{model_name}_{graph_being_compiled}_{nth_graph}"
+
+
+@contextmanager
+def track_graph_compiling(graph_name, increment_index=False):
+    global graph_being_compiled
+    graph_being_compiled = graph_name
+    yield
+    if increment_index:
+        global nth_graph
+        nth_graph += 1
+    graph_being_compiled = None
+
+
 def create_aot_autograd_function(
     flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
 ):
@@ -202,14 +232,29 @@ def create_aot_autograd_function(
                             def fake_fn(primals, tangents):
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
-                fw_module, bw_module = partition_fn(fx_g, joint_inputs)
-                # print(fw_module.code, bw_module.code)
 
-                compiled_fw = fw_compiler(fw_module, flat_tensor_args)
+                if config.debug_joint:
+                    print(fx_g.code)
+
+                with track_graph_compiling("joint"):
+                    fw_module, bw_module = partition_fn(fx_g, joint_inputs)
+
+                if config.debug_graphs:
+                    print(fw_module.code, bw_module.code)
+
+                with track_graph_compiling("forward"):
+                    compiled_fw = fw_compiler(fw_module, flat_tensor_args)
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
+                if config.debug_partitioner:
+                    activation_sizes = 0
+                    for out in fw_outs[num_outs:]:
+                        if isinstance(out, torch.Tensor):
+                            activation_sizes += out.storage().nbytes()
+                    print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-                compiled_bw = bw_compiler(bw_module, bw_args)
+                with track_graph_compiling("backward", True):
+                    compiled_bw = bw_compiler(bw_module, bw_args)
             else:
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
@@ -613,7 +658,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         with _stateless.reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            out = mod(*args[params_len:], **kwargs)
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.override_stack_trace():
+                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "

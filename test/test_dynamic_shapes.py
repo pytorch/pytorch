@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
+import operator
+import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
 
@@ -127,10 +129,36 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymbolicIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
 class TestPySymInt(TestCase):
+
+    @skipIfNoSympy
+    def test_arith_ops(self):
+        shape_env = ShapeEnv()
+        symints = []
+        for i in range(5):
+            symints.append((i, shape_env.create_symint(f"s{i}", i)))
+
+        ops = [operator.add, operator.sub, operator.floordiv, operator.mul, operator.mod]
+
+        for op in ops:
+            for args in itertools.permutations(symints, 2):
+                if not isinstance(args[0][1], int) and ((op != operator.mod or op != operator.floordiv) and args[1][0] != 0):
+                    self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
+
+
+    @skipIfNoSympy
+    def test_reverse_arith_ops(self):
+        shape_env = ShapeEnv()
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 // a == 5 // 2)
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 * a == 5 * 2)
+
 
     @skipIfNoSympy
     def test_roundtrip(self):
@@ -229,6 +257,9 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[0] == 5)
         self.assertTrue(z.shape[1] == 4)
         self.assertTrue(z.shape[2] == 3)
+
+        z = y.expand((y.shape[1],))
+        z = y.expand(y.shape[1])
 
     @skipIfNoSympy
     def test_size_expressions(self):

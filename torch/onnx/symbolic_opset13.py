@@ -4,10 +4,13 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch._C._onnx as _C_onnx
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_opset11 as opset11
-from torch.onnx import utils
+from torch.onnx import (
+    _type_utils,
+    symbolic_helper,
+    symbolic_opset11 as opset11,
+    symbolic_opset9 as opset9,
+    utils,
+)
 
 
 @symbolic_helper.parse_args("v", "i", "none")
@@ -16,7 +19,7 @@ def softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", softmax, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
 
     return softmax
@@ -28,7 +31,7 @@ def log_softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     return return_op
 
@@ -78,7 +81,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             for i in range(_outputs)
         ]
 
-    split_val = split_size_or_sizes.node()["value"]
+    split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
@@ -116,11 +119,12 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
 
     if symbolic_helper._is_split_static(indices_or_sections, _outputs):
-        split_val = indices_or_sections.node()["value"]
+        split_val = symbolic_helper._node_get(indices_or_sections.node(), "value")
 
         if split_val.dim() > 0:
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             res = []
+            assert _outputs is not None
             for i in range(_outputs - 1):
                 end = g.op(
                     "Gather",
@@ -267,9 +271,7 @@ def nonzero_numpy(g, input, _outputs=None):
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
-        condition = g.op(
-            "Cast", condition, to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"]
-        )
+        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = opset9.nonzero(g, condition)
         return symbolic_helper._unbind_helper(
@@ -356,7 +358,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -367,7 +369,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")

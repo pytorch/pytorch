@@ -6,10 +6,9 @@
 
 import torch
 import functools
-from collections import OrderedDict
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec, _register_pytree_node
+from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
 from .pytree_hacks import tree_map_
 from functools import partial
 
@@ -24,25 +23,14 @@ in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 
-# Temporary OrderedDict registration as pytree
-def _odict_flatten(d):
-    return list(d.values()), list(d.keys())
-
-
-def _odict_unflatten(values, context):
-    return OrderedDict((key, value) for key, value in zip(context, values))
-
-
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
-
-
 # Checks that all args-to-be-batched have the same batch dim size
-
 def _validate_and_get_batch_size(
         flat_in_dims: List[Optional[int]],
         flat_args: List) -> int:
     batch_sizes = [arg.size(in_dim) for in_dim, arg in zip(flat_in_dims, flat_args)
                    if in_dim is not None]
+    if len(batch_sizes) == 0:
+        raise ValueError('vmap: Expected at least one Tensor to vmap over')
     if batch_sizes and any(size != batch_sizes[0] for size in batch_sizes):
         raise ValueError(
             f'vmap: Expected all tensors to have the same size in the mapped '
@@ -121,7 +109,7 @@ def _create_batched_inputs(
         flat_in_dims: List[Any], flat_args: List[Any], vmap_level: int, args_spec) -> Tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [arg if in_dim is None else
-                      _add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                      _add_batch_dim(arg, in_dim, vmap_level)
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec)
 
