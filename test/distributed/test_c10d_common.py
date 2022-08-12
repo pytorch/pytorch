@@ -1572,7 +1572,6 @@ class CompilerTest(MultiProcessTestCase):
                 self.assertTrue(waited)
                 self.assertTrue(commed)
 
-
         # Update input to make sure we are not recording it as constant during
         # tracing.
         x += 1

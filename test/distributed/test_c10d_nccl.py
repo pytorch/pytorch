@@ -2748,6 +2748,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
+    @property
+    def world_size(self):
+        return 2
+
     def _get_default_group(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
