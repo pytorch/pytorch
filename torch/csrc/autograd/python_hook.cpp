@@ -47,7 +47,7 @@ namespace {
 //
 // This function returns True if any hook returned non-None value, and False
 // otherwise.
-bool _pyfunction_call_hooks(PyObject* dict, PyObject* args) {
+bool _call_hooks(PyObject* dict, PyObject* args) {
   // Note: [Extend Hook Lifetime]
   // Hold a reference to hooks till we iterate over them.
   // This is to handle the case when hook calls `handle.remove` inside it
@@ -108,7 +108,7 @@ auto PyFunctionTensorPreHook::operator()(const variable_list& values)
     throw python_error();
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, value.release());
-  bool is_tup_modified = _pyfunction_call_hooks(dict, tup.get());
+  bool is_tup_modified = _call_hooks(dict, tup.get());
   variable_list results(values);
   if (is_tup_modified) {
     results[value_idx] = THPVariable_Unpack(PyTuple_GetItem(tup.get(), 0));
@@ -134,7 +134,7 @@ auto PyFunctionPreHook::operator()(const variable_list& grad_outputs_)
   THPObjectPtr grad_outputs(wrap_variables(grad_outputs_));
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, grad_outputs.release());
-  _pyfunction_call_hooks(dict, tup.get());
+  _call_hooks(dict, tup.get());
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
@@ -159,7 +159,7 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr tup(PyTuple_New(2));
   PyTuple_SET_ITEM(tup.get(), 0, grad_inputs.release());
   PyTuple_SET_ITEM(tup.get(), 1, grad_outputs.release());
-  _pyfunction_call_hooks(dict, tup.get());
+  _call_hooks(dict, tup.get());
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
