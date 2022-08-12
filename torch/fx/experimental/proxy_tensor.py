@@ -151,7 +151,8 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        with proxy_mode.restore():
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     with proxy_mode.restore():
         r = func_overload.decompose(*args, **kwargs)
         if r is not NotImplemented:
@@ -447,6 +448,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #
         # This is what the overload modification does.
         elif self.trace_factory_functions:
+            flat_args = pytree.tree_flatten((args, kwargs))[0]
+            handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
+
+            # If there are any tensor subclasses, we need to handle those tensor subclasses first
+            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+                return NotImplemented
+
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 

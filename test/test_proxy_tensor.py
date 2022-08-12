@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
@@ -131,6 +132,42 @@ def _create_new_input(x):
         return torch.rand_like(x, requires_grad=x.requires_grad)
     else:
         return torch.rand_like(x)
+
+"""
+Delays a cos being executed on the unwraptensor until its used. Simulates a CommTensor used
+"""
+class UnwrapTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor):
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            tensor.size(),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
+        r._tensor = tensor
+        return r
+
+    def __repr__(self):
+        # TODO: consider all_gather the local tensors for better debugging
+        return f"UnwrapTensor({self._tensor})"
+
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            ret = e
+            if isinstance(e, UnwrapTensor):
+                ret = e._tensor.cos()
+
+            return ret
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
     # WARNING: if any of your inputs are index tensors, DO NOT use this
@@ -252,6 +289,31 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sum(traced))
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
+
+    def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
+        def f(x):
+            y = x.new_zeros(x.size())
+            y.copy_(x)
+            return y
+
+        def _new_zeros_decomp(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
+            return torch.zeros(size, dtype=inp.dtype, device=inp.device)
+
+        factory_func_decomp = {torch.ops.aten.new_zeros.default: _new_zeros_decomp}
+
+        # When new_zeros() decomposes into torch.zero(), we expect ProxyTensorMode
+        # to still be (re-entrantly) enabled, so that the `torch.zero()` call
+        # returns a ProxyTensor.
+        out = make_fx(f, decomposition_table=factory_func_decomp)(torch.ones(2))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, x_1):
+    zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy__default
+    """)
 
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
@@ -473,6 +535,15 @@ class TestGenericProxyTensor(TestCase):
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
 
+    def test_trace_subclasses(self):
+        def f(x):
+            x = UnwrapTensor(x)
+            y = x * 2
+            return y
+
+        inp = [torch.randn(5)]
+        self._test(f, [torch.randn(5)])
+
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -507,6 +578,7 @@ def xfail_inherited_tests(tests):
     "test_make_fx_model_fwd_bwd",
     "test_proxy_tensor",
     "test_resnet18_backward_trace",
+    "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
