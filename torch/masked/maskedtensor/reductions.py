@@ -1,13 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import logging
-import os
+import warnings
 
 import torch
 
 from .creation import masked_tensor
 
-logging.basicConfig(level=getattr(logging, os.getenv("MTLOGLEVEL", "INFO")))
+__all__ = []
 
 
 def masked_all_all(data, mask=None):
@@ -85,7 +84,7 @@ def torch_reduce_dim(fn):
                 "In the case that the semantics for the operator are not trivial, it would be appreciated "
                 "to also include a proposal for the semantics."
             )
-            logging.info(msg)
+            warnings.warn(msg)
             return NotImplemented
 
         data = self._masked_data

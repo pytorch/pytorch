@@ -4,6 +4,7 @@ import torch
 
 from .core import MaskedTensor, is_masked_tensor
 
+__all__ = ["masked_tensor"]
 
 def masked_tensor(data, mask, requires_grad=False):
     r""" A basic factory function to create a MaskedTensor

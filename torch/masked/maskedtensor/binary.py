@@ -4,6 +4,8 @@ import torch
 
 from .core import _masks_match, _tensors_match, is_masked_tensor
 
+__all__ = []
+
 BINARY_NAMES = [
     "add",
     #    "addcdiv",
@@ -69,7 +71,7 @@ INPLACE_BINARY_NAMES = [
 ]
 
 
-def get_at_least_one_mask(a, b):
+def _get_at_least_one_mask(a, b):
     if not is_masked_tensor(a) and not is_masked_tensor(b):
         raise TypeError("At least one of `a` and `b` must be a MaskedTensor")
     if not _masks_match(a, b):
@@ -155,7 +157,7 @@ def _binary_helper(fn, args, kwargs, inplace):
         args[0]._set_data_mask(result_data, mask_args[0])
         return args[0]
     else:
-        result_mask = get_at_least_one_mask(*args[:2])
+        result_mask = _get_at_least_one_mask(*args[:2])
         # sparse tensors don't have strides
         if args[0].layout() == torch.strided:
             result_mask = result_mask.expand_as(result_data)
