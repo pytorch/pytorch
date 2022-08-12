@@ -443,9 +443,13 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 # "Wraps" a dim (up to one time) for the given rank, allowing
 # dims to be specified using negative indices
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
-    if rank <= 0:
+    if rank < 0:
+        msg = f"Rank cannot be negative but got {rank}"
+        raise IndexError(msg)
+
+    if rank == 0:
         if not wrap_scalar:
-            msg = f"dimension specified as {idx} but tensor has no dimensions"
+            msg = f"Dimension specified as {idx} but tensor has no dimensions"
             raise IndexError(msg)
         rank = 1
 
