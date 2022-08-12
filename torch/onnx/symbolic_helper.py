@@ -568,37 +568,59 @@ def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
 
 
 def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> None:
+    message = (
+        f"Unsupported: ONNX export of operator {op_name}. "
+        f"Please feel free to request support or submit a pull request "
+        f"on PyTorch GitHub: {_constants.PYTORCH_GITHUB_ISSUES_URL}"
+    )
     if isinstance(value, _C.Value):
         raise errors.SymbolicValueError(
-            f"Unsupported: ONNX export of operator {op_name}. "
-            "Please feel free to request support or submit a pull request on PyTorch GitHub.",
+            message,
             value,
         )
-    raise RuntimeError(
-        f"Unsupported: ONNX export of operator {op_name}. "
-        "Please feel free to request support or submit a pull request on PyTorch GitHub."
-    )
+    raise errors.OnnxExporterError(message)
 
 
-def _onnx_opset_unsupported(op_name: str, current_opset: int, supported_opset: int):
-    raise RuntimeError(
+def _onnx_opset_unsupported(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    value: Optional[_C.Value] = None,
+) -> None:
+    message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _onnx_opset_unsupported_detailed(
-    op_name: str, current_opset: int, supported_opset: int, reason: str
-):
-    raise RuntimeError(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    reason: str,
+    value: Optional[_C.Value] = None,
+) -> None:
+    message = (
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _block_list_in_opset(name: str):
     def symbolic_fn(*args, **kwargs):
-        raise RuntimeError(
+        raise errors.OnnxExporterError(
             f"ONNX export failed on {name}, which is not implemented for opset "
             f"{GLOBALS.export_onnx_opset_version}. "
             "Try exporting with other opset versions."
@@ -1256,8 +1278,8 @@ def _reshape_helper(g, input, shape, allowzero=0):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if GLOBALS.export_onnx_opset_version <= 13:
         if allowzero == 1:
-            raise _onnx_opset_unsupported(
-                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14
+            _onnx_opset_unsupported(
+                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
             )
         return g.op("Reshape", input, shape)
     else:
@@ -1448,6 +1470,7 @@ def dequantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            qtensor,
         )
 
     return (
@@ -1488,16 +1511,15 @@ def quantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            tensor,
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",

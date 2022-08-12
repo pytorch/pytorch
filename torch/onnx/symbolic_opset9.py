@@ -17,13 +17,13 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (
+from torch.onnx import (  # noqa: F401
     _constants,
     _patch_torch,
     _type_utils,
     errors,
     symbolic_helper,
-)  # noqa: F401
+)
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -364,7 +364,7 @@ def reshape_as(g, self, other):
 def add(g, self, other, alpha=None):
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "Add", 9, 11, "Add between list of tensors not supported"
+            "Add", 9, 11, "Add between list of tensors not supported", self
         )
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
@@ -406,15 +406,15 @@ def addcmul(g, self, tensor1, tensor2, value=1.0):
 def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode is None:
         return true_divide(g, self, other)
-    if rounding_mode == "floor":
+    elif rounding_mode == "floor":
         return _floor_divide(g, self, other)
-    if rounding_mode == "trunc":
+    elif rounding_mode == "trunc":
         return _trunc_divide(g, self, other)
-
-    raise errors.SymbolicValueError(
-        f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"',
-        self
-    )
+    else:
+        raise errors.SymbolicValueError(
+            f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"',
+            self,
+        )
 
 
 def _trunc_divide(g, self, other):
@@ -704,7 +704,9 @@ def overload_by_arg_count(fn):
             arg_descriptors = overload._arg_descriptors
             if len(arg_descriptors) == len(args):
                 return overload(g, *args)
-        raise NotImplementedError(f"Unknown aten::{fn.__name__} signature")
+        return symbolic_helper._unimplemented(
+            f"aten::{fn.__name__}", f"with {len(args)} arguments"
+        )
 
     return wrapper
 
@@ -759,8 +761,8 @@ def cumsum(g, input, dim, dtype):
         if dtype.node().kind() != "prim::Constant":
             return symbolic_helper._unimplemented("cumsum", "dtype", dtype)
         return g.at("cumsum", input, dim_i=dim)
-    else:
-        symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11)
+
+    symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11, input)
 
 
 def _sample_dirichlet(g, self, generator):
@@ -942,7 +944,7 @@ def view_as(g, self, other):
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "unsafe_chunk", 9, 11, "Dynamic number of outputs not supported"
+            "unsafe_chunk", 9, 11, "Dynamic number of outputs not supported", self
         )
     size = symbolic_helper._get_tensor_dim_size(self, dim)
     if size is None:
@@ -961,7 +963,7 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "split", 9, 11, "Dynamic number of outputs not supported"
+            "split", 9, 11, "Dynamic number of outputs not supported", self
         )
     split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
@@ -974,7 +976,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             size = split_size * _outputs
         else:
             return symbolic_helper._onnx_opset_unsupported_detailed(
-                "split", 9, 11, "Unknown dimension size not supported"
+                "split", 9, 11, "Unknown dimension size not supported", self
             )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -991,7 +993,7 @@ def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "split_with_sizes", 9, 11, "Dynamic number of outputs not supported"
+            "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
@@ -1004,7 +1006,7 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "unbind", 9, 11, "Dynamic number of outputs not supported"
+            "unbind", 9, 11, "Dynamic number of outputs not supported", self
         )
 
     outputs = g.op("Split", self, split_i=[1] * _outputs, axis_i=dim, outputs=_outputs)
@@ -1308,7 +1310,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     dim = sizes[-len(padding) :] if sizes is not None else None
     if dim is None or any([i is None for i in dim]):
         return symbolic_helper._unimplemented(
-            "get_pool_ceil_padding", "input size not accessible", self
+            "get_pool_ceil_padding", "input size not accessible", input
         )
     ceiled_output_dim = [
         int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
@@ -1496,6 +1498,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # so we try using max_poolxd_with_indices, and if it is not possible
         # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
+        output_size_value = output_size
         try:
             output_size = symbolic_helper._parse_arg(output_size, "is")
         except Exception:
@@ -1525,7 +1528,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
-                name, "output size that are not factor of input size"
+                name, "output size that are not factor of input size", output_size_value
             )
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
@@ -1584,8 +1587,8 @@ def _prepare_onnx_paddings(dim, pad):
     return paddings
 
 
-def _convert_padding_node(padding):
-    padding = symbolic_helper._maybe_get_const(padding, "is")
+def _convert_padding_node(input):
+    padding = symbolic_helper._maybe_get_const(input, "is")
     if symbolic_helper._is_value(padding) and symbolic_helper._is_packed_list(padding):
         input_list = symbolic_helper._unpack_list(padding)
         try:
@@ -1596,7 +1599,7 @@ def _convert_padding_node(padding):
             # FIXME(justinchuby): Avoid catching Exception.
             # Catch a more specific exception instead.
             return symbolic_helper._onnx_opset_unsupported_detailed(
-                "Pad", 9, 11, "The sizes of the padding must be constant"
+                "Pad", 9, 11, "The sizes of the padding must be constant", input
             )
     return padding
 
@@ -1609,7 +1612,7 @@ def constant_pad_nd(g, input, padding, value):
         # FIXME(justinchuby): Avoid catching Exception.
         # Catch a more specific exception instead.
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "Pad", 9, 11, "The value for the padding must be constant"
+            "Pad", 9, 11, "The value for the padding must be constant", value
         )
 
     padding = _convert_padding_node(padding)
@@ -1734,14 +1737,14 @@ def __interpolate(
     return g.op("Upsample", input, scales, mode_s=mode)
 
 
-def bitwise_not(g, inp):
-    if inp.type().scalarType() != "Bool":
+def bitwise_not(g, input):
+    if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise Not "
             "for non-boolean input values",
-            inp,
+            input,
         )
-    return g.op("Not", inp)
+    return g.op("Not", input)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1763,7 +1766,7 @@ def wrap_logical_op_with_negation(func):
 
 
 def __not_(g, self):
-    if self.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(self):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise Not "
             "for non-boolean input values",
@@ -1797,9 +1800,9 @@ def gt(g, input, other):
 def gt_impl(g, input, other):
     if (
         input.type().scalarType() is not None
-        and input.type().scalarType() == "Bool"
+        and symbolic_helper._is_bool(input)
         and other.type().scalarType() is not None
-        and other.type().scalarType() == "Bool"
+        and symbolic_helper._is_bool(other)
     ):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
         other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
@@ -1814,9 +1817,9 @@ def lt(g, input, other):
 def lt_impl(g, input, other):
     if (
         input.type().scalarType() is not None
-        and input.type().scalarType() == "Bool"
+        and symbolic_helper._is_bool(input)
         and other.type().scalarType() is not None
-        and other.type().scalarType() == "Bool"
+        and symbolic_helper._is_bool(other)
     ):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
         other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
@@ -1836,13 +1839,13 @@ def le(g, input, other):
 
 
 def __and_(g, input, other):
-    if input.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise AND "
             "for non-boolean input values",
             input,
         )
-    if other.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(other):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise AND "
             "for non-boolean input values",
@@ -1852,13 +1855,13 @@ def __and_(g, input, other):
 
 
 def __or_(g, input, other):
-    if input.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise OR "
             "for non-boolean input values",
             input,
         )
-    if other.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(other):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise OR "
             "for non-boolean input values",
@@ -1868,13 +1871,13 @@ def __or_(g, input, other):
 
 
 def __xor_(g, input, other):
-    if input.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise XOR "
             "for non-boolean input values",
             input,
         )
-    if other.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(other):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise XOR "
             "for non-boolean input values",
@@ -1953,7 +1956,7 @@ def __lshift_(g, self, other):
 @symbolic_helper.parse_args("v", "v", "v", "i")
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
-    if condition.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(condition):
         condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = nonzero(g, condition)
@@ -2257,6 +2260,7 @@ def batch_norm(
             15,
             "All input tensors must have the same `dtype`."
             " Turn off Autocast or export using opset version 15.",
+            input,
         )
 
     weight, bias, running_mean, running_var = symbolic_helper._batchnorm_helper(
@@ -2478,17 +2482,21 @@ def unfold(g, input, dimension, size, step):
         ]
         return g.op("Concat", *unsqueeze, axis_i=dimension)
     else:
-        return symbolic_helper._unimplemented("Unfold", "input size not accessible")
+        return symbolic_helper._unimplemented(
+            "Unfold", "input size not accessible", input
+        )
 
 
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "t", "t", "t")
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
-        return symbolic_helper._unimplemented("scale", "does not support scale in Elu")
+        return symbolic_helper._unimplemented(
+            "scale", "does not support scale in Elu", scale
+        )
     if input_scale and input_scale != 1.0:
         return symbolic_helper._unimplemented(
-            "input_scale", "does not support input_scale in Elu"
+            "input_scale", "does not support input_scale in Elu", input_scale
         )
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=symbolic_helper._scalar(alpha))
@@ -2521,10 +2529,8 @@ def index_put(g, self, indices_list_value, values, accumulate):
     if len(indices_list) == 0:
         if accumulate:
             return add(g, self, values)
-        else:
-            return values
-    else:
-        symbolic_helper._onnx_opset_unsupported("index_put", 9, 11)
+        return values
+    symbolic_helper._onnx_opset_unsupported("index_put", 9, 11, self)
 
 
 def index_fill(g, self, dim, index, value):
@@ -2904,8 +2910,8 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
             return_counts_i=return_counts,
             outputs=3,
         )
-    else:
-        symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11)
+
+    symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
 def _cast_func_template(to_i, g, input, non_blocking):
@@ -2983,8 +2989,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
-            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+            scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()
             dtype = _type_utils.JitScalarType.from_name(scalar_name)
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
@@ -3168,7 +3173,7 @@ def eye(g, *args):
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
 
-    raise NotImplementedError("Unknown aten::eye signature")
+    return symbolic_helper._unimplemented("aten::eye", f"with {len(args)} arguments")
 
 
 def slice(g, self, *args):
@@ -3232,7 +3237,7 @@ def slice(g, self, *args):
             g, self, axes=[dim], starts=[start], ends=[end]
         )
 
-    raise NotImplementedError("Unknown aten::slice signature")
+    return symbolic_helper._unimplemented("aten::slice", f"with {len(args)} arguments")
 
 
 @symbolic_helper.quantized_args(True)
@@ -3344,7 +3349,7 @@ def unsqueeze(g, self, dim):
             dim = dim + rank + 1
         else:
             return symbolic_helper._unimplemented(
-                "unsqueeze", "negative axis with unknown input rank"
+                "unsqueeze", "negative axis with unknown input rank", self
             )
 
     return symbolic_helper._unsqueeze_helper(g, self, axes_i=[dim])
@@ -3355,7 +3360,7 @@ def unsqueeze(g, self, dim):
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
-            "Sort", "Out parameter is not supported for sort"
+            "Sort", "Out parameter is not supported for sort", self
         )
     self_sizes = symbolic_helper._get_tensor_sizes(self)
     try:
@@ -3366,7 +3371,7 @@ def sort(g, self, dim, decending, out=None):
         dim_size = None
 
     if dim_size is None:
-        return symbolic_helper._unimplemented("Sort", "input size not accessible")
+        return symbolic_helper._unimplemented("Sort", "input size not accessible", self)
 
     return g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
 
@@ -3381,10 +3386,10 @@ def numel(g, self):
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
-            "TopK", "Out parameter is not supported for topk"
+            "TopK", "Out parameter is not supported for topk", self
         )
     if not largest:
-        symbolic_helper._unimplemented("TopK", "Ascending TopK is not supported")
+        symbolic_helper._unimplemented("TopK", "Ascending TopK is not supported", self)
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
@@ -3516,6 +3521,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
                 9,
                 13,
                 "Unsupported along dimension with unknown input size",
+                self,
             )
         else:
             reps = input_sizes[dim]
@@ -3531,10 +3537,15 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
                 9,
                 13,
                 "Unsupported along dimension with unknown input size",
+                self,
             )
         if repeats_sizes[0] is None:
             return symbolic_helper._onnx_opset_unsupported_detailed(
-                "repeat_interleave", 9, 13, "Unsupported for cases with dynamic repeats"
+                "repeat_interleave",
+                9,
+                13,
+                "Unsupported for cases with dynamic repeats",
+                self,
             )
         assert (
             repeats_sizes[0] == input_sizes[dim]
@@ -4386,7 +4397,7 @@ def scatter_add(g, self, dim, index, src):
     scalar_name = symbolic_helper._try_get_scalar_type(self)
     if scalar_name is None:
         return symbolic_helper._unimplemented(
-            "scatter_add", "input dtype not accessible", input
+            "scatter_add", "input dtype not accessible", self
         )
     scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
@@ -4433,7 +4444,7 @@ def one_hot(g, self, num_classes):
 @symbolic_helper.parse_args("v", "i", "v", "v")
 def gather(g, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
-        return symbolic_helper._unimplemented("gather", "sparse_grad == True", input)
+        return symbolic_helper._unimplemented("gather", "sparse_grad == True", self)
     # NOTE: This workaround is needed since GatherElement is only supported
     #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
@@ -4591,9 +4602,7 @@ def arange(g, *args):
             "Cast", arange_tensor, to_i=_type_utils.JitScalarType(dtype).onnx_type()
         )
 
-    raise NotImplementedError(
-        f"Unknown aten::arange signature taking {len(args)} arguments."
-    )
+    return symbolic_helper._unimplemented("aten::arange", f"with {len(args)} arguments")
 
 
 def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
@@ -4628,7 +4637,7 @@ def index(g, self, index):
 
     def try_mask_to_index(index):
         if not symbolic_helper._is_none(index) and (
-            index.type().scalarType() == "Byte" or index.type().scalarType() == "Bool"
+            index.type().scalarType() == "Byte" or symbolic_helper._is_bool(index)
         ):
             if GLOBALS.export_onnx_opset_version < 9:
                 raise errors.SymbolicValueError(
@@ -4680,19 +4689,21 @@ def index(g, self, index):
         else:
             rank = symbolic_helper._get_tensor_rank(self)
             if rank is None:
-                raise NotImplementedError(
-                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank. "
-                    + "Try turning on shape inference during export: "
-                    + "torch.onnx._export(..., onnx_shape_inference=True)."
+                return symbolic_helper._unimplemented(
+                    "aten::index",
+                    "operator of advanced indexing on tensor of unknown rank. "
+                    "Try turning on shape inference during export: "
+                    "torch.onnx._export(..., onnx_shape_inference=True).",
+                    self,
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,
             #       update the warning to recommend exporting with higher opset version.
             warnings.warn(
                 "Exporting aten::index operator of advanced indexing in opset "
-                + str(GLOBALS.export_onnx_opset_version)
-                + " is achieved by combination of multiple ONNX operators, "
-                + "including Reshape, Transpose, Concat, and Gather. "
-                + "If indices include negative values, the exported graph will produce incorrect results."
+                f"{GLOBALS.export_onnx_opset_version}"
+                " is achieved by combination of multiple ONNX operators, "
+                "including Reshape, Transpose, Concat, and Gather. "
+                "If indices include negative values, the exported graph will produce incorrect results."
             )
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
@@ -4797,7 +4808,7 @@ def linalg_norm(
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
             return symbolic_helper._unimplemented(
-                "dim", "Input rank must be known at export time.", input
+                "dim", "Input rank must be known at export time.", self
             )
         if self_dim == 1:
             ord_value = symbolic_helper._parse_arg(ord, "f")
@@ -4833,7 +4844,7 @@ def linalg_vector_norm(
         result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
     elif ord == 0:
         return symbolic_helper._onnx_opset_unsupported_detailed(
-            "linalg_vector_norm", 9, 11, "ord=0 not supported"
+            "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
@@ -4866,7 +4877,7 @@ def linalg_matrix_norm(
     if ord_value == "fro":
         return frobenius_norm(g, self, dim, keepdim)
     elif ord_value == "nuc":
-        return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==nuc", input)
+        return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==nuc", self)
     else:
         ord_value = symbolic_helper._parse_arg(ord, "f")
         if ord_value is None:
@@ -4874,12 +4885,12 @@ def linalg_matrix_norm(
         if ord_value == 2 or ord_value == -2:
             # ord = 2/-2 unimplemented due to lack of operators
             # used to calculate singular values
-            return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==2", input)
+            return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==2", self)
         # Wrap the dim vector to handle neagtive dim values
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
             return symbolic_helper._unimplemented(
-                "linalg.matrix_norm", "Input rank must be known at export time.", input
+                "linalg.matrix_norm", "Input rank must be known at export time.", self
             )
         # Common implementation for cases with
         # ord = 1/-1 and ord = inf/-inf
