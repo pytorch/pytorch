@@ -91,8 +91,7 @@ from ..utils import (
 
 from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
-    get_pattern_to_input_type_to_index,
-    get_module_to_qat_module,
+    p get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
 )
 from ..backend_config import (
@@ -155,16 +154,16 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
-def node_arg_is_weight(node: Node, arg: Any, backend_config: Optional[BackendConfig]) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function' or not backend_config:
+def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function':
         weight_index = backend_config.configs[node.target]._input_type_to_index.get('weight')
         if weight_index and weight_index < len(node.args) and node.args[weight_index] is arg:
             return True
         return node.kwargs.get('weight') is arg
     return False
 
-def node_arg_is_bias(node: Node, arg: Any, backend_config: Optional[BackendConfig]) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function' or not backend_config:
+def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function':
         bias_index = backend_config.configs[node.target]._input_type_to_index.get('bias')
         if bias_index and bias_index < len(node.args) and node.args[bias_index] is arg:
             return True
@@ -237,7 +236,7 @@ def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_node_pattern: Optional[NodePattern],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig,
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
     the backend or not
@@ -511,7 +510,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -648,7 +647,7 @@ def maybe_insert_input_observers_for_node(
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -1081,7 +1080,7 @@ def insert_observers_for_model(
     equalization_config_map: Dict[str, Any],
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig,
     observed_node_names: Set[str],
     is_qat: bool,
 ) -> Optional[Node]:
@@ -1370,7 +1369,7 @@ def run_prepare_fx_on_standalone_modules(
     modules: Dict[str, torch.nn.Module],
     matches: Any,
     prepare_custom_config: PrepareCustomConfig,
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig,
 ) -> None:
     """
     Runs prepare_fx on each standalone module. Note: this does
