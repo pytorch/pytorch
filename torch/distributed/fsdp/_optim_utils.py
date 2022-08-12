@@ -17,10 +17,7 @@ import torch
 import torch.distributed as dist
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
-from torch.distributed.fsdp.flat_param import (
-    FlatParameter,
-    FlatParamHandle,
-)
+from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 
 class _ConsolidatedOptimState:
@@ -147,10 +144,13 @@ def _communicate_optim_state(
     for state_name, value in flat_param_state.items():
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
-            # If the parameter is not sharded (e.g. world size of 1), then
-            # neither is the positive-dimension tensor state, so no need to
-            # communicate it -- we take the target rank's value
-            if not flat_param._is_sharded:  # type: ignore[attr-defined]
+            # If the parameter is not sharded, then neither is the
+            # positive-dimension tensor state, so no need to communicate it --
+            # we take the target rank's value
+            if (
+                fsdp_module.world_size == 1
+                or fsdp_module.sharding_strategy == FSDP.ShardingStrategy.NO_SHARD
+            ):  # TODO (awgu): refactor this once optim state dict uses handles
                 tensor_state[state_name] = value.cpu()
                 continue
             if tensor_buffer is None:

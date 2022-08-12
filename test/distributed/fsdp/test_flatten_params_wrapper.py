@@ -5,7 +5,11 @@ import unittest
 
 import torch
 from torch import distributed as dist
-from torch.distributed.fsdp.flat_param import FlatParamShardMetadata
+from torch.distributed.fsdp.flat_param import (
+    FlatParamShardMetadata,
+    HandleConfig,
+    HandleShardingStrategy,
+)
 from torch.distributed.fsdp.flatten_params_wrapper import FlattenParamsWrapper
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -16,6 +20,9 @@ if not dist.is_available():
 
 class TestFlattenParams(TestCase):
     """Base test class and used for CPU case."""
+
+    def _get_default_config(self):
+        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None)
 
     def _get_empty_module(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
@@ -78,7 +85,12 @@ class TestFlattenParams(TestCase):
         ref_num_params = sum(p.numel() for p in module.parameters())
 
         params_to_flatten = list(module.parameters())
-        flat_module = FlattenParamsWrapper(module, params_to_flatten)
+        flat_module = FlattenParamsWrapper(
+            module,
+            params_to_flatten,
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         flat_num_params = sum(p.numel() for p in flat_module.parameters())
 
         self.assertEqual(ref_num_params, flat_num_params)
@@ -88,7 +100,12 @@ class TestFlattenParams(TestCase):
         ref_output = self._get_output(module)
 
         params_to_flatten = list(module.parameters())
-        flat_module = FlattenParamsWrapper(module, params_to_flatten)
+        flat_module = FlattenParamsWrapper(
+            module,
+            params_to_flatten,
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         flat_output = self._get_output(flat_module)
         self.assertEqual(ref_output, flat_output)
 
@@ -101,7 +118,12 @@ class TestFlattenParams(TestCase):
         )
         num_params_to_flatten = sum(p.numel() for p in params_to_flatten)
 
-        module = FlattenParamsWrapper(module, params_to_flatten)
+        module = FlattenParamsWrapper(
+            module,
+            params_to_flatten,
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         self.assertEqual(module.flat_param.numel(), num_params_to_flatten)
         self.assertEqual(sum(p.numel() for p in module.parameters()), num_params)
 
@@ -128,14 +150,24 @@ class TestFlattenParams(TestCase):
 
     def test_flatten_nothing(self):
         module = self._get_transformer()
-        module = FlattenParamsWrapper(module, [])
+        module = FlattenParamsWrapper(
+            module,
+            [],
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         self.assertIsNone(module.flat_param)
 
     def test_empty_module(self):
         module = self._get_empty_module()
         in_data = torch.rand(1)
         ref_out = module(in_data)
-        module = FlattenParamsWrapper(module, [])
+        module = FlattenParamsWrapper(
+            module,
+            [],
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         self.assertEqual(len(list(module.parameters())), 0)
         self.assertIsNone(module.flat_param)
         fpw_out = module(in_data)
@@ -165,7 +197,12 @@ class TestFlattenParams(TestCase):
 
         module = self._get_shared_params_transformer()  # recreate
         params_to_flatten = list(module.parameters())
-        flat_module = FlattenParamsWrapper(module, params_to_flatten)
+        flat_module = FlattenParamsWrapper(
+            module,
+            params_to_flatten,
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         flat_pnorm_after_step = self._get_pnorm_after_step(flat_module)
 
         self.assertEqual(ref_pnorm_after_step, flat_pnorm_after_step)
@@ -180,7 +217,12 @@ class TestFlattenParams(TestCase):
             torch.nn.ReLU(),
         )
         params_to_flatten = list(module.parameters())
-        flat_module = FlattenParamsWrapper(module, params_to_flatten)
+        flat_module = FlattenParamsWrapper(
+            module,
+            params_to_flatten,
+            torch.device("cuda"),
+            self._get_default_config(),
+        )
         flat_param_handle = flat_module.handle
 
         def _test(kwargs, expected):

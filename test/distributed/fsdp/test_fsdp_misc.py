@@ -148,7 +148,7 @@ class TestFSDPMisc(FSDPTest):
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             self.assertEqual(
-                fsdp_module.device_id,
+                fsdp_module.compute_device,
                 torch.device("cuda", torch.cuda.current_device()),
             )
 
@@ -236,7 +236,7 @@ class TestFSDPMisc(FSDPTest):
         )
         _check_device_matches(nested_wrapped_module, dev_id)
         # Check that passing in `torch.device("cuda")` for a GPU module warns
-        regex = "does not have explicit index"
+        regex = "does not have an explicit index"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
@@ -258,8 +258,8 @@ class TestFSDPMisc(FSDPTest):
         module that does not match the GPU device ID raises an error."""
         context = (
             self.assertRaisesRegex(
-                RuntimeError,
-                f"on rank {self.rank}.*cuda:0, but is on cuda:{self.rank}"
+                AssertionError,
+                f"cuda:{self.rank} vs cuda:0"
             ) if self.rank != 0 else suppress()
         )
         with context:
