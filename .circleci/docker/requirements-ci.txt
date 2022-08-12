@@ -164,9 +164,9 @@ pytest-rerunfailures
 #Pinned versions:
 #test that import:
 
-xdoctest
+xdoctest==1.0.1
 #Description: runs doctests in pytest
-#Pinned versions:
+#Pinned versions: 1.0.1
 #test that import:
 
 #PyYAML
