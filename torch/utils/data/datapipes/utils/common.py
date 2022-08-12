@@ -72,42 +72,46 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         """Finds any position or keyword arguments in the signature"""
         return [p for p in signature.parameters.values() if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD]
 
-    if len(sig.parameters) >= input_col_size:
-        non_default_params = get_non_default_params(sig)
+    pos = []
+    var_positional = False
+    non_default_kw_only = []
 
-        if len(non_default_params) > input_col_size:
+    for p in sig.parameters.values():
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            pos.append(p)
+        elif p.kind is inspect.Parameter.VAR_POSITIONAL:
+            var_positional = True
+        elif p.kind is inspect.Parameter.KEYWORD_ONLY:
+            if p.default is p.empty:
+                non_default_kw_only.append(p)
+        else:
+            continue
 
-            raise ValueError(
-                f"The function {fn_name} takes {len(non_default_params)} "
-                f"non-default parameters, but {input_col_size} are required."
-            )
+    if len(non_default_kw_only) > 0:
+        raise ValueError(
+            f"The function {fn_name} takes {len(non_default_kw_only)} "
+            f"non-default keyword-only parameters, which is not allowed."
+        )
 
-        non_default_kw_only = [p for p in non_default_params if p.kind == inspect.Parameter.KEYWORD_ONLY]
-
-        if len(non_default_kw_only) > 0:
-            raise ValueError(
-                f"The function {fn_name} takes {len(non_default_kw_only)} "
-                f"non-default keyword-only parameters, which is not allowed."
-            )
-
-        pos_or_kwonly = get_normal_params(sig)
-        non_default_pos_or_kwonly = list(filter(lambda p: p.default is p.empty, pos_or_kwonly))
-        if len(pos_or_kwonly) != input_col_size:
-            if contains_var_positional(sig):
-                pass
-            elif len(non_default_pos_or_kwonly) != input_col_size:
-                raise ValueError(
-                    f"The function {fn_name} takes {len(non_default_pos_or_kwonly)} "
-                    f"non-default positional or keyword parameters, "
-                    f"but {input_col_size} are required."
-                )
-
-    else:
-        if inspect.Parameter.VAR_POSITIONAL not in [p.kind for p in sig.parameters.values()]:
+    if len(sig.parameters) < input_col_size:
+        if not var_positional:
             raise ValueError(
                 f"The function {fn_name} takes {len(sig.parameters)} "
                 f"parameters, but {input_col_size} are required."
             )
+    else:
+        if len(pos) > input_col_size:
+            if any(p.default is p.empty for p in pos[input_col_size:]):
+                raise ValueError(
+                    f"The function {fn_name} takes {len(pos)} "
+                    f"positional parameters, but {input_col_size} are required."
+                )
+        elif len(pos) < input_col_size:
+            if not var_positional:
+                raise ValueError(
+                    f"The function {fn_name} takes {len(pos)} "
+                    f"positional parameters, but {input_col_size} are required."
+                )
 
 
 def _is_local_fn(fn):
