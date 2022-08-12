@@ -175,7 +175,9 @@ class TestGenericProxyTensor(TestCase):
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
-        self.assertEqual(fx_f(*new_inps), f(*new_inps))
+        r1 = fx_f(*new_inps)
+        r2 = f(*new_inps)
+        self.assertEqual(r1, r2)
 
     def test_make_fx_simple(self):
         def f(x):
@@ -442,6 +444,7 @@ def forward(self, x_1):
         g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
 
+    @unittest.expectedFailure
     def test_decomposition_interpreter(self):
         def fn(x):
             return torch.nn.functional.silu(x)
@@ -514,6 +517,8 @@ def forward(self, x_1):
         model = Foo()
 
         def f(args, params, buffers):
+            for p in params.values():
+                p.grad = None
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
