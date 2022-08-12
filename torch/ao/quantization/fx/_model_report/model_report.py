@@ -74,6 +74,7 @@ class ModelReport:
     8.) Call model_report.generate_qconfigs to generate the qconfigs based on the report suggestions
 
     Example (with QuantizationTracer):
+        >>> # xdoctest: +SKIP
         >>> # get the necessary qconfig
         >>> config = PrepareCustomConfig()
         >>> skipped_module_names, skipped_module_classes = get_skipped_module_name_and_classes(config, False)
