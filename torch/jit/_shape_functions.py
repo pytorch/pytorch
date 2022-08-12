@@ -741,7 +741,6 @@ def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[L
         output_padding = [0, 0]
     if dilation is None:
         dilation = [1, 1]
-    
     has_dilation = len(dilation) > 0
     dim = len(input)
     output_size: List[int] = []
