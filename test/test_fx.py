@@ -3536,6 +3536,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(str(tracer.graph), str(tracer_after.graph))
         self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
 
+    def test_deepcopy_custom_tracer(self):
+        class MyTracer(Tracer):
+            def __init__(self, extra_param=None):
+                super(Tracer, self).__init__()
+                self.extra_param = extra_param
+
+            @classmethod
+            def deepcopy_special_behavior(cls):
+                return {
+                    'extra_param': lambda v: v,
+                    **Tracer.deepcopy_special_behavior(),
+                }
+
+        # "math" module is not copyable, we need the special behavior
+        tracer = MyTracer(extra_param=math)
+        tracer_copy = copy.deepcopy(tracer)
+
+        self.assertEqual(tracer.extra_param, tracer_copy.extra_param)
+        self.assertEqual(tracer.__class__, tracer_copy.__class__)
+
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))

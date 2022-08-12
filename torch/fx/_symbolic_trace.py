@@ -723,13 +723,21 @@ class Tracer(TracerBase):
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
 
-    def __deepcopy__(self, memo):
+    @classmethod
+    def deepcopy_special_behavior(cls) -> Dict[str, Callable]:
         # _autowrap_search contains modules, which cannot be deepcopied.
-        new_tracer = Tracer.__new__(Tracer)
+        # If your subclass has other attributes that need to be handled with a special case,
+        # you can override this method to handle other attributes specially.
+        return {'_autowrap_search': lambda v: copy.copy(v)}
+
+    def __deepcopy__(self, memo):
+        new_tracer = self.__class__.__new__(self.__class__)
+
+        special_behavior = self.deepcopy_special_behavior()
 
         for k, v in self.__dict__.items():
-            if k in {'_autowrap_search'}:
-                new_obj = copy.copy(v)
+            if k in special_behavior:
+                new_obj = special_behavior[k](v)
             else:
                 new_obj = copy.deepcopy(v, memo)
 
