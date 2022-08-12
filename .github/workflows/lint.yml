@@ -122,7 +122,18 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          pr_size=$(git diff --shortstat "${BASE}" "${HEAD}" | grep -o '[0-9]*' | tail -1)
+          ancestor=$(git merge-base "${BASE}" "${HEAD}")
+          details=$(git diff --shortstat "$ancestor" "${HEAD}")
+          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*')
+          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*')
+
+          pr_size=0
+          if [ "$add" ]; then
+              pr_size=$(("$pr_size" + "$add"))
+          fi
+          if [ "$remove" ]; then
+              pr_size=$(("$pr_size" + "$remove"))
+          fi
 
           if ((pr_size > 2000)); then
             echo
