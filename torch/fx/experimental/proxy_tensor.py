@@ -152,7 +152,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         if r is not NotImplemented:
             return r
 
-    all_constant = pytree.tree_all_only(ProxyTensor, lambda t: t.constant, (args, kwargs))
+    all_constant = pytree.tree_all_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
 
     if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
@@ -206,7 +206,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # element constant computation by testing the numel of the result before
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
-    any_constant = pytree.tree_any_only(ProxyTensor, lambda e: e.constant, (args, kwargs))
+    any_constant = pytree.tree_any_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
 
     constant = None
     # NB: do NOT include factories as constants
