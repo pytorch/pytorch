@@ -448,6 +448,13 @@ def add_torch_libs():
         ],
     )
 
+    cpp_library(
+        name = "headers_for_torch_python_hip_deps",
+        exported_deps = [
+            ":_C_impl_hip",
+        ],
+    ) if is_amd_build() else None
+
     # This target compiles torch_python bindings, but skips the deps on actual
     # torch and python since those will be integrated specially in the wrapper for
     # libinterpreter.so used in torch::deploy
@@ -522,6 +529,28 @@ def add_torch_libs():
         build_script_dep = "//caffe2:fb_caffe2_hipify",
         output_gen_files = libtorch_python_hip_sources_hipified,
     )
+
+    cpp_library(
+        name = "torch_python_hip_without_torch",
+        srcs = [":fb_C_impl_hipify_gen={}".format(f) for f in (libtorch_python_hip_sources_hipified)] + libtorch_python_hip_sources + torch_cpp_srcs,
+        undefined_symbols = True,
+        preferred_linkage = "static",
+        exported_deps = [
+            ":headers_for_torch_python_hip_deps#headers",
+        ],
+        exported_external_deps = [
+            ("pybind11", None),
+            ("frozenpython", None, "python-headers"),
+        ],
+        compiler_flags = compiler_flags_cpu + [
+            "-DUSE_ROCM",
+            # some code in the Python bindings compiles differently
+            # when you are deploy
+            "-DUSE_DEPLOY",
+            "-Wno-error",
+        ],
+        compiler_specific_flags = common_flags["compiler_specific_flags"],
+    ) if is_amd_build() else None
 
     cpp_library(
         name = "_C_impl_hip",
