@@ -447,6 +447,35 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             ]
         }
 
+    def test_grads_reduced_precision(self):
+        config = MixedPrecision(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+            buffer_dtype=torch.bfloat16,
+            keep_casted_gradients=True,
+        )
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Linear(10, 10)
+                self.lin2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin2(self.lin1(x))
+
+        m = MyModel().cuda()
+        m.lin1 = FSDP(m.lin1, mixed_precision=config)
+        m = FSDP(m, mixed_precision=config)
+        inp = torch.ones(1, 10)
+        out = m(inp).sum()
+        out.backward()
+        # grads should be in reduced prec
+        for param in m.params:
+            self.assertEqual(torch.bfloat16, param.grad.dtype)
+
+        print(" -- done --")
+        dist.barrier()
+
     @skip_if_lt_x_gpu(2)
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to

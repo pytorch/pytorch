@@ -205,8 +205,8 @@ class MixedPrecision:
         original parameter precision.
     """
     # maintain a tensor of this dtype that the fp32 param shard will be cast to.
-    # Will control the precision of model params, inputs, and thus compute as
-    # well.
+    # Will control the precision of model params, inputs, and thus compute and
+    # resulting gradients as well.
     param_dtype: Optional[torch.dtype] = None
     # Gradient communication precision.
     reduce_dtype: Optional[torch.dtype] = None
@@ -214,6 +214,8 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
+    keep_casted_gradients: Optional[bool] = False
+
 
 
 @dataclass
@@ -1350,6 +1352,11 @@ class FullyShardedDataParallel(nn.Module):
             self.mixed_precision is not None
             and self.mixed_precision.reduce_dtype is not None
         )
+
+    def _mixed_precision_keep_low_precision_grads(self) -> bool:
+        ret = self.mixed_precision is not None and self.mixed_precision.keep_casted_gradients
+        print(f"returning {ret}")
+        return ret
 
     def _low_precision_hook_enabled(self) -> bool:
         """
@@ -2968,6 +2975,7 @@ class FullyShardedDataParallel(nn.Module):
                         # This is a two-step process to avoid potential underflow and overflow.
                         output.div_(self.gradient_postdivide_factor)
 
+                    print(f"rv: casting")
                     self._cast_grad_to_param_dtype(output, param)
 
                     # To support gradient accumulation outside `no_sync()`, we save
@@ -3026,6 +3034,8 @@ class FullyShardedDataParallel(nn.Module):
                 # are underway in the post_backward stream. See:
                 # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
                 orig_grad_data.record_stream(self._streams["post_backward"])
+
+            print(f"{self.rank} finished post backward")
 
     def _cast_grad_to_param_dtype(
         self,
@@ -3130,6 +3140,14 @@ class FullyShardedDataParallel(nn.Module):
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
+                        # TODO - in FSDP mixed precision, if we want to keep gradients downcasted,
+                        # we re-downcast here. This roundabout way of doing so is because we
+                        # currently have the full precision param shard being used, but want
+                        # a mixed precision gradient, we cannot directly assign to a lower precision
+                        # gradient.
+                        if self._mixed_precision_keep_low_precision_grads():
+                            assert self.mixed_precision is not None and self.mixed_precision.param_dtype is not None
+                            p.grad.data = p.grad.data.to(self.mixed_precision.param_dtype)
                     else:
                         p_assert(
                             not p._is_sharded or not p._post_backward_called,
@@ -3147,50 +3165,54 @@ class FullyShardedDataParallel(nn.Module):
                     p._post_backward_called = False
 
         # Update root and nested FSDP's hooks and flags.
-        for m in self.modules():  # includes self
-            if isinstance(m, FullyShardedDataParallel):
-                if any(p.requires_grad for p in m.parameters()):
-                    # Check if the module has params and if any of them has
-                    # the `requires_grad` field set. If `requires_grad=False` for
-                    # all the params, the post_backward hook will not fire and the
-                    # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
-                    if managed_param_requires_grad:
-                        p_assert(
-                            all(hasattr(p, '_post_backward_called') for p in m.params),
-                            "Expected all params to have flag _post_backward_called set!"
-                        )
-                        post_backward_hook_called = any(p._post_backward_called for p in m.params)
-                        if post_backward_hook_called:
-                            m._assert_state(TrainingState_.BACKWARD_POST)
+        try:
+            for m in self.modules():  # includes self
+                if isinstance(m, FullyShardedDataParallel):
+                    if any(p.requires_grad for p in m.parameters()):
+                        # Check if the module has params and if any of them has
+                        # the `requires_grad` field set. If `requires_grad=False` for
+                        # all the params, the post_backward hook will not fire and the
+                        # state will remain in `TrainingState_.BACKWARD_PRE`.
+                        managed_param_requires_grad = any(p.requires_grad for p in m.params)
+                        if managed_param_requires_grad:
+                            p_assert(
+                                all(hasattr(p, '_post_backward_called') for p in m.params),
+                                "Expected all params to have flag _post_backward_called set!"
+                            )
+                            post_backward_hook_called = any(p._post_backward_called for p in m.params)
+                            if post_backward_hook_called:
+                                m._assert_state(TrainingState_.BACKWARD_POST)
+                            else:
+                                # post backward hook was not called, meaning param
+                                # did not have a gradient computed. It was either unused
+                                # in forward, or unused in loss computation so it did
+                                # not get gradient
+                                m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
                         else:
-                            # post backward hook was not called, meaning param
-                            # did not have a gradient computed. It was either unused
-                            # in forward, or unused in loss computation so it did
-                            # not get gradient
-                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+                            m._assert_state(TrainingState_.BACKWARD_PRE)
                     else:
-                        m._assert_state(TrainingState_.BACKWARD_PRE)
-                else:
-                    # When `m` and its children have no non-ignored params or
-                    # have non-ignored params but none with `requires_grad==True`,
-                    # there are two cases:
-                    # 1. output tensors are `requires_grad==True`. In this case,
-                    # pre-backward hook is still registered, so it is in BACKWARD_PRE state.
-                    # 2. output tensors are `requires_grad==False`. In this case,
-                    # pre-backward hook is not registered, so it is in IDLE state.
-                    m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+                        # When `m` and its children have no non-ignored params or
+                        # have non-ignored params but none with `requires_grad==True`,
+                        # there are two cases:
+                        # 1. output tensors are `requires_grad==True`. In this case,
+                        # pre-backward hook is still registered, so it is in BACKWARD_PRE state.
+                        # 2. output tensors are `requires_grad==False`. In this case,
+                        # pre-backward hook is not registered, so it is in IDLE state.
+                        m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
 
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
-                m.training_state = TrainingState_.IDLE
+                    _finalize_params(m)
+                    m._pre_backward_hook_has_run = False
+                    m.training_state = TrainingState_.IDLE
 
-                if m._is_root:
-                    # reset this flag for cases like "one forward pass + multiple backward passes"
-                    self._post_backward_callback_queued = False
+                    if m._is_root:
+                        # reset this flag for cases like "one forward pass + multiple backward passes"
+                        self._post_backward_callback_queued = False
 
-        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
-            self._param_exec_order_policy_second_iter_init()
+            if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
+                self._param_exec_order_policy_second_iter_init()
+        except Exception as e:
+            print(f"rv got {str(e)}")
+            raise e
 
     def _param_exec_order_policy_second_iter_init(self) -> None:
         self._param_exec_order_prep_stage = False
