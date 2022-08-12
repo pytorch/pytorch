@@ -322,8 +322,13 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
 
   A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
   B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
-  if (!A_bdim.has_value()) {
-    A_ = A_.contiguous();  // bug?
+
+  // A determines whether or not linalg_solve takes an optimized path. We the check on A_ to match the one run on the
+  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
+  // differs based on whether or not the optimized path was taken
+  const auto batched_A_was_contiguous = (!A_bdim.has_value() && A.is_contiguous()) || *A_bdim == 0;
+  if (batched_A_was_contiguous && !A.is_complex()) {
+    A_ = A_.contiguous();
   }
   const auto res = _linalg_solve_ex(A_, B_, left, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
