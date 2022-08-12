@@ -6,7 +6,7 @@ import torch.nn as nn
 
 class DummyNet(nn.Module):
     def __init__(self, num_classes=1000):
-        super(DummyNet, self).__init__()
+        super().__init__()
         self.features = nn.Sequential(
             nn.LeakyReLU(0.02),
             nn.BatchNorm2d(3),
@@ -20,7 +20,7 @@ class DummyNet(nn.Module):
 
 class ConcatNet(nn.Module):
     def __init__(self):
-        super(ConcatNet, self).__init__()
+        super().__init__()
 
     def forward(self, inputs):
         return torch.cat(inputs, 1)
@@ -28,7 +28,7 @@ class ConcatNet(nn.Module):
 
 class PermuteNet(nn.Module):
     def __init__(self):
-        super(PermuteNet, self).__init__()
+        super().__init__()
 
     def forward(self, input):
         return input.permute(2, 3, 0, 1)
@@ -36,7 +36,7 @@ class PermuteNet(nn.Module):
 
 class PReluNet(nn.Module):
     def __init__(self):
-        super(PReluNet, self).__init__()
+        super().__init__()
         self.features = nn.Sequential(
             nn.PReLU(3),
         )
@@ -48,7 +48,7 @@ class PReluNet(nn.Module):
 
 class FakeQuantNet(nn.Module):
     def __init__(self):
-        super(FakeQuantNet, self).__init__()
+        super().__init__()
         self.fake_quant = torch.ao.quantization.FakeQuantize()
         self.fake_quant.disable_observer()
 

@@ -5,6 +5,7 @@ import warnings
 import torch
 from ..parameter import is_lazy
 
+__all__ = ['LazyModuleMixin']
 
 class _LazyProtocol(Protocol):
     """This is to avoid errors with mypy checks for

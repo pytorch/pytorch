@@ -1,7 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/sparse/SparseBlas.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,14 +25,23 @@
 namespace at {
 namespace native {
 
-Tensor& addmv_out_sparse_csr(
+Tensor& addmv_out_sparse_compressed(
     const Tensor& self,
     const Tensor& mat,
     const Tensor& vec,
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.is_sparse_csr());
+  TORCH_CHECK(
+      mat.layout() != kSparseBsc,
+      "torch.addmv: operation not supported for mat with SparseBsc layout");
+  if (mat.layout() == kSparseCsc) {
+    // TODO: Add native CSC support to avoid this expensive conversion
+    return addmv_out_sparse_compressed(
+        self, mat.to_sparse_csr(), vec, beta, alpha, result);
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mat.layout() == kSparseCsr || mat.layout() == kSparseBsr);
 
   TORCH_CHECK(mat.dim() == 2, "addmv: Expected mat to be 2-D");
   TORCH_CHECK(vec.dim() == 1, "addmv: Expected vec to be 1-D");
@@ -109,49 +120,20 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.is_sparse_csr());
-
-  TORCH_CHECK(mat1.layout() == kStrided, "sampled_addmm: Expected mat1 to have strided layout, but got ", mat1.layout());
-  TORCH_CHECK(mat2.layout() == kStrided, "sampled_addmm: Expected mat2 to have strided layout, but got ", mat2.layout());
-
-  TORCH_CHECK(result.layout() == kSparseCsr, "sampled_addmm: Expected result to have sparse csr layout, but got ", result.layout());
-
-  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "sampled_addmm: Expected mat1 and mat2 to have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
-  TORCH_CHECK(mat1.scalar_type() == self.scalar_type(), "sampled_addmm: Expected mat1 and self to have the same dtype, but got ", mat1.scalar_type(), " and ", self.scalar_type());
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(), "sampled_addmm: Expected result and self to have the same dtype, but got ", result.scalar_type(), " and ", self.scalar_type());
-
-  TORCH_CHECK(
-      mat1.dim() == 2, "sampled_addmm: Expected mat1 to be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "sampled_addmm: Expected mat2 to be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-    result.dim() == 2, "sampled_addmm: Expected result to be a matrix, got ", result.dim(), "-D tensor");
-
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-  TORCH_CHECK(
-      mat1_sizes[1] == mat2_sizes[0],
-      "sampled_addmm: mat1 and mat2 shapes cannot be multiplied (",
-      mat1_sizes[0],
-      "x",
-      mat1_sizes[1],
-      " and ",
-      mat2_sizes[0],
-      "x",
-      mat2_sizes[1],
-      ")");
-
-  IntArrayRef self_sizes = self.sizes();
-  TORCH_CHECK(
-      self_sizes[0] == mat1_sizes[0], "sampled_addmm: self dim 0 must match mat1 dim 0");
-  TORCH_CHECK(
-      self_sizes[1] == mat2_sizes[1], "sampled_addmm: self dim 1 must match mat2 dim 1");
-
+  at::native::sparse::sparse_sampled_addmm_check_inputs(self, mat1, mat2, beta, alpha, result);
+  // Allow only same types as for the CUDA path
+  auto t = self.scalar_type();
+  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float ||
+    t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+    "sparse_sampled_addmm: Expected self to be a floating-point or complex tensor, but got ", t);
   if (&result != &self) {
-    at::native::resize_as_sparse_csr_(result, self);
+    // We allow self to be a single matrix when mat1 and mat2 are batched
+    auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
+    result_sizes.push_back(self.size(-2));
+    result_sizes.push_back(self.size(-1));
+    at::sparse_csr::get_sparse_csr_impl(result)->resize_(self._nnz(), result_sizes);
   }
-
-  result.copy_(at::addmm(self.to_dense(), mat1, mat2, beta, alpha).sparse_mask(self));
+  result.copy_((self.to_dense().mul(beta).add(mat1.matmul(mat2), alpha)).sparse_mask(self));
   return result;
 }
 
@@ -165,6 +147,105 @@ Tensor sparse_sampled_addmm_sparse_csr_cpu(
   at::native::sparse_sampled_addmm_out_sparse_csr_cpu(self, mat1, mat2, beta, alpha, result);
   return result;
 }
+
+namespace sparse {
+
+void sparse_sampled_addmm_check_inputs(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.is_sparse_csr());
+
+  TORCH_CHECK(
+      mat1.layout() == kStrided,
+      "sampled_addmm: Expected mat1 to have strided layout, but got ",
+      mat1.layout());
+  TORCH_CHECK(
+      mat2.layout() == kStrided,
+      "sampled_addmm: Expected mat2 to have strided layout, but got ",
+      mat2.layout());
+
+  TORCH_CHECK(
+      result.layout() == kSparseCsr,
+      "sampled_addmm: Expected result to have sparse csr layout, but got ",
+      result.layout());
+
+  TORCH_CHECK(
+      mat1.scalar_type() == mat2.scalar_type(),
+      "sampled_addmm: Expected mat1 and mat2 to have the same dtype, but got ",
+      mat1.scalar_type(),
+      " and ",
+      mat2.scalar_type());
+  TORCH_CHECK(
+      mat1.scalar_type() == self.scalar_type(),
+      "sampled_addmm: Expected mat1 and self to have the same dtype, but got ",
+      mat1.scalar_type(),
+      " and ",
+      self.scalar_type());
+  TORCH_CHECK(
+      result.scalar_type() == self.scalar_type(),
+      "sampled_addmm: Expected result and self to have the same dtype, but got ",
+      result.scalar_type(),
+      " and ",
+      self.scalar_type());
+
+  TORCH_CHECK(
+      mat1.dim() >= 2,
+      "sampled_addmm: Expected mat1 to be a matrix, got ",
+      mat1.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() >= 2,
+      "sampled_addmm: Expected mat2 to be a matrix, got ",
+      mat2.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      result.dim() >= 2,
+      "sampled_addmm: Expected result to be a matrix, got ",
+      result.dim(),
+      "-D tensor");
+
+  TORCH_CHECK(
+    mat1.sizes().slice(0, mat1.dim() - 2) == mat2.sizes().slice(0, mat2.dim() - 2),
+    "sampled_addmm: Expected mat1 and mat2 to have the same batch size, but got ",
+    mat1.sizes().slice(0, mat1.dim() - 2),
+    " and ",
+    mat2.sizes().slice(0, mat2.dim() - 2));
+
+  TORCH_CHECK(
+    !(self.dim() > 2 && self.sizes().slice(0, self.dim() - 2) != mat1.sizes().slice(0, mat1.dim() - 2)),
+    "sampled_addmm: Expected self and mat1 to have the same batch size, but got ",
+    self.sizes().slice(0, self.dim() - 2),
+    " and ",
+    mat1.sizes().slice(0, mat1.dim() - 2));
+
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  TORCH_CHECK(
+      mat1_sizes[mat1.dim() - 1] == mat2_sizes[mat2.dim() - 2],
+      "sampled_addmm: mat1 and mat2 shapes cannot be multiplied (",
+      mat1_sizes[mat1.dim() - 2],
+      "x",
+      mat1_sizes[mat1.dim() - 1],
+      " and ",
+      mat2_sizes[mat2.dim() - 2],
+      "x",
+      mat2_sizes[mat2.dim() - 1],
+      ")");
+
+  IntArrayRef self_sizes = self.sizes();
+  TORCH_CHECK(
+      self_sizes[self.dim() - 2] == mat1_sizes[mat1.dim() - 2],
+      "sampled_addmm: self.shape[-2] must match mat1.shape[-2]");
+  TORCH_CHECK(
+      self_sizes[self.dim() - 1] == mat2_sizes[mat2.dim() - 1],
+      "sampled_addmm: self.shape[-1] must match mat2.shape[-1]");
+}
+
+} // namespace sparse
 
 } // namespace native
 } // namespace at

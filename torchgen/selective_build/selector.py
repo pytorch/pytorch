@@ -1,13 +1,13 @@
-from typing import Dict, Set, Optional, Tuple, List
-import yaml
-
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from torchgen.model import NativeFunction
 from torchgen.selective_build.operator import (
-    SelectiveBuildOperator,
     merge_debug_info,
     merge_operator_dicts,
+    SelectiveBuildOperator,
     strip_operator_overload_name,
 )
 

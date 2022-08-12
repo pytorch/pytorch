@@ -113,7 +113,7 @@ static void min_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t min_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = self_data[i * self_dim_stride];
@@ -146,10 +146,10 @@ static void max_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t max_number = self_data[0];
+        scalar_t max_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) <= zabs_(max_number))) {
             max_number = value;
             index = i;
@@ -182,10 +182,10 @@ static void aminmax_kernel(
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        scalar_t min_number = self_data[0];
-        scalar_t max_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
+        scalar_t max_number = min_number;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           // note: comparison is written this way to handle NaN correctly
           if (!(value >= min_number)) {
             min_number = value;
@@ -205,7 +205,7 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
@@ -257,7 +257,7 @@ static void mode_kernel_impl(
             int64_t max_freq = 0;
 
             for (const auto i : c10::irange(self_dim_size)) {
-              elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
+              elements[i] = std::make_pair(c10::load(&self_data[i * self_dim_stride]), i);
             }
 
             // Even though, theoretically, we don't need to specify this lambda
@@ -331,14 +331,18 @@ static void isin_default_kernel_cpu(
   });
 }
 
-static void clamp_kernel_impl(TensorIterator& iter) {
+static void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-        return std::min(std::max(a, min), max);
+        if (min != min || max != max) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+        } else {
+            return std::min(std::max(a, min), max);
+        }
       },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
-        return vec::clamp(a, min, max);
+        return vec::minimum(vec::maximum(a, min), max);
       });
   });
 }
@@ -359,18 +363,6 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
   });
 }
 
-static void clamp_max_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t max) -> scalar_t {
-        return std::min(a, max);
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> max) {
-        return vec::clamp_max(a, max);
-      });
-  });
-}
-
 static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
     const auto max = max_.to<scalar_t>();
@@ -382,18 +374,6 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
       [=](Vectorized<scalar_t> a) {
         return vec::clamp_max(a, max_vec);
       });
-  });
-}
-
-static void clamp_min_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
-    cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t min) -> scalar_t {
-          return std::max(a, min);
-        },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min) {
-          return vec::clamp_min(a, min);
-        });
   });
 }
 
@@ -421,8 +401,6 @@ REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_impl);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);

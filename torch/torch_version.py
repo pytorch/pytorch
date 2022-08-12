@@ -1,6 +1,8 @@
 from typing import Any, Iterable
 from .version import __version__ as internal_version
 
+__all__ = ['TorchVersion', 'Version', 'InvalidVersion']
+
 class _LazyImport:
     """Wraps around classes lazy imported from packaging.version
     Output of the function v in following snippets are identical:
@@ -23,7 +25,7 @@ class _LazyImport:
         except ImportError:
             # If packaging isn't installed, try and use the vendored copy
             # in pkg_resources
-            from pkg_resources import packaging  # type: ignore[attr-defined]
+            from pkg_resources import packaging  # type: ignore[attr-defined, no-redef]
         return getattr(packaging.version, self._cls_name)
 
     def __call__(self, *args, **kwargs):

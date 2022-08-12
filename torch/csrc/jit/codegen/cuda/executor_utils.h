@@ -55,7 +55,8 @@ struct NvrtcFunction {
 
 void initializeCudaContext();
 
-NvrtcFunction nvrtcCompile(
+// Returns executable function and the ptxas log from compilation
+std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id,

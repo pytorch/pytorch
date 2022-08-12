@@ -187,7 +187,13 @@ class WeightedRandomSampler(Sampler[int]):
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(replacement))
-        self.weights = torch.as_tensor(weights, dtype=torch.double)
+
+        weights_tensor = torch.as_tensor(weights, dtype=torch.double)
+        if len(weights_tensor.shape) != 1:
+            raise ValueError("weights should be a 1d sequence but given "
+                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+
+        self.weights = weights_tensor
         self.num_samples = num_samples
         self.replacement = replacement
         self.generator = generator
@@ -232,14 +238,27 @@ class BatchSampler(Sampler[List[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[List[int]]:
-        batch = []
-        for idx in self.sampler:
-            batch.append(idx)
-            if len(batch) == self.batch_size:
-                yield batch
-                batch = []
-        if len(batch) > 0 and not self.drop_last:
-            yield batch
+        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
+        if self.drop_last:
+            sampler_iter = iter(self.sampler)
+            while True:
+                try:
+                    batch = [next(sampler_iter) for _ in range(self.batch_size)]
+                    yield batch
+                except StopIteration:
+                    break
+        else:
+            batch = [0] * self.batch_size
+            idx_in_batch = 0
+            for idx in self.sampler:
+                batch[idx_in_batch] = idx
+                idx_in_batch += 1
+                if idx_in_batch == self.batch_size:
+                    yield batch
+                    idx_in_batch = 0
+                    batch = [0] * self.batch_size
+            if idx_in_batch > 0:
+                yield batch[:idx_in_batch]
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented

@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
 
+__all__ = ['LowRankMultivariateNormal']
 
 def _batch_capacitance_tril(W, D):
     r"""
@@ -127,6 +128,10 @@ class LowRankMultivariateNormal(Distribution):
 
     @property
     def mean(self):
+        return self.loc
+
+    @property
+    def mode(self):
         return self.loc
 
     @lazy_property

@@ -122,7 +122,11 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->stop());
     os_ << " : ";
   }
-  print_inline(id->extent());
+  if (id->isBroadcast() && id->hasExpandedExtent()) {
+    print_inline(id->expandedExtent());
+  } else {
+    print_inline(id->extent());
+  }
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
@@ -390,10 +394,25 @@ void IrPrinter::handle(const TernaryOp* top) {
 }
 
 void IrPrinter::handle(const ReductionOp* rop) {
-  indent() << rop->out() << " = reduction( " << rop->in()
+  indent() << rop->out() << "\n";
+  indent() << "   = reduction( " << rop->in()
            << ", op = " << rop->getReductionOpType()
            << ", initial value = " << rop->init()
-           << ", fused = " << rop->isFused() << " )\n";
+           << ", allreduce = " << rop->isAllreduce() << " )\n";
+}
+
+void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
+  indent() << "Grouped reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    indent() << grouped_rop->output(i) << " = reduction( "
+             << grouped_rop->input(i)
+             << ", op = " << grouped_rop->getReductionOpType(i)
+             << ", initial value = " << grouped_rop->initVal(i) << " )\n";
+  }
+  indent() << "allreduce = " << (grouped_rop->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
 }
 
 void IrPrinter::handle(const WelfordOp* wop) {
@@ -411,12 +430,18 @@ void IrPrinter::handle(const WelfordOp* wop) {
     os_ << "\n  initial value = " << wop->initAvg() << "(Avg)\n  "
         << wop->initVar() << "(Var)\n  " << wop->initN() << "(N)";
   }
-  os_ << "\n  fused = " << wop->isFused();
+  os_ << "\n  allreduce = " << wop->isAllreduce();
   os_ << " )\n";
 }
 
+void IrPrinter::handle(const LoadStoreOp* ldst) {
+  indent() << ldst->out() << " = " << ldst->opType() << "( " << ldst->in()
+           << " )\n";
+}
+
 void IrPrinter::handle(const BroadcastOp* bop) {
-  indent() << bop->out() << " = broadcast( " << bop->in() << " )\n";
+  indent() << bop->out() << "\n";
+  indent() << "   = broadcast( " << bop->in() << " )\n";
 }
 
 void IrPrinter::handle(const Split* s) {
@@ -451,6 +476,18 @@ void IrPrinter::handle(const TransposeOp* top) {
   indent() << top->out() << " = transpose( " << top->in() << " )\n";
 }
 
+void IrPrinter::handle(const ExpandOp* eop) {
+  indent() << eop->out() << " = expand( " << eop->in() << ", {";
+  std::stringstream ss;
+  for (auto expanded_extent : eop->expanded_extents()) {
+    if (ss.tellp()) {
+      ss << ", ";
+    }
+    ss << expanded_extent;
+  }
+  os_ << ss.str() << "} )\n";
+}
+
 void IrPrinter::handle(const ShiftOp* sop) {
   indent() << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
            << "}, {" << sop->padWidth() << "} )\n";
@@ -483,9 +520,9 @@ void IrPrinter::handle(const GatherOp* op) {
   os_ << "} )\n";
 }
 
-void IrPrinter::handle(const ViewDtypeOp* top) {
-  indent() << top->out() << " = view.dtype( " << top->in() << ", "
-           << top->dtype() << " )\n";
+void IrPrinter::handle(const ViewAsScalar* top) {
+  indent() << top->out() << " = view_as_scalar( " << top->in() << ", "
+           << top->vector_id() << " )\n";
 }
 
 void IrPrinter::handle(const ViewOp* top) {
@@ -494,35 +531,12 @@ void IrPrinter::handle(const ViewOp* top) {
 
 void IrPrinter::handle(const kir::Predicate* node) {
   switch (node->predicate_type()) {
-    case PredicateType::Inline: {
-      os_ << "Inline_Predicate";
-      break;
-    }
     case PredicateType::Manual: {
       os_ << node->value();
       break;
     }
-    case PredicateType::Misaligned: {
-      os_ << "Misaligned_Predicate";
-      break;
-    }
-    case PredicateType::Padding: {
-      os_ << "Padding_Predicate";
-      break;
-    }
-    case PredicateType::Shift: {
-      os_ << "Shift_Predicate";
-      break;
-    }
-    case PredicateType::Unswitch: {
-      os_ << "Unswitch_Predicate";
-      break;
-    }
-    case PredicateType::Vectorize: {
-      os_ << "Vectorize_Predicate";
-      break;
-    }
     default:
+      os_ << node->predicate_type();
       break;
   }
 }
@@ -572,6 +586,10 @@ void IrPrinter::handle(const kir::BlockSync* node) {
            << ")\n";
 }
 
+void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT()\n";
+}
+
 void IrPrinter::handle(const kir::GridSync* node) {
   indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
   handle(node->syncBuffer());
@@ -615,25 +633,24 @@ void IrPrinter::handle(const kir::GridBroadcast* node) {
 }
 
 void IrPrinter::handle(const kir::GridReduction* node) {
-  const auto* reduction_op = node->reduction_op();
   indent();
-  handle(reduction_op->out());
+  handle(node->out());
   os_ << " = "
-      << "GRID_REDUCTION(op='" << reduction_op->getReductionOpType() << "'"
+      << "GRID_REDUCTION(op='" << node->getReductionOpType() << "'"
       << ", in=";
-  handle(reduction_op->in());
+  handle(node->in());
   os_ << ", init=";
-  handle(reduction_op->init());
+  handle(node->init());
   os_ << ", read_pred=";
-  if (reduction_op->predicate() != nullptr) {
-    handle(reduction_op->predicate());
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
   } else {
     os_ << "nullptr";
   }
   os_ << ")\n";
   os_ << ", write_pred=";
-  if (reduction_op->writePredicate() != nullptr) {
-    handle(reduction_op->writePredicate());
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
   } else {
     os_ << "nullptr";
   }
@@ -644,19 +661,43 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   indent() << kTab << ".sync_buffer=";
   handle(node->sync_buffer()->buffer());
   os_ << "\n";
-  indent() << kTab << ".grid_read_pred=";
+}
+
+void IrPrinter::handle(const kir::GroupedGridReduction* node) {
+  indent() << "Grouped grid reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent();
+    handle(node->output(i));
+    os_ << " = "
+        << "reduction(op='" << node->getReductionOpType(i) << "'"
+        << ", in=";
+    handle(node->input(i));
+    os_ << ", init=";
+    handle(node->initVal(i));
+    os_ << "\n";
+  }
+  indent() << kTab << ".read_pred=";
   if (node->predicate() != nullptr) {
     handle(node->predicate());
   } else {
     os_ << "nullptr";
   }
   os_ << "\n";
-  indent() << kTab << ".grid_write_pred=";
+  indent() << kTab << ".write_pred=";
   if (node->writePredicate() != nullptr) {
     handle(node->writePredicate());
   } else {
     os_ << "nullptr";
   }
+  os_ << "\n";
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent() << kTab << ".reduction_buffer=";
+    handle(node->reduction_buffers().at(i)->buffer());
+    os_ << "\n";
+  }
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
   os_ << "\n";
 }
 
@@ -751,11 +792,7 @@ void IrTransformPrinter::handle(Fusion* f) {
 }
 
 void IrTransformPrinter::printTransforms(TensorView* tv) {
-  auto root_domain = tv->getMaybeRFactorDomain();
-  auto all_exp = DependencyCheck::getAllExprsBetween(
-      {root_domain.begin(), root_domain.end()},
-      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-
+  auto root_domain = tv->domain()->getRootDomain();
   os() << " root domain : (";
   for (const auto root_idx : c10::irange(root_domain.size())) {
     IrPrinter::handle(root_domain[root_idx]);
@@ -764,6 +801,33 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
     }
   }
   os() << ")\n";
+
+  if (tv->hasRFactor()) {
+    auto rfactor_domain = tv->domain()->getRFactorDomain();
+
+    auto all_exp = DependencyCheck::getAllExprsBetween(
+        {root_domain.begin(), root_domain.end()},
+        {rfactor_domain.begin(), rfactor_domain.end()});
+
+    for (auto exp : all_exp) {
+      os() << "  ";
+      IrPrinter::handle(exp);
+    }
+
+    os() << " rfactor domain : (";
+    for (const auto root_idx : c10::irange(rfactor_domain.size())) {
+      IrPrinter::handle(rfactor_domain[root_idx]);
+      if (root_idx + 1 < rfactor_domain.size()) {
+        os() << ",";
+      }
+    }
+    os() << ")\n";
+  }
+
+  auto from = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   for (auto exp : all_exp) {
     os() << "  ";

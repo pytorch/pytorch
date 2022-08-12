@@ -56,7 +56,7 @@ def _is_zipfile(f) -> bool:
     start = f.tell()
 
     byte = f.read(1)
-    while byte != "":
+    while byte != b"":
         read_bytes.append(byte)
         if len(read_bytes) == 4:
             break
@@ -115,13 +115,18 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
 
 def _cpu_tag(obj):
-    if type(obj).__module__ == 'torch':
+    if obj.device.type == 'cpu':
         return 'cpu'
 
 
 def _cuda_tag(obj):
-    if type(obj).__module__ == 'torch.cuda':
-        return 'cuda:' + str(obj.get_device())
+    if obj.device.type == 'cuda':
+        return 'cuda:' + str(obj.device.index)
+
+
+def _mps_tag(obj):
+    if obj.device.type == 'mps':
+        return 'mps'
 
 
 def _cpu_deserialize(obj, location):
@@ -151,18 +156,22 @@ def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
         device = validate_cuda_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
-            storage_type = getattr(torch.cuda, type(obj).__name__)
             with torch.cuda.device(device):
-                return storage_type(obj.nbytes())
+                return torch._UntypedStorage(obj.nbytes(), device=torch.device(location))
         else:
             return obj.cuda(device)
+
+def _mps_deserialize(obj, location):
+    if location == 'mps':
+        return obj.mps()
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(20, _cuda_tag, _cuda_deserialize)
+register_package(21, _mps_tag, _mps_deserialize)
 
 
-def location_tag(storage: Union[Storage, torch.storage._TypedStorage]):
+def location_tag(storage: Union[Storage, torch.storage._TypedStorage, torch._UntypedStorage]):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
@@ -374,12 +383,13 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
     """
     _check_dill_version(pickle_module)
 
-    with _open_file_like(f, 'wb') as opened_file:
-        if _use_new_zipfile_serialization:
-            with _open_zipfile_writer(opened_file) as opened_zipfile:
-                _save(obj, opened_zipfile, pickle_module, pickle_protocol)
-                return
-        _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(f) as opened_zipfile:
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+            return
+    else:
+        with _open_file_like(f, 'wb') as opened_file:
+            _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
@@ -414,6 +424,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             return ('module', obj, source_file, source)
 
         if isinstance(obj, torch.storage._TypedStorage) or torch.is_storage(obj):
+            storage: torch._UntypedStorage
+
             if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
@@ -424,12 +436,14 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 dtype = obj.dtype
                 storage_numel = obj.size()
 
-            else:
+            elif isinstance(obj, torch._UntypedStorage):
                 storage = obj
-                storage_dtype = storage.dtype
+                storage_dtype = torch.uint8
                 storage_type = normalize_storage_type(type(obj))
                 dtype = torch.uint8
-                storage_numel = cast(Storage, storage).nbytes()
+                storage_numel = storage.nbytes()
+            else:
+                raise TypeError(f'type not recognized: {type(obj)}')
 
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
@@ -444,7 +458,6 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
             view_metadata: Optional[Tuple[str, int, int]]
-            storage = cast(Storage, storage)
 
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
@@ -552,11 +565,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
             else:
                 storage = obj
-                storage_dtype = storage.dtype
+                storage_dtype = torch.uint8
                 storage_type = normalize_storage_type(type(obj))
                 storage_numel = storage.nbytes()
-
-            storage = cast(Storage, storage)
 
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
@@ -708,7 +719,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
-                    return torch.jit.load(opened_file)
+                    return torch.jit.load(opened_file, map_location=map_location)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
@@ -1009,7 +1020,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
-        dtype = storage_type.dtype
+        if storage_type is torch._UntypedStorage:
+            dtype = torch.uint8
+        else:
+            dtype = storage_type.dtype
 
         if key not in loaded_storages:
             nbytes = numel * torch._utils._element_size(dtype)

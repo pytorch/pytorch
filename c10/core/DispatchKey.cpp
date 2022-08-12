@@ -17,6 +17,8 @@ const char* toString(BackendComponent t) {
       return "XLABit";
     case BackendComponent::LazyBit:
       return "LazyBit";
+    case BackendComponent::MetaBit:
+      return "MetaBit";
     case BackendComponent::XPUBit:
       return "XPUBit";
     case BackendComponent::IPUBit:
@@ -142,6 +144,8 @@ const char* toString(DispatchKey t) {
       return "AutogradXLA";
     case DispatchKey::AutogradLazy:
       return "AutogradLazy";
+    case DispatchKey::AutogradMeta:
+      return "AutogradMeta";
     case DispatchKey::AutogradMPS:
       return "AutogradMPS";
     case DispatchKey::AutogradHPU:
@@ -192,6 +196,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::CompositeExplicitAutograd:
       return "CompositeExplicitAutograd";
+
+    case DispatchKey::CompositeExplicitAutogradNonFunctional:
+      return "CompositeExplicitAutogradNonFunctional";
 
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
@@ -260,6 +267,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
       {"ORT", c10::DispatchKey::ORT},
+      {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
       {"VE", c10::DispatchKey::VE},
@@ -330,6 +338,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
       {"AutogradXLA", c10::DispatchKey::AutogradXLA},
       {"AutogradLazy", c10::DispatchKey::AutogradLazy},
+      {"AutogradMeta", c10::DispatchKey::AutogradMeta},
       {"AutogradIPU", c10::DispatchKey::AutogradIPU},
       {"AutogradXPU", c10::DispatchKey::AutogradXPU},
       {"AutogradMPS", c10::DispatchKey::AutogradMPS},
@@ -343,6 +352,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::CompositeImplicitAutograd},
       {"CompositeExplicitAutograd",
        c10::DispatchKey::CompositeExplicitAutograd},
+      {"CompositeExplicitAutogradNonFunctional",
+       c10::DispatchKey::CompositeExplicitAutogradNonFunctional},
   };
   auto it = key_map.find(k);
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);

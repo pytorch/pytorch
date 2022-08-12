@@ -31,9 +31,13 @@
 namespace torch {
 namespace jit {
 
-mobile::Module parse_mobile_module(void* data, size_t) {
+mobile::Module parse_mobile_module(
+    void* data,
+    size_t,
+    bool should_copy_tensor_memory = false) {
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(flatbuffer_module);
+  return initialize_mobile_module(
+      flatbuffer_module, c10::nullopt, should_copy_tensor_memory);
 }
 
 TEST(FlatbufferTest, UpsampleNearest2d) {
@@ -59,6 +63,37 @@ TEST(FlatbufferTest, UpsampleNearest2d) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  auto res2 = bc2.forward(inputs);
+  auto resd2 = res2.toTensor();
+  ASSERT_TRUE(resd2.equal(refd));
+}
+
+TEST(FlatbufferTest, UpsampleNearest2dWithCopyTensorMemory) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  IValue res;
+  res = bc.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+
+  buff = flatbuffers::DetachedBuffer();
+
   auto res2 = bc2.forward(inputs);
   auto resd2 = res2.toTensor();
   ASSERT_TRUE(resd2.equal(refd));
@@ -139,7 +174,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#if !defined(FB_XPLAT_BUILD)
 TEST(FlatbufferTest, FlatbufferBackPortTest) {
   Module m("m");
   m.define(R"(
@@ -153,7 +188,7 @@ TEST(FlatbufferTest, FlatbufferBackPortTest) {
   bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
   ASSERT_TRUE(backPortSuccess);
 }
-#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
@@ -172,7 +207,6 @@ TEST(FlatbufferTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
 
   std::unordered_map<std::string, std::string> loaded_extra_files;
-#if defined ENABLE_FLATBUFFER
   std::stringstream ss;
   module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
 
@@ -184,17 +218,6 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   // load it twice using the same stream
   auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
-#else
-  CompilationOptions options;
-  mobile::Module bc = jitModuleToMobile(*module, options);
-  auto buff = save_mobile_module_to_bytes(bc, extra_files);
-
-  loaded_extra_files["metadata.json"] = "";
-  auto* flatbuffer_module =
-      mobile::serialization::GetMutableModule(buff.data());
-
-  parseExtraFiles(flatbuffer_module, loaded_extra_files);
-#endif
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -242,6 +265,50 @@ TEST(FlatbufferTest, Conv) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
+TEST(FlatbufferTest, ConvWithCopyTensorMemory) {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0)
+    return;
+
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+  )");
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-use-emplace)
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+
+  auto outputref = m.forward(inputs).toTensor();
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+  buff = flatbuffers::DetachedBuffer();
+
+  for (int i = 0; i < 3; ++i) {
+    res = bc2.get_method("forward")(inputs);
+  }
+  output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
 TEST(FlatbufferTest, Inline) {
   Module m("m");
   m.define(R"JIT(
@@ -262,6 +329,32 @@ TEST(FlatbufferTest, Inline) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  std::vector<torch::jit::IValue> inputs2({torch::ones({})});
+  output = bc2.get_method("foo3")(inputs2);
+  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+}
+
+TEST(FlatbufferTest, InlineWithCopyTensorMemory) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo1(self, x):
+      return x + 1
+
+  def foo2(self, x):
+      return self.foo1(x) + 2
+
+  def foo3(self, x):
+      return self.foo2(x) + 3
+  )JIT");
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("foo3")(inputs);
+  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+  buff = flatbuffers::DetachedBuffer();
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
@@ -1178,7 +1271,6 @@ Module jitModuleFromBuffer(void* data) {
       mobilem._ivalue(), files, constants, 8);
 }
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -1270,7 +1362,6 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
-#endif
 
 #if !defined FB_XPLAT_BUILD
 // The following test run in fbcode only

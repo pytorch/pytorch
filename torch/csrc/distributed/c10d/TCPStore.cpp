@@ -128,6 +128,7 @@ void BackgroundThread::closeStopSignal() {
 
 void BackgroundThread::stop() {
   if (controlPipeFd_[1] != -1) {
+    ::write(controlPipeFd_[1], "\0", 1);
     // close the write end of the pipe
     ::close(controlPipeFd_[1]);
     controlPipeFd_[1] = -1;
@@ -534,8 +535,16 @@ void TCPStoreMasterDaemon::run() {
 void TCPStoreMasterDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
-  // Push the read end of the pipe to signal the stopping of the daemon run
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
+  // Although we haven't found any documentation or literature describing this,
+  // we've seen cases that, under certain circumstances, the read end of the
+  // pipe won't receive POLLHUP when the write end is closed. However, under
+  // the same circumstances, writing to the pipe will guarantee POLLIN to be
+  // received on the read end.
+  //
+  // For more reliable termination, the main thread will write a byte to the
+  // pipe before closing it, and the background thread will poll for both
+  // POLLIN and POLLHUP.
+  tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
 
   // receive the queries
   bool finished = false;
@@ -564,8 +573,9 @@ void TCPStoreMasterDaemon::run() {
 
     // The pipe receives an event which tells us to shutdown the daemon
     if (fds[1].revents != 0) {
-      // Will be POLLUP when the pipe is closed
-      if (fds[1].revents ^ POLLHUP) {
+      // The main thread will write a byte to the pipe then close it before
+      // joining the background thread
+      if (fds[1].revents & ~(POLLIN | POLLHUP)) {
         throw std::system_error(
             ECONNABORTED,
             std::system_category(),
@@ -700,7 +710,16 @@ void TCPStoreWorkerDaemon::run() {
 #else
 void TCPStoreWorkerDaemon::run() {
   std::vector<struct pollfd> fds;
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
+  // Although we haven't found any documentation or literature describing this,
+  // we've seen cases that, under certain circumstances, the read end of the
+  // pipe won't receive POLLHUP when the write end is closed. However, under
+  // the same circumstances, writing to the pipe will guarantee POLLIN to be
+  // received on the read end.
+  //
+  // For more reliable termination, the main thread will write a byte to the
+  // pipe before closing it, and the background thread will poll for both
+  // POLLIN and POLLHUP.
+  tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
   tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
 
   while (true) {
@@ -709,8 +728,9 @@ void TCPStoreWorkerDaemon::run() {
     // Check control and exit early if triggered
     // The pipe receives an event which tells us to shutdown the listener thread
     if (fds[0].revents != 0) {
-      // Will be POLLUP when the pipe is closed
-      if (fds[0].revents ^ POLLHUP) {
+      // The main thread will write a byte to the pipe then close it before
+      // joining the background thread
+      if (fds[0].revents & ~(POLLIN | POLLHUP)) {
         throw std::system_error(
             ECONNABORTED,
             std::system_category(),
@@ -852,9 +872,8 @@ std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -928,9 +947,8 @@ std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   int rawSocket = socket.handle();
 

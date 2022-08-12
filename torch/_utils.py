@@ -75,11 +75,17 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             values = torch.Tensor._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
-            new_type = getattr(torch.cuda, self.__class__.__name__)
-            return new_type(self.size()).copy_(self, non_blocking)
+            return torch._UntypedStorage(self.size(), device=torch.device('cuda')).copy_(self, non_blocking)
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
+    """ Return the non-blocking flag given the function name and kwargs.
+
+    Args:
+        function_name (str): the name of the function being used.
+        non_blocking (bool): the default value.
+        **kwargs (dict): the kwargs passed to the function.
+    """
     if not kwargs:
         return non_blocking
     if len(kwargs) != 1 or 'async' not in kwargs:
@@ -176,6 +182,13 @@ def _validate_loaded_sparse_tensors():
         _sparse_tensors_to_validate.clear()
 
 def _rebuild_sparse_tensor(layout, data):
+    """
+    Rebuilds a sparse tensor from its sparse storage representation.
+
+    Args:
+        layout (str): The sparse storage layout of the tensor.
+        data (tuple): The tensor's sparse storage representation.
+    """
     if layout == torch.sparse_coo:
         indices, values, size = data
         result = torch._sparse_coo_tensor_unsafe(indices, values, size)
@@ -220,18 +233,18 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
-        tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
+        tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype, device=storage.device)
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
-                scales = torch.tensor(scales, dtype=torch.double)
-                zero_points = torch.tensor(zero_points, dtype=torch.long)
+                scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
+                zero_points = torch.tensor(zero_points, dtype=torch.long, device=storage.device)
             else:
-                scales = torch.tensor(scales, dtype=torch.float)
-                zero_points = torch.tensor(zero_points, dtype=torch.float)
+                scales = torch.tensor(scales, dtype=torch.float, device=storage.device)
+                zero_points = torch.tensor(zero_points, dtype=torch.float, device=storage.device)
         tensor = torch._empty_per_channel_affine_quantized(
-            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
+            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype, device=storage.device)
     else:
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
     tensor.set_(storage, storage_offset, size, stride)
@@ -465,6 +478,8 @@ class ExceptionWrapper(object):
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
+        return "xpu"
     # add more available device types here
     return None
 
@@ -473,6 +488,8 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "xpu":
+        return get_member(torch.xpu)  # type: ignore[attr-defined]
     # add more available device types here
     return None
 

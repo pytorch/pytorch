@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 
 #include <sstream>
 
@@ -248,6 +249,32 @@ std::string toString(const SegmentedEdge* edge) {
   std::stringstream ss;
   ss << edge;
   return ss.str();
+}
+
+std::unique_ptr<SegmentedFusion> SegmentedFusion::fromCompleteFusion(
+    std::unique_ptr<Fusion> fusion_ptr,
+    ScheduleHeuristic heuristic) {
+  auto fusion = fusion_ptr.get();
+
+  auto segmented_fusion_ptr =
+      std::make_unique<SegmentedFusion>(std::move(fusion_ptr));
+
+  // Make a group for the single fusion
+  auto single_group = segmented_fusion_ptr->newGroup();
+
+  // Add input and output vals
+  single_group->input_vals = fusion->inputs();
+  single_group->output_vals = fusion->outputs();
+
+  // Get ordered expression list
+  single_group->resetExprList();
+
+  // Assign heuristics and id for the complete fusion
+  //  to share the runtime path of segmented fusion.
+  single_group->setHeuristic(heuristic);
+  single_group->setID(0);
+
+  return segmented_fusion_ptr;
 }
 
 SegmentedFusion::SegmentedFusion(std::unique_ptr<Fusion> fusion)
@@ -559,7 +586,10 @@ std::vector<Expr*> groupExprPrintSorting(const std::vector<Expr*>& exprs) {
   std::unordered_set<Expr*> exprs_to_print_set(exprs.begin(), exprs.end());
   std::unordered_set<Expr*> exprs_visited;
   std::vector<Expr*> sorted_list;
-  while (sorted_list.size() != exprs_to_print.size()) {
+  while (!std::all_of(
+      exprs_to_print.begin(),
+      exprs_to_print.end(),
+      [&exprs_visited](auto expr) { return exprs_visited.count(expr); })) {
     bool expr_added_to_sorted_list = false;
     for (auto expr : exprs_to_print) {
       if (!exprs_visited.count(expr)) {
@@ -652,10 +682,10 @@ TensorView* castIntermediateValueInCompleteFusion(
     // Keep broadcast axes and remove reduction axes
     size_t i = 0;
     auto no_reduction_root_domain =
-        TensorDomain::noReductions(original_tv->getRootDomain());
+        TensorDomain::noReductions(original_tv->getMaybeRFactorDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
     for (const auto& dom : no_reduction_root_domain) {
-      new_root_domain[i++] = dom->clone();
+      new_root_domain[i++] = dom->cloneWithoutRFactor();
     }
 
     // Create the actual domain and tv.
@@ -1125,6 +1155,7 @@ std::ostream& operator<<(
         return group_order.at(edge_a->from) < group_order.at(edge_b->from);
       });
 
+  os << "Segmented_Fusion Dump: -- fusion segments:\n";
   os << "Segmented_Fusion{ \n";
   os << "groups: \n";
   for (const auto g : sorted_groups_to_print) {
@@ -1143,6 +1174,9 @@ std::ostream& operator<<(
 }
 
 void SegmentedFusion::print() const {
+  std::cout << "Segmented_Fusion Dump: -- Re-written complete fusion:{\n";
+  completeFusion()->printMath();
+  std::cout << "} // {Re-written complete fusion}\n";
   std::cout << this << "\n";
 }
 
@@ -1580,6 +1614,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
     SegmentedGroup* b = nullptr) {
   FusionSegmentGuard fsg(fusion, getAllInputs(a, b), getAllOutputs(a, b));
 
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
@@ -1591,6 +1627,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
       fusion,
       allInputsIfTrueElseOutputs(segmented_groups, true),
       allInputsIfTrueElseOutputs(segmented_groups, false));
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
@@ -1925,22 +1963,33 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   auto out_N = welford->outN()->as<TensorView>();
 
   fusion->removeExpr(welford);
+  // Not safe to use welford anymore
+  welford = nullptr;
 
   // Create normalization based welford graph
   //  largely taken from batchnorm cpp benchmark
-  auto& in_root = in_val->getRootDomain();
-  auto& out_root = out_avg->getRootDomain();
+  const auto& in_root =
+      TensorDomain::noReductions(in_val->getMaybeRFactorDomain());
+  const auto& out_root = out_avg->getRootDomain();
   std::vector<int> red_axes;
+
+  TORCH_INTERNAL_ASSERT(
+      in_root.size() == out_root.size(),
+      "Invalid root domains of Welford input and output.",
+      " Input: ",
+      ir_utils::toString(in_root),
+      ". Output: ",
+      ir_utils::toString(out_root));
 
   // Create scalar version of the feature element
   //  counting.
   Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
   for (const auto i : c10::irange(in_root.size())) {
-    if (out_root[i]->isReduction()) {
+    if (out_root.at(i)->isReduction()) {
       red_axes.push_back(i);
       broadcast_mask[i] = true;
-      num_features = mul(num_features, out_root[i]->extent());
+      num_features = mul(num_features, out_root.at(i)->extent());
     }
   }
 
@@ -2622,7 +2671,8 @@ void SegmentCandidateFinder::findSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
-      if (expr->getExprType().value() != ExprType::UnaryOp) {
+      if (expr->getExprType().value() != ExprType::UnaryOp ||
+          expr->output(0)->isFusionOutput()) {
         continue;
       }
 

@@ -2,7 +2,6 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
 
-
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
@@ -31,13 +30,19 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.empty(0)
-        if type(data) is torch.Tensor:
+        if type(data) is torch.Tensor or type(data) is Parameter:
             # For ease of BC maintenance, keep this path for standard Tensor.
             # Eventually (tm), we should change the behavior for standard Tensor to match.
             return torch.Tensor._make_subclass(cls, data, requires_grad)
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
+        if type(t) is not type(data):
+            raise RuntimeError(f"Creating a Parameter from an instance of type {type(data).__name__} "
+                               "requires that detach() returns an instance of the same type, but return "
+                               f"type {type(t).__name__} was found instead. To use the type as a "
+                               "Parameter, please correct the detach() semantics defined by "
+                               "its __torch_dispatch__() implementation.")
         t._is_param = True
         return t
 

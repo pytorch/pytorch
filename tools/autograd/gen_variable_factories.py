@@ -3,15 +3,16 @@
 # This writes one file: variable_factories.h
 
 import re
-from typing import Optional, List
+from typing import List, Optional
+
+import torchgen.api.python as python
+from torchgen.api import cpp
 
 from torchgen.api.types import CppSignatureGroup
-from torchgen.api import cpp
-import torchgen.api.python as python
-from torchgen.gen import parse_native_yaml
 from torchgen.context import with_native_function
-from torchgen.utils import mapMaybe, FileManager
+from torchgen.gen import parse_native_yaml
 from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
+from torchgen.utils import FileManager, mapMaybe
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")

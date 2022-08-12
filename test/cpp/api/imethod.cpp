@@ -17,8 +17,10 @@ const char* path(const char* envname, const char* path) {
   return env ? env : path;
 }
 
-// Run `python torch/csrc/deploy/example/generate_examples.py` before running the following tests.
-// TODO(jwtan): Figure out a way to automate the above step for development. (CI has it already.)
+// Run `python torch/csrc/deploy/example/generate_examples.py` before running
+// the following tests.
+// TODO(jwtan): Figure out a way to automate the above step for development. (CI
+// has it already.)
 TEST(IMethodTest, CallMethod) {
   auto scriptModel = torch::jit::load(path("SIMPLE_JIT", simpleJit));
   auto scriptMethod = scriptModel.get_method("forward");

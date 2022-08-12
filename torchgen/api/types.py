@@ -1,18 +1,19 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional, Sequence, Set, TypeVar, Union
+
 from torchgen.model import (
     Argument,
+    BackendIndex,
+    BaseTy,
     FunctionSchema,
     NativeFunction,
-    BackendIndex,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    ScalarType,
     SelfArgument,
     TensorOptionsArguments,
-    BaseTy,
-    ScalarType,
 )
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
-from enum import Enum
 
 _T = TypeVar("_T")
 
@@ -67,6 +68,7 @@ iTensorListRefT = BaseCppType("at", "ITensorListRef")
 iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
 dimnameT = BaseCppType("at", "Dimname")
 dimnameListT = BaseCppType("at", "DimnameList")
+dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
 scalarT = BaseCppType("at", "Scalar")
@@ -113,6 +115,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
     BaseTy.Dimname: dimnameT,
+    BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
     BaseTy.Scalar: scalarT,
@@ -750,8 +753,8 @@ def kernel_signature(
 from torchgen.api import (
     cpp,
     dispatcher,
-    native,
-    translate,
     functionalization,
+    native,
     structured,
+    translate,
 )

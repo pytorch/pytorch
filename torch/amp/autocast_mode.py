@@ -5,6 +5,8 @@ import warnings
 from typing import Any, Optional
 from torch.types import _dtype
 
+__all__ = ['autocast_decorator', 'autocast']
+
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):
@@ -83,26 +85,36 @@ class autocast(object):
         # After exiting autocast, calls f_float16.float() to use with d_float32
         g_float32 = torch.mm(d_float32, f_float16.float())
 
-    CPU Example::
+    CPU Training Example::
 
-        # Creates some tensors in default dtype (here assumed to be float32)
-        a_float32 = torch.rand((8, 8), device="cpu")
-        b_float32 = torch.rand((8, 8), device="cpu")
-        c_float32 = torch.rand((8, 8), device="cpu")
-        d_float32 = torch.rand((8, 8), device="cpu")
+        # Creates model and optimizer in default precision
+        model = Net()
+        optimizer = optim.SGD(model.parameters(), ...)
 
-        with autocast(dtype=torch.bfloat16, device_type="cpu"):
-            # torch.mm is on autocast's list of ops that should run in bfloat16.
-            # Inputs are float32, but the op runs in bfloat16 and produces bfloat16 output.
-            # No manual casts are required.
-            e_bfloat16 = torch.mm(a_float32, b_float32)
-            # Also handles mixed input types
-            f_bfloat16 = torch.mm(d_float32, e_bfloat16)
+        for epoch in epochs:
+            for input, target in data:
+                optimizer.zero_grad()
 
-        # After exiting autocast, calls f_float16.float() to use with d_float32
-        g_float32 = torch.mm(d_float32, f_bfloat16.float())
+                # Runs the forward pass with autocasting.
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    output = model(input)
+                    loss = loss_fn(output, target)
 
-    Example to use with jit trace in inference::
+                loss.backward()
+                optimizer.step()
+
+
+    CPU Inference Example::
+
+        # Creates model in default precision
+        model = Net().eval()
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            for input in data:
+                # Runs the forward pass with autocasting.
+                output = model(input)
+
+    CPU Inference Example with Jit Trace::
 
         class TestModel(nn.Module):
             def __init__(self, input_size, num_classes):
@@ -115,9 +127,16 @@ class autocast(object):
         num_classes = 2
         model = TestModel(input_size, num_classes).eval()
 
+        # For now, we suggest to disable the Jit Autocast Pass,
+        # As the issue: https://github.com/pytorch/pytorch/issues/75956
+        torch._C._jit_set_autocast_mode(False)
+
         with torch.cpu.amp.autocast(cache_enabled=False):
             model = torch.jit.trace(model, torch.randn(1, input_size))
-        print(model.graph_for(torch.randn(1, input_size)))
+        model = torch.jit.freeze(model)
+        # Models Run
+        for _ in range(3):
+            model(torch.randn(1, input_size))
 
     Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
     please file an issue.
@@ -177,7 +196,7 @@ class autocast(object):
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
-        if torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
+        if enabled and torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
         if dtype is not None:

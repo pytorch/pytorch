@@ -4,6 +4,7 @@ from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 
+__all__ = ['Dirichlet']
 
 # This helper is exposed for testing.
 def _Dirichlet_backward(x, concentration, grad_output):
@@ -74,6 +75,14 @@ class Dirichlet(ExponentialFamily):
     @property
     def mean(self):
         return self.concentration / self.concentration.sum(-1, True)
+
+    @property
+    def mode(self):
+        concentrationm1 = (self.concentration - 1).clamp(min=0.)
+        mode = concentrationm1 / concentrationm1.sum(-1, True)
+        mask = (self.concentration < 1).all(axis=-1)
+        mode[mask] = torch.nn.functional.one_hot(mode[mask].argmax(axis=-1), concentrationm1.shape[-1]).to(mode)
+        return mode
 
     @property
     def variance(self):

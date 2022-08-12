@@ -11,10 +11,15 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -53,25 +58,20 @@ jobs:
 
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           TORCH_CUDA_ARCH_LIST: 5.2
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -e
           # Unlike other gradle jobs, it's not worth building libtorch in a separate CI job and share via docker, because:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
-
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
-          time docker pull "${DOCKER_IMAGE}" >/dev/null
 
           export BUILD_LITE_INTERPRETER
           BUILD_LITE_INTERPRETER="1"
@@ -82,11 +82,8 @@ jobs:
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           export id
           id=$(docker run -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e BUILD_LITE_INTERPRETER \
@@ -109,37 +106,6 @@ jobs:
           echo "${COMMAND}" > ./command.sh && bash ./command.sh
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
-
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-
-      - name: Display and upload binary build size statistics (Click Me)
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-          ARTIFACTS: ""
-          ANDROID_BUILD_TYPE: custom-build-single
-        run: |
-          # The artifact file is created inside docker container, which contains the result binaries.
-          # Now unpackage it into the project folder. The subsequent script will scan project folder
-          # to locate result binaries and report their sizes.
-          # If artifact file is not provided it assumes that the project folder has been mounted in
-          # the docker during build and already contains the result binaries, so this step can be skipped.
-          if [ -n "${ARTIFACTS}" ]; then
-            tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
-            cd "${GITHUB_WORKSPACE}"
-          fi
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26 boto3==1.16.34
-          python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace

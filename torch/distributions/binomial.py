@@ -3,6 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
+__all__ = ['Binomial']
 
 def _clamp_by_zero(x):
     # works like clamp(x, min=0) but has grad at 0 is 0.5
@@ -74,6 +75,10 @@ class Binomial(Distribution):
     @property
     def mean(self):
         return self.total_count * self.probs
+
+    @property
+    def mode(self):
+        return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
 
     @property
     def variance(self):

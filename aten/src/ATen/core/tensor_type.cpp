@@ -193,7 +193,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       } else if (strides[a] > strides[b]) {
         return 1;
       } else { // strides[a] == strides[b]
-        if (sizes[a] < sizes[b] || a > b ) {
+        if (sizes[a] > sizes[b]) {
           return 1;
         }
       }
@@ -253,7 +253,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
-  if (t.layout() == at::kStrided) {
+  if (t.layout() == at::kStrided && !t.is_nested()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(

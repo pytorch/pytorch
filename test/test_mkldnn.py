@@ -450,6 +450,74 @@ class TestMkldnn(TestCase):
                                    msg,
                                    lambda: m(x2))
 
+    def _test_prelu_base(self, size, num_channels):
+        x = torch.randn(size, dtype=torch.float32)
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        x3 = x.clone().to_mkldnn().requires_grad_()
+        m1 = torch.nn.PReLU(num_channels)
+        m2 = mkldnn_utils.to_mkldnn(copy.deepcopy(m1))
+        m3 = copy.deepcopy(m1)
+        y1 = m1(x1)
+        y2 = m2(x2).to_dense()
+        y3 = m3(x3).to_dense()  # Only convert data to mkldnn, weight is Aten tensor
+        loss1 = y1.sum()
+        loss1.backward()
+        loss2 = y2.sum()
+        loss2.backward()
+        loss3 = y3.sum()
+        loss3.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(y1, y3)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+        self.assertEqual(x1.grad, x3.grad.to_dense())
+
+    def test_prelu(self):
+        self._test_prelu_base(torch.Size([16]), 1)
+        self._test_prelu_base(torch.Size([16, 64]), 1)
+        self._test_prelu_base(torch.Size([16, 64]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112, 1]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112, 1]), 64)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def _test_prelu_bf16_base(self, size, num_channels):
+        if has_bf16_support():
+            x = torch.randn(size, dtype=torch.float32)
+            x_fp32 = x.clone().to_mkldnn().requires_grad_()
+            x_bf16 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
+            m = mkldnn_utils.to_mkldnn(torch.nn.PReLU())
+            m_bf16 = mkldnn_utils.to_mkldnn(torch.nn.PReLU(), torch.bfloat16)
+
+            y = m(x_fp32).to_dense()
+            y_bf16 = m_bf16(x_bf16).to_dense()
+            self.assertEqual(y, y_bf16.to(torch.float32), atol=1e-1, rtol=1e-3)
+
+            loss = y.sum()
+            loss.backward()
+            loss_bf16 = y_bf16.sum()
+            loss_bf16.backward()
+            self.assertEqual(x_fp32.grad.to_dense(), x_bf16.grad.to_dense(torch.float32))
+        else:
+            x_bf16 = torch.randn(size, dtype=torch.bfloat16).requires_grad_()
+            m_bf16 = mkldnn_utils.to_mkldnn(torch.nn.PReLU(), torch.bfloat16)
+            msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            self.assertRaisesRegex(RuntimeError,
+                                   msg,
+                                   lambda: m_bf16(x_bf16))
+
+    def test_prelu_bf16(self):
+        self._test_prelu_bf16_base(torch.Size([16]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64]), 64)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112]), 64)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112, 112, 1]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112, 112, 1]), 64)
+
     def _test_max_pool_base(self, dim, input):
         pool_module = {2: torch.nn.MaxPool2d, 3: torch.nn.MaxPool3d}
         for stride in [1, 2, 3]:

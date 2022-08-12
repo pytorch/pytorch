@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+__all__ = ['Normal']
 
 class Normal(ExponentialFamily):
     r"""
@@ -31,6 +32,10 @@ class Normal(ExponentialFamily):
 
     @property
     def mean(self):
+        return self.loc
+
+    @property
+    def mode(self):
         return self.loc
 
     @property

@@ -188,7 +188,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path)
-            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
 
             state_dict_to_load_to = MyTestModule().state_dict()
 
@@ -197,7 +197,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
             # Load from file without any resharding
             fs_reader = FileSystemReader(path=path)
-            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader, no_dist=True)
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
@@ -461,6 +461,93 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
         self.assertEqual([1], state_dict_to_load['bytes0'])
         self.assertEqual('string', state_dict_to_load['bytes1'])
+
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_switch_between_sharded_tensor_to_tensor(self) -> None:
+        path = self.get_file_path()
+        tensor_size = 32
+
+        specs = [
+            ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                ],
+            ),
+            ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                    "rank:1/cuda:1",
+                    "rank:0/cuda:0",
+                ],
+            ),
+            EnumerableShardingSpec(
+                shards=[
+                    ShardMetadata(
+                        shard_offsets=[0],
+                        shard_sizes=[8],
+                        placement="rank:1/cuda:1",
+                    ),
+                    ShardMetadata(
+                        shard_offsets=[8],
+                        shard_sizes=[tensor_size - 8],
+                        placement="rank:0/cuda:0",
+                    ),
+                ]
+            ),
+            EnumerableShardingSpec(
+                shards=[
+                    ShardMetadata(
+                        shard_offsets=[0],
+                        shard_sizes=[10],
+                        placement="rank:0/cuda:0",
+                    ),
+                    ShardMetadata(
+                        shard_offsets=[10],
+                        shard_sizes=[tensor_size - 10],
+                        placement="rank:1/cuda:1",
+                    ),
+                ]
+            ),
+        ]
+
+        for save_spec in specs:
+            for load_spec in specs:
+                save_dict = {
+                    'sharded': sharded_tensor.rand(save_spec, tensor_size),
+                    'replicated': torch.rand(tensor_size, device=self.rank)
+                }
+
+                fs_writer = FileSystemWriter(path=path)
+                save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
+
+                # Freaky Friday the tensors
+                load_dict = {
+                    'sharded': torch.zeros(tensor_size, device=self.rank),
+                    'replicated': sharded_tensor.zeros(load_spec, tensor_size)
+                }
+
+                fs_reader = FileSystemReader(path=path)
+                load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
+
+                save_dict_sharded = self.load_tensor(save_dict['sharded'])
+                load_dict_replicated = self.load_tensor(load_dict['replicated'])
+
+                if dist.get_rank() == 0:
+                    self.assertTrue(
+                        torch.allclose(save_dict_sharded, load_dict['sharded']),
+                        f"save-spec {save_spec} load-spec {load_spec}"
+                    )
+                    self.assertTrue(
+                        torch.allclose(save_dict['replicated'], load_dict_replicated),
+                        f"save-spec {save_spec} load-spec {load_spec}"
+                    )
 
 if __name__ == "__main__":
     run_tests()

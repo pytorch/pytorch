@@ -248,7 +248,7 @@ HazardKind getPotentialHazards(
     // First, RAW.
     for (auto& bR : bReads) {
       for (auto& aW : aWrites) {
-        if (boundOverlap(bR, aW) != NoOverlap) {
+        if (boundOverlap(bR, aW) != OverlapKind::NoOverlap) {
           return HazardKind::ReadAfterWrite;
         }
       }
@@ -257,7 +257,7 @@ HazardKind getPotentialHazards(
     // Then WAR.
     for (auto& bW : bWrites) {
       for (auto& aR : aReads) {
-        if (boundOverlap(bW, aR) != NoOverlap) {
+        if (boundOverlap(bW, aR) != OverlapKind::NoOverlap) {
           return HazardKind::WriteAfterRead;
         }
       }
@@ -266,7 +266,7 @@ HazardKind getPotentialHazards(
     // Then WAW.
     for (auto& bW : bWrites) {
       for (auto& aW : aWrites) {
-        if (boundOverlap(bW, aW) != NoOverlap) {
+        if (boundOverlap(bW, aW) != OverlapKind::NoOverlap) {
           return HazardKind::WriteAfterWrite;
         }
       }
@@ -333,7 +333,7 @@ bool hasConflictingOverlap(
           continue;
         }
         auto overlap = overlaps(aIndexBounds[i], bIndexBounds[j]);
-        if (overlap != NoOverlap) {
+        if (overlap != OverlapKind::NoOverlap) {
           return true;
         }
       }

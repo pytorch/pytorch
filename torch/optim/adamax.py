@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Adamax', 'adamax']
 
 class Adamax(Optimizer):
     r"""Implements Adamax algorithm (a variant of Adam based on infinity norm).
@@ -42,13 +43,15 @@ class Adamax(Optimizer):
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer is used (default: None)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, foreach: Optional[bool] = None):
+                 weight_decay=0, foreach: Optional[bool] = None, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -60,13 +63,15 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, foreach=foreach)
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
+                        foreach=foreach, maximize=maximize)
         super(Adamax, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+            group.setdefault('maximize', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -98,6 +103,7 @@ class Adamax(Optimizer):
             lr = group['lr']
             weight_decay = group['weight_decay']
             foreach = group['foreach']
+            maximize = group['maximize']
 
             for p in group['params']:
                 if p.grad is None:
@@ -129,7 +135,8 @@ class Adamax(Optimizer):
                    beta2=beta2,
                    lr=lr,
                    weight_decay=weight_decay,
-                   foreach=foreach)
+                   foreach=foreach,
+                   maximize=maximize)
 
         return loss
 
@@ -142,6 +149,7 @@ def adamax(params: List[Tensor],
            # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
            # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
            foreach: bool = None,
+           maximize: bool = False,
            *,
            eps: float,
            beta1: float,
@@ -153,7 +161,7 @@ def adamax(params: List[Tensor],
     See :class:`~torch.optim.Adamax` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
@@ -177,7 +185,8 @@ def adamax(params: List[Tensor],
          beta1=beta1,
          beta2=beta2,
          lr=lr,
-         weight_decay=weight_decay)
+         weight_decay=weight_decay,
+         maximize=maximize)
 
 
 def _single_tensor_adamax(params: List[Tensor],
@@ -190,10 +199,12 @@ def _single_tensor_adamax(params: List[Tensor],
                           beta1: float,
                           beta2: float,
                           lr: float,
-                          weight_decay: float):
+                          weight_decay: float,
+                          maximize: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         exp_avg = exp_avgs[i]
         exp_inf = exp_infs[i]
         step_t = state_steps[i]
@@ -229,10 +240,14 @@ def _multi_tensor_adamax(params: List[Tensor],
                          beta2: float,
                          lr: float,
                          weight_decay: float,
-                         eps: float):
+                         eps: float,
+                         maximize: bool):
 
     if len(params) == 0:
         return
+
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
     # Update steps
     torch._foreach_add_(state_steps, 1)

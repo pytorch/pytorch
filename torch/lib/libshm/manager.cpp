@@ -55,12 +55,8 @@ void unregister_fd(int fd) {
 }
 
 void print_init_message(const char* message) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t unused;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, message, strlen(message));
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, "\n", 1);
+  write(1, message, strlen(message));
+  write(1, "\n", 1);
 }
 
 bool object_exists(const char* name) {

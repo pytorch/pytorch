@@ -115,6 +115,18 @@ inline double igammac(double x, double y) {
   throw std::runtime_error("igammac is not implemented on older Android");
 }
 
+// Note: std::signbit returns true for negative zero (-0), but this
+// implementation returns false.
+inline bool signbit(float x) {
+  return x < 0;
+}
+inline bool signbit(double x) {
+  return x < 0;
+}
+inline bool signbit(long double x) {
+  return x < 0;
+}
+
 #if !defined(__NEWLIB__)
 // TODO: this function needs to be implemented and tested. Currently just throw
 // an error.

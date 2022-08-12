@@ -1,10 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -31,16 +32,22 @@ namespace cuda {
  */
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
-  template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
-    IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-    // (only applicable for histc)
-    // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
-    // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
-    // therefore when bin == nbins, adjust bin to the last bin
-    if (bin == nbins) bin -= 1;
-    return bin;
-  }
+template <typename input_t, typename IndexType>
+__device__ static IndexType getBin(
+    input_t bVal,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
+    int64_t nbins) {
+  IndexType bin = (int)(((bVal - minvalue)) * nbins / (maxvalue - minvalue));
+  // (only applicable for histc)
+  // while each bin is inclusive at the lower end and exclusive at the higher,
+  // i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
+  // order to include maxvalue if exists therefore when bin == nbins, adjust bin
+  // to the last bin
+  if (bin == nbins)
+    bin -= 1;
+  return bin;
+}
 }
 
 /*
@@ -61,8 +68,8 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
     int64_t nbins,
-    input_t minvalue,
-    input_t maxvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     IndexType totalElements,
     Op getOp) {
   extern __shared__ unsigned char my_smem[];
@@ -84,7 +91,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         gpuAtomicAddNoReturn(&smem[bin], getOp(linearIndex));
       }
     }
@@ -110,7 +118,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `p`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
@@ -141,7 +150,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
         gpuAtomicAddNoReturn(&a.data[aOffset], getOp(linearIndex));
@@ -150,13 +160,23 @@ __global__ void kernelHistogram1D(
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                              \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>              \
-      <<<grid,                                                                        \
-         block,                                                                       \
-         SHARED_MEM,                                                                  \
-         getCurrentCUDAStream()>>>(                                                   \
-          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP); \
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                 \
+  kernelHistogram1D<                                                     \
+      output_t,                                                          \
+      input_t,                                                           \
+      IndexType,                                                         \
+      1,                                                                 \
+      2,                                                                 \
+      -1,                                                                \
+      MEMORY_TYPE><<<grid, block, SHARED_MEM, getCurrentCUDAStream()>>>( \
+      aInfo,                                                             \
+      pInfo,                                                             \
+      bInfo,                                                             \
+      nbins,                                                             \
+      minvalue,                                                          \
+      maxvalue,                                                          \
+      totalElements,                                                     \
+      WEIGHTS_OP);                                                       \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
@@ -205,8 +225,8 @@ bool CUDA_tensor_histogram(
     at::Tensor b, /* input */
     at::Tensor c, /* weights(optional) */
     int64_t nbins,
-    input_t minvalue,
-    input_t maxvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     TensorArgType aType = TensorArgType::ReadWrite,
     TensorArgType bType = TensorArgType::ReadOnly,
     TensorArgType cType = TensorArgType::ReadOnly) {
@@ -311,9 +331,14 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  const int64_t nbins = std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
-  const input_t minvalue = 0;
-  const input_t maxvalue = nbins;
+  const int64_t nbins =
+      std::max(self.max().item<input_t>() + (int64_t)1, minlength);
+
+  // we are using acc_type for the bounds, in particular int64_t for integers
+  // in order to avoid overflows (e.g. using 256 bins for dtype uint8)
+  using bounds_t = at::acc_type<input_t, /*is_cuda=*/true>;
+  const bounds_t minvalue = 0;
+  const bounds_t maxvalue = nbins;
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
@@ -343,8 +368,8 @@ template <typename input_t>
 Tensor _histc_cuda_template(
     const Tensor& self,
     int64_t nbins,
-    input_t min,
-    input_t max) {
+    at::acc_type<input_t, /*is_cuda=*/true> min,
+    at::acc_type<input_t, /*is_cuda=*/true> max) {
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
@@ -387,7 +412,7 @@ Tensor _histc_cuda_template(
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
   cuda::CUDA_tensor_histogram<input_t, input_t, false>(
-    output, self, Tensor(), nbins, minvalue, maxvalue);
+      output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
 } // namespace
@@ -424,7 +449,9 @@ Tensor _histc_cuda(
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
-    return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
+    using bounds_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+    return _histc_cuda_template<scalar_t>(
+        self, nbins, min.to<bounds_t>(), max.to<bounds_t>());
   });
 }
 
