@@ -197,11 +197,25 @@ def create_aot_autograd_function(
             # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
             old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
             if compiled_fw is None:
-                flat_tensor_args = pytree.tree_map(
-                    lambda x: x.detach().requires_grad_(x.requires_grad)
-                    if isinstance(x, Tensor) else x, flat_tensor_args
-                )
-                fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
+                if config.use_fake_tensor:
+                    fake_mode = FakeTensorMode.push()
+                else:
+                    fake_mode = nullcontext()
+                    # The detach().requires_grad_() pattern can cause some subtle bugs.
+                    # These will be fixed once FakeTensor is always-on for AOTAutograd.
+                    #
+                    # For models that might resize their inputs, the input tensors
+                    # must have allow_tensor_metadata_change() set to true.
+                    # detach() returns a view tensor, but with that field set to false.
+                    #
+                    # Specifically, this breaks quantized models
+                    # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
+                    # because they use a "running-mean" style op that requires
+                    # resizing the running counter buffers stored on the module.
+                    flat_tensor_args = pytree.tree_map(
+                        lambda x: x.detach().requires_grad_(x.requires_grad)
+                        if isinstance(x, Tensor) else x, flat_tensor_args
+                    )
                 with preserve_rng_state(), fake_mode as mode:
                     # Set input tensors that require grad to leaves
                     fake_flat_tensor_args = pytree.tree_map(
