@@ -45,7 +45,8 @@ namespace {
 // PreHook          ((Tensor, ...),)                (grad_outputs,)
 // PostHook         ((Tensor, ...),)                (grad_inputs,)
 //
-// This function returns True if any hook returned non-None value, and False otherwise.
+// This function returns True if any hook returned non-None value, and False
+// otherwise.
 bool _pyfunction_call_hooks(PyObject* dict, PyObject* args) {
   // Note: [Extend Hook Lifetime]
   // Hold a reference to hooks till we iterate over them.
@@ -127,9 +128,8 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   }
 }
 
-
-auto PyFunctionPreHook::operator()(
-    const variable_list& grad_outputs_) -> variable_list {
+auto PyFunctionPreHook::operator()(const variable_list& grad_outputs_)
+    -> variable_list {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr grad_outputs(wrap_variables(grad_outputs_));
   THPObjectPtr tup(PyTuple_New(1));
@@ -137,7 +137,6 @@ auto PyFunctionPreHook::operator()(
   _pyfunction_call_hooks(dict, tup.get());
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
-
 
 PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);

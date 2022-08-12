@@ -775,12 +775,10 @@ class TestAutograd(TestCase):
         pre_counter = [0]
 
         def posthook(grad_input, grad_output):
-            print("posthook")
             self.assertEqual(pre_counter[0], 3)
             self.assertTrue(torch.allclose(grad_output[0], torch.ones(1) * 8))
             self.assertTrue(torch.allclose(grad_input[0], torch.ones(1) * 16))
             post_counter[0] += 1
-            print("what prehooks did checks out")
             return grad_input
 
         def prehook(grad_output):
