@@ -757,6 +757,23 @@ class Tensor(torch._C._TensorBase):
 
         return Resize.apply(self, tensor.size())
 
+    def split(self, split_size, dim=0):
+        r"""See :func:`torch.split`"""
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.split, (self,), self, split_size, dim=dim
+            )
+        if isinstance(split_size, int):
+            return super(Tensor, self).split(split_size, dim)
+        elif isinstance(split_size, Tensor):
+            try:
+                split_size = int(split_size)
+                return super(Tensor, self).split(split_size, dim)
+            except ValueError:
+                return super(Tensor, self).split_with_sizes(split_size, dim)
+        else:
+            return super(Tensor, self).split_with_sizes(split_size, dim)
+
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
 
@@ -1180,7 +1197,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> renamed_imgs = imgs.rename(None)
             >>> renamed_imgs.names
-            (None,)
+            (None, None, None, None)
 
             >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
             >>> renamed_imgs.names
