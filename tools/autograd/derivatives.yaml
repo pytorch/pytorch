@@ -2826,158 +2826,560 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
 
-#- name: special_airy_ai(Tensor x) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_bessel_j_0(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_bessel_j_1(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_bessel_y_0(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_bessel_y_1(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_modified_bessel_i_0(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_modified_bessel_i_1(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_modified_bessel_k_0(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_modified_bessel_k_1(Tensor self) -> Tensor
-#  self: non_differentiable
-#
-#- name: special_exp_modified_bessel_k_0(Tensor x) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_exp_modified_bessel_k_1(Tensor x) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
-#  x: non_differentiable
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
-#  n: non_differentiable
-#
-#- name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
-#  x: non_differentiable
-#
-#- name: special_spherical_bessel_j_0(Tensor x) -> Tensor
-#  x: non_differentiable
+- name: special_airy_ai(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_airy_bi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_bell_polynomial_b(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bernoulli_number(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_bernoulli_polynomial_b(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bessel_j(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bessel_j_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_bessel_j_1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_bessel_y(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bessel_y_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_bessel_y_1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_beta(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_binomial_coefficient(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bose_einstein_integral_g(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bulirsch_elliptic_integral_cel(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_bulirsch_elliptic_integral_el1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_bulirsch_elliptic_integral_el2(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_carlson_elliptic_r_c(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_carlson_elliptic_r_j(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_chebyshev_polynomial_t(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_u(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_v(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_w(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_clausen_cl(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_clausen_sl(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_complete_carlson_elliptic_r_f(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_complete_carlson_elliptic_r_g(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_pi(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_confluent_hypergeometric_0_f_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_e(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_k(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_legendre_elliptic_integral_d(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_cos_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_cosh_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_cosine_integral_ci(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_debye_d(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_dilogarithm_li_2(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_dirichlet_beta(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_dirichlet_eta(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_dirichlet_lambda(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_double_factorial(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_exp_airy_ai(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_exp_airy_bi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_exp_modified_bessel_i(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_exp_modified_bessel_k(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_exp_modified_bessel_k_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_exp_modified_bessel_k_1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_exponential_integral_e(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_exponential_integral_ei(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_factorial(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_falling_factorial(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_fermi_dirac_integral_f(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_fresnel_integral_c(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_fresnel_integral_s(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_gauss_hypergeometric_2_f_1(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_hankel_h_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_hankel_h_2(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_harmonic_number(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_hermite_polynomial_h(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_hermite_polynomial_he(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_heuman_lambda(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_hurwitz_zeta(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_hyperbolic_cosine_integral_chi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_hyperbolic_sine_integral_shi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_incomplete_elliptic_integral_e(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_incomplete_elliptic_integral_f(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_incomplete_legendre_elliptic_integral_d(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_jacobi_polynomial_p(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_jacobi_theta_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_jacobi_theta_2(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_jacobi_theta_3(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_jacobi_theta_4(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_jacobi_zeta(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_laguerre_polynomial_l(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_lah_number(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_legendre_polynomial_p(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_legendre_q(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_ln_binomial_coefficient(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_ln_double_factorial(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_ln_factorial(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_ln_falling_factorial(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_ln_gamma(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_ln_gamma_sign(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_ln_rising_factorial(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_logarithmic_integral_li(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_lower_incomplete_gamma(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_modified_bessel_i(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_modified_bessel_i_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_modified_bessel_i_1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_modified_bessel_k(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_modified_bessel_k_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_modified_bessel_k_1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_neville_theta_c(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_neville_theta_d(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_neville_theta_n(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_neville_theta_s(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_nome_q(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_owens_t(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_polar_pi(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_polylogarithm_li(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_prime_number(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_reciprocal_gamma(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_riemann_zeta(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_rising_factorial(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_t(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_u(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_v(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_w(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_sin_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_sinc_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_sinh_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_sinhc_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_sinhc(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_j(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_spherical_bessel_j_0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_y(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_spherical_hankel_h_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_spherical_hankel_h_2(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_spherical_harmonic_y(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_spherical_modified_bessel_i(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_spherical_modified_bessel_k(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_stirling_number_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_stirling_number_2(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_tan_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_tanh_pi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_theta_1(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_theta_2(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_theta_3(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_theta_4(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_upper_incomplete_gamma(Tensor n, Tensor x) -> Tensor
+  n: non_differentiable
+  x: non_differentiable
+
+- name: special_zernike_polynomial_z(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+  d: non_differentiable
+
+- name: special_associated_laguerre_polynomial_l(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_associated_legendre_p(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_associated_legendre_q(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_bulirsch_elliptic_integral_el3(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_carlson_elliptic_r_d(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_carlson_elliptic_r_f(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_carlson_elliptic_r_g(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_gegenbauer_polynomial_c(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_incomplete_beta(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_incomplete_elliptic_integral_pi(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_kummer_confluent_hypergeometric_1_f_1(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_radial_polynomial_r(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_spherical_legendre_y(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable
+
+- name: special_tricomi_confluent_hypergeometric_u(Tensor a, Tensor b, Tensor c) -> Tensor
+  a: non_differentiable
+  b: non_differentiable
+  c: non_differentiable

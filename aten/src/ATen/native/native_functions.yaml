@@ -12977,19 +12977,6 @@
   structured: True
   variants: function
 
-#- func: special_digamma(Tensor x) -> Tensor
-#  python_module: special
-#  structured_delegate: special_digamma.out
-#  variants: function
-#
-#- func: special_digamma.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
-#  dispatch:
-#    CPU, CUDA: special_digamma_out
-#  python_module: special
-#  structured_inherits: TensorIteratorBase
-#  structured: True
-#  variants: function
-
 - func: special_dilogarithm_li_2(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_dilogarithm_li_2.out
@@ -16256,6 +16243,36 @@
   structured_delegate: special_associated_laguerre_polynomial_l.out
   variants: function
 
+- func: special_associated_laguerre_polynomial_l.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_associated_laguerre_polynomial_l.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
@@ -16265,10 +16282,82 @@
   structured: True
   variants: function
 
+- func: special_associated_laguerre_polynomial_l.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_laguerre_polynomial_l.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_associated_legendre_p(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_associated_legendre_p.out
+  variants: function
+
+- func: special_associated_legendre_p.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_associated_legendre_p.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16280,10 +16369,82 @@
   structured: True
   variants: function
 
+- func: special_associated_legendre_p.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_p.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_associated_legendre_q(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_associated_legendre_q.out
+  variants: function
+
+- func: special_associated_legendre_q.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_associated_legendre_q.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16295,10 +16456,82 @@
   structured: True
   variants: function
 
+- func: special_associated_legendre_q.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_associated_legendre_q.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_associated_legendre_q_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_bulirsch_elliptic_integral_el3(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_bulirsch_elliptic_integral_el3.out
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_bulirsch_elliptic_integral_el3.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16310,10 +16543,82 @@
   structured: True
   variants: function
 
+- func: special_bulirsch_elliptic_integral_el3.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el3.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el3_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_carlson_elliptic_r_d(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_carlson_elliptic_r_d.out
+  variants: function
+
+- func: special_carlson_elliptic_r_d.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_carlson_elliptic_r_d.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16325,10 +16630,82 @@
   structured: True
   variants: function
 
+- func: special_carlson_elliptic_r_d.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_d.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_d_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_carlson_elliptic_r_f(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_carlson_elliptic_r_f.out
+  variants: function
+
+- func: special_carlson_elliptic_r_f.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_carlson_elliptic_r_f.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16340,10 +16717,82 @@
   structured: True
   variants: function
 
+- func: special_carlson_elliptic_r_f.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_f.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_carlson_elliptic_r_g(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_carlson_elliptic_r_g.out
+  variants: function
+
+- func: special_carlson_elliptic_r_g.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_carlson_elliptic_r_g.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16355,10 +16804,82 @@
   structured: True
   variants: function
 
+- func: special_carlson_elliptic_r_g.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_g.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_g_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_gegenbauer_polynomial_c(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_gegenbauer_polynomial_c.out
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_gegenbauer_polynomial_c.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16370,10 +16891,82 @@
   structured: True
   variants: function
 
+- func: special_gegenbauer_polynomial_c.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gegenbauer_polynomial_c.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gegenbauer_polynomial_c_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_incomplete_beta(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_incomplete_beta.out
+  variants: function
+
+- func: special_incomplete_beta.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_incomplete_beta.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16385,10 +16978,82 @@
   structured: True
   variants: function
 
+- func: special_incomplete_beta.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_beta.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_incomplete_elliptic_integral_pi(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_incomplete_elliptic_integral_pi.out
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_incomplete_elliptic_integral_pi.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16400,10 +17065,82 @@
   structured: True
   variants: function
 
+- func: special_incomplete_elliptic_integral_pi.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_incomplete_elliptic_integral_pi.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_incomplete_elliptic_integral_pi_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_kummer_confluent_hypergeometric_1_f_1(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_kummer_confluent_hypergeometric_1_f_1.out
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_kummer_confluent_hypergeometric_1_f_1.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16415,10 +17152,82 @@
   structured: True
   variants: function
 
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_kummer_confluent_hypergeometric_1_f_1.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_kummer_confluent_hypergeometric_1_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_radial_polynomial_r(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_radial_polynomial_r.out
+  variants: function
+
+- func: special_radial_polynomial_r.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_radial_polynomial_r.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16430,10 +17239,82 @@
   structured: True
   variants: function
 
+- func: special_radial_polynomial_r.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_radial_polynomial_r.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_radial_polynomial_r_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_spherical_legendre_y(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_spherical_legendre_y.out
+  variants: function
+
+- func: special_spherical_legendre_y.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_spherical_legendre_y.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16445,10 +17326,82 @@
   structured: True
   variants: function
 
+- func: special_spherical_legendre_y.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_legendre_y.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_legendre_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_tricomi_confluent_hypergeometric_u(Tensor a, Tensor b, Tensor c) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_tricomi_confluent_hypergeometric_u.out
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar(Scalar a, Tensor b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.b_scalar(Tensor a, Scalar b, Tensor c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.c_scalar(Tensor a, Tensor b, Scalar c) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_tricomi_confluent_hypergeometric_u.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
@@ -16460,12 +17413,124 @@
   structured: True
   variants: function
 
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar_out(Scalar a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.b_scalar_out(Tensor a, Scalar b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_tricomi_confluent_hypergeometric_u.c_scalar_out(Tensor a, Tensor b, Scalar c, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_tricomi_confluent_hypergeometric_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 # SPECIAL FUNCTIONS: QUATERNARY OPERATORS
 
 - func: special_bulirsch_elliptic_integral_cel(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_bulirsch_elliptic_integral_cel.out
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_bulirsch_elliptic_integral_cel.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16477,10 +17542,178 @@
   structured: True
   variants: function
 
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_cel.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_cel_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_bulirsch_elliptic_integral_el2(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_bulirsch_elliptic_integral_el2.out
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_bulirsch_elliptic_integral_el2.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16492,10 +17725,178 @@
   structured: True
   variants: function
 
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_bulirsch_elliptic_integral_el2.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_bulirsch_elliptic_integral_el2_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_carlson_elliptic_r_j(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_carlson_elliptic_r_j.out
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_carlson_elliptic_r_j.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16507,10 +17908,178 @@
   structured: True
   variants: function
 
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_carlson_elliptic_r_j.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_carlson_elliptic_r_j_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_gauss_hypergeometric_2_f_1(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_gauss_hypergeometric_2_f_1.out
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_gauss_hypergeometric_2_f_1.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16522,10 +18091,178 @@
   structured: True
   variants: function
 
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_gauss_hypergeometric_2_f_1.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_gauss_hypergeometric_2_f_1_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_jacobi_polynomial_p(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_jacobi_polynomial_p.out
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_jacobi_polynomial_p.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16537,10 +18274,178 @@
   structured: True
   variants: function
 
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_jacobi_polynomial_p.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_spherical_harmonic_y(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_spherical_harmonic_y.out
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_spherical_harmonic_y.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16552,10 +18457,178 @@
   structured: True
   variants: function
 
+- func: special_spherical_harmonic_y.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_spherical_harmonic_y.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_spherical_harmonic_y_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_zernike_polynomial_z(Tensor a, Tensor b, Tensor c, Tensor d) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_zernike_polynomial_z.out
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar_c_scalar(Scalar a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar_d_scalar(Scalar a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar(Scalar a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_c_scalar_d_scalar(Scalar a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_c_scalar(Scalar a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_d_scalar(Scalar a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar(Scalar a, Tensor b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_c_scalar_d_scalar(Tensor a, Scalar b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_c_scalar(Tensor a, Scalar b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_d_scalar(Tensor a, Scalar b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar(Tensor a, Scalar b, Tensor c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.c_scalar_d_scalar(Tensor a, Tensor b, Scalar c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.c_scalar(Tensor a, Tensor b, Scalar c, Tensor d) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.d_scalar(Tensor a, Tensor b, Tensor c, Scalar d) -> Tensor
+  device_check: NoCheck
+  python_module: special
   variants: function
 
 - func: special_zernike_polynomial_z.out(Tensor a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
@@ -16565,4 +18638,102 @@
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar_c_scalar_out(Scalar a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar_d_scalar_out(Scalar a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_b_scalar_out(Scalar a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_c_scalar_d_scalar_out(Scalar a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_c_scalar_out(Scalar a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_d_scalar_out(Scalar a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.a_scalar_out(Scalar a, Tensor b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_c_scalar_d_scalar_out(Tensor a, Scalar b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_c_scalar_out(Tensor a, Scalar b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_d_scalar_out(Tensor a, Scalar b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.b_scalar_out(Tensor a, Scalar b, Tensor c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.c_scalar_d_scalar_out(Tensor a, Tensor b, Scalar c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.c_scalar_out(Tensor a, Tensor b, Scalar c, Tensor d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_zernike_polynomial_z.d_scalar_out(Tensor a, Tensor b, Tensor c, Scalar d, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_zernike_polynomial_z_out
+  device_check: NoCheck
+  python_module: special
   variants: function
