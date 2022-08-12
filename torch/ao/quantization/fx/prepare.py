@@ -156,68 +156,38 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
         is_activation_post_process(modules[str(node.target)])
 
 
-def _get_weight_and_bias_index_dicts(backend_config: BackendConfig):
-    index_dicts: Dict[str, Dict[str, List[int]]] = {
-        "weight": {},
-        "bias": {},
-        "input": {}  # not used right now
-    }
-    pattern_to_input_type_to_index = get_pattern_to_input_type_to_index(backend_config)
-    for pattern, input_type_to_index in pattern_to_input_type_to_index.items():
-        for input_type, index in input_type_to_index.items():
-            assert input_type in index_dicts.keys(), \
-                f"input type must be one of {index_dicts.keys()} but got: {input_type}"
-            index_dict = index_dicts[input_type]
-            if pattern in index_dict:  # type: ignore[operator]
-                index_dict[pattern].append(index)  # type: ignore[index]
-            else:
-                index_dict[pattern] = [index]  # type: ignore[index]
-
-    return index_dicts['weight'], index_dicts['bias']
-
-def node_arg_is_weight(node: Node, arg: Any, weight_index_dict: Dict[str, List[int]]) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function' and \
-            node.target in weight_index_dict:
-        for i, node_arg in enumerate(node.args):
-            if arg is node_arg and i in \
-                    weight_index_dict[node.target]:  # type: ignore[index]
-                return True
-        for kwarg_name, kwarg_value in node.kwargs.items():
-            if kwarg_name == 'weight' and arg is kwarg_value:
-                return True
+def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function':
+        weight_index = backend_config.configs[node.target]._input_type_to_index.get('weight')
+        return (weight_index and  weight_index < len(node.args) and node.args[weight_index] is arg) or node.kwargs.get('weight') is arg
     return False
 
-def node_arg_is_bias(node: Node, arg: Any, bias_index_dict: Dict[str, List[int]]) -> bool:
-    if not isinstance(node, Node) or node.op != 'call_function' or \
-       node.target not in bias_index_dict:
-        return False
 
-    for i, node_arg in enumerate(node.args):
-        if arg is node_arg and i in \
-           bias_index_dict[node.target]:  # type: ignore[index]
-            return True
+def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function':
+        bias_index = backend_config.configs[node.target]._input_type_to_index.get('bias')
+        return (bias_index and bias_index < len(node.args) and node.args[bias_index] is arg) or node.kwargs.get('bias') is arg
+    return False
 
-    return node.kwargs.get('bias', None) is arg
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     dtype_config: DTypeConfig,
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
+    backend_config: BackendConfig,
 ) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
     """
     if isinstance(arg, (list, tuple)):
         return all(is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype,
-                                                           dtype_config, weight_index_dict, bias_index_dict) for a in arg)
+                                                           dtype_config, backend_config) for a in arg)
     if not isinstance(arg, Node):
         return True
     # TODO: support check for standalone module
-    is_weight = node_arg_is_weight(node, arg, weight_index_dict)
-    is_bias = node_arg_is_bias(node, arg, bias_index_dict)
+    is_weight = node_arg_is_weight(node, arg, backend_config)
+    is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation:
         is_dynamic = dtype_config.is_dynamic
@@ -237,6 +207,7 @@ def is_input_arg_dtype_supported_by_backend(
     else:  # bias
         bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or node_name_to_target_dtype[node.name]["bias_dtype"] == bias_dtype
+
 
 def is_output_dtype_supported_by_backend(
     node: Node,
@@ -267,8 +238,6 @@ def is_pattern_dtype_config_supported_by_backend(
     matched_node_pattern: Optional[NodePattern],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
     the backend or not
@@ -290,11 +259,11 @@ def is_pattern_dtype_config_supported_by_backend(
         for arg in input_node.args:
             supported = supported and \
                 is_input_arg_dtype_supported_by_backend(
-                    arg, input_node, node_name_to_target_dtype, dtype_config, weight_index_dict, bias_index_dict)
+                    arg, input_node, node_name_to_target_dtype, dtype_config, backend_config)
         for k, arg in input_node.kwargs.items():
             supported = supported and \
                 is_input_arg_dtype_supported_by_backend(
-                    arg, input_node, node_name_to_target_dtype, dtype_config, weight_index_dict, bias_index_dict)
+                    arg, input_node, node_name_to_target_dtype, dtype_config, backend_config)
         # check if output dtype is supported
         supported = supported and is_output_dtype_supported_by_backend(
             output_node, node_name_to_target_dtype, dtype_config)
@@ -493,15 +462,14 @@ def get_arg_target_dtype_as_input_to_node(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
+    backend_config: BackendConfig,
 ) -> Optional[Union[torch.dtype, type]]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
     """
     assert isinstance(arg, Node)
-    is_weight = node_arg_is_weight(node, arg, weight_index_dict)
-    is_bias = node_arg_is_bias(node, arg, bias_index_dict)
+    is_weight = node_arg_is_weight(node, arg, backend_config)
+    is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation:
         return node_name_to_target_dtype[node.name]["input_activation_dtype"]
@@ -518,15 +486,14 @@ def get_arg_target_compute_dtype_as_input_to_node(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Union[torch.dtype, type, None]]],
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
+    backend_config: BackendConfig,
 ) -> Union[torch.dtype, type, None]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
     """
     assert isinstance(arg, Node)
-    is_weight = node_arg_is_weight(node, arg, weight_index_dict)
-    is_bias = node_arg_is_bias(node, arg, bias_index_dict)
+    is_weight = node_arg_is_weight(node, arg, backend_config)
+    is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation and \
        "input_activation_compute_dtype" in node_name_to_target_dtype[node.name]:
@@ -545,8 +512,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -562,9 +527,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 graph, node_name_to_target_dtype,
                 qhandler,
                 prepare_custom_config,
-                backend_config,
-                weight_index_dict,
-                bias_index_dict)
+                backend_config)
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
 
@@ -578,7 +541,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     assert qconfig is not None
     if not is_standalone_module:
         # regular flow for most nodes, except standalone modules
-        is_weight = node_arg_is_weight(node, arg, weight_index_dict)
+        is_weight = node_arg_is_weight(node, arg, backend_config)
 
         is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
@@ -590,11 +553,10 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                                                                           node,
                                                                           modules,
                                                                           node_name_to_target_dtype,
-                                                                          weight_index_dict,
-                                                                          bias_index_dict)
+                                                                          backend_config)
         arg_as_input_target_compute_dtype = \
             get_arg_target_compute_dtype_as_input_to_node(
-                arg, node, modules, node_name_to_target_dtype, weight_index_dict, bias_index_dict)
+                arg, node, modules, node_name_to_target_dtype, backend_config)
         needs_obs = (
             # if the dtypes are different, we need an observer
             (arg_as_output_target_dtype != arg_as_input_target_dtype) and
@@ -687,8 +649,6 @@ def maybe_insert_input_observers_for_node(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
     backend_config: Optional[BackendConfig],
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -717,9 +677,7 @@ def maybe_insert_input_observers_for_node(
             node_name_to_target_dtype,
             qhandler,
             prepare_custom_config,
-            backend_config,
-            weight_index_dict,
-            bias_index_dict,)
+            backend_config)
         new_args.append(new_arg)
 
     new_kwargs = {}
@@ -729,9 +687,7 @@ def maybe_insert_input_observers_for_node(
             node_name_to_target_dtype,
             qhandler,
             prepare_custom_config,
-            backend_config,
-            weight_index_dict,
-            bias_index_dict,)
+            backend_config)
         new_kwargs[k] = new_kwarg
 
     # assign the new args and kwargs to the node, inplace
@@ -746,8 +702,7 @@ def maybe_insert_input_equalization_observers_for_node(
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     is_branch: bool,
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
+    backend_config: BackendConfig,
 ) -> None:
     """
     If `node` needs to be equalized, find the input/weight observers it needs in
@@ -766,11 +721,11 @@ def maybe_insert_input_equalization_observers_for_node(
 
     new_args = []
     for arg in node.args:
-        if not isinstance(arg, Node) or node_arg_is_bias(node, arg, bias_index_dict):
+        if not isinstance(arg, Node) or node_arg_is_bias(node, arg, backend_config):
             new_args.append(arg)
             continue
 
-        is_weight = node_arg_is_weight(node, arg, weight_index_dict)
+        is_weight = node_arg_is_weight(node, arg, backend_config)
 
         act_eq_process_ctr = equalization_qconfig.weight if is_weight else \
             equalization_qconfig.input_activation
@@ -1129,8 +1084,6 @@ def insert_observers_for_model(
     backend_config: Optional[BackendConfig],
     observed_node_names: Set[str],
     is_qat: bool,
-    weight_index_dict: Dict[str, List[int]],
-    bias_index_dict: Dict[str, List[int]],
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
@@ -1256,7 +1209,7 @@ def insert_observers_for_model(
             )
 
             is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
-                pattern, matched_node_pattern, node_name_to_target_dtype, backend_config, weight_index_dict, bias_index_dict)
+                pattern, matched_node_pattern, node_name_to_target_dtype, backend_config)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
@@ -1302,14 +1255,12 @@ def insert_observers_for_model(
                             node_name_to_target_dtype,
                             qhandler,
                             prepare_custom_config,
-                            backend_config,
-                            weight_index_dict,
-                            bias_index_dict)
+                            backend_config)
 
                         # Insert equalization input observers if needed
                         maybe_insert_input_equalization_observers_for_node(
                             node, equalization_qconfig, model, modules, graph,
-                            node_name_to_target_dtype, is_quantized_branch, weight_index_dict, bias_index_dict)
+                            node_name_to_target_dtype, is_quantized_branch, backend_config)
 
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
@@ -1558,8 +1509,6 @@ def prepare(
     pattern_to_quantize_handler = get_pattern_to_quantize_handlers(backend_config)
     pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
-    weight_index_dict, bias_index_dict = _get_weight_and_bias_index_dicts(backend_config)
-
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)
 
@@ -1623,9 +1572,7 @@ def prepare(
         output_quantized_idxs,
         backend_config,
         observed_node_names,
-        is_qat,
-        weight_index_dict,
-        bias_index_dict)
+        is_qat)
 
     save_state(model, qconfig_map, node_name_to_scope,
                prepare_custom_config, equalization_qconfig_map, qconfig_mapping, is_qat, observed_node_names)
