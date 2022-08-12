@@ -13,7 +13,12 @@
 namespace at {
 namespace native {
 
-// See Note [nested tensor matmul] TODO in NestedTensorMath.cpp
+Tensor native_dropout_backward_nested(const Tensor& grad, const Tensor& mask, double scale) {
+  Tensor result = grad * mask * scale;
+  return result;
+}
+
+// See Note [nested tensor matmul] in NestedTensorMath.cpp
 std::tuple<Tensor, Tensor> matmul_backward_nested(
     const Tensor& grad,
     const Tensor& self,

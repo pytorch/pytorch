@@ -705,22 +705,25 @@ at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
   return get_nested_size_tensor(self);
 }
 
-Tensor dropout_nested(const Tensor& input, double p, bool train) {
+std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
   auto input_ptr = get_nested_tensor_impl(input);
   const Tensor& input_buffer = input_ptr->get_buffer(),
       & sizemat = input_ptr->get_nested_size_tensor(),
       & stridemat = input_ptr->get_nested_stride_tensor();
   const std::vector<int64_t>& offsets = input_ptr->get_offsets();
-  Tensor output_buffer = at::dropout(input_buffer, p, train);
+  Tensor output_buffer, mask_buffer;
+  if (input_buffer.numel() == 0) {
+    output_buffer = input_buffer.clone();
+    mask_buffer = input_buffer.clone();
+  }
+  else {
+    std::tie(output_buffer, mask_buffer) = at::native_dropout(input_buffer, p, train);
+  }
   // regular tensor dropout reuses input size and stride
   // i.e. if input is not contiguous, then output is also discontiguous
-  return wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets);
-}
-
-Tensor& dropout_nested_(Tensor& input, double p, bool train) {
-  Tensor input_buffer = get_buffer(input);
-  at::dropout_(input_buffer, p, train);
-  return input;
+  Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets),
+      mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), offsets);
+  return std::make_tuple(output, mask);
 }
 
 Tensor softmax_nested(
