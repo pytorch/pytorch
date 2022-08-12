@@ -161,11 +161,6 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
           MPSGraphTensor* alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, alpha_f);
-          MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
-                                                           indicesTensor:indexTensor
-                                                                    axis:dim
-                                                         batchDimensions:0
-                                                                    name:nil];
           MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:sourceTensor
                                                                        secondaryTensor:alphaTensor
                                                                                   name:nil];
