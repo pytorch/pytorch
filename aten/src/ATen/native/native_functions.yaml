@@ -12765,6 +12765,11 @@
     NestedTensorCPU: NestedTensor_to_padded_tensor_generic
     NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
 
+- func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
+  dispatch:
+    NestedTensorCPU: NestedTensor_softmax_dropout
+    NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
+
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
   dispatch:
