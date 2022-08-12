@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import json
+from turtle import back
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -484,6 +485,8 @@ def test_distributed(test_module, test_directory, options):
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if backend != "ucc":
+            continue
         if sys.platform == "win32" and backend != "gloo":
             continue
         if backend == "mpi" and not mpi_available:
