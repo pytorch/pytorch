@@ -15,6 +15,7 @@ number = Union[int, float]
 # python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
 # to reproduce errors from opinfo tests.
 
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
