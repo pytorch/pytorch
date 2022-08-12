@@ -179,6 +179,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                            torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],

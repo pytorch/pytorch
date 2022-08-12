@@ -31,6 +31,7 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         to close them explicitly.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
         >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
         >>> dp = FileOpener(dp)

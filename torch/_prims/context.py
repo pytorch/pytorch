@@ -103,6 +103,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.* functions and Tensor methods to
     use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
 
+    >>> # xdoctest: +SKIP
     >>> with TorchRefsMode():
     ...     torch.add(x, y)  # calls torch._refs.add(x, y)
 

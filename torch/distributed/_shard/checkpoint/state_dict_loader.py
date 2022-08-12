@@ -126,6 +126,7 @@ def load_state_dict(
         None.
 
     Examples
+        >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()

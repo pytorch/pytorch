@@ -17,6 +17,7 @@ class Cauchy(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Cauchy(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Cauchy distribution with loc=0 and scale=1
         tensor([ 2.3214])

@@ -18,6 +18,7 @@ class Binomial(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
         tensor([   0.,   22.,   71.,  100.])

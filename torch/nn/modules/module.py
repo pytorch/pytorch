@@ -352,6 +352,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
@@ -705,20 +706,17 @@ class Module:
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            Sequential(
-              (0): Linear(in_features=2, out_features=2, bias=True)
-              (1): Linear(in_features=2, out_features=2, bias=True)
-            )
+
         """
         for module in self.children():
             module.apply(fn)
@@ -923,6 +921,7 @@ class Module:
 
         Examples::
 
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
             Parameter containing:
@@ -1406,6 +1405,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> module.state_dict().keys()
             ['bias', 'weight']
 
@@ -1689,6 +1689,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for param in model.parameters():
             >>>     print(type(param), param.size())
             <class 'torch.Tensor'> (20L,)
@@ -1713,6 +1714,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
@@ -1737,6 +1739,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for buf in model.buffers():
             >>>     print(type(buf), buf.size())
             <class 'torch.Tensor'> (20L,)
@@ -1761,6 +1764,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, buf in self.named_buffers():
             >>>    if name in ['running_var']:
             >>>        print(buf.size())
@@ -1790,6 +1794,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
@@ -1816,7 +1821,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
@@ -1850,7 +1855,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> ('', Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)

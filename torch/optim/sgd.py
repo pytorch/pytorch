@@ -55,6 +55,7 @@ class SGD(Optimizer):
             is used (default: None)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()

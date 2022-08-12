@@ -56,6 +56,7 @@ def make_dual(tensor, tangent, *, level=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
         ...   inp = make_dual(x, v)
         ...   out = f(inp)
@@ -95,6 +96,7 @@ def unpack_dual(tensor, *, level=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
         ...   inp = make_dual(x, x_t)
         ...   out = f(inp)
@@ -130,6 +132,7 @@ class dual_level(_DecoratorContextManager):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> x = torch.tensor([1])
         >>> x_t = torch.tensor([1])
         >>> with dual_level():

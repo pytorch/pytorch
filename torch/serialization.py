@@ -696,6 +696,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         as byte arrays which can be decoded later with ``byte_array.decode(...)``.
 
     Example:
+        >>> # xdoctest: +SKIP("undefined filepaths")
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
         >>> torch.load('tensors.pt', map_location=torch.device('cpu'))

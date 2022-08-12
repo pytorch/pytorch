@@ -257,15 +257,18 @@ def einsum(*args: Any) -> Tensor:
 
     Examples::
 
-        # trace
+        >>> # trace
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum('ii', torch.randn(4, 4))
         tensor(-1.2104)
 
-        # diagonal
+        >>> # diagonal
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum('ii->i', torch.randn(4, 4))
         tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
-        # outer product
+        >>> # outer product
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> x = torch.randn(5)
         >>> y = torch.randn(4)
         >>> torch.einsum('i,j->ij', x, y)
@@ -275,7 +278,8 @@ def einsum(*args: Any) -> Tensor:
                 [ 0.1713, -0.4291, -0.5802,  0.7350],
                 [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-        # batch matrix multiplication
+        >>> # batch matrix multiplication
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> As = torch.randn(3,2,5)
         >>> Bs = torch.randn(3,5,4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
@@ -288,7 +292,8 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        # with sublist format and ellipsis
+        >>> # with sublist format and ellipsis
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -299,12 +304,12 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        # batch permute
+        >>> # batch permute
         >>> A = torch.randn(2, 3, 4, 5)
         >>> torch.einsum('...ij->...ji', A).shape
         torch.Size([2, 3, 5, 4])
 
-        # equivalent to torch.nn.functional.bilinear
+        >>> # equivalent to torch.nn.functional.bilinear
         >>> A = torch.randn(3,5,4)
         >>> l = torch.randn(2,5)
         >>> r = torch.randn(2,4)
@@ -453,6 +458,7 @@ else:
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
+            >>> # xdoctest: +SKIP
             <mpl_toolkits.mplot3d.art3d.Poly3DCollection object at 0x7f8f30d40100>
             >>> plt.show()
 
@@ -730,6 +736,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
 
         >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
         >>> output
+        >>> # xdoctest: +SKIP
         tensor([ 2,  3,  1])
 
         >>> output, inverse_indices = torch.unique(
@@ -1014,6 +1021,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
 
         >>> a = torch.randn(3, 4, 5, device='cuda')
         >>> b = torch.randn(4, 5, 6, device='cuda')
+        >>> # xdoctest: +SKIP
         >>> c = torch.tensordot(a, b, dims=2).cpu()
         tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
@@ -1081,6 +1089,7 @@ def cartesian_prod(*tensors):
 
         >>> a = [1, 2, 3]
         >>> b = [4, 5]
+        >>> # xdoctest: +SKIP
         >>> list(itertools.product(a, b))
         [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
         >>> tensor_a = torch.tensor(a)
@@ -1203,6 +1212,7 @@ def atleast_1d(*tensors):
 
         >>> x = torch.randn(2)
         >>> x
+        >>> # xdoctest: +SKIP
         tensor([1.4584, 0.7583])
         >>> torch.atleast_1d(x)
         tensor([1.4584, 0.7583])
@@ -1243,6 +1253,7 @@ def atleast_2d(*tensors):
         tensor([[1.]])
         >>> x = torch.randn(2,2)
         >>> x
+        >>> # xdoctest: +SKIP
         tensor([[2.2086, 2.5165],
                 [0.1757, 0.5194]])
         >>> torch.atleast_2d(x)
@@ -1280,6 +1291,7 @@ def atleast_3d(*tensors):
         tensor([[[0.5000]]])
         >>> y = torch.randn(2,2)
         >>> y
+        >>> # xdoctest: +SKIP
         tensor([[-0.8079,  0.7460],
                 [-1.1647,  1.4734]])
         >>> torch.atleast_3d(y)
@@ -1414,6 +1426,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
         >>> torch.norm(a)
+        >>> # xdoctest: +SKIP
         tensor(7.7460)
         >>> torch.norm(b)
         tensor(7.7460)
@@ -1529,6 +1542,7 @@ def chain_matmul(*matrices, out=None):
         >>> c = torch.randn(5, 6)
         >>> d = torch.randn(6, 7)
         >>> torch.chain_matmul(a, b, c, d)
+        >>> # xdoctest: +SKIP
         tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
                 [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
                 [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
@@ -1621,6 +1635,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(--lapack)
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU

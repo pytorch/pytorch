@@ -199,6 +199,7 @@ class _RemoteModule(nn.Module):
             >>> from torch import nn, Tensor
             >>> from torch.distributed.nn.api.remote_module import RemoteModule
             >>>
+            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_linear_module = RemoteModule(
             >>>     "worker1/cpu", nn.Linear, args=(20, 30),
@@ -505,6 +506,7 @@ class _RemoteModule(nn.Module):
             >>> from torch import nn, Tensor
             >>> from torch.distributed.nn.api.remote_module import RemoteModule
             >>>
+            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_module = RemoteModule(
             >>>     "worker1/cpu", nn.Linear, args=(20, 30),
@@ -626,6 +628,7 @@ class RemoteModule(_RemoteModule):
         >>> from torch import nn, Tensor
         >>> from torch.distributed.nn.api.remote_module import RemoteModule
         >>>
+        >>> # xdoctest: +SKIP
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> remote_linear_module = RemoteModule(
         >>>     "worker1/cpu", nn.Linear, args=(20, 30),

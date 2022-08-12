@@ -160,6 +160,7 @@ def _wait_all():
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
+        >>> # xdoctest: +SKIP
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> with rpc._wait_all():
         >>>    fut_1 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
@@ -331,11 +332,12 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -574,15 +576,17 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         raised as they have not yet been handled.
 
     Example::
+
         Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -759,11 +763,12 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -850,11 +855,12 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc

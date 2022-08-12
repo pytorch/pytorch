@@ -37,6 +37,7 @@ def _reify(o, s):
 
 def reify(e, s):
     """ Replace variables of expression with substitution
+    >>> # xdoctest: +SKIP
     >>> x, y = var(), var()
     >>> e = (1, x, (3, y))
     >>> s = {x: 2, y: 4}

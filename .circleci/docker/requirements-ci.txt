@@ -164,6 +164,11 @@ pytest-rerunfailures
 #Pinned versions:
 #test that import:
 
+#xdoctest
+#Description: runs doctests in pytest
+#Pinned versions:
+#test that import:
+
 #PyYAML
 #Description: data serialization format
 #Pinned versions:

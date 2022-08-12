@@ -52,7 +52,7 @@ class LowRankMultivariateNormal(Distribution):
         covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:
-
+        >>> # xdoctest: +REQUIRES(--lapack)
         >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([[1.], [0.]]), torch.ones(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[[1],[0]]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])

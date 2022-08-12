@@ -127,6 +127,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> options.set_device_map("worker1", {1: 2})
             >>> # maps worker0's cuda:1 to worker1's cuda:2
             >>>
+            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc(
             >>>     "worker0",
             >>>     rank=0,

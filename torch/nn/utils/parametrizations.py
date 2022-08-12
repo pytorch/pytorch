@@ -242,6 +242,7 @@ def orthogonal(module: Module,
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(--lapack)
         >>> orth_linear = orthogonal(nn.Linear(20, 40))
         >>> orth_linear
         ParametrizedLinear(
@@ -252,6 +253,7 @@ def orthogonal(module: Module,
             )
         )
         )
+        >>> # xdoctest: +IGNORE_WANT
         >>> Q = orth_linear.weight
         >>> torch.dist(Q.T @ Q, torch.eye(20))
         tensor(4.9332e-07)
@@ -457,6 +459,7 @@ def spectral_norm(module: Module,
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(--lapack)
         >>> snm = spectral_norm(nn.Linear(20, 40))
         >>> snm
         ParametrizedLinear(

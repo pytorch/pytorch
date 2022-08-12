@@ -19,13 +19,13 @@ class LSTMCell(torch.nn.Module):
 
         >>> import torch.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
-        >>> input = torch.randn(3, 10)
+        >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
         >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-                hx, cx = rnn(input[i], (hx, cx))
-                output.append(hx)
+        ...     hx, cx = rnn(input[i], (hx, cx))
+        ...     output.append(hx)
     """
     _FLOAT_MODULE = torch.nn.LSTMCell
 
@@ -262,6 +262,7 @@ class LSTM(torch.nn.Module):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
         >>> # To get the weights:
+        >>> # xdoctest: +SKIP
         >>> print(rnn.layers[0].weight_ih)
         tensor([[...]])
         >>> print(rnn.layers[0].weight_hh)

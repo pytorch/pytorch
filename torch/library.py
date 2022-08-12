@@ -76,6 +76,7 @@ class Library:
                           the dispatch key that the library was created with.
 
         Example::
+            >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>    return self * (1 / other)

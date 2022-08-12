@@ -33,6 +33,7 @@ class Conv1d(nnq.Conv1d):
 
         >>> m = nn.quantized.dynamic.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
 
     """
@@ -108,6 +109,7 @@ class Conv2d(nnq.Conv2d):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.dynamic.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
 
     """
@@ -172,6 +174,7 @@ class Conv3d(nnq.Conv3d):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.dynamic.Conv3d(16, 33, (3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2), dilation=(1, 2, 2))
         >>> input = torch.randn(20, 16, 56, 56, 56)
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
 
     """
@@ -231,6 +234,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     Examples::
 
         >>> # With square kernels and equal stride
+        >>> # xdoctest: +SKIP
         >>> m = nndq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nndq.ConvTranspose1d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -294,6 +298,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> # exact output size can be also specified as an argument
         >>> downsample = nnq.Conv2d(16, 16, 3, stride=2, padding=1)
@@ -354,6 +359,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1, 1), padding=(4, 2, 2))
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> # exact output size can be also specified as an argument
         >>> downsample = nnq.Conv3d(16, 16, 3, stride=2, padding=1)

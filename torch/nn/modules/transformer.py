@@ -130,6 +130,7 @@ class Transformer(Module):
             batch size, E is the feature number
 
         Examples:
+            >>> # xdoctest: +SKIP
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 

@@ -32,6 +32,7 @@ class Quantize(torch.nn.Module):
         >>> t = torch.tensor([[1., -1.], [1., -1.]])
         >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
         >>> qm = Quantize(scale, zero_point, dtype)
+        >>> # xdoctest: +SKIP
         >>> qt = qm(t)
         >>> print(qt)
         tensor([[ 1., -1.],
@@ -71,6 +72,7 @@ class DeQuantize(torch.nn.Module):
         >>> input = torch.tensor([[1., -1.], [1., -1.]])
         >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
         >>> qm = Quantize(scale, zero_point, dtype)
+        >>> # xdoctest: +SKIP
         >>> quantized_input = qm(input)
         >>> dqm = DeQuantize()
         >>> dequantized = dqm(quantized_input)

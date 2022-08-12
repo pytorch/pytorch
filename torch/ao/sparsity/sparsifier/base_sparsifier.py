@@ -43,7 +43,8 @@ class BaseSparsifier(abc.ABC):
 
     Example::
 
-        >>> config = [{'tensor_fqn': 'layer1.weight', {'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
+        >>> # xdoctest: +SKIP("Can't instantiate abstract class BaseSparsifier with abstract method update_mask")
+        >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
@@ -233,6 +234,7 @@ class BaseSparsifier(abc.ABC):
                             to save in the `sparse_params`
 
         Examples:
+            >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
             >>> sparsifier.squash_mask()
             >>> hasattr(model.submodule1, 'sparse_params')

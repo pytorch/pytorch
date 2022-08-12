@@ -905,19 +905,20 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
-                name='extension',
-                ext_modules=[
-                    CppExtension(
-                        name='extension',
-                        sources=['extension.cpp'],
-                        extra_compile_args=['-g']),
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='extension',
+        ...     ext_modules=[
+        ...         CppExtension(
+        ...             name='extension',
+        ...             sources=['extension.cpp'],
+        ...             extra_compile_args=['-g']),
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -951,20 +952,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
-                name='cuda_extension',
-                ext_modules=[
-                    CUDAExtension(
-                            name='cuda_extension',
-                            sources=['extension.cpp', 'extension_kernel.cu'],
-                            extra_compile_args={'cxx': ['-g'],
-                                                'nvcc': ['-O2']})
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='cuda_extension',
+        ...     ext_modules=[
+        ...         CUDAExtension(
+        ...                 name='cuda_extension',
+        ...                 sources=['extension.cpp', 'extension_kernel.cu'],
+        ...                 extra_compile_args={'cxx': ['-g'],
+        ...                                     'nvcc': ['-O2']})
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
 
     Compute capabilities:
 
@@ -998,10 +1000,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
+        >>> # xdoctest: +SKIP
         >>> #include <ATen/ATen.h>
         >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
+        >>> # xdoctest: +SKIP
         >>> #include <torch/extension.h>
         >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
@@ -1026,13 +1030,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> CUDAExtension(
-                    name='cuda_extension',
-                    sources=['extension.cpp', 'extension_kernel.cu'],
-                    dlink=True,
-                    dlink_libraries=["dlink_lib"],
-                    extra_compile_args={'cxx': ['-g'],
-                                        'nvcc': ['-O2', '-rdc=true']})
+        ...        name='cuda_extension',
+        ...        sources=['extension.cpp', 'extension_kernel.cu'],
+        ...        dlink=True,
+        ...        dlink_libraries=["dlink_lib"],
+        ...        extra_compile_args={'cxx': ['-g'],
+        ...                            'nvcc': ['-O2', '-rdc=true']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1264,12 +1269,13 @@ def load(name,
             added to the PATH environment variable as a side effect.)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load
         >>> module = load(
-                name='extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_cflags=['-O2'],
-                verbose=True)
+        ...     name='extension',
+        ...     sources=['extension.cpp', 'extension_kernel.cu'],
+        ...     extra_cflags=['-O2'],
+        ...     verbose=True)
     '''
     return _jit_compile(
         name,
@@ -1355,14 +1361,14 @@ def load_inline(name,
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
-        >>> source = \'\'\'
+        >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
           return x.sin() + y.sin();
         }
-        \'\'\'
+        """
         >>> module = load_inline(name='inline_extension',
-                                 cpp_sources=[source],
-                                 functions=['sin_add'])
+        ...                      cpp_sources=[source],
+        ...                      functions=['sin_add'])
 
     .. note::
         By default, the Ninja backend uses #CPUS + 2 workers to build the

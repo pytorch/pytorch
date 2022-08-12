@@ -59,6 +59,7 @@ def quantization_pertensor_hook(
         ``allreduce`` protocol. It works only with flattened grads.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, quantization_pertensor_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -138,6 +139,7 @@ def quantization_perchannel_hook(
         ``allreduce`` protocol. It works only with flattened grads.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, quantization_perchannel_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
