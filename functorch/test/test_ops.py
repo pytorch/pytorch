@@ -297,7 +297,7 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -437,7 +437,7 @@ class TestOperators(TestCase):
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
         xfail('as_strided_scatter', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -482,7 +482,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
         xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -618,7 +618,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
 
         xfail('chalf', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
         xfail('as_strided_scatter', ''),
         xfail('index_reduce', ''),
         xfail('nn.functional.dropout3d', ''),
@@ -915,13 +915,13 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
         xfail('linalg.solve_ex', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
         xfail('_masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -983,7 +983,7 @@ class TestOperators(TestCase):
         xfail('half'),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1087,7 +1087,7 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
+        xfail('sparse.sampled_addmm', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
         xfail('index_reduce', ''),
@@ -1359,7 +1359,7 @@ class TestOperators(TestCase):
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.multi_dot', '', device_type='cpu'),
-        skip('sparse.sampled_addmm', '', device_type='cpu'),
+        skip('sparse.sampled_addmm', ''),
         skip('native_layer_norm', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
     })
