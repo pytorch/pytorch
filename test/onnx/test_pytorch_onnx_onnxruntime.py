@@ -153,7 +153,7 @@ def _parametrize_rnn_args(arg_name):
 
 
 @parameterized.parameterized_class(
-    **_parameterized_class_attrs_and_values(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION)),
+    **_parameterized_class_attrs_and_values(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 @common_utils.instantiate_parametrized_tests
