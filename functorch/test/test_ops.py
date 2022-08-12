@@ -1358,9 +1358,9 @@ class TestOperators(TestCase):
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
-        xfail('linalg.multi_dot', '', device_type='cpu'),
-        xfail('sparse.sampled_addmm', '', device_type='cpu'),
-        xfail('native_layer_norm', '', device_type='cpu'),
+        skip('linalg.multi_dot', '', device_type='cpu'),
+        skip('sparse.sampled_addmm', '', device_type='cpu'),
+        skip('native_layer_norm', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
     })
     def test_vmap_autograd_grad(self, device, dtype, op):
