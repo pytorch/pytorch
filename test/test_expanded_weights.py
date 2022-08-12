@@ -178,9 +178,6 @@ class TestExpandedWeightFunctional(TestCase):
             if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
                 sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
 
-            def reduction(x):
-                return x.sum()
-
             self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.sum)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
