@@ -9,10 +9,16 @@ function install_ucx() {
   git checkout ${UCX_COMMIT}
   git submodule update --init --recursive
 
+  if [[ "$image" == *cuda* ]];  then
+    with_cuda=/usr/local/cuda/
+  else
+    with_cuda=no
+  fi
+
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
-      --with-cuda=/usr/local/cuda/    \
+      --with-cuda=$with_cuda          \
       --enable-profiling              \
       --enable-stats
   time make -j
