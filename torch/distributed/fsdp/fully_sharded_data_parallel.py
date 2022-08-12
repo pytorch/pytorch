@@ -2321,6 +2321,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         state_dict: Mapping[str, Any],
         *args,
+        **kwargs,
     ) -> NamedTuple:
         """
         The entry point of all three FSDP ``load_state_dict`` APIs. By default,
