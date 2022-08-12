@@ -154,8 +154,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
         ? impl::version_counter(data_).current_version()
         : version_counter_.current_version();
 
-
-
     if (saved_version_ != current_version) {
       std::stringstream message;
       message
