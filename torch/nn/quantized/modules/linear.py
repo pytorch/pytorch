@@ -114,6 +114,7 @@ class Linear(WeightedQuantizedModule):
 
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> # xdoctest: +SKIP
         >>> input = torch.quantize_per_tensor(input, 1.0, 0, torch.quint8)
         >>> output = m(input)
         >>> print(output.size())
