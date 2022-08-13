@@ -247,9 +247,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     )
 
     if isinstance(out, (list, tuple)):
-        num_outs = len(out)
+        _num_outs = len(out)
     else:
-        num_outs = 1
+        _num_outs = 1
 
     joint_inputs = (flat_args, out)
     with torch.set_grad_enabled(True):
@@ -266,29 +266,30 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     if config.debug_joint:
         print(fx_g.code)
 
-    with track_graph_compiling("joint"):
-        fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+    with torch.no_grad():
+        with track_graph_compiling("joint"):
+            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
-    if config.debug_graphs:
-        print(fw_module.code, bw_module.code)
+        if config.debug_graphs:
+            print(fw_module.code, bw_module.code)
 
-    with track_graph_compiling("forward"):
-        compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
+        with track_graph_compiling("forward"):
+            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
 
-    if config.debug_partitioner:
-        with torch.no_grad():
+        if config.debug_partitioner:
             fw_outs = call_func_with_args(compiled_fw_func, flat_args)
-        activation_sizes = 0
-        for out in fw_outs[num_outs:]:
-            if isinstance(out, torch.Tensor):
-                activation_sizes += out.storage().nbytes()
-        print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+            activation_sizes = 0
+            for out in fw_outs[_num_outs:]:
+                if isinstance(out, torch.Tensor):
+                    activation_sizes += out.storage().nbytes()
+            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
     torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = None
+        num_outs = _num_outs
 
         @staticmethod
         @disable_torchdynamo
