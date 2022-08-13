@@ -85,6 +85,24 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
   };
 }
 
+namespace {
+c10::optional<bool> soft_assert_raises_;
+} // namespace
+
+void setSoftAssertRaises(c10::optional<bool> value) {
+  soft_assert_raises_ = value;
+}
+
+bool softAssertRaises() {
+  return soft_assert_raises_.value_or(
+#ifdef NDEBUG
+      false
+#else
+      true
+#endif
+  );
+}
+
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
 // ----------------------------------------------------------------------------
