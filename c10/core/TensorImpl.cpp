@@ -537,8 +537,9 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+  if ((key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) ||
+      c10::impl::tls_is_dispatch_key_included(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));

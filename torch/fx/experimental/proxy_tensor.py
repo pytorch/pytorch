@@ -220,7 +220,7 @@ def wrap_key(f, tensors, proxy_mode):
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
-        assert (len(flat_tensors) == len(flat_tensors))
+        assert (len(flat_proxies) == len(flat_tensors))
         for idx, tensor, proxy in zip(range(len(flat_tensors)), flat_tensors, flat_proxies):
             if isinstance(tensor, torch.Tensor):
                 proxy_mode.trace_state[WeakTensorRefKey(tensor)] = ProxyTensor(proxy, None)
@@ -229,8 +229,10 @@ def wrap_key(f, tensors, proxy_mode):
         out = f(*tree_args)
         flat_outs, out_spec = pytree.tree_flatten(out)
         for idx, tensor in enumerate(flat_outs):
-            if isinstance(tensor, torch.Tensor) and WeakTensorRefKey(tensor) in proxy_mode.trace_state:
-                flat_outs[idx] = proxy_mode.trace_state[WeakTensorRefKey(tensor)].proxy
+            if isinstance(tensor, torch.Tensor):
+                if WeakTensorRefKey(tensor) in proxy_mode.trace_state:
+                    flat_outs[idx] = proxy_mode.trace_state[WeakTensorRefKey(tensor)].proxy
+
         return pytree.tree_unflatten(flat_outs, out_spec)
 
     return wrapped
