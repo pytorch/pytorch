@@ -19,6 +19,7 @@ from torch.overrides import (
     TorchFunctionMode
 )
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
+from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
 
@@ -337,7 +338,7 @@ def generate_tensor_like_torch_implementations():
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
+        "torch.overrides.get_testing_overrides for this function or if a "
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
@@ -648,7 +649,11 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                elif t == 'Dimname':
+                    func_args.append("")
+                elif t == 'DimnameList':
+                    func_args.append([""])
+                elif t.startswith('int'):
                     func_args.append(0)
                 elif t in {'Stream'}:
                     func_args.append(torch.Stream())
@@ -1527,6 +1532,51 @@ class TestTorchFunctionMode(TestCase):
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_enable_subclass(self):
+        called = False
+
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(5))
+        with torch._C.DisableTorchFunction():
+            g = torch._C._EnableTorchFunction()
+            try:
+                self.assertIsInstance(torch.sum(x), A)
+            finally:
+                del g
+
+    def test_subclass_hash(self):
+        class DiagTensor(torch.Tensor):
+            def __init__(self, diag):
+                self._diag = diag
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                def get_full_matrices(t):
+                    if isinstance(t, DiagTensor):
+                        return torch.diag_embed(t._diag)
+                    else:
+                        return t
+
+                return func(*tree_map(get_full_matrices, args), **tree_map(get_full_matrices, kwargs))
+
+        d = torch.rand(2)
+        a = DiagTensor(d)
+
+        self.assertEqual((a + 1), torch.diag_embed(d) + 1)
+
+        # If the hash function was returning the same value, this would
+        # fail inside `Tensor.__eq__`.
+        # If __hash__ was going through torch_function, the implementation above would
+        # be wrong as it would compute the hash on a temporary Tensor thus not ensuring
+        # the uniqueness of the hash that we rely on for Tensors.
+        s = set()
+        s.add(a)
+        s.add(DiagTensor(d))
 
 
 if __name__ == '__main__':
