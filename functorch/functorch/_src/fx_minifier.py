@@ -3,8 +3,9 @@ import torch.fx as fx
 import copy
 import torch
 import math
-from typing import Callable
-
+from typing import Callable, List
+from functools import wraps, partial
+from dataclasses import dataclass
 
 class ConcreteProp(torch.fx.Interpreter):
     def run_node(self, n):
@@ -60,7 +61,12 @@ with torch.jit.fuser("fuser2"):
     for _ in range(5):
         f(*inps)""")
 
-def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callable = lambda *args: None):
+@dataclass
+class ReproState:
+    graph: fx.Graph
+    inps: List[torch.Tensor]
+
+def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callable = generate_repro):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -77,8 +83,10 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
     failing_graph = fail_f.graph
     cur_size = len(failing_graph.nodes)
 
+    num_queries = 0
     def graph_fails(graph, inps):
-
+        nonlocal num_queries
+        num_queries += 1
         mod = fx.GraphModule(fail_f, graph)
         mod.graph.lint()
         return module_fails(mod, inps)
@@ -88,10 +96,41 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         raise RuntimeError("Input graph did not fail the tester")
     print(f"Started off with {cur_size} nodes")
 
+    def _register_strategy(strategy: Callable, name: str):
+        @wraps(strategy)
+        def new_func(old_state: ReproState):
+            print(f"Strategy: {name}")
+            new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps))
+            if new_state is not None:
+                new_nodes = len(new_state.graph.nodes)
+                old_nodes = len(old_state.graph.nodes)
+                new_inps = len(new_state.inps)
+                old_inps = len(old_state.inps)
+                if new_nodes < old_nodes:
+                    print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
+                elif new_nodes == old_nodes and new_inps > old_inps:
+                    print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs")
+                else:
+                    raise RuntimeError("Success raised but no progress made?")
+
+                if not graph_fails(new_state.graph, new_state.inps):
+                    print("WARNING: Something went wrong, not applying this minification")
+                    return None
+
+                return new_state
+            else:
+                print(f"FAIL: {name}")
+            return None
+
+        return new_func
+
+    def register_strategy(name: str):
+        return partial(_register_strategy, name=name)
+
+    @register_strategy("Truncate suffix")
     def remove_suffix(cur_graph, cur_inps):
-        print("Strategy: Remove suffix")
-        assert graph_fails(cur_graph, cur_inps)
-        gap = 2**math.floor(math.log2(len(cur_graph.nodes)))
+        gap = 2**(math.floor(math.log2(len(cur_graph.nodes))) - 1)
+        gap = max(gap, 1)
         tested = set()
         while gap >= 1:
             new_graph = fx.Graph()
@@ -102,23 +141,18 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                     if idx % gap == 0 and idx not in tested:
                         output_node = new_graph.output((new_node,))
                         if graph_fails(new_graph, cur_inps) and len(new_graph.nodes) < len(cur_graph.nodes):
-                            print()
-                            print(f"SUCCESS: Removed [{idx}:{len(cur_graph.nodes)})")
-                            return (new_graph, cur_inps), True
+                            return ReproState(new_graph, cur_inps)
                         else:
                             tested.add(idx)
                             new_graph.erase_node(output_node)
                 env[node] = new_node
             gap //= 2
         print("FAIL: Could not remove suffix")
-        return (cur_graph, cur_inps), False
+        return None
 
+    @register_strategy("Remove unused inputs")
     def remove_unused_inputs(cur_graph, cur_inps):
-        assert graph_fails(cur_graph, cur_inps)
         ph_nodes = _get_placeholders(cur_graph)
-        if len(ph_nodes) != len(cur_inps):
-            print(cur_graph)
-            print(len(cur_inps))
         assert len(ph_nodes) == len(cur_inps)
 
         new_inps = []
@@ -129,22 +163,18 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 new_inps.append(cur_inps[idx])
 
         if len(new_inps) < len(cur_inps) and graph_fails(cur_graph, new_inps):
-            print("Strategy: Remove unused inputs")
-            print(f"SUCCESS: Went from {len(cur_inps)} inputs to {len(new_inps)} inputs")
-            return (cur_graph, new_inps), True
+            return ReproState(cur_graph, new_inps)
         else:
-            return (cur_graph, new_inps), False
+            return None
 
+    @register_strategy("Eliminate dead code")
     def eliminate_dead_code(cur_graph, cur_inps):
-        orig_size = len(cur_graph.nodes)
         if cur_graph.eliminate_dead_code() and graph_fails(cur_graph, cur_inps):
-            print("Strategy: Eliminate dead code")
-            print(f"SUCCESS: Went from {orig_size} nodes to {len(cur_graph.nodes)} nodes")
-            return (cur_graph, cur_inps), True
+            return ReproState(cur_graph, cur_inps)
         else:
-            return (cur_graph, cur_inps), False
+            return None
 
-    def consolidate_placeholders(cur_graph):
+    def _consolidate_placeholders(cur_graph):
         new_graph = fx.Graph()
         env = {}
         for node in cur_graph.nodes:
@@ -158,10 +188,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 env[node] = new_node
         return new_graph
 
+    @register_strategy("Delta Debugging")
     def delta_debugging(cur_graph: fx.Graph, cur_inps):
-        print("Strategy: Delta Debugging")
-        assert graph_fails(cur_graph, cur_inps)
-        starting_placeholders = len(_get_placeholders(cur_graph))
         num_nodes = len(cur_graph.nodes)
         gap = int(2**math.floor(math.log2(num_nodes)))
         while gap >= 1:
@@ -177,21 +205,14 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                         _convert_node_to_placeholder(new_node, new_inps)
                 if not is_removing:
                     continue
-                new_graph = consolidate_placeholders(new_graph)
+                new_graph = _consolidate_placeholders(new_graph)
                 if graph_fails(new_graph, new_inps):
-                    print(
-                        f"SUCCESS: Removed ({start_range}:{end_range}] - Went from {starting_placeholders} "
-                        f"placeholders to {len(_get_placeholders(new_graph))}"
-                    )
-                    return (new_graph, new_inps), True
+                    return ReproState(new_graph, new_inps)
             gap //= 2
 
-        print("FAIL: Could not remove prefix")
-        return (cur_graph, inps), False
+        return None
 
-    print("###################")
-    print(f"Current size: {len(failing_graph.nodes)}")
-    print("###################")
+    failing_state = ReproState(failing_graph, inps)
     while True:
         any_succeeded = False
         strategies = [
@@ -199,74 +220,14 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
             delta_debugging, eliminate_dead_code, remove_unused_inputs
         ]
         for strategy in strategies:
-            out = strategy(copy.deepcopy(failing_graph), inps[:])
-            (cur_graph, cur_inps), succeeded = out
-            if succeeded:
-                print()
-                print("###################")
-                print(f"Current size: {len(cur_graph.nodes)}")
-                print("###################")
-                failing_graph = cur_graph
-                inps = cur_inps
+            new_state = strategy(failing_state)
+            if new_state is not None:
+                failing_state = new_state
                 any_succeeded = True
 
         if not any_succeeded:
             break
-    failing_fx = fx.GraphModule(fail_f, failing_graph)
-    generate_repro(failing_fx, inps)
+    print(f"Made {num_queries} queries")
+    failing_fx = fx.GraphModule(fail_f, failing_state.graph)
+    generate_repro(failing_fx, failing_state.inps)
     return failing_fx, inps
-
-
-def check_nvfuser_subprocess(f, inps):
-    f.to_folder("temp")
-    with open("_temp.py", 'w') as fil:
-        fil.write(f'''
-import torch
-from temp import FxModule
-f = FxModule().cuda()
-inps = {[(i.shape, i.dtype) for i in inps]}
-inps = [torch.ones(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
-with torch.jit.fuser("fuser2"):
-    nf = torch.jit.script(f)
-    for _ in range(5):
-        nf(*inps)
-    ''')
-    p = subprocess.Popen(["PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py"],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    out, err = p.communicate()
-    if p.returncode != 0:
-        err = err.decode('utf-8')
-        print(err)
-        return True
-    return False
-
-
-def check_nvfuser_correctness_subprocess(f, inps):
-    f.to_folder("temp")
-    with open("_temp.py", 'w') as fil:
-        fil.write(f'''
-import torch
-from temp import FxModule
-f = FxModule().cuda()
-inps = {[(i.shape, i.dtype) for i in inps]}
-inps = [torch.randn(shape, dtype=dtype, device='cuda')
-        if dtype.is_floating_point else torch.ones(shape, dtype=dtype, device='cuda')
-        for shape, dtype in inps]
-
-ref = f(*inps)
-nv_f = torch.jit.script(f)
-with torch.jit.fuser("fuser2"):
-    for _ in range(5):
-        res = nv_f(*inps)
-for a, b in zip(ref, res):
-    if not torch.allclose(a, b, atol=0.1):
-        exit(1)
-''')
-    p = subprocess.Popen(["PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py"],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    out, err = p.communicate()
-    if p.returncode != 0:
-        err = err.decode('utf-8')
-        print(err)
-        return True
-    return False
