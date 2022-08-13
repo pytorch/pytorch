@@ -3,6 +3,7 @@ import torch.fx as fx
 import copy
 import torch
 import math
+from typing import Callable
 
 
 class ConcreteProp(torch.fx.Interpreter):
@@ -49,8 +50,17 @@ def _convert_node_to_placeholder(node, inps):
         for tuple_user in list(node.users):
             _convert_node_to_placeholder(tuple_user, inps)
 
+def generate_repro(fx_g, inps):
+        print(f"""
+inps = {[(i.shape, i.dtype) for i in inps]}
+inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
+{fx_g.code}
+f = torch.jit.script(forward)
+with torch.jit.fuser("fuser2"):
+    for _ in range(5):
+        f(*inps)""")
 
-def minifier(fail_f: fx.GraphModule, inps, module_fails):
+def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callable = lambda *args: None):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -203,14 +213,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails):
         if not any_succeeded:
             break
     failing_fx = fx.GraphModule(fail_f, failing_graph)
-    print(f"""
-inps = {[(i.shape, i.dtype) for i in inps]}
-inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
-{failing_fx.code}
-f = torch.jit.script(forward)
-with torch.jit.fuser("fuser2"):
-  for _ in range(5):
-    f(*inps)""")
+    generate_repro(failing_fx, inps)
     return failing_fx, inps
 
 
