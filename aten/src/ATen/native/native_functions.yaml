@@ -594,6 +594,7 @@
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
+  tags: data_dependent_output
   dispatch:
     CompositeExplicitAutograd: allclose
 
@@ -6382,6 +6383,7 @@
   variants: function
 
 - func: item(Tensor self) -> Scalar
+  tags: data_dependent_output
   variants: method
 
 - func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
@@ -6403,6 +6405,7 @@
 
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
+  tags: data_dependent_output
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -8567,6 +8570,7 @@
     CPU, CUDA: unfold_backward
 
 - func: equal(Tensor self, Tensor other) -> bool
+  tags: data_dependent_output
   variants: method, function
   dispatch:
     CPU: cpu_equal
