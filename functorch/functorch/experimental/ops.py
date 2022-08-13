@@ -8,9 +8,7 @@ class PyOperator:
 
         # TODO: torch_dispatch expects PyOperator to be an instance of a torch.ops.aten op.
         self.overloadpacket = self
-
-        # Hack for FX tracing
-        self.__name__ = f'functorch.experimental.ops.{name}'
+        self.__name__ = name
 
     def impl(self, dispatch_key, fn, reentrant=False):
         assert dispatch_key not in self.table
