@@ -1728,6 +1728,81 @@ def transpose(self: List[int],
     _3 = torch.append(out0, elem0)
   return (out, out0, [grad_output[1]])
 
+def conv_forwards(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int) -> List[int]:
+  has_dilation = torch.gt(torch.len(dilation), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[0])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    if transposed:
+      kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+      _3 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
+      _4 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _5 = torch.add(torch.sub(_3, _4), kernel)
+      _6 = torch.append(output_size, torch.add(_5, 1))
+    else:
+      _7 = torch.mul(dilation_, torch.sub(weight[d], 1))
+      kernel0 = torch.add(_7, 1)
+      _8 = input[d]
+      _9 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _10 = torch.sub(torch.add(_8, _9), kernel0)
+      _11 = torch.floordiv(_10, stride[torch.sub(d, 2)])
+      _12 = torch.append(output_size, torch.add(_11, 1))
+  return output_size
+
+)=====")
++ std::string(R"=====(def conv_transpose2d_input(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]]=None,
+    stride: Optional[List[int]]=None,
+    padding: Optional[List[int]]=None,
+    output_padding: Optional[List[int]]=None,
+    groups: int=1,
+    dilation: Optional[List[int]]=None) -> List[int]:
+  if torch.__is__(stride, None):
+    stride0 = [1, 1]
+  else:
+    stride0 = unchecked_cast(List[int], stride)
+  if torch.__is__(padding, None):
+    padding0 = [0, 0]
+  else:
+    padding0 = unchecked_cast(List[int], padding)
+  if torch.__is__(dilation, None):
+    dilation0 = [1, 1]
+  else:
+    dilation0 = unchecked_cast(List[int], dilation)
+  has_dilation = torch.gt(torch.len(dilation0), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[0])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation0[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+    _3 = torch.mul(torch.sub(input[d], 1), stride0[torch.sub(d, 2)])
+    _4 = torch.mul(padding0[torch.sub(d, 2)], 2)
+    _5 = torch.add(torch.sub(_3, _4), kernel)
+    _6 = torch.append(output_size, torch.add(_5, 1))
+  return output_size
+
 )=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
@@ -2738,6 +2813,8 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
     {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
+    {"aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", "conv_forwards"},
+    {"aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", "conv_transpose2d_input"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
