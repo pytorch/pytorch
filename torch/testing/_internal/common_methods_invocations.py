@@ -2247,10 +2247,11 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex=err_msg)
 
     # error inputs for different devices
-    x_cuda = torch.randn((3, 3), device='cuda')
-    y_cpu = torch.randn((3, 3), device='cpu')
-    yield ErrorInput(SampleInput((x_cuda, y_cpu)),
-                     error_regex='Expected all tensors to be on the same device')
+    if device == 'cuda':
+        x_cuda = torch.randn((3, 3), device=device)
+        y_cpu = torch.randn((3, 3), device='cpu')
+        yield ErrorInput(SampleInput((x_cuda, y_cpu)),
+                         error_regex='Expected all tensors to be on the same device')
 
     # error inputs for different input sizes for more than 2 tensors
     x = torch.randn(2, 1, device=device)
@@ -15768,14 +15769,18 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # Batching rule not implemented for aten::concatenate
-           check_batched_gradgrad=False,
            assert_autodiffed=True,
            skips=(
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
+               # RuntimeError: Batching rule not implemented for aten::concatenate
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoCPU',
+                            'test_op_has_batch_rule'),
+               # RuntimeError: Batching rule not implemented for aten::concatenate
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoCPU',
+                            'test_vmap_exhaustive'),
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
     OpInfo('unbind',
