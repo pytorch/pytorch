@@ -12,7 +12,7 @@ import expecttest
 import torch
 from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -154,6 +154,7 @@ class ProfilerTree:
                 caller_name = to_string(extra_fields.caller)
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
@@ -810,7 +811,7 @@ class TestProfilerTree(TestCase):
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
                           cudaLaunchKernel
-                          void ..._kernel<...>(...)
+                            void ..._kernel<...>(...)
                           [memory]
                           aten::expand
                             aten::as_strided
@@ -841,7 +842,7 @@ class TestProfilerTree(TestCase):
                               aten::as_strided
                           aten::mm
                             cudaLaunchKernel
-                              std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, float, float, float, float, false, true, false, false, 7, false, cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParams<cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
+                              void ..._kernel<...>(...)
                             [memory]
                           aten::t
                             aten::transpose
@@ -897,13 +898,11 @@ class TestProfilerTree(TestCase):
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/optim/sgd.py(...): sgd
@@ -937,10 +936,8 @@ class TestProfilerTree(TestCase):
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                     torch/autograd/grad_mode.py(...): __init__
                       <built-in function is_grad_enabled>
