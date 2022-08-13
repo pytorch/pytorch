@@ -3,15 +3,16 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
-from torch.ao.quantization.backend_config.observation_type import ObservationType
 from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
+from enum import Enum
 
 
 __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
+    "ObservationType",
 ]
 
 
@@ -43,6 +44,17 @@ INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
 OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
 OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
+# TODO: maybe rename this to something that's not related to observer
+# e.g. QParamsType
+class ObservationType(Enum):
+    # this means input and output are observed with different observers, based
+    # on qconfig.activation
+    # example: conv, linear, softmax
+    OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT = 0
+    # this means the output will use the same observer instance as input, based
+    # on qconfig.activation
+    # example: torch.cat, maxpool
+    OUTPUT_SHARE_OBSERVER_WITH_INPUT = 1
 
 @dataclass
 class DTypeConfig:
