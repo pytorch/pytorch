@@ -19456,7 +19456,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # FIXME: AssertionError: RuntimeError not raised
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon','test_python_ref_errors'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
