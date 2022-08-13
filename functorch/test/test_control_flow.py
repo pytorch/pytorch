@@ -28,7 +28,7 @@ class TestControlFlowTraced(TestCase):
         def false_fn(x):
             return x.cos()
 
-        
+
         def f(x, y):
             return cond(y, true_fn, false_fn, x)
 
