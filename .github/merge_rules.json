@@ -60,7 +60,19 @@
          "tools/**",
          ".github/ci_commit_pins/*"
       ],
-      "approved_by": ["alband", "dagitses", "pytorchbot", "pytorch/pytorch-dev-infra"],
+      "approved_by": ["alband", "dagitses", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "OSS CI / pytorchbot",
+      "patterns": [
+         ".github/ci_commit_pins/*"
+      ],
+      "approved_by": ["pytorchbot"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
