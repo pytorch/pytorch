@@ -273,41 +273,43 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         print(fw_module.code, bw_module.code)
 
     with track_graph_compiling("forward"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
-
-    # TODO: Delay this backwards compilation until the backwards pass
-    with torch.no_grad():
-        fw_outs = call_func_with_args(compiled_fw, flat_args)
+        compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
 
     if config.debug_partitioner:
+        with torch.no_grad():
+            fw_outs = call_func_with_args(compiled_fw_func, flat_args)
         activation_sizes = 0
         for out in fw_outs[num_outs:]:
             if isinstance(out, torch.Tensor):
                 activation_sizes += out.storage().nbytes()
         print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
-    bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-    with track_graph_compiling("backward", True):
-        compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
     torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
     class CompiledFunction(torch.autograd.Function):
+        compiled_fw = compiled_fw_func
+        compiled_bw = None
+
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *flat_tensor_args):
-            # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
-            # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
-            fw_outs = call_func_with_args(compiled_fw, flat_tensor_args)
+            fw_outs = call_func_with_args(CompiledFunction.compiled_fw, flat_tensor_args)
+            num_outs = CompiledFunction.num_outs
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
         @disable_torchdynamo
         def backward(ctx, *flat_args):
+            old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
             contiguous_args = [t.contiguous() for t in flat_args]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            if CompiledFunction.compiled_bw is None:
+                with track_graph_compiling("backward", True):
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(bw_module, all_args)
             ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(compiled_bw, all_args, steal_args=True)
+            out = call_func_with_args(CompiledFunction.compiled_bw, all_args, steal_args=True)
+            torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
             return tuple(out)
 
