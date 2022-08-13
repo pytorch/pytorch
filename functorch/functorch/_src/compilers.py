@@ -312,14 +312,14 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         pickle.dump(
             input_meta,
             open(
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",  # noqa: B950
                 "wb",
             ),
         )  # noqa: E501
         if dump_example_input:
             torch.save(
                 args,
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
             )  # noqa: E501
 
     def graph_saver_forward(gm, fw_args):
