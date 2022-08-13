@@ -142,6 +142,10 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
   return result;
 }
 
+Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result) {
+  return range_out(start, end, /*step = */ 1, result);
+}
+
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
