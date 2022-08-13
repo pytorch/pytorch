@@ -99,7 +99,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
     def _register_strategy(strategy: Callable, name: str):
         @wraps(strategy)
         def new_func(old_state: ReproState):
-            print(f"Strategy: {name}")
+            print(f"Strategy: {name} ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs")
             new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps))
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
