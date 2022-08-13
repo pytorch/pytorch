@@ -498,37 +498,63 @@ class TestOperators(TestCase):
         xfail("linalg.eigvals"),  # vmap over torch.allclose
         xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
-        xfail("nn.functional.batch_norm"),  # got a batched tensor as input while the running_mean or running_var, which will be updated in place, were not batched.
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
-        xfail("nn.functional.conv2d"),  # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4] to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),  # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4] to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),  # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4] to have 4 channels, but got 8 channels instead
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d"),
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
-        xfail("nn.functional.gaussian_nll_loss"),  # It looks like you're either (1) calling .item() on a Tensor or (2) attempting to use a Tensor in some data-dependent control flow or (3) encountering this error in PyTorch internals. For (1): we don't support vmap over calling .item() on a Tensor, please try to rewrite what you're doing with other operations. For (2): If you're doing some control flow instead, we don't support that yet, please shout over at https://github.com/pytorch/functorch/issues/257 . For (3): please file an issue.
-        xfail("nn.functional.instance_norm"),  # got a batched tensor as input while the running_mean or running_var, which will be updated in place, were not batched.
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("nn.functional.gaussian_nll_loss"),
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.instance_norm"),
         xfail("nn.functional.layer_norm"),  # vmap: inplace into a regular tensor
-        xfail("nn.functional.max_pool2d"),  # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
-        xfail("nn.functional.max_unpool2d"),  # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only supported with memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
-        xfail("nn.functional.max_unpool2d", "grad"),  # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only supported with memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
+        # RuntimeError: NYI: querying is_contiguous inside of vmap
+        # for memory_format other than torch.contiguous_formats
+        xfail("nn.functional.max_pool2d"),
+        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
+        # supported with memory_format torch.preserve_format or
+        # torch.contiguous_format (got ChannelsLast)
+        xfail("nn.functional.max_unpool2d"),
+        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
+        # supported with memory_format torch.preserve_format
+        # or torch.contiguous_format (got ChannelsLast)s
+        xfail("nn.functional.max_unpool2d", "grad"),
         xfail("nn.functional.prelu"),  # Mismatch!
-        xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise. Please file an issue
+        xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
-        xfail("prod"),  # vmap: We do not support batching operators that can output dynamic shape. (calls nonzero)
+        # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
+        xfail("prod"),
         xfail("put"),  # vmap: inplace into a regular tensor
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
-        xfail("stft"),  # vmap: Calling Tensor.as_strided is not supported unless the batch dims being vmapped over are at the front of the tensor 
+        # vmap: Calling Tensor.as_strided is not supported unless the batch dims being
+        # vmapped over are at the front of the tensor 
+        xfail("stft"),
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
         xfail("nn.functional.conv_transpose3d", device_type='cuda'),  # bias tensor has to be contiguous
-        xfail("nn.functional.batch_norm", 'without_cudnn'),  # got a batched tensor as input while the running_mean or running_var, which will be updated in place, were not batched.
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.batch_norm", 'without_cudnn'),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
