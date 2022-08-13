@@ -5,6 +5,7 @@ import pickle
 import random
 from functools import partial
 from typing import Callable, Optional, Tuple, Union
+from contextlib import contextmanager
 
 import torch
 import torch.fx as fx
@@ -29,9 +30,16 @@ def _canonicalize(fx_g):
     fx_g.recompile()
     return fx_g
 
+@contextmanager
+def _disable_jit_autocast():
+    old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
 @make_boxed_compiler
-def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
+def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
 
@@ -74,6 +82,8 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
 
     f = torch.jit.freeze(f.eval())
     f = torch.jit.optimize_for_inference(f)
+    with _disable_jit_autocast():
+        f(*inps)
     return f
 
 

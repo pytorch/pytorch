@@ -207,22 +207,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-@contextmanager
-def _disable_jit_autocast():
-    old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
-
-<<<<<<< HEAD
-=======
-    if isinstance(out, (list, tuple)):
-        _num_outs = len(out)
-    else:
-        _num_outs = 1
->>>>>>> 42d5f309d0a (Delayed compilation of backwards pass to when backwards runs)
-
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
     # Set input tensors that require grad to leaves
@@ -234,9 +218,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     )
 
     if isinstance(out, (list, tuple)):
-        num_outs = len(out)
+        _num_outs = len(out)
     else:
-        num_outs = 1
+        _num_outs = 1
 
     joint_inputs = (flat_args, out)
     with torch.set_grad_enabled(True):
