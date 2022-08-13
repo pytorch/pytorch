@@ -15,7 +15,7 @@ __all__ = ["lobpcg"]
 
 
 def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
-    # compute F, such that F_ij = (d_j - d_i)^{-1} for i != j, F_ii = 0
+    # Compute F, such that F_ij = (d_j - d_i)^{-1} for i != j, F_ii = 0
     F = D.unsqueeze(-2) - D.unsqueeze(-1)
     F.diagonal(dim1=-2, dim2=-1).fill_(float("inf"))
     F.pow_(-1)
@@ -146,7 +146,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     proj_U_ortho = -U.matmul(Ut)
     proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
 
-    # compute U_ortho, a basis for the orthogonal complement to the span(U),
+    # Compute U_ortho, a basis for the orthogonal complement to the span(U),
     # by projecting a random [..., m, m - k] matrix onto the subspace spanned
     # by the columns of U.
     #
@@ -204,7 +204,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
         series_acc += U_grad_projected * poly_D.unsqueeze(-2)
         U_grad_projected = A.matmul(U_grad_projected)
 
-    # compute chr_poly_D(A) which essentially is:
+    # Compute chr_poly_D(A) which essentially is:
     #
     # chr_poly_D_at_A = A.new_zeros(A.shape)
     # for k in range(chr_poly_D.size(-1)):
@@ -247,7 +247,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
 
 
 def _symeig_backward(D_grad, U_grad, A, D, U, largest):
-    # if `U` is square, then the columns of `U` is a complete eigenspace
+    # If `U` is square, then the columns of `U` is a complete eigenspace
     if U.size(-1) == U.size(-2):
         return _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U)
     else:
@@ -333,7 +333,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         if largest is None:
             largest = True
 
-        # symeig backward
+        # Symeig backward
         if B is None:
             A_grad = _symeig_backward(D_grad, U_grad, A, D, U, largest)
 
@@ -383,7 +383,7 @@ def lobpcg(
       not recommended but there exist cases where the usage of the
       basic method may be preferred.
 
-    .. warning:: The backward method does not support sparse and complex inputs.
+    .. arning:: The backward method does not support sparse and complex inputs.
       It works only when `B` is not provided (i.e. `B == None`).
       We are actively working on extensions, and the details of
       the algorithms are going to be published promptly.

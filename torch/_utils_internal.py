@@ -3,7 +3,7 @@ import sys
 import tempfile
 
 
-# this arbitrary-looking assortment of functionality is provided here
+# This arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.

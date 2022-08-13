@@ -16,12 +16,12 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
 try:
-    from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
+    from tqdm.auto import tqdm  # Automatically select proper tqdm submodule if available
 except ImportError:
     try:
         from tqdm import tqdm
     except ImportError:
-        # fake tqdm if it's not installed
+        # Fake tqdm if it's not installed
         class tqdm(object):  # type: ignore[no-redef]
 
             def __init__(self, total=None, disable=False,
@@ -29,7 +29,7 @@ except ImportError:
                 self.total = total
                 self.disable = disable
                 self.n = 0
-                # ignore unit, unit_scale, unit_divisor; they're just for real tqdm
+                # Ignore unit, unit_scale, unit_divisor; they're just for real tqdm
 
             def update(self, n):
                 if self.disable:
@@ -64,7 +64,7 @@ __all__ = [
     'set_dir',
 ]
 
-# matches bfd8deac from resnet18-bfd8deac.pth
+# Matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 _TRUSTED_REPO_OWNERS = ("facebookresearch", "facebookincubator", "pytorch", "fairinternal")
