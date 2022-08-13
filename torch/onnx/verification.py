@@ -123,8 +123,30 @@ def _compare_ort_pytorch_outputs(
     check_shape: bool,
     check_dtype: bool,
     flatten: bool,
+    acceptable_error_percentage: Optional[float],
 ):
+    """
+    Compare ONNX Runtime and PyTorch outputs.
+
+    Args:
+        ort_outs: outputs from ONNX Runtime.
+        pt_outs: outputs from PyTorch.
+        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        flatten (bool, optional): Default True. If True, ignore None type in
+            torch output, which is usually the case with tracing. Set this to False if
+            the 'output' should keep None type, which is usually the case with exporting
+            ScriptModules.
+        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+            It should be a float of value between 0.0 and 1.0.
+
+    Raises:
+        AssertionError: if outputs from ONNX model and PyTorch model are not
+            equal up to specified precision.
+        ValueError: if arguments provided are invalid.
+    """
     if flatten:
+        # torch.jit._flatten filters None type
         pt_outs, _ = torch.jit._flatten(pt_outs)
     else:
         pt_outs = _inline_flatten_list([pt_outs], [])
@@ -133,20 +155,40 @@ def _compare_ort_pytorch_outputs(
     assert len(ort_outs) == len(
         pt_outs
     ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
+    if acceptable_error_percentage and (
+        acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
+    ):
+        raise ValueError(
+            "If set, acceptable_error_percentage should be between 0.0 and 1.0"
+        )
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
-        # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
-        if not check_shape:
-            # Allow different but broadcastable output shapes.
-            ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
-        torch.testing.assert_close(
-            ort_out,
-            pt_out,
-            rtol=rtol,
-            atol=atol,
-            check_dtype=check_dtype,
-            equal_nan=True,
-        )
+        try:
+            # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
+            if not check_shape:
+                # Allow different but broadcastable output shapes.
+                ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
+            torch.testing.assert_close(
+                ort_out,
+                pt_out,
+                rtol=rtol,
+                atol=atol,
+                check_dtype=check_dtype,
+                equal_nan=True,
+            )
+        except AssertionError as e:
+            if acceptable_error_percentage:
+                error_percentage = 1 - np.sum(
+                    np.isclose(ort_out, pt_out, rtol=rtol, atol=atol)
+                ) / np.prod(ort_out.shape)
+                if error_percentage <= acceptable_error_percentage:
+                    warnings.warn(
+                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"Error percentage {error_percentage} "
+                        f"within acceptable range {acceptable_error_percentage}."
+                    )
+                    continue
+            raise
 
 
 def _prepare_input_for_pytorch(args, kwargs):
@@ -247,6 +289,7 @@ def _compare_ort_pytorch_model(
     atol,
     check_shape,
     check_dtype,
+    accetable_error_persentage: Optional[float],
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -269,7 +312,14 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs, pt_outs, rtol, atol, check_shape, check_dtype, flatten
+            ort_outs,
+            pt_outs,
+            rtol,
+            atol,
+            check_shape,
+            check_dtype,
+            flatten,
+            accetable_error_persentage
         )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
@@ -552,6 +602,7 @@ def verify(
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
     rtol: float = 0.001,
     atol: float = 1e-7,
+    acceptable_error_percentage: Optional[float] = None,
     **_,
 ):
     """Verify model export to ONNX with ONNX Runtime.
@@ -579,9 +630,10 @@ def verify(
             model, supplying all inputs will cause an error on unexpected inputs.
             This parameter tells the verifier which inputs to pass into the ONNX model.
         flatten (bool, optional): Default True. If True, unpack nested list/tuple/dict
-            inputs into a flattened list of Tensors for ONNX. Set this to False if nested
-            structures are to be preserved for ONNX, which is usually the case with
-            exporting ScriptModules.
+            'inputs' into a flattened list of Tensors for ONNX, and ignore None type in
+            torch output, which is usually the case with tracing. Set this to False if
+            nested structures are to be preserved for ONNX, and the 'output' should keep
+            None type, which is usually the case with exporting ScriptModules.
         check_shape (bool, optional): Default True. If True, check the shapes between
             PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
             output shape broadcasting.
@@ -590,10 +642,13 @@ def verify(
         ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+            It should be a float of value between 0.0 and 1.0.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
+        ValueError: if arguments provided are invalid.
     """
     if training == torch.onnx.TrainingMode.TRAINING:
         model.train()
@@ -638,4 +693,5 @@ def verify(
             atol,
             check_shape,
             check_dtype,
+            acceptable_error_percentage,
         )
