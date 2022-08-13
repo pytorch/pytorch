@@ -1,5 +1,5 @@
-import warnings
 import dataclasses
+import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -12,7 +12,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
-from torch.nn.utils import _stateless, stateless
+from torch.nn.utils import stateless
 
 from functorch import make_fx
 from functorch._C import CompileCache
@@ -115,16 +115,6 @@ def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
 
-@register_decomposition(aten.new_zeros, aot_autograd_decompositions)
-def new_zeros(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.zeros(size, dtype=inp.dtype, device=inp.device)
-
-
-@register_decomposition(aten.new_full, aot_autograd_decompositions)
-def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.full(size, value, dtype=inp.dtype, device=inp.device)
-
-
 graph_being_compiled: str = None
 nth_graph: int = 0
 model_name: str = "model"
@@ -177,9 +167,6 @@ def call_func_with_args(f, args, steal_args=False):
         args = list(args)
     assert isinstance(args, list)
 
-    # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
-    # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
-    old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
     if hasattr(f, "_boxed_call"):
         out = normalize_as_list(f(args))
     else:
@@ -191,7 +178,6 @@ def call_func_with_args(f, args, steal_args=False):
             "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
         )
         out = normalize_as_list(f(*args))
-    torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
     return out
 
 
@@ -208,14 +194,7 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    def fake_signature(fn, nargs):
-        """FX gets confused by varargs, de-confuse it"""
-        argnames = ",".join(f"arg{i}" for i in range(nargs))
-        return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
-
-    fw_module = make_fx(
-        fake_signature(flat_fn, len(flat_args)), aot_config.decompositions
-    )(*flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     with track_graph_compiling("forward"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
@@ -227,68 +206,76 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+@contextmanager
+def _disable_jit_autocast():
     old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
-    joint_forward_backward = create_joint_forward_backward(flat_fn)
-    # Set input tensors that require grad to leaves
-    with torch.set_grad_enabled(True):
-        out = flat_fn(*flat_args)
-    out = pytree.tree_map(
-        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        out,
-    )
+    try:
+        yield
+    finally:
+        torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
-    if isinstance(out, (list, tuple)):
-        num_outs = len(out)
-    else:
-        num_outs = 1
 
-    joint_inputs = (flat_args, out)
-    with torch.set_grad_enabled(True):
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    with _disable_jit_autocast():
+        joint_forward_backward = create_joint_forward_backward(flat_fn)
+        # Set input tensors that require grad to leaves
+        with torch.set_grad_enabled(True):
+            out = flat_fn(*flat_args)
+        out = pytree.tree_map(
+            lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+            out,
+        )
 
-        if config.use_functionalize:
-            # Functionalize the foward backward graph. First create a
-            # fake fn to make functionalize happy
-            def fake_fn(primals, tangents):
-                return fx_g(primals, tangents)
+        if isinstance(out, (list, tuple)):
+            num_outs = len(out)
+        else:
+            num_outs = 1
 
-            fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        joint_inputs = (flat_args, out)
+        with torch.set_grad_enabled(True):
+            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
+                *joint_inputs
+            )
 
-    if config.debug_joint:
-        print(fx_g.code)
+            if config.use_functionalize:
+                # Functionalize the foward backward graph. First create a
+                # fake fn to make functionalize happy
+                def fake_fn(primals, tangents):
+                    return fx_g(primals, tangents)
 
-    with track_graph_compiling("joint"):
-        fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+                fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
-    if config.debug_graphs:
-        print(fw_module.code, bw_module.code)
+        if config.debug_joint:
+            print(fx_g.code)
 
-    with track_graph_compiling("forward"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        with track_graph_compiling("joint"):
+            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
-    # TODO: Delay this backwards compilation until the backwards pass
-    with torch.no_grad():
-        fw_outs = call_func_with_args(compiled_fw, flat_args)
+        if config.debug_graphs:
+            print(fw_module.code, bw_module.code)
 
-    if config.debug_partitioner:
-        activation_sizes = 0
-        for out in fw_outs[num_outs:]:
-            if isinstance(out, torch.Tensor):
-                activation_sizes += out.storage().nbytes()
-        print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+        with track_graph_compiling("forward"):
+            compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
-    bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-    with track_graph_compiling("backward", True):
-        compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
-    torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
+        # TODO: Delay this backwards compilation until the backwards pass
+        with torch.no_grad():
+            fw_outs = call_func_with_args(compiled_fw, flat_args)
+
+        if config.debug_partitioner:
+            activation_sizes = 0
+            for out in fw_outs[num_outs:]:
+                if isinstance(out, torch.Tensor):
+                    activation_sizes += out.storage().nbytes()
+            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+
+        bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
+        with track_graph_compiling("backward", True):
+            compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
 
     class CompiledFunction(torch.autograd.Function):
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *flat_tensor_args):
-            # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
-            # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
             fw_outs = call_func_with_args(compiled_fw, flat_tensor_args)
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
@@ -300,14 +287,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
             ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(compiled_bw, all_args, steal_args=True)
-
             return tuple(out)
 
     return CompiledFunction.apply
 
 
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, grad_enabled: bool
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -352,7 +338,8 @@ def create_aot_dispatcher_function(
         fake_flat_tensor_args = process_inputs(flat_args)
 
         needs_autograd = (
-            any([x.requires_grad for x in fake_flat_tensor_args]) and grad_enabled
+            any([x.requires_grad for x in fake_flat_tensor_args])
+            and torch.is_grad_enabled()
         )
         # crappy version of dispatcher
         # TODO: Do this properly
@@ -397,12 +384,6 @@ class PytreeThunk:
         if self.is_simple:
             return x
         return pytree.tree_unflatten(x, self.spec)
-
-
-def fake_signature(fn, nargs):
-    """FX gets confused by varargs, de-confuse it"""
-    argnames = ",".join(f"arg{i}" for i in range(nargs))
-    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 
 def filter_tensor_and_static_args(args, static_argnums):
@@ -634,7 +615,6 @@ def aot_function(
                 flat_fn,
                 flat_tensor_args,
                 aot_config,
-                grad_enabled=torch.is_grad_enabled(),
             )
             cached_res = (compiled_fn, out_spec)
 
@@ -790,7 +770,6 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
                     fn,
                     args,
                     aot_config,
-                    grad_enabled=torch.is_grad_enabled(),
                 )
             return compiled_fn(args)
 
