@@ -127,7 +127,8 @@ default_decompositions = {
     aten.hardtanh,
     aten.hardswish,
     aten.hardsigmoid,
-    aten.conj_physical
+    aten.conj_physical,
+    aten.is_same_size,
 }
 
 default_decompositions = get_decompositions(default_decompositions)

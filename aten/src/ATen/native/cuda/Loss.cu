@@ -211,6 +211,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     // If the only element was omited, we get 0. See the discussion in
     // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
     *output = scalar_t{0};
+    *total_weight = scalar_t{0};
   }
 }
 
@@ -280,6 +281,7 @@ void nll_loss_forward_out_cuda_template(
 
   if (reduction == Reduction::None && n_dims == 2) {
     at::native::resize_output(output, {batch_size});
+    total_weight.zero_();
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
       // 0 blocks.

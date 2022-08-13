@@ -104,7 +104,7 @@ def normalize_as_list(x):
 
 aot_autograd_decompositions = {}
 
-
+# TODO: Remove these stupid decompositions
 @register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
 def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
