@@ -2261,7 +2261,7 @@ def error_inputs_cat(op_info, device, **kwargs):
 
     x = torch.randn(2, 1, 2, device=device)
     y = torch.randn(2, 1, 1, device=device)
-    z = torch.randn(2, 2, 1, device=device) 
+    z = torch.randn(2, 2, 1, device=device)
     yield ErrorInput(SampleInput((x, y, z), kwargs={'dim': 1}),
                      error_regex='Sizes of tensors must match')
 
