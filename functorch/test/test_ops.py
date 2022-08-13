@@ -545,7 +545,7 @@ class TestOperators(TestCase):
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         # vmap: Calling Tensor.as_strided is not supported unless the batch dims being
-        # vmapped over are at the front of the tensor 
+        # vmapped over are at the front of the tensor
         xfail("stft"),
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
