@@ -8,13 +8,13 @@
 namespace c10 {
 namespace impl {
 
-struct TORCH_API TorchDispatchModeTLS {
+struct C10_API TorchDispatchModeTLS {
   static void set_state(std::shared_ptr<SafePyObject> state);
   static const std::shared_ptr<SafePyObject>& get_state();
   static void reset_state();
 };
 
-bool dispatch_mode_enabled();
+C10_API bool dispatch_mode_enabled();
 
 } // namespace impl
 } // namespace c10
