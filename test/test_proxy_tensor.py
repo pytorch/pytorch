@@ -665,6 +665,19 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
         assert len(shape_env.guards) == 0
 
+    def test_multiply_shape(self):
+        def f(a):
+            return torch.empty(a.shape[0] * 2)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    size = a_1.size(0);  a_1 = None
+    mul = size * 2;  size = None
+    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    size_1 = empty.size(0)
+    return empty""")
+
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)
