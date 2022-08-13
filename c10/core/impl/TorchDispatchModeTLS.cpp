@@ -1,8 +1,9 @@
-#include <ATen/core/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 
-namespace at { namespace impl {
+namespace c10 { namespace impl {
 
 thread_local std::shared_ptr<SafePyObject> torchDispatchModeState;
 
@@ -27,31 +28,7 @@ void TorchDispatchModeTLS::reset_state() {
 }
 
 bool dispatch_mode_enabled() {
-  return static_cast<bool>(at::impl::TorchDispatchModeTLS::get_state());
-}
-
-bool tensor_has_dispatch(const at::Tensor& t) {
-  DispatchKeySet key_set({DispatchKey::Python, DispatchKey::PythonTLSSnapshot});
-  return t.key_set().has_any(key_set);
-}
-
-bool tensorlist_has_dispatch(const at::TensorList& li) {
-  for (const auto& t: li) {
-    if (tensor_has_dispatch(t)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
-  for (auto i : c10::irange(li.size())) {
-    auto t = li.get(i);
-    if (t && tensor_has_dispatch(*t)) {
-      return true;
-    }
-  }
-  return false;
+  return static_cast<bool>(c10::impl::TorchDispatchModeTLS::get_state());
 }
 
 } // namespace impl

@@ -1,0 +1,20 @@
+#pragma once
+
+#include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
+#include <c10/core/SafePyObject.h>
+
+namespace c10 {
+namespace impl {
+
+struct TORCH_API TorchDispatchModeTLS {
+  static void set_state(std::shared_ptr<SafePyObject> state);
+  static const std::shared_ptr<SafePyObject>& get_state();
+  static void reset_state();
+};
+
+bool dispatch_mode_enabled();
+
+} // namespace impl
+} // namespace c10
