@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
+import torch.library
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
@@ -8,6 +9,42 @@ from typing import Dict, List, Set
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
+
+pseudo = torch.library.Library("pseudo", "DEF")
+
+pseudo.define("any() -> ()")
+"""
+pseudo.any is a wildcard node that can be matched with any fx node with arbitrary number of inputs and outputs.
+For example, to match relu followed by one fx node:
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.any(y)
+        return z
+"""
+
+pseudo.define("oneof(*, str[] targets) -> ()")
+"""
+pseudo.oneof is a special node that can be matched with a fx node whose target is in the permissible list.
+`targets` must be be a list of qualified name for operators, e.g. ["operator.add", "torch.sigmoid",
+"torch.ops.aten.foo", "torch.ops.prims.bar"]
+
+For example, using following pattern with pseudo.oneof
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.oneof(y, targets=["relu", "torch.sigmoid", "operator.add"])
+        return z
+
+It will have 3 matches in the following function
+    def forward(y):
+        z = y.relu()
+        x = z.relu()    # first match
+
+        x = x.relu()
+        x = torch.sigmoid(x)    # second match
+
+        x = x.relu()
+        return x + 1    # third match
+"""
 
 @compatibility(is_backward_compatible=False)
 @dataclass
@@ -79,6 +116,18 @@ class SubgraphMatcher:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
+
+        if pn.target == torch.ops.pseudo.any:
+            return True
+
+        if pn.target == torch.ops.pseudo.oneof:
+            permissible_targets: List[str] = pn.kwargs.get("targets", list())  # type: ignore[assignment]
+            assert isinstance(permissible_targets, list), \
+                "pseudo.oneof(permissible_targets=[\"foo\", \"bar\"]) only accept targets as a list"
+            assert len(permissible_targets) > 0, "please specific as least one target for pseudo.oneof"
+
+            if gn._pretty_print_target(gn.target) in permissible_targets:
+                return True
 
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
