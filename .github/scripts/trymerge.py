@@ -509,7 +509,7 @@ def add_workflow_conclusions(
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
                     if not isinstance(checkrun_node, dict):
-                        warnf(f"Expected dictionary, but got {type(checkrun_node)}")
+                        warn(f"Expected dictionary, but got {type(checkrun_node)}")
                         continue
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
