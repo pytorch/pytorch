@@ -71,6 +71,7 @@ class _TestJITIRToONNX:
             check_shape=self.check_shape,
             check_dtype=self.check_dtype,
             flatten=self.flatten,
+            acceptable_error_percentage=None,
         )
 
     def test_example_ir(self):
