@@ -319,7 +319,7 @@ def _compare_ort_pytorch_model(
             check_shape,
             check_dtype,
             flatten,
-            accetable_error_persentage
+            accetable_error_persentage,
         )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
