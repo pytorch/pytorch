@@ -80,7 +80,7 @@
    {
       "name": "Mobile",
       "patterns": ["ios/**", "android/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "xta0", "IvanKobzarev", "dreiss", "raziel"],
+      "approved_by": ["linbinyu", "IvanKobzarev", "dreiss", "raziel"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
