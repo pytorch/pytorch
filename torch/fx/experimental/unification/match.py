@@ -39,6 +39,7 @@ class Dispatcher(object):
 class VarDispatcher(Dispatcher):
     """ A dispatcher that calls functions with variable names
     >>> d = VarDispatcher('d')
+    >>> # xdoctest: +SKIP
     >>> x = var('x')
     >>> @d.register('inc', x)
     ... def f(x):
