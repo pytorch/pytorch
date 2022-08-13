@@ -747,6 +747,13 @@ def type_to_dtype(typ: type) -> torch.dtype:
     raise ValueError("Invalid type!")
 
 
+def get_dtype(x: Union[torch.Tensor, NumberType]):
+    if isinstance(x, torch.Tensor):
+        return x.dtype
+    else:
+        return type_to_dtype(type(x))
+
+
 _ordered_types = (bool, int, float, complex)
 
 
@@ -1386,3 +1393,8 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
+
+
+def prod(xs: Sequence[NumberType]) -> NumberType:
+    """Product of elements in input sequence. Returns 1 for empty sequence"""
+    return reduce(operator.mul, xs, 1)

@@ -761,7 +761,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline int64_t numel_default() const {
 #ifdef DEBUG
-    TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
+    TORCH_INTERNAL_ASSERT(compute_numel() == numel_.as_int_unchecked());
 #endif
     return numel_.as_int_unchecked();
   }
@@ -2064,7 +2064,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "empty_tensor_restride() called on tensor with symbolic shape")
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(
-        compute_numel() == numel_,
+        compute_numel() == numel_.as_int_unchecked(),
         "If you are seeing this error, that means empty_tensor_restride was "
         "called before setting correct numel");
 #endif
