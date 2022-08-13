@@ -1099,6 +1099,97 @@ class TestOperators(TestCase):
                 expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
                 self.assertEqual(result, expected)
 
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
+        skip('atleast_1d'),
+        skip('atleast_2d'),
+        skip('atleast_3d'),
+        # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
+        # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
+        xfail('normal', ''),
+        xfail('_masked.log_softmax', ''),
+        xfail('_masked.softmax', ''),
+        xfail('_masked.softmin', ''),
+        xfail('cdist', ''),
+        xfail('cholesky', ''),
+        xfail('eig', ''),
+        xfail('logcumsumexp', ''),
+        xfail('nn.functional.embedding_bag', ''),
+        xfail('nn.functional.grid_sample', ''),
+        xfail('nn.functional.hardsigmoid', ''),
+        xfail('nn.functional.huber_loss', ''),
+        xfail('nn.functional.instance_norm', ''),
+        xfail('nn.functional.logsigmoid', ''),
+        xfail('nn.functional.softmin', ''),
+        xfail('nn.functional.softmin', 'with_dtype'),
+        xfail('renorm', ''),
+        xfail('symeig', ''),
+        xfail('pca_lowrank', ''),
+        xfail('svd_lowrank', ''),
+        xfail('nn.functional.multilabel_margin_loss', ''),
+        xfail('nn.functional.multilabel_soft_margin_loss', ''),
+        xfail('scatter_reduce', 'amax'),
+        xfail('scatter_reduce', 'amin'),
+        xfail('nn.functional.soft_margin_loss', ''),
+        xfail('nn.functional.pdist', ''),
+        xfail('scatter_reduce', 'sum'),
+        xfail('nn.functional.multi_margin_loss', ''),
+        xfail('scatter_reduce', 'mean'),
+        xfail('scatter_reduce', 'prod'),
+        skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
+    }))
+    def test_vmapjvpvjp(self, device, dtype, op):
+        # Since we test `jvpvjp` seperately,
+        # in this we just check that vmap of `jvpvjp`
+        # is correct.
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        for sample in samples:
+            fn, primals = normalize_op_input_output(op, sample)
+            result = fn(*primals)
+            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+
+            primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+            cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
+
+            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
+                # typically the first primal arg is the input. If the input has no elements, we will typically run
+                # into an issue of "Expected Tensor but got None"
+                continue
+
+            def push_vjp(primals, cotangents):
+                _, vjp_fn = vjp(fn, *primals)
+                return vjp_fn(cotangents)
+
+            args, spec = tree_flatten(((primals, cotangents), (primals_tangents, cotangents_tangents)))
+
+            def jvp_of_vjp(*args):
+                (primals, tangents) = tree_unflatten(args, spec)
+                primals_out, tangents_out = jvp(push_vjp, primals, tangents)
+
+                if isinstance(primals_out, torch.Tensor):
+                    return (primals_out, tangents_out)
+                else:
+                    flat_primals_out, _ = tree_flatten(primals_out)
+                    flat_tangents_out, _ = tree_flatten(tangents_out)
+                    return tuple(flat_primals_out + flat_tangents_out)
+
+            is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
+            generator = get_fallback_and_vmap_exhaustive(
+                jvp_of_vjp, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
+
+
     def _make_extremal_inputs(self, shape, device):
         if shape is None:
             return (None,)
