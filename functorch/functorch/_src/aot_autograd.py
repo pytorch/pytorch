@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
+import torch.nn.utils.stateless as stateless
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
