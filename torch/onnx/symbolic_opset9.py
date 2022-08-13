@@ -4586,9 +4586,9 @@ def index(g, self, index):
             rank = symbolic_helper._get_tensor_rank(self)
             if rank is None:
                 raise NotImplementedError(
-                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank, "
-                    + "try turning on shape and type propagate during export: "
-                    + "torch.onnx._export(..., propagate=True)."
+                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank. "
+                    + "Try turning on shape inference during export: "
+                    + "torch.onnx._export(..., onnx_shape_inference=True)."
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,
             #       update the warning to recommend exporting with higher opset version.

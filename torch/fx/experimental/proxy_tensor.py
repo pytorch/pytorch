@@ -22,7 +22,7 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -90,12 +90,6 @@ def decompose(decomposition_table):
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
-# Checks whether we try to convert the tensor into a scalar
-IS_STRICT = True
-def enable_strict(val):
-    global IS_STRICT
-    IS_STRICT = val
-
 def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
@@ -157,28 +151,32 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         r = func_overload.decompose(*args, **kwargs)
         if r is not NotImplemented:
             return r
-    if func_overload == aten._local_scalar_dense.default:
-        t, = args
-        assert not kwargs
-        if t.constant is not None:
+
+    all_constant = pytree.tree_all_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
+
+    if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
+        # Check if all of the Tensor inputs are constants
+        if all_constant:
+            const_args, const_kwargs = pytree.tree_map_only(
+                ProxyTensor, lambda t: t.constant, (args, kwargs)
+            )
             with maybe_disable_fake_tensor_mode():
-                return t.constant.item()
-        raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-                           "It's likely that this is caused by data-dependent control flow or similar."
-                           "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
+                return func_overload(*const_args, **const_kwargs)
+        raise RuntimeError(
+            "It appears that you're trying to get value out of a tracing tensor - erroring out! "
+            "It's likely that this is caused by data-dependent control flow or similar."
+        )
 
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    proxy_args = pytree.tree_map(unwrap_proxy, args)
-    proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
-
+    proxy_args, proxy_kwargs = pytree.tree_map_only(ProxyTensor, lambda e: e.proxy, (args, kwargs))
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
+
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
         args[0].proxy = proxy_res
         proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-    inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
+
+    elem_args, elem_kwargs = pytree.tree_map(unwrap_elem, (args, kwargs))
+    inner_res = func_overload(*elem_args, **elem_kwargs)
 
     # Needed to sync up metadata for in-place operators that modify metadata
     # TODO: instead forward the metadata to the inner tensor so updating
@@ -208,33 +206,16 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # element constant computation by testing the numel of the result before
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
-    all_constant = True
-    any_constant = False
-
-    def check_constant(e):
-        nonlocal all_constant, any_constant
-        if isinstance(e, ProxyTensor):
-            if e.constant is None:
-                all_constant = False
-            else:
-                any_constant = True
-
-    pytree.tree_map(check_constant, args)
-    pytree.tree_map(check_constant, kwargs)
-
-    def unwrap_constant(e):
-        if isinstance(e, ProxyTensor):
-            return e.constant
-        return e
+    any_constant = pytree.tree_any_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
 
     constant = None
     # NB: do NOT include factories as constants
     if all_constant and any_constant:
         with maybe_disable_fake_tensor_mode():
-            constant = func_overload(
-                *pytree.tree_map(unwrap_constant, args),
-                **pytree.tree_map(unwrap_constant, kwargs)
+            const_args, const_kwargs = pytree.tree_map_only(
+                ProxyTensor, lambda t: t.constant, (args, kwargs)
             )
+            constant = func_overload(*const_args, **const_kwargs)
 
     # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
     # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
@@ -404,8 +385,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # We don't want to convert torch.tensor constants into tracing objects.
         if func_overload == aten.lift.default:
             return args[0]
+
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(self, func_overload, args, kwargs)
+            out = proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -464,7 +446,18 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                     constant = args[0].clone()
             else:
                 constant = None
-            return wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
+            out = wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
+
+        def assert_proxy_tensor(e):
+            if isinstance(e, torch.Tensor):
+                assert isinstance(e, ProxyTensor), \
+                    f"Internal Error: ProxyTensor is incorrectly baking a tensor constant into the graph: {str(e)}"
+
+        # When we trace factory functions, we expect that tensor outputs are *always* ProxyTensors.
+        # (Except for torch.tensor() constants handled through lift(), which is handled
+        # specially further up).
+        pytree.tree_map(assert_proxy_tensor, out)
+        return out
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
