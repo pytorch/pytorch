@@ -290,6 +290,31 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
 
+    def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
+        def f(x):
+            y = x.new_zeros(x.size())
+            y.copy_(x)
+            return y
+
+        def _new_zeros_decomp(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
+            return torch.zeros(size, dtype=inp.dtype, device=inp.device)
+
+        factory_func_decomp = {torch.ops.aten.new_zeros.default: _new_zeros_decomp}
+
+        # When new_zeros() decomposes into torch.zero(), we expect ProxyTensorMode
+        # to still be (re-entrantly) enabled, so that the `torch.zero()` call
+        # returns a ProxyTensor.
+        out = make_fx(f, decomposition_table=factory_func_decomp)(torch.ones(2))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, x_1):
+    zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy__default
+    """)
+
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
             return torch.ops.aten.norm.Scalar(x, 2.0)
@@ -386,13 +411,16 @@ class TestGenericProxyTensor(TestCase):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-        g = make_fx(f, tracing_mode=self.tracing_mode)()
-        self.assertEqual(g(), f())
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -676,6 +704,8 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
