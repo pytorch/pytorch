@@ -408,8 +408,7 @@ def _nll_loss_backward(
 
     has_ignore_index = ignore_index >= 0
     if has_ignore_index:
-        ignore_index_mask = target != ignore_index
-        grad_output = grad_output * ignore_index_mask
+        grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
 
@@ -1417,22 +1416,16 @@ def nll_loss_forward(
         channel_dim = 0
 
     if weight is not None:
-        # Here is a specific case with reduction mean and non-batched tensors
-        # https://github.com/pytorch/pytorch/issues/61309
-        # In this case weight is cancelled: w * x[t] / w -> x[t]
-        if not (reduction == Reduction.MEAN.value and n_dims < 2):
-            w = weight.unsqueeze(0) if n_dims > 1 else weight
-            self = self * w
+        w = weight.unsqueeze(0) if n_dims > 1 else weight
+        self = self * w
 
     target_ = target.unsqueeze(channel_dim)
     # target can be [N, 1] or [1]
 
     result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
 
-    ignore_index_mask = None
     if ignore_index >= 0:
-        ignore_index_mask = target != ignore_index
-        result = result * ignore_index_mask
+        result = torch.where(target != ignore_index, result, 0)
 
     if reduction == Reduction.NONE.value and n_dims > 1:
         total_weight = self.new_full((), 0.0)
@@ -1441,23 +1434,20 @@ def nll_loss_forward(
     if weight is not None:
         w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
         wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
-        if ignore_index_mask is not None:
-            wsum = wsum * ignore_index_mask
+        if ignore_index >= 0:
+            wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
-    elif ignore_index_mask is not None:
-        total_weight = ignore_index_mask.sum().to(self)
+    elif ignore_index >= 0:
+        total_weight = (target != ignore_index).sum().to(self)
     else:
         total_weight = self.new_full((), 1.0 * result.numel())
 
-    if result.dim() > 0:
-        if reduction == Reduction.SUM.value:
-            result = result.sum()
-        elif reduction == Reduction.MEAN.value:
-            if weight is None:
-                result = (
-                    result.sum() / total_weight if ignore_index >= 0 else result.mean()
-                )
-            else:
-                result = result.sum() / total_weight
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        if weight is None:
+            result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
+        else:
+            result = result.sum() / total_weight
 
     return result, total_weight
