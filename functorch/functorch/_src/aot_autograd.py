@@ -1,21 +1,16 @@
-import logging
+import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
-from torch import Tensor
-from functorch import make_fx
-from torch.fx import immutable_collections, Interpreter
 import torch.fx.traceback as fx_traceback
-from torch._subclasses import FakeTensorMode
+import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode
-from torch.fx import immutable_collections
-from torch.nn.utils import _stateless
+from torch.fx import immutable_collections, Interpreter
 
 from functorch import make_fx
 from functorch._C import CompileCache
@@ -24,10 +19,6 @@ from . import config
 from .decompositions import register_decomposition
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-from .named_members_polyfill import _named_parameters, _named_buffers
-from typing import Callable, List, Dict, Any, Tuple, Optional
-from functools import wraps
-import warnings
 
 try:
     from torchdynamo import disable as disable_torchdynamo
