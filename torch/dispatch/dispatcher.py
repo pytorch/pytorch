@@ -29,7 +29,6 @@ class PyDispatcher:
         try:
             key = compute_dispatch_key(operator, args, kwargs, self.current_key)
             self.record_dispatch(key, operator)
-            print(f"PyDispatcher.call {key}")
             return dispatch(key, operator, args, kwargs)
         finally:
             self.reset_dispatch_record()
@@ -39,7 +38,6 @@ class PyDispatcher:
         assert operator == self.currently_dispatching_op
         key = compute_dispatch_key(operator, args, kwargs, self.current_key, self.already_dispatched_keys)
         self.record_dispatch(key, operator)
-        print(f"PyDispatcher.redispatch {key}")
         return dispatch(key, operator, args, kwargs)
 
     def reset_dispatch_record(self):

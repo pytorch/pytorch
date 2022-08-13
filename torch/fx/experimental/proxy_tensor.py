@@ -147,37 +147,6 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # ----
     # Another point of contention here ... this shouldn't be here, but where should it be?
     # Should we add real support for providing custom behavior based on name when doing proxy calls in tracing?
-    if func_overload.__name__ == 'functorch.experimental.ops.cond':
-        assert kwargs is None or not kwargs
-        pred, true_fn, false_fn, operands = args
-
-        if isinstance(operands, ProxyTensor):
-            operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
-        else:
-            operands = operands
-
-        true_graph = get_isolated_graphmodule(true_fn, operands, {})
-        false_graph = get_isolated_graphmodule(false_fn, operands, {})
-        true_name = "true_graph"
-        false_name = "false_graph"
-        proxy_mode.tracer.root.register_module(true_name, true_graph)
-        proxy_mode.tracer.root.register_module(false_name, false_graph)
-
-        if isinstance(operands, ProxyTensor):
-            operands = [operands]  # Prevent unwanted unpacking
-
-        args = (pred, true_graph, false_graph, operands)
-
-        def _unwrap_proxy(e):
-            return e.proxy if isinstance(e, ProxyTensor) else e
-
-        proxy_args = pytree.tree_map(_unwrap_proxy, args)
-
-        # Does this need random slug appended so as not to collide?
-        proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
-                                                name="conditional")
-
-        return proxy_res
 
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
