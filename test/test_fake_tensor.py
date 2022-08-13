@@ -192,6 +192,19 @@ class FakeTensorTest(TestCase):
             y1 = torch.randperm(5, device="cpu")
             prims.utils.compare_tensor_meta(y, y1)
 
+    def test_layernorm(self):
+        out = []
+        for ctx in (contextlib.nullcontext, FakeTensorMode):
+            with ctx():
+                a = torch.empty_strided([4, 576, 768], (442368, 1, 576))
+                b = [768]
+                c = torch.empty([768])
+                d = torch.empty([768])
+                e = .01
+                args = (a, b, c, d, e)
+                out.append(torch.ops.aten.native_layer_norm(*args))
+        for e1, e2 in zip(out[0], out[1]):
+            prims.utils.compare_tensor_meta(e1, e2, check_strides=True)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):

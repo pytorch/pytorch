@@ -285,6 +285,19 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     return FakeTensor(fake_mode, out, out_device)
 
 
+# TODO - use refs/decomps over math kernels more generally?
+@register_op_impl(aten.native_layer_norm.default)
+def layer_norm(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    out_device = new_kwargs["input"].device
+    with in_kernel_invocation_manager(fake_mode):
+        out = torch._refs.native_layer_norm(*args, **kwargs)
+
+    return tuple([FakeTensor(fake_mode, out_meta, out_device) for out_meta in out])
+
+
 # Dont default to default device handling,
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self
