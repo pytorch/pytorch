@@ -192,6 +192,7 @@ class LambdaLR(_LRScheduler):
         >>> # Assuming optimizer has two groups.
         >>> lambda1 = lambda epoch: epoch // 30
         >>> lambda2 = lambda epoch: 0.95 ** epoch
+        >>> # xdoctest: +SKIP
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):
         >>>     train(...)
@@ -275,6 +276,7 @@ class MultiplicativeLR(_LRScheduler):
 
     Example:
         >>> lmbda = lambda epoch: 0.95
+        >>> # xdoctest: +SKIP
         >>> scheduler = MultiplicativeLR(optimizer, lr_lambda=lmbda)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -361,6 +363,7 @@ class StepLR(_LRScheduler):
         >>> # lr = 0.005    if 30 <= epoch < 60
         >>> # lr = 0.0005   if 60 <= epoch < 90
         >>> # ...
+        >>> # xdoctest: +SKIP
         >>> scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -408,6 +411,7 @@ class MultiStepLR(_LRScheduler):
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 80
         >>> # lr = 0.0005   if epoch >= 80
+        >>> # xdoctest: +SKIP
         >>> scheduler = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -458,6 +462,7 @@ class ConstantLR(_LRScheduler):
         >>> # lr = 0.025   if epoch == 2
         >>> # lr = 0.025   if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
+        >>> # xdoctest: +SKIP
         >>> scheduler = ConstantLR(self.opt, factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -519,6 +524,7 @@ class LinearLR(_LRScheduler):
         >>> # lr = 0.0375   if epoch == 2
         >>> # lr = 0.04375  if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
+        >>> # xdoctest: +SKIP
         >>> scheduler = LinearLR(self.opt, start_factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -610,6 +616,7 @@ class SequentialLR(_LRScheduler):
         >>> # lr = 0.9     if epoch == 2
         >>> # lr = 0.81    if epoch == 3
         >>> # lr = 0.729   if epoch == 4
+        >>> # xdoctest: +SKIP
         >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
         >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
         >>> scheduler = SequentialLR(self.opt, schedulers=[scheduler1, scheduler2], milestones=[2])
@@ -837,6 +844,7 @@ class ChainedScheduler(_LRScheduler):
         >>> # lr = 0.729    if epoch == 2
         >>> # lr = 0.6561   if epoch == 3
         >>> # lr = 0.59049  if epoch >= 4
+        >>> # xdoctest: +SKIP
         >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
         >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
@@ -934,6 +942,7 @@ class ReduceLROnPlateau(object):
             each update. Default: ``False``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
@@ -1148,6 +1157,7 @@ class CyclicLR(_LRScheduler):
             each update. Default: ``False``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
         >>> data_loader = torch.utils.data.DataLoader(...)
@@ -1346,6 +1356,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         """Step could be called after every batch update
 
         Example:
+            >>> # xdoctest: +SKIP("Undefined vars")
             >>> scheduler = CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
             >>> iters = len(dataloader)
             >>> for epoch in range(20):
@@ -1361,6 +1372,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         This function can be called in an interleaved way.
 
         Example:
+            >>> # xdoctest: +SKIP("Undefined vars")
             >>> scheduler = CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
             >>> for epoch in range(20):
             >>>     scheduler.step()
@@ -1503,6 +1515,7 @@ class OneCycleLR(_LRScheduler):
 
     Example:
         >>> data_loader = torch.utils.data.DataLoader(...)
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
         >>> for epoch in range(10):
