@@ -142,7 +142,12 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
-    if func_overload.__name__ == 'torch.cond':
+    # Location is a hack, for now, due to where we place the PyOperator class
+    # TODO(voz): Make this not terrible, maybe use something other than name, or resolve a better name
+    # ----
+    # Another point of contention here ... this shouldn't be here, but where should it be?
+    # Should we add real support for providing custom behavior based on name when doing proxy calls in tracing?
+    if func_overload.__name__ == 'functorch.experimental.ops.cond':
         assert kwargs is None or not kwargs
         pred, true_fn, false_fn, operands = args
 
