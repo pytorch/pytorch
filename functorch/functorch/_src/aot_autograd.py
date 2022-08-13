@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
+import torch.nn.utils.stateless as stateless
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
@@ -644,7 +645,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
+        return stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
     compiled_f = aot_function(functional_call, *args, **kwargs)
 
@@ -686,7 +687,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     params_len = len(params_flat)
 
     def functional_call(*args, **kwargs):
-        with _stateless.reparametrize_module(
+        with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
