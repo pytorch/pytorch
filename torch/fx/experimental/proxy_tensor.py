@@ -152,7 +152,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         pred, true_fn, false_fn, operands = args
 
         if isinstance(operands, ProxyTensor):
-            operands = [operands] # Little hack because * on a single ProxyTensor unpacks it
+            operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
         else:
             operands = operands
 
@@ -164,16 +164,18 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         proxy_mode.tracer.root.register_module(false_name, false_graph)
 
         if isinstance(operands, ProxyTensor):
-            operands = [operands] # Prevent unwanted unpacking
+            operands = [operands]  # Prevent unwanted unpacking
 
         args = (pred, true_graph, false_graph, operands)
-        def unwrap_proxy(e):
+
+        def _unwrap_proxy(e):
             return e.proxy if isinstance(e, ProxyTensor) else e
 
-        proxy_args = pytree.tree_map(unwrap_proxy, args)
+        proxy_args = pytree.tree_map(_unwrap_proxy, args)
 
+        # Does this need random slug appended so as not to collide?
         proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
-                                                name="conditional") # Does this need random slug appended so as not to collide?
+                                                name="conditional")
 
         return proxy_res
 

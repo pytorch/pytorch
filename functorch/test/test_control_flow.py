@@ -1,8 +1,6 @@
 import torch
 
-import functorch
-from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
-import unittest
+from torch.testing._internal.common_utils import TestCase
 from functorch.experimental.cond import cond
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -59,10 +57,10 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
-        result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True)) # True + True -> x * x
-        result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False)) # True + True -> x + x
-        result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True)) #  False + either -> cos
-        result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False)) #  False + either -> cos
+        result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True))  # True + True -> x * x
+        result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False))  # True + True -> x + x
+        result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True))  #  False + either -> cos
+        result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False))  #  False + either -> cos
 
 
         self.assertFalse(torch.allclose(result_true_true, result_true_false))

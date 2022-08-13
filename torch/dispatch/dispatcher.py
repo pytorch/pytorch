@@ -1,6 +1,6 @@
 import torch
 import torch._C as _C
-from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
+from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard  # type: ignore[attr-defined]
 from torch.utils._pytree import tree_flatten
 from torch.overrides import handle_torch_function, has_torch_function
 
@@ -76,10 +76,10 @@ def dispatch(dispatch_key, operator, args, kwargs):
 
 
 def key_extractor(tensors, additional_exclude=None):
-    key_set = _C._dispatch_tls_local_include_set()
+    key_set = _C._dispatch_tls_local_include_set()  # type: ignore[attr-defined]
     for tensor in tensors:
-        key_set = key_set | _C._dispatch_keys(tensor)
-    key_set = key_set - _C._dispatch_tls_local_exclude_set()
+        key_set = key_set | _C._dispatch_keys(tensor)  # type: ignore[attr-defined]
+    key_set = key_set - _C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
     if additional_exclude is not None:
         key_set = key_set - additional_exclude
     return key_set.highestPriorityTypeId()
