@@ -257,16 +257,16 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         graph_size = None
 
-        def assert_graph_empty(fx_g, _):
+        def get_graph_size(fx_g, _):
             nonlocal graph_size
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
         start_recompilations = num_of_recompilations()
-        f = aot_function(foo, nop, assert_graph_empty)
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertIsNone(graph_size)
         with torch.set_grad_enabled(True):
             f(*inps)
         self.assertTrue(graph_size > 2)
