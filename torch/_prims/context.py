@@ -77,7 +77,7 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.ops.prims.* functions to
     use nvFuser's prims in torch.ops.nvprims.*
 
-    >>> with NvfuserPrimMode():
+    >>> with NvfuserPrimsMode():
     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 
     By default, this context manager will fall back on the torch.ops.prims* if the

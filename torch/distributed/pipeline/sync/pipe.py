@@ -153,10 +153,11 @@ class WithDevice(nn.Module):
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> dropout = nn.Dropout()
         >>>
+        >>> # xdoctest: +REQUIRES(env:CUDAHOME)
         >>> # Dropout does not have any parameters/buffers, but we want to
         >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
         >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +SKIP("Needs RPC framework init")
         >>> model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):

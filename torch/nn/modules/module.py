@@ -933,6 +933,7 @@ class Module:
             Parameter containing:
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> # xdoctest: +REQUIRES(env:CUDAHOME)
             >>> gpu1 = torch.device("cuda:1")
             >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)

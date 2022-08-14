@@ -559,6 +559,9 @@ def run_doctests(test_module, test_directory, options):
     xdoctest runner on the torch library itself.
     """
     import xdoctest
+    import pathlib
+    pkgpath = pathlib.Path(torch.__file__).parent
+
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
         'global_exec': r'\n'.join([
@@ -569,8 +572,10 @@ def run_doctests(test_module, test_directory, options):
         'style': 'google',
         'options': '+IGNORE_WHITESPACE',
     }
+    xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
-        pkgpath, config=xdoctest_config, verbose=1, command='all', argv=[])
+        os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
+        command='all', argv=[])
     result = 1 if run_summary['n_failed'] else 0
     return result
 
