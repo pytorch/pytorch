@@ -208,7 +208,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
-    # Set input tensors that require grad to leaves
     with torch.set_grad_enabled(True):
         out = flat_fn(*flat_args)
     out = pytree.tree_map(
@@ -230,6 +229,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             # fake fn to make functionalize happy
             def fake_fn(primals, tangents):
                 return fx_g(primals, tangents)
+
+            fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
