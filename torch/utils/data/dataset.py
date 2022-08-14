@@ -108,6 +108,7 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
         [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> # xdoctest: +IGNORE_WANT("non deterministic")

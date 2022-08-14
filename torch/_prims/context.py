@@ -77,6 +77,7 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.ops.prims.* functions to
     use nvFuser's prims in torch.ops.nvprims.*
 
+    >>> # xdoctest: +SKIP("undefined vars")
     >>> with NvfuserPrimsMode():
     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 

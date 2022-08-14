@@ -295,7 +295,7 @@ class Conv1d(_ConvNd):
         >>> # quantize input to quint8
         >>> # xdoctest: +SKIP
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
-                                                dtype=torch.quint8)
+        ...                                     dtype=torch.quint8)
         >>> output = m(q_input)
 
     """
@@ -763,6 +763,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ENABLE_QENGINE)
         >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride

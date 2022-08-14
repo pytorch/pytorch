@@ -13523,6 +13523,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:CUDAHOME)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,

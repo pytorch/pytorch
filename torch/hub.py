@@ -587,6 +587,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             Default: True
 
     Example:
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
 
     """
