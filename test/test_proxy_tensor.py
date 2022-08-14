@@ -411,13 +411,16 @@ def forward(self, x_1):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-        g = make_fx(f, tracing_mode=self.tracing_mode)()
-        self.assertEqual(g(), f())
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -701,6 +704,8 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),

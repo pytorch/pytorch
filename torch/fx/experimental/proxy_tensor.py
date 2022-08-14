@@ -22,7 +22,7 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -90,12 +90,6 @@ def decompose(decomposition_table):
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
-# Checks whether we try to convert the tensor into a scalar
-IS_STRICT = True
-def enable_strict(val):
-    global IS_STRICT
-    IS_STRICT = val
-
 def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
@@ -157,15 +151,30 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         r = func_overload.decompose(*args, **kwargs)
         if r is not NotImplemented:
             return r
-    if func_overload == aten._local_scalar_dense.default:
-        t, = args
-        assert not kwargs
-        if t.constant is not None:
+    if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
+        # Check if all of the Tensor inputs are constants
+        all_constant = True
+
+        def try_unwrap_constant(t):
+            nonlocal all_constant
+            if isinstance(t, ProxyTensor):
+                if t.constant is not None:
+                    return t.constant
+                else:
+                    all_constant = False
+                    return NotImplemented
+            else:
+                return t
+
+        const_args, const_kwargs = pytree.tree_map(try_unwrap_constant, (args, kwargs))
+
+        if all_constant:
             with maybe_disable_fake_tensor_mode():
-                return t.constant.item()
-        raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-                           "It's likely that this is caused by data-dependent control flow or similar."
-                           "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
+                return func_overload(*const_args, **const_kwargs)
+        raise RuntimeError(
+            "It appears that you're trying to get value out of a tracing tensor - erroring out! "
+            "It's likely that this is caused by data-dependent control flow or similar."
+        )
 
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
