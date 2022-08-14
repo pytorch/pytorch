@@ -154,7 +154,7 @@ class TestTorchDlPack(TestCase):
         with self.assertRaises(RuntimeError):
             to_dlpack(x)
 
-    # TODO: increase tests once NumPy supports the `__dlpack__` protocol
+    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
     def test_dlpack_export_requires_grad(self):
         x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
@@ -183,9 +183,8 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(y.stride(), (3,))
         z = from_dlpack(y)
         self.assertEqual(z.shape, (1,))
-        # gh-83069, toDLPack should normalize strides
+        # gh-83069, make sure __dlpack__ normalizes strides
         self.assertEqual(z.stride(), (1,))
-        # TODO: are there more complicated cases that are still not handled?
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())

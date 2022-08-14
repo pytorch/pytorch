@@ -229,6 +229,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   // Normalize the strides to 1 wherever shape < 2
+  // gh-83069
   auto shape = src.sizes().data();
   int64_t *strides = new int64_t[src.dim()];
   for (int i=0; i<src.dim(); i++) {
