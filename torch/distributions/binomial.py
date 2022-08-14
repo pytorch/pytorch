@@ -3,6 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
+__all__ = ['Binomial']
 
 def _clamp_by_zero(x):
     # works like clamp(x, min=0) but has grad at 0 is 0.5
@@ -17,6 +18,7 @@ class Binomial(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
         tensor([   0.,   22.,   71.,  100.])

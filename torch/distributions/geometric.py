@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Geometric']
 
 class Geometric(Distribution):
     r"""
@@ -18,6 +19,7 @@ class Geometric(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
         tensor([ 2.])

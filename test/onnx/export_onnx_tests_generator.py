@@ -4,11 +4,11 @@ import shutil
 import traceback
 
 import onnx
-import test_onnx_common
-from onnx import numpy_helper
-from test_nn import new_module_tests
+import onnx_test_common
 
 import torch
+from onnx import numpy_helper
+from test_nn import new_module_tests
 from torch.autograd import Variable
 from torch.testing._internal.common_nn import module_tests
 
@@ -110,7 +110,7 @@ def convert_tests(testcases, sets=1):
             onnx_model = onnx.load_from_string(f.getvalue())
             onnx.checker.check_model(onnx_model)
             onnx.helper.strip_doc_string(onnx_model)
-            output_dir = os.path.join(test_onnx_common.pytorch_converted_dir, test_name)
+            output_dir = os.path.join(onnx_test_common.pytorch_converted_dir, test_name)
 
             if os.path.exists(output_dir):
                 shutil.rmtree(output_dir)
@@ -151,7 +151,7 @@ def convert_tests(testcases, sets=1):
     )
     print(
         "PyTorch converted cases are stored in {}.".format(
-            test_onnx_common.pytorch_converted_dir
+            onnx_test_common.pytorch_converted_dir
         )
     )
     print_stats(FunctionalModule_nums, nn_module)

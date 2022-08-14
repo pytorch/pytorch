@@ -14,6 +14,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
@@ -600,8 +601,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream;
 
 #ifdef USE_NCCL_WITH_UCC
-  static std::once_flag initialize_ucc_lib_flag;
-  std::call_once(initialize_ucc_lib_flag, [&] {
+  static c10::once_flag initialize_ucc_lib_flag;
+  c10::call_once(initialize_ucc_lib_flag, [&] {
     uccLib_ = loadTorchUCC();
     if (uccLib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
@@ -1404,6 +1405,34 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
     : ProcessGroup::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
+void ProcessGroupNCCL::startCoalescing() {
+  coalescedDevices_.clear();
+  coalescing_active_ = true;
+  groupStart();
+}
+
+void ProcessGroupNCCL::endCoalescing(
+    std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& reqs) {
+  groupEnd();
+  if (reqs.size() != coalescedDevices_.size()) {
+    TORCH_CHECK(false, "Number of requests do not match number of collectives");
+  }
+
+  int batch_idx = 0;
+  for (const auto& req : reqs) {
+    auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
+    // @lint-ignore CLANGTIDY
+    std::vector<at::Device> devices = coalescedDevices_[batch_idx];
+    const auto key = getKeyFromDevices(devices);
+    auto& ncclStreams = ncclStreams_[key];
+    for (const auto i : c10::irange(devices.size())) {
+      (*ncclWork->ncclEndEvents_)[i].record(ncclStreams[i]);
+    }
+    batch_idx += 1;
+  }
+  coalescing_active_ = false;
+}
+
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -1434,6 +1463,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
+
+  if (coalescing_active_) {
+    coalescedDevices_.push_back(devices);
+  }
 
   // Used many times below, so we stash the unordered_map lookup
   auto& ncclStreams = ncclStreams_[key];
@@ -1496,7 +1529,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
-    (*work->ncclEndEvents_)[i].record(ncclStream);
+    if (!coalescing_active_) {
+      (*work->ncclEndEvents_)[i].record(ncclStream);
+    }
     work->ncclComms_[i] = ncclComms[i];
   }
 
@@ -1558,6 +1593,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
   }
   auto& ncclComms = getNCCLComm(key, devices, opType, p2pRank, isSendRecvSelf);
+
+  if (coalescing_active_) {
+    coalescedDevices_.push_back(devices);
+  }
 
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
@@ -1622,7 +1661,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    (*work->ncclEndEvents_)[i].record(ncclStream);
+    if (!coalescing_active_) {
+      (*work->ncclEndEvents_)[i].record(ncclStream);
+    }
     work->ncclComms_[i] = ncclComms[i];
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = options_->timeout;
