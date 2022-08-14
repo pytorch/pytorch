@@ -2,7 +2,7 @@
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
+Additionally, it provides many utilities for efficient serialization of
 Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
@@ -523,7 +523,7 @@ def is_deterministic_algorithms_warn_only_enabled():
 def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
     r"""Sets the debug mode for deterministic operations.
 
-    .. note:: This is an alternative interface for
+    .. Note:: This is an alternative interface for
         :func:`torch.use_deterministic_algorithms`. Refer to that function's
         documentation for details about affected operations.
 
@@ -534,7 +534,7 @@ def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
             nondeterministic operations.
     """
 
-    # NOTE: builtins.int is used here because int in this scope resolves
+    # Note: builtins.int is used here because int in this scope resolves
     # to torch.int
     if not isinstance(debug_mode, (builtins.int, str)):
         raise TypeError(f'debug_mode must be str or int, but got {type(debug_mode)}')
@@ -661,7 +661,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 from ._tensor import Tensor
 from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 
-# NOTE: New <type>Storage classes should never be added. When adding a new
+# Note: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
 
 class ByteStorage(_LegacyStorage):
@@ -813,7 +813,7 @@ for name in dir(_C._VariableFunctions):
 # Import interface functions defined in Python
 ################################################################################
 
-# needs to be after the above ATen bindings so we can overwrite from Python side
+# Needs to be after the above ATen bindings so we can overwrite from Python side
 from .functional import *  # noqa: F403
 
 
@@ -828,7 +828,7 @@ del _LegacyStorage
 # Define _assert
 ################################################################################
 
-# needs to be before the submodule imports to avoid circular dependencies
+# Needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
@@ -892,7 +892,7 @@ from torch import ao as ao
 
 _C._init_names(list(torch._storage_classes))
 
-# attach docstrings to torch and tensor functions
+# Attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
@@ -906,7 +906,7 @@ def compiled_with_cxx11_abi():
 from torch._ops import ops
 from torch._classes import classes
 
-# quantization depends on torch.fx
+# Quantization depends on torch.fx
 # Import quantization
 from torch import quantization as quantization
 
@@ -963,7 +963,7 @@ def _register_device_module(device_type, module):
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module
 
-# expose return_types
+# Expose return_types
 from . import return_types
 if sys.executable != 'torch_deploy':
     from . import library
