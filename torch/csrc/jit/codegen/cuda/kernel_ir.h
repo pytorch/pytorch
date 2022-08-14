@@ -55,6 +55,7 @@ class Allocate;
 class BlockSync;
 class GridSync;
 class CpAsyncWait;
+class CpAsyncCommit;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -258,11 +259,27 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
 };
 
 // CpAsyncWait represents wait intrinsics for cp.async
-// TODO: expand to support different wait modes of the intrinsic
-//  as the analysis passes build out.
 class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
-  explicit CpAsyncWait(IrBuilderPasskey passkey);
+  explicit CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages = 0);
+
+  //! Returns the remaining number of stages that are not synchronized
+  //!  after this op.
+  unsigned int keepStages() const {
+    return keep_stages_;
+  }
+
+ private:
+  //! Number of stage to leave un-sync'ed by this op.
+  unsigned int keep_stages_ = 0;
+};
+
+// CpAsyncCommit represents commit intrinsics for cp.async
+//  A commit intrinsic communicates delimiter of transaction groups
+// to the async load hardware. Example usage see [Cicular buffer].
+class TORCH_CUDA_CU_API CpAsyncCommit final : public Expr {
+ public:
+  explicit CpAsyncCommit(IrBuilderPasskey passkey);
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
@@ -392,7 +409,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
       Val* step,
       bool vectorize,
       Val* vectorize_shift,
-      bool unroll_required);
+      bool unroll_required,
+      DoubleBufferLoopStage double_buffer_loop_stage);
 
   ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain);
 
@@ -445,6 +463,12 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   //! True if no actual for-loop is materialized
   bool isTrivial() const;
 
+  //! Returns the stage of a double buffered iterdomain
+  //!  that this for loop materializes.
+  auto doubleBufferLoopStage() const {
+    return double_buffer_loop_stage_;
+  }
+
  private:
   //! Returns if a loop could be unrolled.
   bool isUnrollable() const;
@@ -468,6 +492,11 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   bool unroll_required_ = false;
 
   Scope body_;
+
+  //! Tracks if this for loop is implementing a stage of
+  //!  a double buffered iterdomain.
+  DoubleBufferLoopStage double_buffer_loop_stage_ =
+      DoubleBufferLoopStage::NotApplicable;
 };
 
 //! IfThenElse provides scoping for an boolean operator. Exprs placed in its
@@ -575,6 +604,7 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       Allocate* sync_buffer,
       Val* entrance_index,
       Val* entrances,
+      Val* buffer_stride,
       bool is_allreduce = false);
 
   const std::vector<Allocate*>& reduction_buffers() const {
@@ -599,6 +629,10 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
     return entrances_;
   }
 
+  Val* buffer_stride() const {
+    return buffer_stride_;
+  }
+
   const ParallelTypeBitmap& threadPredicate() const {
     return thread_predicate_;
   }
@@ -616,6 +650,8 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
   ParallelTypeBitmap thread_predicate_;
   Val* entrance_index_ = nullptr;
   Val* entrances_ = nullptr;
+  // Stride of reduction buffers
+  Val* buffer_stride_ = nullptr;
 };
 
 //! Grid broadcast operation
@@ -748,6 +784,102 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
  private:
   //! GridReduction, GridWelford or GroupedGridReduction
   Expr* grid_expr_ = nullptr;
+};
+
+//! An IR node consisting of a pair of integers
+//!  to facilitate definition of 2D swizzle operators.
+//! All swizzle 2D ops takes two inputs and outputs
+//!  an integer pair.
+//! TODO:
+//!  currently this IR node is only allowed as input
+//!  to the new PairSelect node. In follow ups would
+//!  possibly build out to support out of line
+//!  definition of the pair alone.
+class TORCH_CUDA_CU_API IntPair : public Val {
+ public:
+  IntPair(IrBuilderPasskey passkey);
+};
+
+//! An IR node marking selection of first or second
+//!  value from a pair of integers, e.g.:
+//! Pair(X,Y) -> X or Y.
+//! This IR node is used to facilitate generation
+//!  of inline 2D swizzle math.
+class TORCH_CUDA_CU_API PairSelect : public Expr {
+ public:
+  //! Indicates which value from the input
+  //!  integer pair to output.
+  enum class Selection { X = 0, Y };
+
+  PairSelect(IrBuilderPasskey, Val* out, IntPair* in, Selection selection);
+
+  Val* out() const {
+    return out_;
+  }
+
+  IntPair* in() const {
+    return in_;
+  }
+
+  auto selection() const {
+    return selection_;
+  }
+
+ private:
+  Val* const out_ = nullptr;
+  IntPair* const in_ = nullptr;
+  Selection selection_;
+};
+
+//! An integer IR node that will be generated
+//!  using custom integer swizzle functions
+//!  from the cuda runtime functions.
+//! Most supported swizzle functions require
+//!  the sizes of each dimension defined so
+//!  all operators will take the extents as inputs.
+class TORCH_CUDA_CU_API Swizzle2DInt : public Expr {
+ public:
+  Swizzle2DInt(
+      IrBuilderPasskey,
+      IntPair* out,
+      Val* in_x,
+      Val* in_y,
+      Val* extent_x,
+      Val* extent_y,
+      Swizzle2DType swizzle_type);
+
+  IntPair* out() const {
+    return out_;
+  }
+
+  Val* inX() const {
+    return in_x_;
+  }
+
+  Val* inY() const {
+    return in_y_;
+  }
+
+  Val* extentX() const {
+    return extent_x_;
+  }
+
+  Val* extentY() const {
+    return extent_y_;
+  }
+
+  const auto& swizzleType() const {
+    return swizzle_type_;
+  }
+
+ private:
+  IntPair* const out_ = nullptr;
+
+  Val* const in_x_ = nullptr;
+  Val* const in_y_ = nullptr;
+  Val* const extent_x_ = nullptr;
+  Val* const extent_y_ = nullptr;
+  Swizzle2DType swizzle_type_;
 };
 
 } // namespace kir

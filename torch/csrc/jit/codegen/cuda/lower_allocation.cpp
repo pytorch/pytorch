@@ -141,7 +141,8 @@ class AllocationInserter : public kir::ExprMutator {
             nullptr,
             false,
             nullptr,
-            false);
+            false,
+            DoubleBufferLoopStage::NotApplicable);
       } else {
         new_loop = IrBuilder::create<kir::ForLoop>(id);
       }
@@ -407,7 +408,7 @@ class AllocationInserter : public kir::ExprMutator {
 
     // Double the allocation size if double-buffered. Record the
     // original size for indexing.
-    if (info.buffer->isDoubleBuffered()) {
+    if (info.buffer->isDoubleBuffered() || info.buffer->isCircularBuffered()) {
       Val* original_alloc_size = nullptr;
       for (auto alloc_dim : alloc_dims) {
         if (original_alloc_size == nullptr) {
@@ -419,7 +420,11 @@ class AllocationInserter : public kir::ExprMutator {
       }
       GpuLower::current()->doubleBufferInfo().setOriginalAllocSize(
           info.buffer, original_alloc_size);
-      alloc_dims.push_back(IrBuilder::create<Int>(2));
+      int double_buffer_stage = 2;
+      if (info.buffer->isCircularBuffered()) {
+        double_buffer_stage = info.buffer->circularBufferDepth();
+      }
+      alloc_dims.push_back(IrBuilder::create<Int>(double_buffer_stage));
     }
 
     // Create the allocation node
