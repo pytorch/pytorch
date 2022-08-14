@@ -671,6 +671,24 @@ class TestSymbolicTracing(TestCase):
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
         assert len(shape_env.guards) == 1
 
+    def test_new_empty(self):
+        def f(a, b):
+            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
+
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
+
+
+    def test_expand(self):
+        def f(a):
+            b = torch.mul(a, a)
+            c = b.expand(a.shape)
+            return c
+
+        self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
+        self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
+
+
+
 make_fx_failures = {
     # unknown
     xfail('allclose'),

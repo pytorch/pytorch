@@ -1,4 +1,3 @@
-import subprocess
 import torch.fx as fx
 import copy
 import torch
@@ -52,7 +51,7 @@ def _convert_node_to_placeholder(node, inps):
             _convert_node_to_placeholder(tuple_user, inps)
 
 def generate_repro(fx_g, inps):
-        print(f"""
+    print(f"""
 inps = {[(i.shape, i.dtype) for i in inps]}
 inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
 {fx_g.code}
@@ -84,6 +83,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
     cur_size = len(failing_graph.nodes)
 
     num_queries = 0
+
     def graph_fails(graph, inps):
         nonlocal num_queries
         num_queries += 1
@@ -98,9 +98,10 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
 
     def _register_strategy(strategy: Callable, name: str):
         @wraps(strategy)
-        def new_func(old_state: ReproState):
-            print(f"Strategy: {name} ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs")
-            new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps))
+        def new_func(old_state: ReproState, granularity):
+            print(f"Strategy: {name} ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
+            print(f"Granularity: {granularity}")
+            new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps), granularity)
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
                 old_nodes = len(old_state.graph.nodes)
@@ -128,30 +129,27 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         return partial(_register_strategy, name=name)
 
     @register_strategy("Truncate suffix")
-    def remove_suffix(cur_graph, cur_inps):
-        gap = 2**(math.floor(math.log2(len(cur_graph.nodes))) - 1)
-        gap = max(gap, 1)
+    def remove_suffix(cur_graph, cur_inps, granularity):
         tested = set()
-        while gap >= 1:
-            new_graph = fx.Graph()
-            env = {}
-            for idx, node in enumerate(cur_graph.nodes):
-                new_node = new_graph.node_copy(node, lambda x: env[x])
-                if node.op not in ['placeholder', 'output']:
-                    if idx % gap == 0 and idx not in tested:
-                        output_node = new_graph.output((new_node,))
-                        if graph_fails(new_graph, cur_inps) and len(new_graph.nodes) < len(cur_graph.nodes):
-                            return ReproState(new_graph, cur_inps)
-                        else:
-                            tested.add(idx)
-                            new_graph.erase_node(output_node)
-                env[node] = new_node
-            gap //= 2
+        new_graph = fx.Graph()
+        env = {}
+        for idx, node in enumerate(cur_graph.nodes):
+            new_node = new_graph.node_copy(node, lambda x: env[x])
+            if node.op not in ['placeholder', 'output']:
+                if idx % granularity == 0 and idx not in tested:
+                    output_node = new_graph.output((new_node,))
+                    if len(new_graph.nodes) < len(cur_graph.nodes) and graph_fails(new_graph, cur_inps):
+                        return ReproState(new_graph, cur_inps)
+                    else:
+                        tested.add(idx)
+                        new_graph.erase_node(output_node)
+            env[node] = new_node
         print("FAIL: Could not remove suffix")
         return None
 
-    @register_strategy("Remove unused inputs")
-    def remove_unused_inputs(cur_graph, cur_inps):
+    def remove_unused_inputs(cur_state: ReproState):
+        cur_graph = copy.deepcopy(cur_state.graph)
+        cur_inps = list(cur_state.inps)
         ph_nodes = _get_placeholders(cur_graph)
         assert len(ph_nodes) == len(cur_inps)
 
@@ -161,18 +159,20 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 cur_graph.erase_node(ph_nodes[idx])
             else:
                 new_inps.append(cur_inps[idx])
-
-        if len(new_inps) < len(cur_inps) and graph_fails(cur_graph, new_inps):
+        if len(new_inps) < cur_inps:
             return ReproState(cur_graph, new_inps)
-        else:
-            return None
+        return None
 
     @register_strategy("Eliminate dead code")
-    def eliminate_dead_code(cur_graph, cur_inps):
+    def eliminate_dead_code(cur_graph, cur_inps, granularity):
         if cur_graph.eliminate_dead_code() and graph_fails(cur_graph, cur_inps):
+            input_remove_state = remove_unused_inputs(ReproState(cur_graph, cur_inps))
+            if input_remove_state is not None and graph_fails(input_remove_state.graph, input_remove_state.inps):
+                return input_remove_state
             return ReproState(cur_graph, cur_inps)
         else:
             return None
+
 
     def _consolidate_placeholders(cur_graph):
         new_graph = fx.Graph()
@@ -189,44 +189,53 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         return new_graph
 
     @register_strategy("Delta Debugging")
-    def delta_debugging(cur_graph: fx.Graph, cur_inps):
+    def delta_debugging(cur_graph: fx.Graph, cur_inps, granularity):
         num_nodes = len(cur_graph.nodes)
-        gap = int(2**math.floor(math.log2(num_nodes)))
-        while gap >= 1:
-            for start_range in range(0, num_nodes, gap):
-                is_removing = False
-                new_graph = copy.deepcopy(cur_graph)
-                new_inps = cur_inps[:]
-                end_range = min(num_nodes, start_range + gap)
-                for idx in range(start_range, end_range):
-                    new_node = list(new_graph.nodes)[idx]
-                    if new_node.op not in ['placeholder', 'output']:
-                        is_removing = True
-                        _convert_node_to_placeholder(new_node, new_inps)
-                if not is_removing:
-                    continue
-                new_graph = _consolidate_placeholders(new_graph)
-                if graph_fails(new_graph, new_inps):
-                    return ReproState(new_graph, new_inps)
-            gap //= 2
+        for start_range in range(0, num_nodes, granularity):
+            is_removing = False
+            new_graph = copy.deepcopy(cur_graph)
+            new_inps = cur_inps[:]
+            end_range = min(num_nodes, start_range + granularity)
+            for idx in range(start_range, end_range):
+                new_node = list(new_graph.nodes)[idx]
+                if new_node.op not in ['placeholder', 'output']:
+                    is_removing = True
+                    _convert_node_to_placeholder(new_node, new_inps)
+            if not is_removing:
+                continue
+            new_graph = _consolidate_placeholders(new_graph)
+            new_state = remove_unused_inputs(ReproState(new_graph, new_inps))
+            if graph_fails(new_state.graph, new_state.inps):
+                return ReproState(new_state.graph, new_state.inps)
 
         return None
 
     failing_state = ReproState(failing_graph, inps)
+
+    def try_granularity(failing_state, granularity):
+        print(f"Trying granularity {granularity}")
+        for strategy in [delta_debugging, eliminate_dead_code, remove_suffix, eliminate_dead_code]:
+            new_state = strategy(failing_state, granularity)
+            if new_state is not None:
+                return new_state
+        return None
+
     while True:
-        any_succeeded = False
-        strategies = [
-            remove_suffix, eliminate_dead_code, remove_unused_inputs,
-            delta_debugging, eliminate_dead_code, remove_unused_inputs
-        ]
-        for strategy in strategies:
-            new_state = strategy(failing_state)
+        granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
+        has_progress = False
+        while granularity >= 1:
+            new_state = try_granularity(failing_state, granularity)
             if new_state is not None:
                 failing_state = new_state
-                any_succeeded = True
-
-        if not any_succeeded:
+                has_progress = True
+                break
+            granularity //= 2
+        if not has_progress:
             break
+
+    if not graph_fails(failing_state.graph, failing_state.inps):
+        raise RuntimeError("Uh oh, something went wrong :( Final graph is not failing")
+
     print(f"Made {num_queries} queries")
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
     generate_repro(failing_fx, failing_state.inps)
