@@ -223,9 +223,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     joint_inputs = (flat_args, out)
     with torch.set_grad_enabled(True):
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
-            *joint_inputs
-        )
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
         if config.use_functionalize:
             # Functionalize the foward backward graph. First create a
@@ -259,7 +257,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *flat_tensor_args):
-            fw_outs = call_func_with_args(CompiledFunction.compiled_fw, flat_tensor_args)
+            fw_outs = call_func_with_args(
+                CompiledFunction.compiled_fw, flat_tensor_args
+            )
             num_outs = CompiledFunction.num_outs
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
@@ -271,9 +271,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
             if CompiledFunction.compiled_bw is None:
                 with track_graph_compiling("backward", True):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(bw_module, all_args)
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, all_args
+                    )
             ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(CompiledFunction.compiled_bw, all_args, steal_args=True)
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw, all_args, steal_args=True
+            )
 
             return tuple(out)
 
@@ -308,7 +312,7 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             flat_args = pytree.tree_map(
-                lambda x: x.detach().requires_grad_(x.requires_grad)
+                lambda x: x.detach().clone().requires_grad_(x.requires_grad)
                 if isinstance(x, Tensor)
                 else x,
                 flat_args,
