@@ -21,6 +21,13 @@ on:
         type: boolean
         default: false
         description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     outputs:
       docker-image:
@@ -85,12 +92,12 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
@@ -102,13 +109,13 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e SKIP_SCCACHE_INITIALIZATION=1 \

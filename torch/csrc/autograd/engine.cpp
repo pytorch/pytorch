@@ -13,6 +13,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/isnan.h>
+#endif
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
@@ -54,8 +60,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static std::once_flag flag;
-  std::call_once(
+  static c10::once_flag flag;
+  c10::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
 #endif
 }
@@ -368,6 +374,21 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
+// The current graph task's exec_info is being used to trim unnecessary edegs
+// during node evaluation, see `Node.task_should_compute_output()` function.
+const std::unordered_map<Node*, GraphTask::ExecInfo>*
+get_current_graph_task_exec_info() {
+  return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
+}
+
+bool get_current_graph_task_keep_graph() {
+  return current_graph_task ? current_graph_task->keep_graph_ : true;
+}
+
+void add_node_to_current_graph_task_exec_info(Node* fn) {
+  current_graph_task->exec_info_[fn].needed_ = true;
+}
+
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
 //
@@ -404,11 +425,6 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   // tasks (ex: device threads). When graph_task is non-null (ex: reentrant
   // backwards, user thread), this function is expected to exit once that
   // graph_task complete.
-
-#ifdef USE_ROCM
-  // Keep track of backward pass for rocblas.
-  at::ROCmBackwardPassGuard in_backward;
-#endif
 
   // local_ready_queue should already been initialized when we get into
   // thread_main
@@ -1109,7 +1125,7 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  std::call_once(
+  c10::call_once(
       start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 

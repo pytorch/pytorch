@@ -15,6 +15,8 @@ from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight, WeightedQuantizedModule
 from torch.nn.utils import fuse_conv_bn_weights
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']
+
 _SUPPORTED_PADDING = {
     'zeros',
     'reflect'
@@ -291,6 +293,7 @@ class Conv1d(_ConvNd):
         >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
+        >>> # xdoctest: +SKIP
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
                                                 dtype=torch.quint8)
         >>> output = m(q_input)
@@ -402,6 +405,7 @@ class Conv2d(_ConvNd):
         >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
         >>> # quantize input to quint8
+        >>> # xdoctest: +SKIP
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
         >>> output = m(q_input)
 
@@ -499,6 +503,7 @@ class Conv3d(_ConvNd):
         >>> m = nn.quantized.Conv3d(16, 33, (3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2), dilation=(1, 2, 2))
         >>> input = torch.randn(20, 16, 56, 56, 56)
         >>> # quantize input to quint8
+        >>> # xdoctest: +SKIP
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
         >>> output = m(q_input)
 
@@ -672,6 +677,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
+        >>> # xdoctest: +SKIP
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose1d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -760,6 +766,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
+        >>> # xdoctest: +SKIP
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -849,6 +856,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
         >>> torch.backends.quantized.engine = 'fbgemm'
         >>> # With cubic kernels and equal stride
+        >>> # xdoctest: +SKIP
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1, 1), padding=(4, 2, 2))

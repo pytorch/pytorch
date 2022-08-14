@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Rprop', 'rprop']
 
 class Rprop(Optimizer):
     r"""Implements the resilient backpropagation algorithm.
@@ -73,7 +74,7 @@ class Rprop(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None

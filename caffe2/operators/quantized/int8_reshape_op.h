@@ -32,8 +32,8 @@ class Int8ReshapeOp final : public ReshapeOp<uint8_t, CPUContext> {
     auto* Y = Outputs()[0]->GetMutable<Int8TensorCPU>();
     int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);
     auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_EQ(Y_offset, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_EQ(Y_offset, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
     DoRunWithTypeImpl<T>(X.t, &Y->t);

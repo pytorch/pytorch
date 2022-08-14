@@ -558,14 +558,15 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
 void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
         [=](scalar_t self_val) {
           return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0)
                                                                    : self_val;
         },
-        [=](Vectorized<scalar_t> self_val) {
-          return ((self_val < -lambd_val) | (self_val > lambd_val)) & self_val;
+        [=](Vec self_val) {
+          return Vec::blendv(self_val, Vec(0), (self_val >= -lambd_val) & (self_val <= lambd_val));
         });
   });
 }

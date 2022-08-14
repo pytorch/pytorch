@@ -2,16 +2,24 @@
 template <typename... Types>
 struct Tuple;
 
+#define TUPLE_INCREMENT_PTR(idx)                                        \
+  do {                                                                  \
+    static_assert(                                                      \
+        IsPointerType<T##idx>::value, "Invalid for non-pointer types"); \
+    val##idx += offset;                                                 \
+  } while (0)
+
 template <typename T0>
 struct Tuple<T0> {
   T0 val0;
+
+  Tuple() = default;
 
   __device__ Tuple(T0 _val0) : val0(_val0) {}
 
   // Only valid when instantiated for pointer types
   __device__ void operator+=(nvfuser_index_t offset) {
-    static_assert(IsPointerType<T0>::value, "Invalid for non-pointer types");
-    val0 += offset;
+    TUPLE_INCREMENT_PTR(0);
   }
 };
 
@@ -20,14 +28,14 @@ struct Tuple<T0, T1> {
   T0 val0;
   T1 val1;
 
+  Tuple() = default;
+
   __device__ Tuple(T0 _val0, T1 _val1) : val0(_val0), val1(_val1) {}
 
   // Only valid when instantiated for pointer types
   __device__ void operator+=(nvfuser_index_t offset) {
-    static_assert(IsPointerType<T0>::value, "Invalid for non-pointer types");
-    static_assert(IsPointerType<T1>::value, "Invalid for non-pointer types");
-    val0 += offset;
-    val1 += offset;
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
   }
 };
 
@@ -37,59 +45,226 @@ struct Tuple<T0, T1, T2> {
   T1 val1;
   T2 val2;
 
+  Tuple() = default;
+
   __device__ Tuple(T0 _val0, T1 _val1, T2 _val2)
       : val0(_val0), val1(_val1), val2(_val2) {}
 
   // Only valid when instantiated for pointer types
   __device__ void operator+=(nvfuser_index_t offset) {
-    static_assert(IsPointerType<T0>::value, "Invalid for non-pointer types");
-    static_assert(IsPointerType<T1>::value, "Invalid for non-pointer types");
-    static_assert(IsPointerType<T2>::value, "Invalid for non-pointer types");
-    val0 += offset;
-    val1 += offset;
-    val2 += offset;
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
   }
 };
+
+template <typename T0, typename T1, typename T2, typename T3>
+struct Tuple<T0, T1, T2, T3> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+
+  Tuple() = default;
+
+  __device__ Tuple(T0 _val0, T1 _val1, T2 _val2, T3 _val3)
+      : val0(_val0), val1(_val1), val2(_val2), val3(_val3) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+  }
+};
+
+template <typename T0, typename T1, typename T2, typename T3, typename T4>
+struct Tuple<T0, T1, T2, T3, T4> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+  T4 val4;
+
+  Tuple() = default;
+
+  __device__ Tuple(T0 _val0, T1 _val1, T2 _val2, T3 _val3, T4 _val4)
+      : val0(_val0), val1(_val1), val2(_val2), val3(_val3), val4(_val4) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+    TUPLE_INCREMENT_PTR(4);
+  }
+};
+
+template <
+    typename T0,
+    typename T1,
+    typename T2,
+    typename T3,
+    typename T4,
+    typename T5>
+struct Tuple<T0, T1, T2, T3, T4, T5> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+  T4 val4;
+  T5 val5;
+
+  Tuple() = default;
+
+  __device__ Tuple(T0 _val0, T1 _val1, T2 _val2, T3 _val3, T4 _val4, T5 _val5)
+      : val0(_val0),
+        val1(_val1),
+        val2(_val2),
+        val3(_val3),
+        val4(_val4),
+        val5(_val5) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+    TUPLE_INCREMENT_PTR(4);
+    TUPLE_INCREMENT_PTR(5);
+  }
+};
+
+template <
+    typename T0,
+    typename T1,
+    typename T2,
+    typename T3,
+    typename T4,
+    typename T5,
+    typename T6>
+struct Tuple<T0, T1, T2, T3, T4, T5, T6> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+  T4 val4;
+  T5 val5;
+  T6 val6;
+
+  Tuple() = default;
+
+  __device__ Tuple(
+      T0 _val0,
+      T1 _val1,
+      T2 _val2,
+      T3 _val3,
+      T4 _val4,
+      T5 _val5,
+      T6 _val6)
+      : val0(_val0),
+        val1(_val1),
+        val2(_val2),
+        val3(_val3),
+        val4(_val4),
+        val5(_val5),
+        val6(_val6) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+    TUPLE_INCREMENT_PTR(4);
+    TUPLE_INCREMENT_PTR(5);
+    TUPLE_INCREMENT_PTR(6);
+  }
+};
+
+template <
+    typename T0,
+    typename T1,
+    typename T2,
+    typename T3,
+    typename T4,
+    typename T5,
+    typename T6,
+    typename T7>
+struct Tuple<T0, T1, T2, T3, T4, T5, T6, T7> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+  T4 val4;
+  T5 val5;
+  T6 val6;
+  T7 val7;
+
+  Tuple() = default;
+
+  __device__ Tuple(
+      T0 _val0,
+      T1 _val1,
+      T2 _val2,
+      T3 _val3,
+      T4 _val4,
+      T5 _val5,
+      T6 _val6,
+      T7 _val7)
+      : val0(_val0),
+        val1(_val1),
+        val2(_val2),
+        val3(_val3),
+        val4(_val4),
+        val5(_val5),
+        val6(_val6),
+        val7(_val7) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+    TUPLE_INCREMENT_PTR(4);
+    TUPLE_INCREMENT_PTR(5);
+    TUPLE_INCREMENT_PTR(6);
+    TUPLE_INCREMENT_PTR(7);
+  }
+};
+
+#undef TUPLE_INCREMENT_PTR
 
 // Accessor for Tuple
 template <int idx>
 struct get;
 
-template <>
-struct get<0> {
-  template <typename Tuple>
-  __device__ auto& operator()(Tuple& vals) {
-    return vals.val0;
-  }
-  template <typename Tuple>
-  __device__ const auto& operator()(const Tuple& vals) {
-    return vals.val0;
-  }
-};
+#define DEFINE_TUPLE_GET(idx)                              \
+  template <>                                              \
+  struct get<idx> {                                        \
+    template <typename Tuple>                              \
+    __device__ auto& operator()(Tuple& vals) {             \
+      return vals.val##idx;                                \
+    }                                                      \
+    template <typename Tuple>                              \
+    __device__ const auto& operator()(const Tuple& vals) { \
+      return vals.val##idx;                                \
+    }                                                      \
+  };
 
-template <>
-struct get<1> {
-  template <typename Tuple>
-  __device__ auto& operator()(Tuple& vals) {
-    return vals.val1;
-  }
-  template <typename Tuple>
-  __device__ const auto& operator()(const Tuple& vals) {
-    return vals.val1;
-  }
-};
-
-template <>
-struct get<2> {
-  template <typename Tuple>
-  __device__ auto& operator()(Tuple& vals) {
-    return vals.val2;
-  }
-  template <typename Tuple>
-  __device__ const auto& operator()(const Tuple& vals) {
-    return vals.val2;
-  }
-};
+DEFINE_TUPLE_GET(0);
+DEFINE_TUPLE_GET(1);
+DEFINE_TUPLE_GET(2);
+DEFINE_TUPLE_GET(3);
+DEFINE_TUPLE_GET(4);
+DEFINE_TUPLE_GET(5);
+DEFINE_TUPLE_GET(6);
+DEFINE_TUPLE_GET(7);
+#undef DEFINE_TUPLE_GET
 
 template <typename DstType, typename SrcType>
 __inline__ __device__ static void copyTuple(
@@ -104,13 +279,23 @@ __inline__ __device__ static void copyTuple(
     const SrcType& src,
     nvfuser_index_t src_offset = 0);
 
+template <typename DstType>
+__inline__ __device__ static void setTuple(
+    DstType& dst,
+    typename DstType::template ValType<0> src);
+
 template <typename... Types>
 class LocalTuple {
  public:
   static constexpr int num_vals = sizeof...(Types);
   using ValTypes = TypeList<Types...>;
 
-  __device__ LocalTuple(Types... args) : vals_(args...) {}
+  template <int idx>
+  using ValType = typename TypeSelector<idx, Types...>::type;
+
+  LocalTuple() = default;
+
+  __device__ explicit LocalTuple(Types... args) : vals_(args...) {}
 
   __device__ LocalTuple(const LocalTuple& other) : vals_(other.vals_) {}
 
@@ -151,6 +336,8 @@ class PtrTupleBase {
  public:
   static constexpr int num_vals = sizeof...(Types);
   using ValTypes = TypeList<Types...>;
+  template <int idx>
+  using ValType = typename TypeSelector<idx, Types...>::type;
   template <int val_idx>
   using TypeIMaybeVolatile = typename MaybeVolatile<
       typename TypeSelector<val_idx, Types...>::type,
@@ -199,6 +386,8 @@ class RefTuple {
  public:
   static constexpr int num_vals = sizeof...(Types);
   using ValTypes = TypeList<Types...>;
+  template <int idx>
+  using ValType = typename TypeSelector<idx, Types...>::type;
 
   __device__ RefTuple(Types&... args) : vals_(args...) {}
 
@@ -253,6 +442,138 @@ struct TupleCopy {
   }
 };
 
+template <typename DstType, typename SrcType>
+struct TupleCopy<DstType, SrcType, 0> {
+  __inline__ __device__ static void copy(
+      DstType& dst,
+      nvfuser_index_t dst_offset,
+      const SrcType& src,
+      nvfuser_index_t src_offset) {}
+};
+
+template <typename DstType, typename SrcType>
+__inline__ __device__ static void copyTuple(
+    DstType& dst,
+    nvfuser_index_t dst_offset,
+    const SrcType& src,
+    nvfuser_index_t src_offset) {
+  static_assert(
+      IsSameType<typename DstType::ValTypes, typename SrcType::ValTypes>::value,
+      "Invalid value types");
+  TupleCopy<DstType, SrcType, DstType::num_vals>::copy(
+      dst, dst_offset, src, src_offset);
+};
+
+template <typename DstType, typename SrcType>
+__inline__ __device__ static void copyTuple(
+    DstType& dst,
+    const SrcType& src,
+    nvfuser_index_t src_offset) {
+  copyTuple<DstType, SrcType>(dst, 0, src, src_offset);
+};
+
+template <typename DstType, int num_vals>
+struct TupleSet {
+  __inline__ __device__ static void set(
+      DstType& dst,
+      nvfuser_index_t dst_offset,
+      typename DstType::template ValType<0> src) {
+    static_assert(
+        IsSameType<
+            typename DstType::template ValType<num_vals - 1>,
+            typename DstType::template ValType<0>>::value,
+        "Invalid value types");
+    TupleSet<DstType, num_vals - 1>::set(dst, dst_offset, src);
+    dst.val<num_vals - 1>(dst_offset) = src;
+  }
+};
+
+template <typename DstType>
+struct TupleSet<DstType, 0> {
+  __inline__ __device__ static void set(
+      DstType& dst,
+      nvfuser_index_t dst_offset,
+      typename DstType::template ValType<0> src) {}
+};
+
+template <typename DstType>
+__inline__ __device__ static void setTuple(
+    DstType& dst,
+    nvfuser_index_t dst_offset,
+    typename DstType::template ValType<0> src) {
+  TupleSet<DstType, DstType::num_vals>::set(dst, dst_offset, src);
+};
+
+template <typename DstType>
+__inline__ __device__ static void setTuple(
+    DstType& dst,
+    typename DstType::template ValType<0> src) {
+  setTuple(dst, 0, src);
+};
+
+template <typename DstType, typename SrcType, typename PredType, int num_vals>
+struct PredicatedTupleCopy {
+  __inline__ __device__ static void copy(
+      DstType& dst,
+      nvfuser_index_t dst_offset,
+      const SrcType& src,
+      nvfuser_index_t src_offset,
+      const PredType& pred) {
+    static_assert(
+        IsSameType<typename PredType::template ValType<num_vals - 1>, bool>::
+            value,
+        "Invalid predicate type");
+    PredicatedTupleCopy<DstType, SrcType, PredType, num_vals - 1>::copy(
+        dst, dst_offset, src, src_offset, pred);
+    if (pred.val<num_vals - 1>(0)) {
+      dst.val<num_vals - 1>(dst_offset) = src.val<num_vals - 1>(src_offset);
+    }
+  }
+};
+
+template <typename DstType, typename SrcType, typename PredType>
+struct PredicatedTupleCopy<DstType, SrcType, PredType, 0> {
+  __inline__ __device__ static void copy(
+      DstType& dst,
+      nvfuser_index_t dst_offset,
+      const SrcType& src,
+      nvfuser_index_t src_offset,
+      const PredType& pred) {}
+};
+
+template <typename DstType, typename SrcType, typename PredType>
+__inline__ __device__ static void copyTupleIf(
+    DstType& dst,
+    nvfuser_index_t dst_offset,
+    const SrcType& src,
+    nvfuser_index_t src_offset,
+    const PredType& pred) {
+  static_assert(
+      IsSameType<typename DstType::ValTypes, typename SrcType::ValTypes>::value,
+      "Invalid value types");
+  static_assert(
+      PredType::num_vals == DstType::num_vals, "Invalid predicate type");
+  PredicatedTupleCopy<DstType, SrcType, PredType, DstType::num_vals>::copy(
+      dst, dst_offset, src, src_offset, pred);
+};
+
+template <typename DstType, typename SrcType, typename PredType>
+__inline__ __device__ static void copyTupleIf(
+    DstType& dst,
+    const SrcType& src,
+    nvfuser_index_t src_offset,
+    const PredType& pred) {
+  copyTupleIf(dst, 0, src, src_offset, pred);
+};
+
+template <typename DstType, typename SrcType, typename PredType>
+__inline__ __device__ static void copyTupleIf(
+    DstType& dst,
+    const SrcType& src,
+    const PredType& pred) {
+  copyTupleIf(dst, 0, src, 0, pred);
+};
+
 // Can a generic const and non-const RefTupe be defined?
 template <typename... Types>
 class ConstRefTuple {
@@ -279,44 +600,68 @@ class ConstRefTuple {
   Tuple<const Types&...> vals_;
 };
 
-template <typename DstType, typename SrcType>
-struct TupleCopy<DstType, SrcType, 1> {
-  __inline__ __device__ static void copy(
-      DstType& dst,
-      nvfuser_index_t dst_offset,
-      const SrcType& src,
-      nvfuser_index_t src_offset) {
-    static_assert(
-        IsSameType<typename DstType::ValTypes, typename SrcType::ValTypes>::
-            value,
-        "Invalid value types");
-    dst.val<0>(dst_offset) = src.val<0>(src_offset);
-  }
-};
-
-template <typename DstType, typename SrcType>
-__inline__ __device__ static void copyTuple(
-    DstType& dst,
-    nvfuser_index_t dst_offset,
-    const SrcType& src,
-    nvfuser_index_t src_offset) {
-  static_assert(
-      IsSameType<typename DstType::ValTypes, typename SrcType::ValTypes>::value,
-      "Invalid value types");
-  TupleCopy<DstType, SrcType, DstType::num_vals>::copy(
-      dst, dst_offset, src, src_offset);
-};
-
-template <typename DstType, typename SrcType>
-__inline__ __device__ static void copyTuple(
-    DstType& dst,
-    const SrcType& src,
-    nvfuser_index_t src_offset) {
-  copyTuple(dst, 0, src, src_offset);
-};
-
 template <typename... Types>
 using PtrTuple = PtrTupleBase<false, Types...>;
 
 template <typename... Types>
 using VolatilePtrTuple = PtrTupleBase<true, Types...>;
+
+// Utility definitions. Currently only used with LocalTuple
+
+template <int idx, typename BinaryFunc, typename... DataTypes>
+struct TupleBinaryOp {
+  static __inline__ __device__ void apply(
+      BinaryFunc func,
+      const LocalTuple<DataTypes...>& lhs,
+      const LocalTuple<DataTypes...>& rhs,
+      LocalTuple<DataTypes...>& result) {
+    TupleBinaryOp<idx - 1, BinaryFunc, DataTypes...>::apply(
+        func, lhs, rhs, result);
+    result.val<idx - 1>(0) = func(lhs.val<idx - 1>(0), rhs.val<idx - 1>(0));
+  }
+};
+
+template <typename BinaryFunc, typename... DataTypes>
+struct TupleBinaryOp<0, BinaryFunc, DataTypes...> {
+  static __inline__ __device__ void apply(
+      BinaryFunc func,
+      const LocalTuple<DataTypes...>& lhs,
+      const LocalTuple<DataTypes...>& rhs,
+      LocalTuple<DataTypes...>& result) {}
+};
+
+template <typename BinaryFunc, typename... DataTypes>
+__inline__ __device__ LocalTuple<DataTypes...> apply(
+    BinaryFunc func,
+    const LocalTuple<DataTypes...>& lhs,
+    const LocalTuple<DataTypes...>& rhs) {
+  LocalTuple<DataTypes...> result = lhs;
+  TupleBinaryOp<sizeof...(DataTypes), BinaryFunc, DataTypes...>::apply(
+      func, result, rhs, result);
+  return result;
+}
+
+template <typename... BoolTypes>
+__inline__ __device__ LocalTuple<BoolTypes...> operator&&(
+    const LocalTuple<BoolTypes...>& lhs,
+    const LocalTuple<BoolTypes...>& rhs) {
+  return apply([](bool x, bool y) { return x && y; }, lhs, rhs);
+}
+
+template <typename... BoolTypes>
+__inline__ __device__ LocalTuple<BoolTypes...> operator&&(
+    bool lhs,
+    const LocalTuple<BoolTypes...>& rhs) {
+  LocalTuple<BoolTypes...> lhs_tuple;
+  setTuple(lhs_tuple, lhs);
+  return lhs_tuple && rhs;
+}
+
+template <typename... BoolTypes>
+__inline__ __device__ LocalTuple<BoolTypes...> operator&&(
+    const LocalTuple<BoolTypes...>& lhs,
+    bool rhs) {
+  LocalTuple<BoolTypes...> rhs_tuple;
+  setTuple(rhs_tuple, rhs);
+  return lhs && rhs_tuple;
+}
