@@ -455,7 +455,11 @@ class ProxySymDispatchMode(SymDispatchMode):
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
             return func(*args, **kwargs)
-        p_args, p_kwargs = pytree.tree_map_only(PySymInt, lambda s: s.__dict__[self.tracer] if s.constant is None else s.constant, (args, kwargs))
+        p_args, p_kwargs = pytree.tree_map_only(
+            PySymInt,
+            lambda s: s.__dict__[self.tracer] if s.constant is None else s.constant,
+            (args, kwargs)
+        )
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
         n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))

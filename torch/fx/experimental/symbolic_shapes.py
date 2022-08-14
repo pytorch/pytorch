@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Dict, Any
+from typing import Dict, Any, List, Type
 import traceback
 import operator
 
@@ -81,7 +81,7 @@ def handle_sym_dispatch(func, args, kwargs):
     SYM_FUNCTION_MODE = mode.inner
     try:
         # TODO: properly compute types
-        types = []
+        types: List[Type] = []
         return mode.__sym_dispatch__(func, types, args, kwargs)
     finally:
         SYM_FUNCTION_MODE = mode
