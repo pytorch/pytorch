@@ -313,10 +313,15 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             # This shouldn't be needed after we switch to fake-tensor tracing
+            def create_copy(x):
+                if isinstance(x, Tensor):
+                    new_val = x.detach().new_empty_strided(x.size(), x.stride())
+                    new_val.copy_(x.detach())
+                    new_val.requires_grad_(x.requires_grad)
+                    return new_val
+                return x
             flat_args = pytree.tree_map(
-                lambda x: x.detach().clone().requires_grad_(x.requires_grad)
-                if isinstance(x, Tensor)
-                else x,
+                create_copy,
                 flat_args,
             )
             fake_flat_tensor_args = pytree.tree_map(
