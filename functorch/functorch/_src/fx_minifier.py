@@ -33,6 +33,13 @@ class ConcreteProp(torch.fx.Interpreter):
 def _get_placeholders(graph):
     return list(filter(lambda x: x.op == 'placeholder', graph.nodes))
 
+
+def _get_outputs(graph):
+    for node in graph.nodes:
+        if node.op == 'output':
+            return node.args[0]
+    raise AssertionError("No output node found")
+
 # inplace modifies node/inps
 
 
@@ -107,10 +114,14 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 old_nodes = len(old_state.graph.nodes)
                 new_inps = len(new_state.inps)
                 old_inps = len(old_state.inps)
+                new_outs = len(_get_outputs(new_state.graph))
+                old_outs = len(_get_outputs(old_state.graph))
                 if new_nodes < old_nodes:
                     print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
                 elif new_nodes == old_nodes and new_inps > old_inps:
                     print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs")
+                elif new_outs < old_outs:
+                    print(f"SUCCESS: Went from {old_outs} to {new_outs} outputs")
                 else:
                     raise RuntimeError("Success raised but no progress made?")
 
@@ -147,6 +158,23 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         print("FAIL: Could not remove suffix")
         return None
 
+    @register_strategy("Remove outputs")
+    def remove_outputs(cur_graph, cur_inps, granularity):
+        for idx, node in enumerate(cur_graph.nodes):
+            node.idx = idx
+            if node.op == 'output':
+                output = node
+                break
+        output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
+        if len(output_args) == 1:
+            return None
+        for idx in range(1, len(output_args)):
+            output.args = (output_args[:idx],)
+            if graph_fails(cur_graph, cur_inps):
+                return ReproState(cur_graph, cur_inps)
+        return None
+
+
     def remove_unused_inputs(cur_state: ReproState):
         cur_graph = copy.deepcopy(cur_state.graph)
         cur_inps = list(cur_state.inps)
@@ -159,7 +187,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 cur_graph.erase_node(ph_nodes[idx])
             else:
                 new_inps.append(cur_inps[idx])
-        if len(new_inps) < cur_inps:
+        if len(new_inps) < len(cur_inps):
             return ReproState(cur_graph, new_inps)
         return None
 
@@ -205,6 +233,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 continue
             new_graph = _consolidate_placeholders(new_graph)
             new_state = remove_unused_inputs(ReproState(new_graph, new_inps))
+            if new_state is None:
+                new_state = ReproState(new_graph, new_inps)
             if graph_fails(new_state.graph, new_state.inps):
                 return ReproState(new_state.graph, new_state.inps)
 
@@ -230,6 +260,11 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 has_progress = True
                 break
             granularity //= 2
+        if not has_progress:
+            new_state = remove_outputs(failing_state, 1)
+            if new_state is not None:
+                has_progress = True
+                failing_state = new_state
         if not has_progress:
             break
 
