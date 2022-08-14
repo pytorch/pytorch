@@ -254,8 +254,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         if config.debug_graphs:
             print(fw_module.code, bw_module.code)
 
-        with track_graph_compiling("forward"):
-            compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        with torch.no_grad():
+            with track_graph_compiling("forward"):
+                compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
         # TODO: Delay this backwards compilation until the backwards pass
         with torch.no_grad():
@@ -320,10 +321,15 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             # This shouldn't be needed after we switch to fake-tensor tracing
+            def create_copy(x):
+                if isinstance(x, Tensor):
+                    new_val = x.detach().new_empty_strided(x.size(), x.stride())
+                    new_val.copy_(x.detach())
+                    new_val.requires_grad_(x.requires_grad)
+                    return new_val
+                return x
             flat_args = pytree.tree_map(
-                lambda x: x.detach().clone().requires_grad_(x.requires_grad)
-                if isinstance(x, Tensor)
-                else x,
+                create_copy,
                 flat_args,
             )
             fake_flat_tensor_args = pytree.tree_map(
