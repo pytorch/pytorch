@@ -128,6 +128,8 @@ TESTS = discover_tests(
     ]
 )
 
+TESTS = TESTS + ['doctests']
+
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Tests need to be run with pytest.
@@ -348,19 +350,6 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
-            # Enable xdoctest
-            # Many doctests assume the existence of these variables
-            xdoctest_global_exec_lines = r'\n'.join([
-                'from torch import nn',
-                'import torch.nn.functional as F',
-                'import torch',
-            ])
-            executable += [
-                "--xdoctest",
-                "--xdoctest-style=google",
-                f"--xdoctest-global-exec='{xdoctest_global_exec_lines}'",
-                "--xdoctest-options=+IGNORE_WHITESPACE"
-            ]
         else:
             print_to_stderr(
                 "Pytest cannot be used for this test. Falling back to unittest."
@@ -564,6 +553,28 @@ def test_distributed(test_module, test_directory, options):
     return 0
 
 
+def run_doctests(test_module, test_directory, options):
+    """
+    Assumes the incoming test module is called doctest, and simply executes the
+    xdoctest runner on the torch library itself.
+    """
+    import xdoctest
+    pkgpath = os.path.dirname(torch.__file__)
+    xdoctest_config = {
+        'global_exec': r'\n'.join([
+            'from torch import nn',
+            'import torch.nn.functional as F',
+            'import torch',
+        ]),
+        'style': 'google',
+        'options': '+IGNORE_WHITESPACE',
+    }
+    run_summary = xdoctest.runner.doctest_module(
+        pkgpath, config=xdoctest_config, verbose=1, command='all', argv=[])
+    result = 1 if run_summary['n_failed'] else 0
+    return result
+
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
@@ -582,6 +593,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "doctests": run_doctests,
 }
 
 
