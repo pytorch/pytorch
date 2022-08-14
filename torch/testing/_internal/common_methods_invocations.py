@@ -16680,10 +16680,29 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.complex64,)),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradient', 'test_fn_grad', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradient', 'test_fn_gradgrad', device_type='cuda'),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradient', 'test_forward_mode_AD', device_type='cuda'),
             # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', 'ComplexFloat', and 'ComplexHalf'
             DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive',
                          device_type='cuda',
-                         dtypes=(torch.chalf, torch.complex64, torch.complex128)),),
+                         dtypes=(torch.chalf, torch.complex64, torch.complex128)),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', 'ComplexFloat', and 'ComplexHalf'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta',
+                         device_type='cuda',
+                         dtypes=(torch.chalf, torch.complex64, torch.complex128)),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', 'ComplexFloat', and 'ComplexHalf'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta',
+                         device_type='cuda',
+                         dtypes=(torch.chalf, torch.complex64, torch.complex128)),
+            # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', and 'ComplexFloat'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         device_type='cuda',
+                         dtypes=(torch.complex64, torch.complex128)),
+        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
