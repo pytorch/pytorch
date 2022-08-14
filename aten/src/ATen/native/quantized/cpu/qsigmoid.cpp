@@ -93,7 +93,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    constexpr double output_scale = 1.0f / 256.0f;
+    constexpr double output_scale = 1.0f / 255.0f;
     constexpr int64_t output_zero_point = 0;
     return qnnpack_sigmoid(qx, output_scale, output_zero_point);
   }

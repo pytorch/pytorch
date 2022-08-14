@@ -69,7 +69,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_sigmoid_nc_q8(
 
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  if (output_scale != 0x1.0p-8f) {
+  if (output_scale != 1.0 / 255.0) {
     pytorch_qnnp_log_error(
         "failed to create Sigmoid operator with %.7g output scale: only output scale of 1/256 is supported",
         output_scale);
