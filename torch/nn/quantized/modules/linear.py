@@ -9,6 +9,8 @@ from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Optional
 
+__all__ = ['LinearPackedParams', 'Linear']
+
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 
@@ -112,6 +114,7 @@ class Linear(WeightedQuantizedModule):
 
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> # xdoctest: +SKIP
         >>> input = torch.quantize_per_tensor(input, 1.0, 0, torch.quint8)
         >>> output = m(input)
         >>> print(output.size())

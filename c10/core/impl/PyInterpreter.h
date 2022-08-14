@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/Layout.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
@@ -27,6 +29,46 @@ using Stack = std::vector<c10::IValue>;
 
 namespace c10 {
 namespace impl {
+
+struct C10_API PyInterpreter;
+
+struct C10_API GPUTraceFunctionWrapper {
+  using event_creation_sig = void(const PyInterpreter*, uintptr_t event);
+  using event_deletion_sig = void(const PyInterpreter*, uintptr_t event);
+  using event_record_sig =
+      void(const PyInterpreter*, uintptr_t event, uintptr_t stream);
+  using event_wait_sig =
+      void(const PyInterpreter*, uintptr_t event, uintptr_t stream);
+  using memory_allocation_sig = void(const PyInterpreter*, uintptr_t pointer);
+  using memory_deallocation_sig = void(const PyInterpreter*, uintptr_t pointer);
+  using stream_creation_sig = void(const PyInterpreter*, uintptr_t stream);
+
+  event_creation_sig* event_creation_fn_;
+  event_deletion_sig* event_deletion_fn_;
+  event_record_sig* event_record_fn_;
+  event_wait_sig* event_wait_fn_;
+  memory_allocation_sig* memory_allocation_fn_;
+  memory_deallocation_sig* memory_deallocation_fn_;
+  stream_creation_sig* stream_creation_fn_;
+
+  GPUTraceFunctionWrapper(
+      event_creation_sig* event_creation_fn,
+      event_deletion_sig* event_deletion_fn,
+      event_record_sig* event_record_fn,
+      event_wait_sig* event_wait_fn,
+      memory_allocation_sig* memory_allocation_fn,
+      memory_deallocation_sig* memory_deallocation_fn,
+      stream_creation_sig* stream_creation_fn)
+      : event_creation_fn_(event_creation_fn),
+        event_deletion_fn_(event_deletion_fn),
+        event_record_fn_(event_record_fn),
+        event_wait_fn_(event_wait_fn),
+        memory_allocation_fn_(memory_allocation_fn),
+        memory_deallocation_fn_(memory_deallocation_fn),
+        stream_creation_fn_(stream_creation_fn) {}
+
+  void disarm();
+};
 
 // Note [Python interpreter tag]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,14 +167,16 @@ struct C10_API PyInterpreter {
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack,
-      // This is a Tensor subclass type object
-      const std::shared_ptr<SafePyObject>& type);
+      torch::jit::Stack* stack);
   using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
   using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
   using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
   using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
   using sizes_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using sym_sizes_sig =
+      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
+  using sym_numel_sig = c10::SymInt(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -143,7 +187,11 @@ struct C10_API PyInterpreter {
       device_sig* device_fn,
       dim_sig* dim_fn,
       strides_sig* strides,
-      sizes_sig* sizes)
+      sizes_sig* sizes,
+      sym_sizes_sig* sym_sizes,
+      layout_sig* layout,
+      sym_numel_sig* sym_numel,
+      GPUTraceFunctionWrapper trace_gpu_functions)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
@@ -152,7 +200,11 @@ struct C10_API PyInterpreter {
         device_fn_(device_fn),
         dim_fn_(dim_fn),
         strides_fn_(strides),
-        sizes_fn_(sizes) {}
+        sizes_fn_(sizes),
+        sym_sizes_fn_(sym_sizes),
+        layout_fn_(layout),
+        sym_numel_fn_(sym_numel),
+        trace_gpu_functions(trace_gpu_functions) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -163,6 +215,10 @@ struct C10_API PyInterpreter {
   dim_sig* dim_fn_;
   strides_sig* strides_fn_;
   sizes_sig* sizes_fn_;
+  sym_sizes_sig* sym_sizes_fn_;
+  layout_sig* layout_fn_;
+  sym_numel_sig* sym_numel_fn_;
+  GPUTraceFunctionWrapper trace_gpu_functions;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -185,16 +241,13 @@ struct C10_API PyInterpreter {
   // detach, which will also arrange for the PyObject to get copied in this
   // situation
   __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
-  }
+      const TensorImpl* self) const;
 
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<SafePyObject>& type) const {
-    return (*dispatch_fn_)(this, op, stack, type);
+      torch::jit::Stack* stack) const {
+    return (*dispatch_fn_)(this, op, stack);
   }
 
   __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
@@ -217,6 +270,57 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::IntArrayRef sizes(
       const TensorImpl* self) const {
     return (*sizes_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
+      const TensorImpl* self) const {
+    return (*sym_sizes_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::Layout layout(const TensorImpl* self) const {
+    return (*layout_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::SymInt sym_numel(
+      const TensorImpl* self) const {
+    return (*sym_numel_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_event_creation(
+      uintptr_t event) const {
+    return (*trace_gpu_functions.event_creation_fn_)(this, event);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_event_deletion(
+      uintptr_t event) const {
+    return (*trace_gpu_functions.event_deletion_fn_)(this, event);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_event_record(
+      uintptr_t event,
+      uintptr_t stream) const {
+    return (*trace_gpu_functions.event_record_fn_)(this, event, stream);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_event_wait(
+      uintptr_t event,
+      uintptr_t stream) const {
+    return (*trace_gpu_functions.event_wait_fn_)(this, event, stream);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_memory_allocation(
+      uintptr_t ptr) const {
+    return (*trace_gpu_functions.memory_allocation_fn_)(this, ptr);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_memory_deallocation(
+      uintptr_t ptr) const {
+    return (*trace_gpu_functions.memory_deallocation_fn_)(this, ptr);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_stream_creation(
+      uintptr_t stream) const {
+    return (*trace_gpu_functions.stream_creation_fn_)(this, stream);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

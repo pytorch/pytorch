@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+__all__ = ['Normal']
 
 class Normal(ExponentialFamily):
     r"""
@@ -15,6 +16,7 @@ class Normal(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # normally distributed with loc=0 and scale=1
         tensor([ 0.1046])

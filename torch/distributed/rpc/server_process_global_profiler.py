@@ -4,12 +4,14 @@ import itertools
 
 import torch
 from torch.autograd.profiler_legacy import profile
+from typing import List
 
 from . import (
     _disable_server_process_global_profiler,
     _enable_server_process_global_profiler,
 )
 
+__all__: List[str] = []
 
 class _server_process_global_profile(profile):
     """
@@ -53,6 +55,7 @@ class _server_process_global_profile(profile):
         please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -65,7 +68,7 @@ class _server_process_global_profile(profile):
         >>> inner_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
         >>> inner_profile_rref.rpc_sync().__exit__(None, None, None)
-        >>> outer_profile_rref.rpc_sync().__exit__(None, None, None
+        >>> outer_profile_rref.rpc_sync().__exit__(None, None, None)
         >>> print(inner_profile_rref.rpc_sync().key_averages())
         ---------  ---------------  ---------------  ---------------  ---------------  ---------------  ---------------
         Name       Self CPU total %  Self CPU total   CPU total %      CPU total        CPU time avg     Number of Calls

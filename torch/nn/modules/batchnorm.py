@@ -10,6 +10,8 @@ from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module
 
+__all__ = ['BatchNorm1d', 'LazyBatchNorm1d', 'BatchNorm2d', 'LazyBatchNorm2d', 'BatchNorm3d',
+           'LazyBatchNorm3d', 'SyncBatchNorm']
 
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
@@ -631,6 +633,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
+        >>> # xdoctest: +SKIP
         >>> process_groups = [torch.distributed.new_group(pids) for pids in [r1, r2]]
         >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
         >>> # Without Learnable Parameters
@@ -787,6 +790,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.
+            >>> # xdoctest: +SKIP
             >>> process_groups = [torch.distributed.new_group(pids) for pids in [r1, r2]]
             >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
             >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)

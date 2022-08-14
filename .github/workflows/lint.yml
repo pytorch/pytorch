@@ -7,6 +7,7 @@ on:
       - master
       - main
       - release/*
+      - landchecks/*
   workflow_dispatch:
 
 jobs:
@@ -105,6 +106,50 @@ jobs:
         run: |
           set -eux
           python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+
+  pr-sanity-checks:
+    name: pr-sanity-checks
+    runs-on: linux.20_04.4x
+    # Only run this on pull requests
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: -1
+      - name: PR size check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -x
+
+          ancestor=$(git merge-base "${BASE}" "${HEAD}")
+          details=$(git diff --shortstat "$ancestor" "${HEAD}")
+          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
+          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
+
+          pr_size=0
+          if [ "$add" ]; then
+              pr_size=$(("$pr_size" + "$add"))
+          fi
+          if [ "$remove" ]; then
+              pr_size=$(("$pr_size" + "$remove"))
+          fi
+
+          if ((pr_size > 2000)); then
+            echo
+            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
+            echo 'allowed within PyTorch infra. PLease make sure to split up'
+            echo 'your PR into smaller pieces that can be reviewed.'
+            echo 'If you think that this rule should not apply to your PR,'
+            echo 'please contact @albanD or @seemethere.'
+            echo
+            false
+          fi
+
+
 
   workflow-checks:
     name: workflow-checks

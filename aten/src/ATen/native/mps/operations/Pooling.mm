@@ -103,15 +103,7 @@ Tensor _mps_max_pool2d(
     outputHeight, outputWidth, memory_format);
 
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "mps_max_pool2d";
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
+  using CachedGraph = native_mps::MPSUnaryCachedGraph;
 
   native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
 
@@ -161,7 +153,7 @@ Tensor _mps_max_pool2d(
                                      to_string(padW) + ":" + to_string(padH) + ":" +
                                      to_string(ceil_mode) + ":" + mem_format_key +
                                      mps::getTensorsStringKey({input_t});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
@@ -248,7 +240,6 @@ Tensor mps_max_pool2d_backward(
   }
 
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "mps_max_pool2d_backward";
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public native_mps::MPSCachedGraph
@@ -390,7 +381,6 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
   }
 
   /* sizes */
-  const int64_t nbatch = input_t.ndimension() == 4 ? input_t.size(-4) : 1;
   const int64_t nInputPlane = input_t.size(-3);
   const int64_t inputHeight = input_t.size(-2);
   const int64_t inputWidth = input_t.size(-1);
@@ -406,7 +396,6 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
     outputHeight, outputWidth, memory_format);
 
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "max_pool2d_with_indices_out_mps";
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public native_mps::MPSCachedGraph
@@ -548,7 +537,6 @@ const Tensor& grad_input) {
   }
 
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "max_pool2d_with_indices_backward_out_mps";
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public native_mps::MPSCachedGraph
@@ -662,13 +650,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
   const int padW = safe_downcast<int, int64_t>(padW_);
 
   /* sizes */
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t nInputPlane = input_.size(-3);
-  const int64_t inputHeight = input_.size(-2);
-  const int64_t inputWidth = input_.size(-1);
 
-  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
   const auto memory_format = input_.suggest_memory_format();
 
   Tensor input = input_.contiguous(memory_format);
@@ -711,7 +693,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
                                        to_string(ceil_mode) + ":" + mem_format_key + ":" +
                                        to_string(divisor_override_value) +
                                        mps::getTensorsStringKey({input});
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
       if(!cachedGraph) {
         native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
@@ -785,8 +767,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
   const Tensor input = input_.contiguous(memory_format);
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
-  const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
 
@@ -798,11 +778,8 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
   if (count == 0) {
     return;
   }
-  bool use_divisor = divisor_override.has_value();
-  const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
 
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "avg_pool2d_backward_out_mps";
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public native_mps::MPSCachedGraph
