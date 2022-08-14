@@ -12,7 +12,10 @@ except ImportError:
 
 aten = torch.ops.aten
 
-__all__ = ["has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv"]
+__all__ = [
+    "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
+    "SymDispatchMode"
+]
 
 SYM_FUNCTION_MODE = None
 
@@ -74,7 +77,7 @@ def handle_symbolic_op(func, args, kwargs):
     if func == torch.ops.aten.stride.default:
         return create_contiguous(args[0].shape)
 
-def handle_sym_dispatch(func, args, kwargs):
+def _handle_sym_dispatch(func, args, kwargs):
     global SYM_FUNCTION_MODE
     mode = SYM_FUNCTION_MODE
     assert mode
@@ -140,7 +143,7 @@ for method, _func in magic_methods.items():
 
         def magic_impl(self, other):
             if SYM_FUNCTION_MODE:
-                return handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
+                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
             if isinstance(other, PySymInt):
                 other = other.expr
             return PySymInt(func(self.expr, other), self.shape_env)
