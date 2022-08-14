@@ -5,6 +5,7 @@ import math
 from typing import Callable, List
 from functools import wraps, partial
 from dataclasses import dataclass
+from .compile_utils import get_placeholders, get_outputs
 
 class ConcreteProp(torch.fx.Interpreter):
     def run_node(self, n):
@@ -30,19 +31,7 @@ class ConcreteProp(torch.fx.Interpreter):
         return super().run(*args)
 
 
-def _get_placeholders(graph):
-    return list(filter(lambda x: x.op == 'placeholder', graph.nodes))
-
-
-def _get_outputs(graph):
-    for node in graph.nodes:
-        if node.op == 'output':
-            return node.args[0]
-    raise AssertionError("No output node found")
-
 # inplace modifies node/inps
-
-
 def _convert_node_to_placeholder(node, inps):
     if node.op == 'output':
         return
@@ -105,7 +94,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
 
     def _register_strategy(strategy: Callable, name: str):
         @wraps(strategy)
-        def new_func(old_state: ReproState, granularity):
+        def new_func(old_state: ReproState, granularity=1):
             print(f"Strategy: {name} ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
             print(f"Granularity: {granularity}")
             new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps), granularity)
@@ -114,8 +103,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 old_nodes = len(old_state.graph.nodes)
                 new_inps = len(new_state.inps)
                 old_inps = len(old_state.inps)
-                new_outs = len(_get_outputs(new_state.graph))
-                old_outs = len(_get_outputs(old_state.graph))
+                new_outs = len(get_outputs(new_state.graph))
+                old_outs = len(get_outputs(old_state.graph))
                 if new_nodes < old_nodes:
                     print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
                 elif new_nodes == old_nodes and new_inps > old_inps:
@@ -175,10 +164,10 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         return None
 
 
-    def remove_unused_inputs(cur_state: ReproState):
-        cur_graph = copy.deepcopy(cur_state.graph)
-        cur_inps = list(cur_state.inps)
-        ph_nodes = _get_placeholders(cur_graph)
+    def remove_unused_inputs_unchecked(cur_state: ReproState):
+        cur_graph = cur_state.graph
+        cur_inps = cur_state.inps
+        ph_nodes = get_placeholders(cur_graph)
         assert len(ph_nodes) == len(cur_inps)
 
         new_inps = []
@@ -191,15 +180,21 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
             return ReproState(cur_graph, new_inps)
         return None
 
+    def _remove_unused_wrapper(cur_graph, cur_inps, granularity):
+        return remove_unused_inputs_unchecked(ReproState(cur_graph, cur_inps))
+
+    remove_unused_inputs = register_strategy("Remove unused inputs")(_remove_unused_wrapper)
+
     @register_strategy("Eliminate dead code")
     def eliminate_dead_code(cur_graph, cur_inps, granularity):
         if cur_graph.eliminate_dead_code() and graph_fails(cur_graph, cur_inps):
-            input_remove_state = remove_unused_inputs(ReproState(cur_graph, cur_inps))
-            if input_remove_state is not None and graph_fails(input_remove_state.graph, input_remove_state.inps):
-                return input_remove_state
-            return ReproState(cur_graph, cur_inps)
-        else:
-            return None
+            cur_state = ReproState(cur_graph, cur_inps)
+            new_state = remove_unused_inputs(cur_state)
+            if new_state is not None:
+                return new_state
+            return cur_state
+
+        return remove_unused_inputs(ReproState(cur_graph, cur_inps))
 
 
     def _consolidate_placeholders(cur_graph):
@@ -232,7 +227,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
             if not is_removing:
                 continue
             new_graph = _consolidate_placeholders(new_graph)
-            new_state = remove_unused_inputs(ReproState(new_graph, new_inps))
+            new_state = remove_unused_inputs_unchecked(ReproState(new_graph, new_inps))
             if new_state is None:
                 new_state = ReproState(new_graph, new_inps)
             if graph_fails(new_state.graph, new_state.inps):
@@ -274,4 +269,4 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
     print(f"Made {num_queries} queries")
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
     generate_repro(failing_fx, failing_state.inps)
-    return failing_fx, inps
+    return failing_fx, failing_state.inps

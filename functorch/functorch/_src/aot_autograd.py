@@ -311,6 +311,7 @@ def create_aot_dispatcher_function(
     with preserve_rng_state(), fake_mode as mode:
 
         def process_inputs(flat_args):
+            # This shouldn't be needed after we switch to fake-tensor tracing
             flat_args = pytree.tree_map(
                 lambda x: x.detach().clone().requires_grad_(x.requires_grad)
                 if isinstance(x, Tensor)
