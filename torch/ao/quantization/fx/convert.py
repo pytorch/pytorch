@@ -795,7 +795,6 @@ def convert(
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = duplicate_dequantize_node(model)
-        # model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)

@@ -534,10 +534,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
             continue
 
         input_dynamic_q_node = dq_node.args[0]
-        # don't support lowering the pattern when the result of quantize is used by
-        # multiple nodes
-        # if len(input_dynamic_q_node.users) > 1:
-        #     continue
 
         if input_dynamic_q_node.op != "call_function" or \
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
@@ -706,10 +702,6 @@ def _lower_dynamic_weighted_ref_functional(
             continue
 
         input_dynamic_q_node = input_dq_node.args[0]
-        # don't support lowering the pattern when the result of quantize is used by
-        # multiple nodes
-        # if len(input_dynamic_q_node.users) > 1:
-        #     continue
 
         if input_dynamic_q_node.op != "call_function" or \
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
