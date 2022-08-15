@@ -60,6 +60,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
+            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(e)
 
     def get_constant(idx):
         if constant is None:
