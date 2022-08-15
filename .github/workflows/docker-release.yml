@@ -8,19 +8,11 @@ on:
       - docker.Makefile
   push:
     branches:
-      - master
-      - main
-      - release/*
-      - landchecks/*
+      - nightly
     tags:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - ciflow/nightly/*
-    paths:
-      - Dockerfile
-      - docker.Makefile
-  schedule:
-    - cron: 0 0 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -30,12 +22,14 @@ env:
   BUILD_PROGRESS: plain
   BUILD_TYPE: official
   DOCKER_ORG: pytorch
+  DOCKER_REGISTRY: ghcr.io
+  NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
-  NO_BUILD_SUFFIX: True
-  # WITH_PUSH: ${{ github.event_name == 'schedule' }}
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
 
 jobs:
   build:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     strategy:
@@ -47,8 +41,8 @@ jobs:
           - image_type: devel
             platform: linux/amd64
     env:
-      BUILD_PLATFORMS: ${{ matrix.platform }}
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
+      BUILD_PLATFORMS: ${{ matrix.platform }}
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
@@ -56,6 +50,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+      - name: Login to GitHub Container Registry
+        if: ${{ env.WITH_PUSH == "true" }}
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
       # Setup multi-arch image builds
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -70,7 +71,14 @@ jobs:
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
           echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
-      - name: Run docker build
+      - name: Setup nightly specific variables
+        if: ${{ github.event.ref == 'refs/heads/nightly' }}
         run: |
-          make -f docker.Makefile ${BUILD_IMAGE_TYPE}-image
-      # TODO: push
+          # Use nightly image if building for nightly
+          echo "DOCKER_IMAGE=pytorch-nightly" >> "${GITHUB_ENV}"
+      - name: Run docker build / push
+        run: |
+          make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
+        if: always()

@@ -1,6 +1,6 @@
 DOCKER_REGISTRY          ?= docker.io
 DOCKER_ORG               ?= $(shell docker info 2>/dev/null | sed '/Username:/!d;s/.* //')
-DOCKER_IMAGE              = pytorch
+DOCKER_IMAGE             ?= pytorch
 DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)
 
 ifeq ("$(DOCKER_ORG)","")
@@ -41,13 +41,19 @@ EXTRA_DOCKER_BUILD_FLAGS ?=
 BUILD                    ?= build
 # Intentionally left blank
 PLATFORMS_FLAG           ?=
+PUSH_FLAG                ?=
 USE_BUILDX               ?=
 BUILD_PLATFORMS          ?=
+WITH_PUSH                ?= false
+# Setup buildx flags
 ifneq ("$(USE_BUILDX)","")
 BUILD                     = buildx build
-# Only set platforms flags if using buildx
 ifneq ("$(BUILD_PLATFORMS)","")
 PLATFORMS_FLAG            = --platform="$(BUILD_PLATFORMS)"
+endif
+# Only set platforms flags if using buildx
+ifeq ("$(WITH_PUSH)","true")
+PUSH_FLAG                 = --push
 endif
 endif
 
@@ -56,6 +62,7 @@ DOCKER_BUILD              = DOCKER_BUILDKIT=1 \
 								--progress=$(BUILD_PROGRESS) \
 								$(EXTRA_DOCKER_BUILD_FLAGS) \
 								$(PLATFORMS_FLAG) \
+								$(PUSH_FLAG) \
 								--target $(BUILD_TYPE) \
 								-t $(DOCKER_FULL_NAME):$(DOCKER_TAG) \
 								$(BUILD_ARGS) .
@@ -81,7 +88,6 @@ runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
 runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
 runtime-image:
 	$(DOCKER_BUILD)
-	docker tag $(DOCKER_FULL_NAME):$(DOCKER_TAG) $(DOCKER_FULL_NAME):latest
 
 .PHONY: runtime-push
 runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
