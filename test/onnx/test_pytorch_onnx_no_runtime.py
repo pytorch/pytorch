@@ -828,6 +828,23 @@ class TestONNXExport(common_utils.TestCase):
                         [max_position_embeddings, batch_size, hidden_size],
                     )
 
+    def test_is_fp_for_C_TypeList(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x.squeeze(1)
+                w = x.shape[2]
+                pos = x.view(2, -1).argmax(1)
+                x_int = pos % w
+                y_int = (pos - x_int) // w
+                return y_int, x_int
+
+        model = torch.jit.script(M())
+        inputs = torch.randn(2, 4, 6)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
