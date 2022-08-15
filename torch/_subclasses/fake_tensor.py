@@ -562,6 +562,13 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+
+        # Use decompositions, and enable fake mode when running them
+        decomps = torch._decomp.get_decompositions([func])
+        if func in decomps:
+            with self.restore():
+                return decomps[func](*args, **kwargs)
+
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
@@ -569,19 +576,14 @@ class FakeTensorMode(TorchDispatchMode):
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
-            from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
             # TODO: hack, doesn't actually work.
             # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
-            with enable_torch_dispatch_mode(
-                self
-            ), torch.overrides.enable_reentrant_dispatch():
+            with self.restore():
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
-                if func in decomposition_table:
-                    return decomposition_table[func](*args, **kwargs)
 
             with no_dispatch():
                 if symbolic_shapes.is_symbolic_op(func):
@@ -596,7 +598,6 @@ class FakeTensorMode(TorchDispatchMode):
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
-
         if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
             try:
                 torch._C._add_meta_to_tls_dispatch_include()
