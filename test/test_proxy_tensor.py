@@ -619,7 +619,7 @@ class TestFakeProxyTensor(TestCase):
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
-    def _test_dynamic(self, fn, trace_inputs, test_inputs):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
         Also returns shape env
@@ -628,7 +628,9 @@ class TestSymbolicTracing(TestCase):
         traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
-            self.assertEqual(traced_f(*input), fn(*input))
+            rx, ry = traced_f(*input), fn(*input)
+            if assert_eq:
+                self.assertEqual(rx, ry)
         return traced_f.shape_env
 
 
@@ -686,9 +688,9 @@ def forward(self, a_1):
 
     def test_new_empty(self):
         def f(a, b):
-            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
+            return a.new_empty(b.shape[0], b.shape[1] * 2)
 
-        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
 
 
     def test_expand(self):

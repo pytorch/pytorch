@@ -44,18 +44,21 @@ def decompose(decomposition_table):
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
+def track_metadata(tensor, proxy, tracer):
+    for i, s in enumerate(tensor.shape):
+        if isinstance(s, SymInt):
+            inner_s = s.get_pyobj()
+            assert isinstance(inner_s, PySymInt)
+            # TODO: improve naming
+            # TODO: lazily insert this into the graph only on first
+            # use?  Maybe complicated and DCE is a better idea
+            inner_s.__dict__[tracer] = proxy.size(i)
+        # TODO: also do stride/numel
+
 def wrap_output(inner_res, proxy_res, *, constant, proxy_mode):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
-            for i, s in enumerate(e.shape):
-                if isinstance(s, SymInt):
-                    inner_s = s.get_pyobj()
-                    assert isinstance(inner_s, PySymInt)
-                    # TODO: improve naming
-                    # TODO: lazily insert this into the graph only on first
-                    # use?  Maybe complicated and DCE is a better idea
-                    inner_s.__dict__[proxy_mode.tracer] = proxy.size(i)
-                # TODO: also do stride/numel
+            track_metadata(e, proxy, proxy_mode.tracer)
             with no_dispatch():
                 return ProxyTensor(e, proxy, constant=constant, proxy_mode=proxy_mode)
         else:
@@ -96,7 +99,7 @@ def unwrap_elem(e):
     return e
 
 
-def unwrap_symint_proxy(tracer):
+def fetch_symint_proxy(tracer):
     def inner(e):
         n = e.get_pyobj()
         if n.constant is not None:
@@ -114,15 +117,24 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode.restore():
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
-    with proxy_mode.restore():
-        r = func_overload.decompose(*args, **kwargs)
-        if r is not NotImplemented:
-            return r
+    # Some of these are not "real" aten ops and will fail if we
+    # call _dispatch_has_kernel_for_dispatch_key on them.
+    # This list is probably incomplete
+    if func_overload not in [torch.ops.aten.size.default]:
+        with proxy_mode.restore():
+            r = func_overload.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
 
-    # DODGY af
-    g = DisableTracingGuard(proxy_mode.sym_mode)
-
-    all_constant = pytree.tree_all_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
+    # If there are SymInts, we also should not consider this constant.
+    # However, fake tensor handling of SymInts is sufficiently broken that
+    # I couldn't write a test for this case
+    all_constant = (
+        pytree.tree_all_only(ProxyTensor, lambda t: t.constant is not None, (args, kwargs))
+        # TODO: maybe constant SymInts should also be allowed?  Not sure if
+        # this can happen
+        and pytree.tree_all_only(SymInt, lambda _: False, (args, kwargs))
+    )
 
     if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
@@ -139,13 +151,15 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     proxy_args, proxy_kwargs = pytree.tree_map_only(
         SymInt,
-        unwrap_symint_proxy(proxy_mode.tracer),
+        fetch_symint_proxy(proxy_mode.tracer),
         pytree.tree_map_only(ProxyTensor, lambda e: e.proxy, (args, kwargs))
     )
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
 
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
+        # This makes DCE marginally less likely to DCE inplace operations.
+        # It is not strictly necessary
         args[0].proxy = proxy_res
         proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
@@ -300,12 +314,7 @@ def wrap_key(f, inps, proxy_mode, tracer):
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
                 with no_dispatch():
-                    for i, s in enumerate(flat_inps[idx].shape):
-                        if isinstance(s, SymInt):
-                            inner_s = s.get_pyobj()
-                            assert isinstance(inner_s, PySymInt)
-                            # TODO: improve naming
-                            inner_s.__dict__[tracer] = arg.size(i)
+                    track_metadata(flat_inps[idx], arg, tracer)
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
@@ -326,16 +335,6 @@ def wrap_key(f, inps, proxy_mode, tracer):
     return wrapped
 
 
-class DisableTracingGuard:
-    def __init__(self, mode):
-        self.mode = mode
-        self.old = mode.enable_tracing
-        mode.enable_tracing = False
-
-    def __del__(self):
-        self.mode.enable_tracing = self.old
-
-
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer):
         self.tracer = tracer
@@ -343,8 +342,16 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.sym_mode = ProxySymDispatchMode(tracer)
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
-        g = DisableTracingGuard(self.sym_mode)
+        with self.sym_mode.enable(False):
+            return self.inner_torch_dispatch(func_overload, types, args, kwargs)
 
+    @contextmanager
+    def restore(self):
+        with self.sym_mode.enable(True):
+            with super().restore():
+                yield
+
+    def inner_torch_dispatch(self, func_overload, types, args=(), kwargs=None):
         if not self.enable_tracing:
             return func_overload(*args, **kwargs)
 
@@ -403,7 +410,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
-            n_args, n_kwargs = pytree.tree_map_only(SymInt, unwrap_symint_proxy(self.tracer), (args, kwargs))
+            n_args, n_kwargs = pytree.tree_map_only(SymInt, fetch_symint_proxy(self.tracer), (args, kwargs))
 
             proxy_res = self.tracer.create_proxy('call_function', func_overload, n_args, n_kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
@@ -441,6 +448,15 @@ class ProxySymDispatchMode(SymDispatchMode):
         super().__init__()
         self.tracer = tracer
         self.enable_tracing = True
+
+    @contextmanager
+    def enable(self, b):
+        old = self.enable_tracing
+        self.enable_tracing = b
+        try:
+            yield
+        finally:
+            self.enable_tracing = old
 
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
