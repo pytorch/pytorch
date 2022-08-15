@@ -47,6 +47,8 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
 
   // This is the interface to implement the actual propagation
   struct Propagator {
+    virtual void setUp() {}
+    virtual void tearDown() {}
     virtual void propagateC2P(TensorView* from, TensorView* to) = 0;
     virtual void propagateP2C(TensorView* from, TensorView* to) = 0;
     virtual void propagateSibling(TensorView* from, TensorView* to) = 0;
@@ -252,6 +254,25 @@ class TORCH_CUDA_CU_API SpanningTreePrinter
   virtual void propagateP2C(TensorView* from, TensorView* to) override;
   virtual void propagateSibling(TensorView* from, TensorView* to) override;
   SpanningTreePrinter(std::ostream& stream = std::cout) : stream_(stream) {}
+};
+
+// Simple selector for selecting subgraphs to build spanning trees. The selector
+// allows propagation only to the given set of selected tensorviews, except for
+// sibiling propagation, which we should never block.
+class TORCH_CUDA_CU_API SetSelector : public MaxInfoSpanningTree::Selector {
+  std::unordered_set<TensorView*> selected_;
+
+ public:
+  virtual bool allowC2P(TensorView* from, TensorView* to) override;
+  virtual bool allowP2C(TensorView* from, TensorView* to) override;
+  virtual bool allowSibling(TensorView* from, TensorView* to) override;
+
+  SetSelector(std::unordered_set<TensorView*> selected)
+      : selected_(std::move(selected)) {}
+
+  const std::unordered_set<TensorView*>& selected() const {
+    return selected_;
+  }
 };
 
 } // namespace cuda
