@@ -408,7 +408,11 @@ uint64_t FusionExecutor::computeSharedMemory(
         const uint64_t data_size = dataTypeSize(smem_alloc->buffer()->dtype());
         // Add padding to align dynamic shared memory
         if (align_padding) {
+#ifndef USE_ROCM
           const int align_size = 16; // always align to 16B/128b.
+#else
+          const int align_size = 8; // see codegen.cpp for HIP
+#endif
           total = ceilDiv(total, align_size) * align_size;
         }
         total += inferred_val.value() * data_size;
