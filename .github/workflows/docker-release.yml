@@ -1,4 +1,4 @@
-name: docker-release
+name: Build Official Docker Images
 
 on:
   workflow_dispatch:
@@ -51,7 +51,7 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Login to GitHub Container Registry
-        if: ${{ env.WITH_PUSH == "true" }}
+        if: ${{ env.WITH_PUSH == 'true' }}
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -77,6 +77,7 @@ jobs:
           # Use nightly image if building for nightly
           echo "DOCKER_IMAGE=pytorch-nightly" >> "${GITHUB_ENV}"
       - name: Run docker build / push
+        # WITH_PUSH is used here to determine whether or not to add the --push flag
         run: |
           make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
       - name: Teardown Linux
