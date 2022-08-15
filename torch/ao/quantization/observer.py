@@ -83,6 +83,7 @@ def _with_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
         >>> foo_instance1 = foo_builder()
@@ -103,11 +104,12 @@ def _with_callable_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_callable_args = classmethod(_with_callable_args)
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
         >>> foo_instance1 = foo_builder()
-        >>> wait 50
+        >>> # wait 50
         >>> foo_instance2 = foo_builder()
         >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
         False
