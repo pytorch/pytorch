@@ -11,8 +11,7 @@ ARG BASE_IMAGE=ubuntu:18.04
 ARG PYTHON_VERSION=3.8
 
 FROM ${BASE_IMAGE} as dev-base
-RUN --mount=type=cache,id=apt-dev,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         ccache \
@@ -77,8 +76,7 @@ RUN /opt/conda/bin/pip install torchelastic
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION
 LABEL com.nvidia.volumes.needed="nvidia_driver"
-RUN --mount=type=cache,id=apt-final,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libjpeg-dev \
         libpng-dev && \

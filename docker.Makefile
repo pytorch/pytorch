@@ -8,13 +8,16 @@ $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION              = 11.3
-MUTEX_PACKAGE             = cudatoolkit=$(CUDA_VERSION)
-CUDNN_VERSION             = 8
+CUDA_VERSION_FULL         = 11.3.1
+CUDA_VERSION_MAJOR_MINOR  = $(shell echo $(CUDA_VERSION_FULL) | cut -d. -f1-2)
 BASE_RUNTIME              = ubuntu:18.04
-BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
-ifeq ("$(CUDA_VERSION)","cpu")
+ifeq ("$(CUDA_VERSION_FULL)","cpu")
 MUTEX_PACKAGE             = cpuonly
+BASE_DEVEL                = $(BASE_RUNTIME)
+else
+CUDNN_VERSION             = 8
+MUTEX_PACKAGE             = cudatoolkit=$(CUDA_VERSION_MAJOR_MINOR)
+BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION_FULL)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
 endif
 
 # The conda channel to use to install cudatoolkit
@@ -39,10 +42,11 @@ BUILD                    ?= build
 # Intentionally left blank
 PLATFORMS_FLAG           ?=
 USE_BUILDX               ?=
+BUILD_PLATFORMS          ?=
 ifneq ("$(USE_BUILDX)","")
 BUILD                     = buildx build
 # Only set platforms flags if using buildx
-ifdef $(BUILD_PLATFORMS)
+ifneq ("$(BUILD_PLATFORMS)","")
 PLATFORMS_FLAG            = --platform="$(BUILD_PLATFORMS)"
 endif
 endif
