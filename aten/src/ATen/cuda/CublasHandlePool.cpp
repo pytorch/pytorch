@@ -87,11 +87,13 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+#ifndef(USE_ROCM)
   if (handle_to_workspace.find(handle) == handle_to_workspace.end()) {
       auto workspace_ptr = getNewWorkspace();
       handle_to_workspace[handle] = std::move(workspace_ptr);
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, handle_to_workspace[handle].get(), getChosenWorkspaceSize()));
+#endif
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
