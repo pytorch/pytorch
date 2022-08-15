@@ -23,7 +23,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -257,16 +257,16 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         graph_size = None
 
-        def assert_graph_empty(fx_g, _):
+        def get_graph_size(fx_g, _):
             nonlocal graph_size
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
         start_recompilations = num_of_recompilations()
-        f = aot_function(foo, nop, assert_graph_empty)
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertIsNone(graph_size)
         with torch.set_grad_enabled(True):
             f(*inps)
         self.assertTrue(graph_size > 2)
@@ -308,6 +308,20 @@ class TestAOTAutograd(TestCase):
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
 
+    def test_list_codegen(self):
+        def list_nop(f, _):
+            def g(inps):
+                return f(*inps)
+            g._boxed_call = True
+            return g
+
+        def f(a, b, c):
+            return a.sin() * b.cos() * c.sin()
+        f = aot_function(f, list_nop)
+        inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
+        f(*inp).sum().backward()
+
+
 
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -328,6 +342,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapz'),
         xfail('corrcoef'),
         xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
