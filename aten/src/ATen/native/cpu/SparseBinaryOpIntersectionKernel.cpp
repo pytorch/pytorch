@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionStubs.h>
 #include <ATen/native/cpu/Loops.h>
