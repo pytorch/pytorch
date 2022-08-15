@@ -286,18 +286,10 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        # Get the first proxy mode. If there are different proxy modes with
-        # different tracers torch.fx.Proxy would raise an error.
-        proxy_mode = None
-        for arg in pytree.tree_flatten((args, kwargs))[0]:
-            if isinstance(arg, ProxyTensor):
-                if proxy_mode is None:
-                    proxy_mode = arg.proxy_mode
-                    break
-        assert proxy_mode is not None, "At least one argument must be a ProxyTensor"
-
-        with proxy_mode.restore():  # type: ignore[union-attr]
-            return func_overload(*args, **kwargs)
+        raise RuntimeError(
+            "Should not be needed as we always trace with modes. May have entered this due to redispatching from"
+            "__torch_dispatch__ into another op without restoring dispatch mode"
+        )
 
 
 class PythonKeyTracer(Tracer):
@@ -377,22 +369,23 @@ def wrap_key(f, inps, proxy_mode):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, trace_factory_functions=True):
+    def __init__(self, tracer):
         self.tracer = tracer
         self.enable_tracing = True
-        self.trace_factory_functions = trace_factory_functions
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         if not self.enable_tracing:
             return func_overload(*args, **kwargs)
 
         if symbolic_shapes.is_symbolic_op(func_overload):
-            return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
+            with self.restore():
+                return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
 
         func = func_overload.overloadpacket
         # We don't want to convert torch.tensor constants into tracing objects.
         if func_overload == aten.lift.default:
             return args[0]
+
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             out = proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
@@ -428,7 +421,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         #       x.add_(2)
         #
         # This is what the overload modification does.
-        elif self.trace_factory_functions:
+        else:
             flat_args = pytree.tree_flatten((args, kwargs))[0]
             handled_types = [torch.Tensor, ProxyTensor, torch.nn.Parameter]
 
@@ -454,8 +447,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             else:
                 constant = None
             out = wrap_output(inner_res, proxy_res, constant=constant, proxy_mode=self)
-        else:
-            out = func_overload(*args, **kwargs)
 
         def assert_proxy_tensor(e):
             if isinstance(e, torch.Tensor):
@@ -465,8 +456,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # When we trace factory functions, we expect that tensor outputs are *always* ProxyTensors.
         # (Except for torch.tensor() constants handled through lift(), which is handled
         # specially further up).
-        if self.trace_factory_functions:
-            pytree.tree_map(assert_proxy_tensor, out)
+        pytree.tree_map(assert_proxy_tensor, out)
         return out
 
 
@@ -502,9 +492,7 @@ class DecompositionInterpreter(torch.fx.Interpreter):
     def run(self, *args, **kwargs):
         # Should enter the mode at least once for being able to restore it later
         # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
-        with self.mode:
-            pass
-        with decompose(self.decomposition_table):
+        with decompose(self.decomposition_table), self.mode:
             return super().run(*args, **kwargs)
 
 
@@ -519,16 +507,7 @@ def wrapper_and_args_for_make_fx(func, args, kwargs):
     return wrapped, flat_args
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
-    if tracing_mode != "real" and not trace_factory_functions:
-        raise ValueError("""\
-use_fake and not trace_factory_functions is not currently supported; if
-proxy tensor is not executed as a mode, fake tensors must not be executed
-as a mode either (otherwise, we will incorrectly intern fake tensors into
-the traced graph module.)  However, non-mode execution of fake tensors
-is not currently supported (although, in principle, it could be; file
-a bug if you need this)""")
-
+def make_fx(f, decomposition_table=None, tracing_mode="real"):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -548,7 +527,7 @@ a bug if you need this)""")
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, trace_factory_functions=trace_factory_functions)
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
         def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
