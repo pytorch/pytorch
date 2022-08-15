@@ -87,7 +87,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#ifndef(USE_ROCM)
+#ifndef USE_ROCM
   if (handle_to_workspace.find(handle) == handle_to_workspace.end()) {
       auto workspace_ptr = getNewWorkspace();
       handle_to_workspace[handle] = std::move(workspace_ptr);
