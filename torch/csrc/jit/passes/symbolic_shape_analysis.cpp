@@ -352,8 +352,8 @@ struct SymbolicShapeOpAnalyzer {
 
         TypePtr element_type =
             graph_in_var->type()->cast<ListType>()->getElementType();
-        for (size_t j = op_in_index; j < li_length; ++j) {
-          auto new_inp = shape_compute_graph_->insertInput(j);
+        for (size_t j = op_in_index; j < op_in_index + li_length; ++j) {
+          auto new_inp = shape_compute_graph_->insertInput(op_in_index + j);
           new_inp->setType(element_type);
           li_inputs.push_back(new_inp);
         }
@@ -361,13 +361,14 @@ struct SymbolicShapeOpAnalyzer {
         auto new_li = shape_compute_graph_->insertNode(
             shape_compute_graph_->createList(element_type, li_inputs));
         graph_in_var->replaceAllUsesWith(new_li->output());
-        shape_compute_graph_->eraseInput(li_length);
+        shape_compute_graph_->eraseInput(op_in_index + li_length);
       }
     }
 
     TORCH_INTERNAL_ASSERT(
         shape_compute_graph_->inputs().size() <= inputs_.size(),
         "Shape Compute Graph expected to have less inputs than actual inputs"); //?
+
     for (size_t op_in_index = 0;
          op_in_index < shape_compute_graph_->inputs().size();
          op_in_index++) {
