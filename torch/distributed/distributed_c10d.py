@@ -1852,6 +1852,10 @@ def broadcast_object_list(object_list, src=0, group=None, device=None, map_locat
         device (``torch.device``, optional): If not None, the objects are
             serialized and converted to tensors which are moved to the
             ``device`` before broadcasting. Default is ``None``.
+        map_location (``torch.device``, optional): The device to load tensors contained
+            in the received objects; this argument does not affec the source rank. If ``None``,
+            the tensors are loaded into the same device they were on when passed into this function.
+            Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
