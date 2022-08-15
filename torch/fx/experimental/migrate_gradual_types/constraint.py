@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod, op_gt, op_lt
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, \
+    op_mod, op_gt, op_lt, op_neq, op_eq
 from torch.fx.tensor_type import TensorType, Dyn
 
 
@@ -211,7 +212,6 @@ class CanReshape(Constraint):
             return False
 
 
-
 class IndexSelect(Constraint):
 
     def __init__(self, tensor_size, input_var, dim_replace, index, output):
@@ -220,7 +220,7 @@ class IndexSelect(Constraint):
             input_var: input to index_select
             tensor_size: tensor size we are considering
             dim_replace: the dimension of the output at "index"
-            index: location of the dimensiont to replace in the input
+            index: location of the dimensions to replace in the input
             outut: variable to store the result
         """
         assert isinstance(input_var, TVar)
@@ -244,14 +244,54 @@ class IndexSelect(Constraint):
 
     def __eq__(self, other):
         if isinstance(other, IndexSelect):
-            return self.tensor_size == other.tensor_size and\
-                self.dim_replace == other.dim_replace and\
-                self.index == other.index and\
-                self.output == other.output and\
+            return self.tensor_size == other.tensor_size and \
+                self.dim_replace == other.dim_replace and \
+                self.index == other.index and \
+                self.output == other.output and \
                 self.input_var == other.input_var
         else:
             return False
 
+
+class Transpose(Constraint):
+
+    def __init__(self, tensor_size, input_var, index1, index2, output):
+        """
+        Args:
+            tensor_size: current tensor size
+            input_var: variable to hold input
+            index1: dimension 1
+            index2: dimension 2
+            output: output that stores result
+        """
+        assert isinstance(input_var, TVar)
+        assert isinstance(output, TVar)
+        assert isinstance(index1, int)
+        assert isinstance(index2, int)
+
+        self.input_var = input_var
+        self.tensor_size = tensor_size
+        self.index1 = index1
+        self.index2 = index2
+        self.output = output
+
+    def __repr__(self):
+
+        return f' {self.output} = ' \
+               f'Transpose({self.input_var}, ' \
+               f'tensor_size: {self.tensor_size}, ' \
+               f'{self.index1}, ' \
+               f'{self.index2})'
+
+    def __eq__(self, other):
+        if isinstance(other, Transpose):
+            return self.tensor_size == other.tensor_size and \
+                self.index1 == other.index1 and \
+                self.index2 == other.index2 and \
+                self.output == other.output and \
+                self.input_var == other.input_var
+        else:
+            return False
 
 
 class GetItem(Constraint):
@@ -277,8 +317,8 @@ class GetItem(Constraint):
     def __eq__(self, other):
         if isinstance(other, GetItem):
             return self.res == other.res and \
-                self.tensor_size == other.tensor_size and\
-                self.index == other.index and\
+                self.tensor_size == other.tensor_size and \
+                self.index == other.index and \
                 self.input_var == other.input_var
         else:
             return False
@@ -341,7 +381,7 @@ class CalcConv(Constraint):
 
     def __eq__(self, other):
         if isinstance(other, CalcConv):
-            return self.conv_result == other.conv_result and self.input_var == other.input_var and\
+            return self.conv_result == other.conv_result and self.input_var == other.input_var and \
                 self.c_out == other.c_out and self.kernel == other.kernel and self.padding == other.padding \
                 and self.stride == other.stride and self.dilation == other.dilation \
                 and self.matching_constraint == other.matching_constraint
@@ -510,9 +550,9 @@ def is_algebraic_expression(constraint):
 
 def is_bool_expr(constraint):
     if isinstance(constraint, BinConstraintD):
-        return constraint.op in [op_gt, op_lt]
+        return constraint.op in [op_gt, op_lt, op_neq, op_eq]
     else:
-        return isinstance(constraint, BVar)
+        return isinstance(constraint, BVar) or isinstance(constraint, Conj) or isinstance(constraint, Disj)
 
 def is_dim(d):
     return isinstance(d, DVar) or isinstance(d, int) or d == Dyn

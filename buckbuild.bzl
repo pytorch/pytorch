@@ -125,8 +125,8 @@ THIRD_PARTY_LIBS = {
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
     "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
-    "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
-    "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
+    "flatbuffers-api": ["//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//third_party:flatbuffers-api"],
+    "flatc": ["//third-party/flatbuffers/fbsource_namespace:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
@@ -134,6 +134,7 @@ THIRD_PARTY_LIBS = {
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
+    "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
@@ -145,7 +146,7 @@ THIRD_PARTY_LIBS = {
 
 def third_party(name):
     if name not in THIRD_PARTY_LIBS:
-        fail("Cannot find thrid party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
+        fail("Cannot find third party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
     return THIRD_PARTY_LIBS[name][1] if IS_OSS else THIRD_PARTY_LIBS[name][0]
 
 def get_pt_compiler_flags():
@@ -1022,7 +1023,7 @@ def define_buck_targets(
             "0",
             "--replace",
             "@AT_POCKETFFT_ENABLED@",
-            "0",
+            "1",
             "--replace",
             "@AT_NNPACK_ENABLED@",
             "ATEN_NNPACK_ENABLED_FBXPLAT",
@@ -1191,7 +1192,7 @@ def define_buck_targets(
         exported_headers = [
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
@@ -1496,8 +1497,6 @@ def define_buck_targets(
             # "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
             # "torch/csrc/jit/serialization/unpickler.cpp",
             "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
-            "torch/csrc/jit/serialization/pickle.cpp",
-            "torch/csrc/jit/serialization/pickler.cpp",
         ],
         header_namespace = "",
         exported_headers = [
@@ -1688,16 +1687,24 @@ def define_buck_targets(
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
+        visibility = [
+            "{}:mobile_bytecode".format(ROOT),
+        ],
     )
 
+    # Users of this target will need to add third_party("flatbuffers-api") as a
+    # dep.
     fb_xplat_cxx_library(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
-        exported_deps = [
-            third_party("flatbuffers-api"),
+        # Avoid leaking implementation details by only exposing this header to
+        # the internals of the loader/serializer layer.
+        visibility = [
+            "{}:flatbuffer_loader".format(ROOT),
+            "{}:flatbuffer_serializer".format(ROOT),
         ],
     )
 
@@ -1713,17 +1720,16 @@ def define_buck_targets(
             "-fexceptions",
             "-frtti",
             "-Wno-deprecated-declarations",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         visibility = ["PUBLIC"],
         deps = [
+            ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":flatbuffer_loader",
-            ":mobile_bytecode",
             ":torch_mobile_train",
-            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1742,7 +1748,7 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
@@ -1757,10 +1763,12 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
-        exported_deps = [
+        deps = [
             ":mobile_bytecode",
-            ":torch_mobile_deserialize",
             third_party("flatbuffers-api"),
+        ],
+        exported_deps = [
+            ":torch_mobile_deserialize",
             C10,
         ],
     )
@@ -1785,10 +1793,8 @@ def define_buck_targets(
         deps = [
             ":flatbuffer_loader",
             ":flatbuffer_serializer",
-            ":mobile_bytecode",
             ":torch_core",
             ":torch_mobile_module",
-            third_party("flatbuffers-api"),
             C10,
         ],
     )
@@ -1880,6 +1886,7 @@ def define_buck_targets(
                 third_party("cpuinfo"),
                 third_party("glog"),
                 third_party("XNNPACK"),
+                third_party("pocketfft"),
             ],
             compiler_flags = get_aten_compiler_flags(),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),

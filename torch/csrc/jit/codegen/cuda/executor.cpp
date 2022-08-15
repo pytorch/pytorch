@@ -93,7 +93,9 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
               << " =======\n\n"
               << code << "\n======================================\n\n";
-  } else if (isDebugDumpEnabled(DebugDumpOption::CudaToFile)) {
+  }
+  if (isDebugDumpEnabled(DebugDumpOption::CudaToFile) ||
+      isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
     std::stringstream file_name;
     file_name << "__tmp_kernel" << fusion_id_ << ".cu";
     std::cout << "PRINTING: " << file_name.str() << std::endl;
@@ -790,6 +792,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 at::TensorOptions()
                     .dtype(executor_entry->buffer_types[i])
                     .device(options_.device)));
+            global_buffers.zero_init.push_back(true);
           } else {
             global_buffers.buffers.push_back(at::native::empty_cuda(
                 executor_entry->buffer_sizes[i],
@@ -797,6 +800,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 c10::nullopt,
                 options_.device,
                 c10::nullopt));
+            global_buffers.zero_init.push_back(false);
           }
         }
       }
@@ -984,9 +988,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
-    for (const auto& buffer : global_buffers.buffers) {
+    TORCH_INTERNAL_ASSERT(
+        global_buffers.buffers.size() == global_buffers.zero_init.size(),
+        "global_buffer buffer & zero_init container should have identical sizes");
+    for (const auto i : c10::irange(global_buffers.buffers.size())) {
+      const auto& buffer = global_buffers.buffers[i];
+      const auto& zero_init = global_buffers.zero_init[i];
       std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
-                << std::endl;
+                << " is_zero_initialized: " << zero_init << std::endl;
     }
   }
 

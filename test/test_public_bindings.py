@@ -188,7 +188,7 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymbolicIntNode",
+            "SymIntNode",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -243,10 +243,6 @@ class TestPublicBindings(TestCase):
 
             "wait",
             "Tag",
-            "inplace_view",
-            "view_copy",
-            "generated",
-            "dynamic_output_shape",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
@@ -276,6 +272,12 @@ class TestPublicBindings(TestCase):
             # no new entries should be added to this allow_dict.
             # New APIs must follow the public API guidelines.
             allow_dict = json.load(json_file)
+            # Because we want minimal modifications to the `allowlist_for_publicAPI.json`,
+            # we are adding the entries for the migrated modules here from the original
+            # locations.
+            for modname in allow_dict["being_migrated"]:
+                if modname in allow_dict:
+                    allow_dict[allow_dict["being_migrated"][modname]] = allow_dict[modname]
 
         def test_module(modname):
             split_strs = modname.split('.')
@@ -294,8 +296,12 @@ class TestPublicBindings(TestCase):
                 why_not_looks_public = ""
                 if elem_module is None:
                     why_not_looks_public = "because it does not have a `__module__` attribute"
+                # If a module is being migrated from foo.a to bar.a (that is entry {"foo": "bar"}),
+                # the module's starting package would be referred to as the new location even
+                # if there is a "from foo import a" inside the "bar.py".
+                modname = allow_dict["being_migrated"].get(modname, modname)
                 elem_modname_starts_with_mod = elem_module is not None and \
-                    elem_module.startswith(allow_dict["being_migrated"].get(modname, modname)) and \
+                    elem_module.startswith(modname) and \
                     '._' not in elem_module
                 if not why_not_looks_public and not elem_modname_starts_with_mod:
                     why_not_looks_public = f"because its `__module__` attribute (`{elem_module}`) is not within the " \
@@ -355,7 +361,6 @@ class TestPublicBindings(TestCase):
                 for elem in all_api:
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
-
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 

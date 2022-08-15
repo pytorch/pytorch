@@ -61,12 +61,6 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
-        // shader layout signature
-        {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
         // shader descriptor
         VK_KERNEL(cat_feature),
         // pipeline barrier
@@ -120,7 +114,7 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images
@@ -158,7 +152,7 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
