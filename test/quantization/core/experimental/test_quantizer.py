@@ -2,6 +2,7 @@
 
 import torch
 from torch import quantize_per_tensor
+from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
 import unittest
@@ -13,7 +14,7 @@ class TestQuantizer(unittest.TestCase):
         (non-uniform quantization reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
         * tensor2quantize: Tensor
-        * b: 4
+        * b: 8
         * k: 1
     """
     def test_quantize_APoT_rand_k1(self):
@@ -23,11 +24,9 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        observer = APoTObserver(b=8, k=1)
-        observer.forward(tensor2quantize)
-        observer.min_val = torch.tensor([0])
-        observer.max_val = torch.tensor([255])
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        apot_observer = APoTObserver(b=8, k=1)
+        apot_observer(tensor2quantize)
+        alpha, gamma, quantization_levels, level_indices = apot_observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
         qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
@@ -37,7 +36,14 @@ class TestQuantizer(unittest.TestCase):
                                 level_indices=level_indices)
 
         # get uniform quantization quantized tensor result
-        uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
+        uniform_observer = MinMaxObserver()
+        uniform_observer(tensor2quantize)
+        scale, zero_point = uniform_observer.calculate_qparams()
+
+        uniform_quantized = quantize_per_tensor(input=tensor2quantize,
+                                                scale=scale,
+                                                zero_point=zero_point,
+                                                dtype=torch.quint8).int_repr()
 
         qtensor_data = qtensor.data.int()
         uniform_quantized_tensor = uniform_quantized.data.int()
@@ -177,6 +183,43 @@ class TestQuantizer(unittest.TestCase):
         result = final_apot.data.int()
 
         self.assertTrue(torch.equal(original_input, result))
+
+    r""" Tests for correct dimensions in dequantize_apot result
+         on random 3-dim tensor with random dimension sizes
+         and hardcoded values for b, k.
+         Dequant an input tensor and verify that
+         dimensions are same as input.
+         * tensor2quantize: Tensor
+         * b: 4
+         * k: 2
+    """
+    def test_dequantize_dim(self):
+        # make observer
+        observer = APoTObserver(4, 2)
+
+        # generate random size of tensor2quantize between 1 -> 20
+        size1 = random.randint(1, 20)
+        size2 = random.randint(1, 20)
+        size3 = random.randint(1, 20)
+
+        # make tensor2quantize: random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size1, size2, size3, dtype=torch.float)
+
+        observer.forward(tensor2quantize)
+
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+
+        # make mock apot_tensor
+        original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
+                                      alpha=alpha,
+                                      gamma=gamma,
+                                      quantization_levels=quantization_levels,
+                                      level_indices=level_indices)
+
+        # dequantize apot_tensor
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
+
+        self.assertEqual(original_apot.data.size(), dequantize_result.size())
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):

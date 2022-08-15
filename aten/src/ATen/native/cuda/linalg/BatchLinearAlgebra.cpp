@@ -35,6 +35,7 @@
 #include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_linalg_check_errors.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -2279,11 +2280,8 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     apply_magma_eigh<scalar_t>(eigvals_working_copy, self_working_copy, infos, upper, eigenvectors);
   });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "symeig_cuda");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "symeig_cuda");
-  }
+  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
+
   if (eigenvectors) {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
   } else {
@@ -2355,7 +2353,7 @@ REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 template <typename scalar_t>
 static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
-                      int64_t *info_ptr) {
+                      int* info_ptr) {
 #if !AT_MAGMA_ENABLED()
 TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
@@ -2425,11 +2423,11 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                      ? at::empty_strided({n, n}, {1, n}, options)
                      : Tensor();
 
-  int64_t info;
+  auto infos = at::zeros({}, self_working_copy.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cuda", [&]{
-    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
+    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, infos.data_ptr<int>());
   });
-  singleCheckErrors(info, "eig_cuda");
+  at::_linalg_check_errors(infos, "eig", /*is_matrix*/true);
 
   return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
 }

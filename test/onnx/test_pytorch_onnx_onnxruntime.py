@@ -26,11 +26,12 @@ from pytorch_test_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
-    skipForAllOpsetVersions,
+    skipDtypeChecking,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
+    skipShapeChecking,
     skipTraceTest,
 )
 from torch import Tensor
@@ -309,8 +310,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, model.hidden))
 
     def get_image(self, rel_path: str, size: Tuple[int, int]) -> Tensor:
-        import os
-
         from PIL import Image
         from torchvision import transforms
 
@@ -380,52 +379,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         assert torch.all(out2[0].eq(out_trace2[0]))
         assert torch.all(out2[1].eq(out_trace2[1]))
-
-    @unittest.skip(
-        "Unstable loading pretrained quantized mobilenet v3: https://github.com/pytorch/vision/issues/5303"
-    )
-    @skipIfUnsupportedMinOpsetVersion(10)
-    @skipScriptTest()
-    def test_mobilenet_v3_quant(self):
-        model = torchvision.models.quantization.mobilenet_v3_large(
-            pretrained=True, quantize=True
-        )
-        from PIL import Image
-        from torchvision import transforms
-
-        data_dir = os.path.join(os.path.dirname(__file__), "assets")
-        path = os.path.join(data_dir, "grace_hopper_517x606.jpg")
-        input_image = Image.open(path)
-        # Based on example from https://pytorch.org/hub/pytorch_vision_resnet/
-        preprocess = transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
-        )
-        input_tensor = preprocess(input_image).unsqueeze(0)
-
-        # Due to precision error from quantization, check only that the top prediction matches.
-        class TopPredictor(torch.nn.Module):
-            def __init__(self, mobilenet):
-                super().__init__()
-                self.mobilenet = mobilenet
-
-            def forward(self, x):
-                x = self.mobilenet(x)
-                _, topk_catid = torch.topk(x[0], 1)
-                return topk_catid
-
-        # Currently, we need convert the model to ScriptModule before export.
-        # The reason is that PackedParams contains int (not tensor).
-        # Then it fails when the exporter calls _trace_and_get_graph_from_model().
-        # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1547858
-        model = torch.jit.trace(TopPredictor(model), input_tensor)
-        self.run_test(model, (input_tensor,))
 
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
@@ -875,6 +828,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(Model(), (x, y))
 
+    @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1579,6 +1533,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_float(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: float):
@@ -1601,6 +1556,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_bool(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: int, z: bool, t: float):
@@ -1768,6 +1724,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
 
+    @skipDtypeChecking
     def test_div_rounding_mode(self):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2988,6 +2945,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
         )
 
+    @skipDtypeChecking
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -3034,6 +2992,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # add to(dtype=torch.long) to avoid ORT output type does not match expected type.
     # will be fixed in ONNX version 14.
     @skipIfUnsupportedMaxOpsetVersion(13)
+    @skipDtypeChecking
     def test_arithmeticOps_with_low_precision(self):
         class AddModule(torch.nn.Module):
             def forward(self, x, y):
@@ -3099,6 +3058,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(MulModule(), (x, y))
         self.run_test(DivModule(), (x, y))
         self.run_test(PowModule(), (x, z))
+
+    def test_mul_bool(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mul(x, y)
+
+        x_t = torch.tensor([True, False, True, False])
+        y_t = torch.tensor([True, True, False, False])
+        z_t = torch.tensor([1.0, 2.0, 3.0, 0.0])
+        self.run_test(MyModel(), (x_t, y_t))
+        self.run_test(MyModel(), (x_t, z_t))
+        self.run_test(MyModel(), (z_t, y_t))
 
     # fmod was added in version 10
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -4937,10 +4908,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     torch.argmax(input),
                     torch.argmin(input, keepdim=True),
                     torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
                 )
 
         self.run_test(ArgminArgmaxModel(), input)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_argmin_argmax(self):
         input = torch.randn(7, 3, 5)
         self._argmin_argmax_model(input)
@@ -5312,6 +5286,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @skipDtypeChecking
     def test_item(self):
         class M(torch.nn.Module):
             def forward(self, x, y, i: int):
@@ -6118,6 +6093,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(ZeroAndOnes(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipShapeChecking
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -6659,6 +6635,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(FullLikeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipDtypeChecking
     def test_full_like_value(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x, y):
@@ -7925,6 +7902,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M(), (dummy_inputs,), input_names=["x"], dynamic_axes={"x": [0]})
 
     @skipIfUnsupportedMinOpsetVersion(12)
+    @skipDtypeChecking
     def test_outer(self):
         class Outer(torch.nn.Module):
             def forward(self, x, y):
@@ -8730,6 +8708,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(10, 3, 53)
         self.run_test(M(), (x))
+
+    def test_rrelu_eval(self):
+        x = torch.tensor([0.5, -0.5])
+        self.run_test(torch.nn.RReLU(0.1, 0.3).eval(), x)
 
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
@@ -11089,6 +11071,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (boxes, scores))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipDtypeChecking
     def test_symbolic_shape_inference_arange_2(self):
         # test Range
         class ArangeModel(torch.nn.Module):
@@ -11545,6 +11528,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(12, 3)
         self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0]})
 
+    @skipShapeChecking
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -12216,9 +12200,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             **atol_rtol,
         )
 
-    # TODO: The fix of OptionalHasElement is still in master branch, not in release
-    #       Enable the test after it's been released.
-    @skipForAllOpsetVersions()
     @skipTraceTest()
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):

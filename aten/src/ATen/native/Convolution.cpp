@@ -194,8 +194,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16)  {
-    return at::native::cudnnv8_enabled_check_debug();
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
+    if (!(detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug())) {
+      return false;
+    }
   }
   if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
     // bypass dilation checks for channels_last convolution
@@ -243,63 +245,9 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
-bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
-  if (input.is_mkldnn()) {
-    return true;
-  }
-  auto input_dim = input.dim();
-  bool is_contiguous = input.is_contiguous(at::MemoryFormat::Contiguous);
-  bool is_channels_last = (input_dim == 4)
-      ? input.is_contiguous(at::MemoryFormat::ChannelsLast)
-      : input.is_contiguous(at::MemoryFormat::ChannelsLast3d);
-  if (!(is_contiguous || is_channels_last)) {
-    return true;
-  }
-
-  auto dims = input.sizes();
-  auto strides = input.strides();
-  bool mkldnn_conv_is_contiguous = true, mkldnn_conv_is_channels_last = true;
-  if (input_dim == 4) {
-    const auto n = 0, c = 1, h = 2, w = 3;
-    mkldnn_conv_is_contiguous =
-        (strides[n] == dims[c] * dims[h] * dims[w] &&
-         strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
-         strides[w] == 1);
-    mkldnn_conv_is_channels_last =
-        (strides[n] == dims[h] * dims[w] * dims[c] &&
-         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-         strides[c] == 1);
-  } else {
-    const auto n = 0, c = 1, d = 2, h = 3, w = 4;
-    mkldnn_conv_is_contiguous =
-        (strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
-         strides[c] == dims[d] * dims[h] * dims[w] &&
-         strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
-         strides[w] == 1);
-    mkldnn_conv_is_channels_last =
-        (strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
-         strides[d] == dims[h] * dims[w] * dims[c] &&
-         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-         strides[c] == 1);
-  }
-  if (is_channels_last && is_contiguous) {
-    return (mkldnn_conv_is_contiguous || mkldnn_conv_is_channels_last);
-  } else if (is_channels_last) {
-    return mkldnn_conv_is_channels_last;
-  } else if (is_contiguous) {
-    return mkldnn_conv_is_contiguous;
-  }
-  return true;
-}
-
 auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
-    return false;
-  }
-  if (!mkldnn_conv_contiguous_check(
-          input)) { // check whether current ATen input is contiguous based on
-                    // oneDNN requirements.
     return false;
   }
   if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
@@ -929,7 +877,7 @@ static Tensor convolution_same(
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
     DimVector output_padding(static_cast<size_t>(dim));
-    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+    return at::convolution(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
@@ -967,7 +915,7 @@ Tensor _convolution_mode(
   } else if (padding == "valid") {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
-    return at::native::convolution(
+    return at::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
@@ -1121,7 +1069,7 @@ ConvBackend select_conv_backend(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1363,7 +1311,7 @@ at::Tensor _convolution(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1534,7 +1482,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     output = view3d(output);
   }
 
@@ -1869,7 +1817,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -2085,12 +2033,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
   // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }

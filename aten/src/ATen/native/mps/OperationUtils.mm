@@ -130,9 +130,9 @@ std::string getMPSTypeString(ScalarType scalar_type) {
     case ScalarType::Short:
       return "Int16";
     case ScalarType::Char:
-      return "UInt8";
-    case ScalarType::Byte:
       return "Int8";
+    case ScalarType::Byte:
+      return "UInt8";
     case ScalarType::Bool:
       return "Bool";
     default:
@@ -192,7 +192,7 @@ MPSShape* getMPSShape(const Tensor& t) {
   {
     NSInteger sz_i = (i < sz) ? t.size(i) : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
@@ -213,7 +213,7 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
   {
     NSInteger sz_i = (i < sz) ? sizes[i] : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
@@ -231,7 +231,12 @@ void printTensorNDArray(const Tensor& t) {
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
                                                          dataType:selfDType] autorelease];
+  C10_CLANG_DIAGNOSTIC_PUSH()
+  #if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
+  #endif
   [tdata printNDArray];
+  C10_CLANG_DIAGNOSTIC_POP()
 }
 
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
