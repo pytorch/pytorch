@@ -299,6 +299,7 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["ucc"] = {
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+            "UCX_TLS": "tcp,cuda"
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
