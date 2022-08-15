@@ -2060,27 +2060,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple(
                     x.symint_to_int() for x in arguments.pre_self_positional
-                ],
+                ),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple(
                     x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple(
                 x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ),
+            pre_tensor_options_kwarg_only=tuple(
                 x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ),
         )
 
         return arguments
