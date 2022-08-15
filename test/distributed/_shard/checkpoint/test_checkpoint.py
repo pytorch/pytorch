@@ -111,6 +111,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_default_metadata(self) -> None:
+        device = f"cuda:{dist.get_rank()}"
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -121,7 +122,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         state_dict = {
             'sharded': sharded_tensor.rand(spec, (10, 10, )),
-            'replicated': torch.rand(4, device="cpu"),
+            'replicated': torch.rand(4, device=device),
             'bytes': [1, 2, 3, 4],
         }
 
