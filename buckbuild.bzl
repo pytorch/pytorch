@@ -1704,7 +1704,7 @@ def define_buck_targets(
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
-            "{}:flatbuffer_serializer".format(ROOT),
+            "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
     )
 
