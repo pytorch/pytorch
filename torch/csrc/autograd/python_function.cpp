@@ -612,14 +612,16 @@ static void _append_subgraph(
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
   }
-  // Find node position in graph, all subsequent nodes after are added to
+  // Find node position in owning block, all subsequent nodes after are added to
   // subgraph
-  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  auto owning_block = node->owningBlock();
+  auto it = std::find(
+      owning_block->nodes().begin(), owning_block->nodes().end(), node);
   // Skip TupleUnpack node if created
   if (!unpack_output) {
     it++;
   }
-  for (it++; it != graph->nodes().end(); ++it) {
+  for (it++; it != owning_block->nodes().end(); ++it) {
     torch::jit::Node* node = *it;
     auto* clone_node =
         subgraph->insertNode(subgraph->createClone(node, value_map_func));
@@ -942,6 +944,21 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
+  TORCH_CHECK(
+      cdata,
+      "Attribute 'register_prehook' is invalid for this instance of _C._FunctionBase. "
+      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+      "access pattern that is no longer supported. For examples on how to use new-style "
+      "autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  return torch::autograd::registerFunctionPreHook(*cdata, hook);
+  END_HANDLE_TH_ERRORS
+}
+
 int THPFunction_set_materialize_grads(
     THPFunction* self,
     PyObject* value,
@@ -1207,6 +1224,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      METH_O,
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
+    {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
