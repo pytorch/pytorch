@@ -153,8 +153,12 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
     return view(self, sizes)
 
 
-def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
+def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
+    if opt_dims is None:
+        dims: List[int] = []
+    else:
+        dims = opt_dims
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
@@ -168,7 +172,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     return out
 
 def max_dim(self: List[int], dim: int, keep_dim: bool):
-    out = mean_dim(self, [dim], keep_dim, None)
+    out = sum_mean_dim(self, [dim], keep_dim, None)
     return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
@@ -728,6 +732,48 @@ def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], bi
     # Bias gradient is always generated regardess of if biases is supplied
     return _copy(input), _copy(weight), [grad_output[1]]
 
+def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[List[int]] = None, stride: Optional[List[int]] = None, padding: Optional[List[int]] = None, output_padding: Optional[List[int]] = None, groups: int = 1, dilation: Optional[List[int]] = None) -> List[int]:
+    if stride is None:
+        stride = [1, 1]
+    if padding is None:
+        padding = [0, 0]
+    if output_padding is None:
+        output_padding = [0, 0]
+    if dilation is None:
+        dilation = [1, 1]
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 0
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        kernel = dilation_ * (weight[d] - 1)
+        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+    return output_size
+
+def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int) -> List[int]:
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 0
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        if transposed:
+            kernel = dilation_ * (weight[d] - 1)
+            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+        else:
+            kernel = dilation_ * (weight[d] - 1) + 1
+            output_size.append((input[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
+    return output_size
+
 def batch_norm(
     input: List[int],
     weight: Optional[List[int]],
@@ -997,14 +1043,16 @@ add_shape_compute_mapping("aten::conv2d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", batch_norm)
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
 add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
+add_shape_compute_mapping("aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", conv_forwards)
+add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", conv_transpose2d_input)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
-add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
-add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
+add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
 add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", max_dim)
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
