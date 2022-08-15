@@ -13,12 +13,6 @@ from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._shard.sharding_spec._internals import (
     _check_shard_metadata_pair_overlap,
 )
-from .resharding import (
-    create_default_local_save_plan,
-    create_default_global_save_plan,
-    create_default_local_load_plan,
-    create_default_global_load_plan,
-)
 
 from .planner import (
     LoadItemType,
