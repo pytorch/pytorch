@@ -91,7 +91,7 @@
       ]
    },
    {
-      "name": "Docs / Tutorials",
+      "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["svekars"],
       "mandatory_checks_name": [
