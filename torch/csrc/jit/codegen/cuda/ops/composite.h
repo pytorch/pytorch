@@ -43,6 +43,8 @@ TORCH_CUDA_CU_API LstmResult lstm(
     TensorView* cell_x,
     TensorView* out_x);
 
+TORCH_CUDA_CU_API TensorView* sign(TensorView* x);
+TORCH_CUDA_CU_API Val* sign(Val* x);
 TORCH_CUDA_CU_API TensorView* softplus(
     TensorView* x,
     Val* beta,
@@ -52,6 +54,7 @@ TORCH_CUDA_CU_API TensorView* gelu_backward(TensorView* dy, TensorView* x);
 TORCH_CUDA_CU_API TensorView* tanh_gelu(TensorView* x);
 TORCH_CUDA_CU_API TensorView* tanh_gelu_backward(TensorView* dy, TensorView* x);
 TORCH_CUDA_CU_API TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x);
+TORCH_CUDA_CU_API TensorView* leaky_relu(TensorView* x, Val* negative_slope);
 
 TORCH_CUDA_CU_API TensorView* view_as_real(TensorView* x);
 
