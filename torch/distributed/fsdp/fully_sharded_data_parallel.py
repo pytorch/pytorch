@@ -1950,13 +1950,11 @@ class FullyShardedDataParallel(nn.Module):
                 )
             )
             if not self.allow_over_prefetch:
-                # Wait for existing computation submitted to the current stream
-                # to finish before prefetching to avoid over-prefetching. This
-                # means that the subsequent module forward or backward
-                # computation may only overlap with this prefetched all-gather,
-                # and the next prefetched all-gather waits for that computation
-                # to finish. "Computation" includes freeing device memory.
-                self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
+                # Synchronize the current stream to prevent the CPU thread from
+                # overprefetching. We cannot simply have the all-gather stream
+                # wait for the current stream since then the all-gather kernel
+                # may still be launched early, reserving the GPU memory.
+                torch.cuda.current_stream().synchronize()
             # Prefetch the next set of parameters without synchronizing to
             # allow the sync to happen as late as possible to maximize overlap
             self._unshard(handles_to_prefetch, prepare_gradient)
