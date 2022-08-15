@@ -5,6 +5,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/core/DispatchKeySet.h>
 
 #include <vector>
 
@@ -51,19 +52,25 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
    * @param offsets View tensors' offsets.
    * @return A newly constructed view tensor
    */
-  inline at::Tensor create_nested_view_tensor(
-      const at::Tensor& base,
-      at::Tensor nested_size_tensor,
-      at::Tensor nested_stride_tensor,
-      std::vector<int64_t>&& offsets) {
-    TORCH_INTERNAL_ASSERT(base.is_nested(), "This function can only be used to create nested tensor views");
-    return at::detail::make_tensor<NestedTensorImpl>(
-        c10::TensorImpl::VIEW,
-        base,
-        nested_size_tensor,
-        nested_stride_tensor,
-        std::move(offsets));
-  }
+inline at::Tensor create_nested_view_tensor(
+    const at::Tensor& base,
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    std::vector<int64_t>&& offsets) {
+  TORCH_INTERNAL_ASSERT(
+      base.is_nested(),
+      "This function can only be used to create nested tensor views");
+  TORCH_INTERNAL_ASSERT(
+      c10::impl::tls_local_dispatch_key_set().excluded_.has(
+          c10::DispatchKey::AutogradFunctionality),
+      "Creating a non differentiable nested tensor view in a CompositeImplicit function is not allowed.");
+  return at::detail::make_tensor<NestedTensorImpl>(
+      c10::TensorImpl::VIEW,
+      base,
+      nested_size_tensor,
+      nested_stride_tensor,
+      std::move(offsets));
+}
 
 // The sizes of the underlying tensors
 inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* self_ptr) {

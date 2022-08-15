@@ -126,7 +126,6 @@ c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
 }
 
 NestedTensorImpl::NestedTensorImpl(
-    int64_t buffer_size,
     Storage storage,
     c10::DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -134,7 +133,6 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_stride_tensor,
     std::vector<int64_t> offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
-      buffer_size_(buffer_size),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       offsets_(std::move(offsets)),
@@ -158,7 +156,6 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_stride_tensor,
     std::vector<int64_t> offsets)
     : NestedTensorImpl(
-          buffer.sizes()[0],
           buffer.storage(),
           generate_nested_key_set(buffer),
           buffer.dtype(),
@@ -192,7 +189,6 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_stride_tensor,
     std::vector<int64_t>&& offsets)
     : TensorImpl(impl_type, Storage(base_tensor.storage()), base_tensor.key_set(), base_tensor.dtype()),
-      buffer_size_(get_nested_tensor_impl(base_tensor)-> get_buffer_size()),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       offsets_(std::move(offsets)),
@@ -282,7 +278,6 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     // the interpreter is dead no one can call us out on it
   }
   auto impl = c10::make_intrusive<NestedTensorImpl>(
-      buffer_size_,
       storage_,
       key_set_,
       data_type_,

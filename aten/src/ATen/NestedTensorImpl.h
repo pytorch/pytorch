@@ -15,7 +15,6 @@ namespace native {
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
-      int64_t buffer_size,
       Storage storage,
       c10::DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
@@ -83,14 +82,16 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    */
   at::Tensor get_buffer() const {
     auto buffer_key_set_ = generate_buffer_key_set();
+    const auto buffer_size = get_buffer_size();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
         c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
-    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size_));
+    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size));
     return Tensor(buffer_tensor_impl);
   }
 
   int64_t get_buffer_size() const {
-    return buffer_size_;
+    return storage_.nbytes() / data_type_.itemsize();
+    ;
   }
 
  protected:
@@ -135,10 +136,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
   void refresh_dim();
-  // Store the size of the buffer for use in get_buffer().
-  // get_buffer constructs a flat, contiguous tensor from the NestedTensor
-  // storage
-  int64_t buffer_size_;
+
   const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
@@ -170,22 +168,23 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    * is generated and redispatched to a non-nested kernel this function
    * generates the key set used by that buffer tensor
    *
-   *@return  New key set:
-   *nt.key_set() - NestedTensor(backend) - NestedAutograd + Dense +
-   *Autograd(backend)
-   *
    * @return A newly constructed view tensor
    */
   inline c10::DispatchKeySet generate_buffer_key_set() const {
-    const auto backend = this->key_set_.highestBackendKey();
-    auto buffer_key_set = c10::DispatchKeySet{c10::DispatchKey::Dense} |
-        c10::DispatchKeySet{backend} |
-        getAutocastRelatedKeySetFromBackend(backend);
-    const bool Autograd = this->key_set_.has_any(c10::autograd_dispatch_keyset);
-    buffer_key_set = Autograd
-        ? getAutogradRelatedKeySetFromBackend(backend) | buffer_key_set
-        : buffer_key_set;
+    auto buffer_key_set = this->key_set();
+    const bool Autograd = buffer_key_set.has_any(c10::autograd_dispatch_keyset);
+    // Remove nested tensor specific keys
+    buffer_key_set =
+        buffer_key_set - c10::DispatchKeySet{c10::DispatchKey::NestedTensor};
+    buffer_key_set = buffer_key_set -
+        c10::DispatchKeySet{c10::DispatchKey::AutogradNestedTensor};
 
+    // Add dense tensor specific keys
+    buffer_key_set =
+        buffer_key_set | c10::DispatchKeySet{c10::DispatchKey::Dense};
+    buffer_key_set = Autograd
+        ? c10::DispatchKeySet{c10::DispatchKey::Autograd} | buffer_key_set
+        : buffer_key_set;
     return buffer_key_set;
   }
 };
