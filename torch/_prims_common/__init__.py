@@ -442,19 +442,26 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
 # dims to be specified using negative indices
-def canonicalize_dim(rank: int, idx: int) -> int:
-    # TODO: add a comment for why this is
-    _rank = rank if rank != 0 else 1
+def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
+    if rank < 0:
+        msg = f"Rank cannot be negative but got {rank}"
+        raise IndexError(msg)
 
-    if idx >= 0 and idx < _rank:
+    if rank == 0:
+        if not wrap_scalar:
+            msg = f"Dimension specified as {idx} but tensor has no dimensions"
+            raise IndexError(msg)
+        rank = 1
+
+    if idx >= 0 and idx < rank:
         return idx
 
     if idx < 0:
-        _idx = idx + _rank
+        _idx = idx + rank
     else:
         _idx = idx
 
-    if _idx < 0 or _idx > _rank:
+    if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
         msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
             -rank, rank - 1, idx
