@@ -1407,9 +1407,12 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     // because of std::unique_ptr, block cannot be trivially copied
-    Block key(0, 0, 0);
-    std::memcpy(&key, &p.search_key, sizeof(Block));
-    key.history.release();
+    Block key(
+        p.search_key.device,
+        p.search_key.stream,
+        p.search_key.size,
+        p.search_key.pool,
+        p.search_key.ptr);
     key.size = (key.size < CachingAllocatorConfig::max_split_size())
         ? CachingAllocatorConfig::max_split_size()
         : key.size;

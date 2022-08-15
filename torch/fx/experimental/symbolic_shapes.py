@@ -1,6 +1,7 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Dict, Any
+from typing import Dict, Any, List, Type
+import operator
 
 try:
     import sympy  # type: ignore[import]
@@ -10,7 +11,36 @@ except ImportError:
 
 aten = torch.ops.aten
 
-__all__ = ["has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv"]
+__all__ = [
+    "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
+    "SymDispatchMode"
+]
+
+SYM_FUNCTION_MODE = None
+
+# We don't bother with the metaclass as all of the dispatching logic happens
+# entirely from Python
+#
+# Didn't bother with ancestors for now, unlikely to have multiple modes for
+# symints right now
+
+class SymDispatchMode:
+    def __sym_dispatch__(self, func, types, args, kwargs):
+        raise NotImplementedError()
+
+    def __enter__(self):
+        global SYM_FUNCTION_MODE
+        old = SYM_FUNCTION_MODE
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
+        else:
+            self.inner = old
+        SYM_FUNCTION_MODE = self
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global SYM_FUNCTION_MODE
+        SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
     return any([isinstance(i, torch._C.SymIntNode) for i in elem.shape])
@@ -41,8 +71,22 @@ def handle_symbolic_op(func, args, kwargs):
     if func == torch.ops.aten.is_contiguous.default:
         return True
     # TODO: hack, we don't currently support symbolic strides properly
+    # NB: this results in goop in the trace, it will be fixed when we have
+    # proper support
     if func == torch.ops.aten.stride.default:
         return create_contiguous(args[0].shape)
+
+def _handle_sym_dispatch(func, args, kwargs):
+    global SYM_FUNCTION_MODE
+    mode = SYM_FUNCTION_MODE
+    assert mode
+    SYM_FUNCTION_MODE = mode.inner
+    try:
+        # TODO: properly compute types
+        types: List[Type] = []
+        return mode.__sym_dispatch__(func, types, args, kwargs)
+    finally:
+        SYM_FUNCTION_MODE = mode
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -53,12 +97,13 @@ class PySymInt(object):
     our program. They're what sit under FakeTensor, and contains our primary
     implementation of symbolic shapes.
     """
-    def __init__(self, expr, shape_env):
+    def __init__(self, expr, shape_env, constant=None):
         self.expr = expr
         self.shape_env = shape_env
+        self.constant = constant
 
     def wrap(self, num):
-        return PySymInt(sympy.Integer(num), self.shape_env)
+        return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def __str__(self):
         return f"PySymInt({self.expr})"
@@ -90,17 +135,22 @@ magic_methods = {
 }
 
 for method, _func in magic_methods.items():
-    method_name = f'{method}'
-
     def _create_magic_impl(func):
+        method_name = method
+
         def magic_impl(self, other):
+            if SYM_FUNCTION_MODE:
+                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
             if isinstance(other, PySymInt):
                 other = other.expr
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymIntNode
-    setattr(PySymInt, method_name, _create_magic_impl(_func))
+    setattr(PySymInt, method, _create_magic_impl(_func))
+    setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
+    if method in reflectable_magic_methods:
+        setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
 
 class ShapeEnv(object):
     def __init__(self):

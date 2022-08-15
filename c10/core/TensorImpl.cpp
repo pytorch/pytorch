@@ -6,6 +6,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -537,17 +538,24 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
+  c10::intrusive_ptr<TensorImpl> r;
+  const auto& maybe_torch_dispatch_mode_state =
+      c10::impl::TorchDispatchModeTLS::get_state();
+  // TODO: do we have to exclude after Python dispatch key set?
+  if (maybe_torch_dispatch_mode_state) {
+    r = maybe_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+  } else if (
+      key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::forward<VariableVersion>(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
+    r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
   }
+  if (r) {
+    r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    return r;
+  }
+  // otherwise just copy the TensorImpl and not the PyObject.  Since
+  // the interpreter is dead no one can call us out on it
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_,
