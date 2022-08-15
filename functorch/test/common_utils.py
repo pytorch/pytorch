@@ -38,6 +38,19 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     return loop_out
 
 
+def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
+    if inplace_variant is None:
+        return False
+    if sample_input.broadcasts_input:
+        return False
+
+    # Check if input's dtype matches the output's dtype
+    args = (sample_input.input,) + sample_input.args
+    kwargs = sample_input.kwargs
+    output_dtype = op(*args, **kwargs).dtype
+    return sample_input.input.dtype == output_dtype
+
+
 # This is kind of dangerous, please think carefully before using it.
 # Known risks:
 # - the return better not be mutated so it's best to return immutable types

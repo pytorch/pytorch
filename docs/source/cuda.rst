@@ -33,6 +33,7 @@ torch.cuda
     stream
     synchronize
     utilization
+    OutOfMemoryError
 
 Random Number Generator
 -------------------------

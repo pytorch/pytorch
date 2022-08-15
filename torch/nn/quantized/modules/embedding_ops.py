@@ -84,7 +84,7 @@ class Embedding(torch.nn.Module):
         >>> indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8])
         >>> output = m(indices)
         >>> print(output.size())
-        torch.Size([9, 12]
+        torch.Size([9, 12])
 
     """
     _version = 1
@@ -210,7 +210,7 @@ class EmbeddingBag(Embedding):
         >>> offsets = torch.tensor([0, 19, 20, 28, 28, 32])
         >>> output = m(indices, offsets)
         >>> print(output.size())
-        torch.Size([5, 12]
+        torch.Size([5, 12])
 
     """
     _version = 1
