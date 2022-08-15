@@ -993,8 +993,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
       ", but ", t_.sizes(), " != ", src_.sizes());
 
   // mul_sparse_sparse_out_stub
-  // is faster if there uncoalesced inputs
-  if (!t_.is_coalesced() || src_.is_coalesced()) {
+  // is faster if there is an uncoalesced input
+  if (!t_.is_coalesced() || !src_.is_coalesced()) {
     mul_sparse_sparse_out_stub(at::kCPU, r, t_, src_);
   }
 
