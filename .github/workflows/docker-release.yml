@@ -1,4 +1,4 @@
-name: docker-builds
+name: docker-release
 
 on:
   workflow_dispatch:
@@ -35,12 +35,13 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     strategy:
-      includes:
-        # nvidia specific images don't exist for arm64 so only build the runtime image
-        - image_type: runtime
-          platform: linux/arm64,linux/amd64
-        - image_type: devel
-          platform: linux/amd64
+      matrix:
+        include:
+          # nvidia specific images don't exist for arm64 so only build the runtime image
+          - image_type: runtime
+            platform: linux/arm64,linux/amd64
+          - image_type: devel
+            platform: linux/amd64
     env:
       BUILD_PLATFORMS: ${{ matrix.platform }}
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
