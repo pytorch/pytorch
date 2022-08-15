@@ -1867,15 +1867,28 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
     info.zero_();
     return;
   }
+  const auto cpu = A.device() == kCPU;
 
-  L.copy_(A);
+  // We can perform this optimisation just on CPU as it fails for MAGMA
+  // due to some bug
+  if (cpu) {
+    if (upper) {
+      at::triu_out(const_cast<Tensor&>(L), A);
+    } else {
+      at::tril_out(const_cast<Tensor&>(L), A);
+    }
+  } else {
+    L.copy_(A);
+  }
 
   cholesky_stub(L.device().type(), L, info, upper);
 
-  if (upper) {
-    L.triu_();
-  } else {
-    L.tril_();
+  if (!cpu) {
+    if (upper) {
+      L.triu_();
+    } else {
+      L.tril_();
+    }
   }
 
   if (check_errors) {
