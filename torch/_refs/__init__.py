@@ -3484,8 +3484,8 @@ def movedim(
     )
 
     rank = input.ndim
-    ss = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in source]  # type: ignore[union-attr]
-    ds = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in destination]  # type: ignore[union-attr]
+    ss = tuple(utils.canonicalize_dims(rank=rank, indices=source))  # type: ignore[arg-type]
+    ds = tuple(utils.canonicalize_dims(rank=rank, indices=destination))  # type: ignore[arg-type]
 
     sss = set(ss)
     dss = set(ds)
