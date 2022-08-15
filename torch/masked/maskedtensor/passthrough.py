@@ -8,7 +8,7 @@ a new MaskedTensor as a result.
 
 import torch
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 
 PASSTHROUGH_FNS = [
