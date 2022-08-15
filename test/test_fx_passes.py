@@ -572,7 +572,6 @@ class MultipleOutputsIdenticalAnchor:
         TestCase(False, True, 0),
     ]
 
-
 class MultipleOutputsHorizontalPattern:
     @staticmethod
     def forward(x):
@@ -599,6 +598,61 @@ class MultipleOutputsHorizontalPattern:
         TestCase(True, True, 0)
     ]
 
+class PatternWithPseudoAny:
+    @staticmethod
+    def forward(x):
+        x = x.relu()
+        x = x.sigmoid()
+
+        y = x.relu()
+        y = y + 1
+
+        z = y.relu()
+        z = z.relu()
+
+        return z
+
+    @staticmethod
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.any(y)
+        return z
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 3),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+
+class PatternWithPseudoOneof:
+    @staticmethod
+    def forward(x):
+        x = x.relu()
+        x = torch.sigmoid(x)
+
+        z = x.relu()
+        z = torch.relu(z)
+
+        y = x.relu()
+        y = y + 1
+
+        return y
+
+    @staticmethod
+    def pattern(a):
+        y = a.relu()
+        z = torch.ops.pseudo.oneof(y, targets=["torch.sigmoid", "operator.add"])
+        return z
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 2),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
 
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
@@ -616,7 +670,9 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsMultipleOverlappingMatches,
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
-        MultipleOutputsHorizontalPattern
+        MultipleOutputsHorizontalPattern,
+        PatternWithPseudoAny,
+        PatternWithPseudoOneof,
     ])
     def test_subgraph_matcher(self, test_model):
         traced = symbolic_trace(test_model.forward)
