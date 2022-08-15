@@ -1,5 +1,5 @@
-DOCKER_REGISTRY           = docker.io
-DOCKER_ORG                = $(shell docker info 2>/dev/null | sed '/Username:/!d;s/.* //')
+DOCKER_REGISTRY          ?= docker.io
+DOCKER_ORG               ?= $(shell docker info 2>/dev/null | sed '/Username:/!d;s/.* //')
 DOCKER_IMAGE              = pytorch
 DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)
 
@@ -20,13 +20,13 @@ endif
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
-INSTALL_CHANNEL           = pytorch
+INSTALL_CHANNEL          ?= pytorch
 
-PYTHON_VERSION            = 3.8
-PYTORCH_VERSION           = $(shell git describe --tags --always)
+PYTHON_VERSION           ?= 3.8
+PYTORCH_VERSION          ?= $(shell git describe --tags --always)
 # Can be either official / dev
-BUILD_TYPE                = dev
-BUILD_PROGRESS            = auto
+BUILD_TYPE               ?= dev
+BUILD_PROGRESS           ?= auto
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg MUTEX_PACKAGE=$(MUTEX_PACKAGE) \
@@ -37,7 +37,7 @@ EXTRA_DOCKER_BUILD_FLAGS ?=
 
 BUILD                    ?= build
 # Intentionally left blank
-PLATFORMS_FLAG            =
+PLATFORMS_FLAG           ?=
 USE_BUILDX               ?=
 ifneq ("$(USE_BUILDX)","")
 BUILD                     = buildx build

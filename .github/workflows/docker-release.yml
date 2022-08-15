@@ -12,11 +12,15 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - ciflow/nightly/*
     paths:
       - Dockerfile
       - docker.Makefile
   schedule:
-    - cron: 1 3 * * 3
+    - cron: 0 0 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -65,7 +69,7 @@ jobs:
           # To get QEMU binaries in our PATh
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
-          echo "PYTORCH_VERSION=$(python .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
+          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
       - name: Run docker build
         run: |
           make -f docker.Makefile ${BUILD_IMAGE_TYPE}-image
