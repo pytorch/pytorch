@@ -39,6 +39,7 @@ from common_utils import (
     is_batch_norm_training,
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
+    is_valid_inplace_sample_input,
 )
 import types
 from collections import namedtuple
@@ -334,21 +335,6 @@ class TestVmapAPI(TestCase):
         expected = f(x)
         self.assertEqual(out["sin"], expected["sin"])
         self.assertEqual(out["cos"], expected["cos"])
-
-    # temporary test for _odict_flatten and _odict_unflatten
-    def test_pytest_odict_flatten_unflatten(self):
-
-        from functorch._src.vmap import _odict_flatten, _odict_unflatten
-
-        x = torch.randn(2, 3)
-        inpt = OrderedDict([("sin", x.sin()), ("cos", x.cos())])
-
-        out = _odict_flatten(inpt)
-        self.assertEqual(out[0], list(inpt.values()))
-        self.assertEqual(out[1], list(inpt.keys()))
-
-        recon_inpt = _odict_unflatten(*out)
-        self.assertEqual(recon_inpt, inpt)
 
     def test_pytree_returns_outdims(self):
         x = torch.randn(2, 3)
@@ -2759,10 +2745,13 @@ class TestVmapOperators(Namespace.TestVmapBase):
 instantiate_parametrized_tests(TestVmapOperators)
 
 
-def construct_v(output, batch_size):
-    return torch.randn(batch_size, *output.shape,
-                       dtype=output.dtype, device=output.device)
-
+def construct_v(output, batch_size, contig=False):
+    if contig:
+        return torch.randn(batch_size, *output.shape,
+                           dtype=output.dtype, device=output.device)
+    result = torch.randn(*output.shape, batch_size,
+                         dtype=output.dtype, device=output.device)
+    return result.movedim(-1, 0)
 
 def as_tuple(x):
     if isinstance(x, tuple):
@@ -2801,13 +2790,15 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             kwargs = {}
         outputs = op(*args, **kwargs)
         outputs = differentiable(output_process_fn(outputs))
-        batched_vectors = tuple(construct_v(out, batch_size) for out in outputs)
+        for contig in [True, False]:
+            batched_vectors = tuple(construct_v(out, batch_size, contig)
+                                    for out in outputs)
 
-        def vector_jacobian_product(*vectors):
-            return torch.autograd.grad(outputs, differentiable(args), vectors,
-                                       retain_graph=True)
-        self._vmap_test(vector_jacobian_product, batched_vectors,
-                        check_propagates_grad=False)
+            def vector_jacobian_product(*vectors):
+                return torch.autograd.grad(outputs, differentiable(args), vectors,
+                                           retain_graph=True)
+            self._vmap_test(vector_jacobian_product, batched_vectors,
+                            check_propagates_grad=False)
 
     # Tests batched second grad computation of outputs = op(*args, **kwargs).
     # by comparing it to a sequential map+stack fallback.
@@ -2835,17 +2826,19 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertNotEqual(
             len(first_grads), 0, "None of the first grads depend on the input!")
 
-        batched_vectors = tuple(construct_v(grad, batch_size) for grad in first_grads)
+        for contig in [True, False]:
+            batched_vectors = tuple(construct_v(grad, batch_size, contig)
+                                    for grad in first_grads)
 
-        def vector_hessian_product(*vectors):
-            outputs = torch.autograd.grad(first_grads, differentiable(args), vectors,
-                                          retain_graph=True, allow_unused=True)
-            outputs = tuple(out for out in outputs if out is not None)
-            assert len(outputs) > 0
-            return outputs
+            def vector_hessian_product(*vectors):
+                outputs = torch.autograd.grad(first_grads, differentiable(args), vectors,
+                                              retain_graph=True, allow_unused=True)
+                outputs = tuple(out for out in outputs if out is not None)
+                assert len(outputs) > 0
+                return outputs
 
-        self._vmap_test(vector_hessian_product, batched_vectors,
-                        check_propagates_grad=False)
+            self._vmap_test(vector_hessian_product, batched_vectors,
+                            check_propagates_grad=False)
 
     def _test_arithmetic(self, op, device, test_grad_grad=True):
         x = torch.randn(2, 3, requires_grad=True, device=device)
@@ -3116,19 +3109,6 @@ def discover_variants(opinfo):
     return aliases, inplace_variants
 
 
-def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
-    if inplace_variant is None:
-        return False
-    if sample_input.broadcasts_input:
-        return False
-
-    # Check if input's dtype matches the output's dtype
-    args = (sample_input.input,) + sample_input.args
-    kwargs = sample_input.kwargs
-    output_dtype = op(*args, **kwargs).dtype
-    return sample_input.input.dtype == output_dtype
-
-
 class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False):
@@ -3156,6 +3136,18 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule, skip_inplace=()):
         def test():
+            # Error inputs check
+            if op.error_inputs_func is not None:
+                error_inputs = op.error_inputs(device)
+                for error_input in error_inputs:
+                    sample_input = error_input.sample_input
+                    args = (sample_input.input,) + tuple(sample_input.args)
+                    kwargs = sample_input.kwargs
+                    for args, in_dims, _ in generate_vmap_inputs(args, {}):
+                        with self.assertRaises(Exception):
+                            vmap(op, in_dims)(*args, **kwargs)
+
+            # Sample inputs check
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
@@ -3231,6 +3223,22 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('int'),
         xfail('long'),
         xfail('short'),
+
+        xfail('linspace', ''),
+        xfail('nn.functional.dropout3d', ''),
+        xfail('broadcast_shapes', ''),
+        xfail('clamp_min', ''),
+        xfail('sparse.sampled_addmm'),
+        xfail('jiterator_binary', device_type='cuda'),
+        xfail('arange', ''),
+        xfail('clamp_max', ''),
+        xfail('jiterator_binary_return_by_ref', device_type='cuda'),
+        xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
+        xfail('equal', ''),
+        xfail('jiterator_unary', device_type='cuda'),
+        xfail('logspace', ''),
+        xfail('jiterator_2inputs_2outputs', device_type='cuda'),
+        xfail('empty', ''),
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -3357,6 +3365,51 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('scatter_reduce', 'mean'),
         xfail('nn.functional.max_unpool3d', ''),
+        xfail('linalg.ldl_solve', '', device_type='cpu'),
+        xfail('chalf', ''),
+        xfail('arange', ''),
+        xfail('clamp_max', ''),
+        xfail('jiterator_binary_return_by_ref', device_type='cuda'),
+        xfail('special.spherical_bessel_j0'),
+        xfail('jiterator_unary', device_type='cuda'),
+        xfail('jiterator_2inputs_2outputs', device_type='cuda'),
+        xfail('special.airy_ai'),
+        xfail('clamp_min', ''),
+        xfail('special.bessel_j0'),
+        xfail('sparse.sampled_addmm'),
+        xfail('special.bessel_y0'),
+        xfail('special.chebyshev_polynomial_u'),
+        xfail('special.modified_bessel_k1'),
+        xfail('segment_reduce', 'offsets'),
+        xfail('linalg.solve_ex', ''),
+        xfail('special.bessel_j1'),
+        xfail('logspace', ''),
+        xfail('empty', ''),
+        xfail('index_reduce', ''),
+        xfail('linspace', ''),
+        xfail('special.laguerre_polynomial_l'),
+        xfail('special.hermite_polynomial_h'),
+        xfail('jiterator_binary', device_type='cuda'),
+        xfail('special.modified_bessel_i0'),
+        xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
+        xfail('linalg.vander', ''),
+        xfail('segment_reduce', 'lengths'),
+        xfail('linalg.lu_solve', ''),
+        xfail('special.bessel_y1'),
+        xfail('special.hermite_polynomial_he'),
+        xfail('special.scaled_modified_bessel_k0'),
+        xfail('nn.functional.dropout3d', ''),
+        xfail('special.scaled_modified_bessel_k1'),
+        xfail('broadcast_shapes', ''),
+        xfail('special.modified_bessel_k0'),
+        xfail('linalg.vecdot', ''),
+        xfail('linalg.ldl_factor', ''),
+        xfail('special.modified_bessel_i1'),
+        xfail('special.chebyshev_polynomial_t'),
+        xfail('as_strided_scatter', ''),
+        xfail('equal', ''),
+        xfail('linalg.lu', ''),
+        skip('linalg.ldl_solve', ''),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -3619,6 +3672,31 @@ class TestVmapOperatorsOpInfo(TestCase):
         y = torch.randn(2, 3, device=device)
         self.assertTrue(isinstance(vmap(f)(x, y), Point))
 
+    def test_inplace_on_view(self, device):
+        def func(leaf):
+            base = leaf * leaf
+            view = base.transpose(0, 1)
+            view[2:4, 2:4] *= 2
+            view[0:2, 0:2].diagonal().sin_()
+            view = view[1:3, 1:3]
+            view.cos_()
+            return view
+
+        def push_vjp(leaf, gout):
+            _, vjp_fn = vjp(func, leaf)
+            result, = vjp_fn(gout)
+            return result
+
+        leaf = torch.randn(4, 4, device=device)
+        gout = torch.randn(2, 2, device=device)
+        args = (leaf, gout)
+
+        for args, in_dims, _, in generate_vmap_inputs(args, {}):
+            if in_dims[1] is None:
+                # triggers some composite compliance problem
+                continue
+            self.vmap_outplace_test(push_vjp, args, {}, in_dims)
+
     def test_advanced_indexing(self, device):
         def test(f, args):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}):
@@ -3674,6 +3752,9 @@ class TestVmapOperatorsOpInfo(TestCase):
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
+        xfail('linalg.vander'),
+        xfail('linalg.vecdot'),
+        skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype, requires_grad=False):

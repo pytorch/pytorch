@@ -2911,6 +2911,34 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
+          "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            Val* negative_slope = value_map[node->inputs()[1]->unique()];
+
+            auto out = leaky_relu(self, negative_slope);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
           "aten::gelu(Tensor self, *, str approximate='none') -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
