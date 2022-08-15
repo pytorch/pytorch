@@ -42,15 +42,16 @@ def sharded_embedding_bag(types, args, kwargs, pg):
     4 GPUs creating 4 shard of (4 x 17).
     The algorithm is as follows:
 
-    1. First the input is broadcasted to all ranks, since this is SPMD we
-       actually do an all_gather for all the inputs resulting in 4 (4 x 6)
-       inputs on each rank. For example if the given input is
+    1. First the input is all gathered to all ranks, since this is SPMD and
+       input is actually sharded across all ranks. The inputs then become a
+       4 (4 x 6) tensor on each rank. For example if the given input is
        tensor([[6, 5, 2, 9, 6, 3],
                [3, 1, 2, 4, 7, 6],
                [4, 0, 4, 9, 8, 9],
                [8, 6, 6, 4, 6, 1]])
        on rank 0.
        Then on every rank, we will have this tensor.
+       If input itself is already replicated, no all-gather will be done.
     2. Next, we mask the ID which are not stored on that rank.
        For example on rank 0, we store ID [0, 1, 2]. We only keep the ID
        inside the set of numbers. The rest of them will be masked to an extra row.
@@ -185,7 +186,7 @@ def _validate_embedding_bag_param(args, kwargs):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) > 2:
         raise ValueError("Input more than 2 dims not supported")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
@@ -300,11 +301,11 @@ def _handle_col_wise_sharding(
         weight,
         local_shard,
         pg,
+        gathered_inputs,
         mode=mode,
         gathered_per_sample_weights=gathered_per_sample_weights,
         gathered_offsets=gathered_offsets,
         padding_idx=padding_idx,
-        gathered_inputs=gathered_inputs,
     )
     return (output, local_shard)
 
@@ -362,7 +363,7 @@ def _handle_row_wise_sharding(
                 gathered_per_sample_weights,
                 gathered_offsets,
             ) = _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg)
-            cat_dim = 0 if input.dim() > 1 else -1
+            cat_dim = 0 if input.dim() != 1 else -1
             gather_inp = torch.cat(gathered_inputs, dim=cat_dim)
             if per_sample_weights is not None:
                 per_sample_weights = torch.cat(gathered_per_sample_weights, dim=cat_dim)

@@ -369,6 +369,13 @@ struct TORCH_API FunctionSchema {
   bool is_varret() const {
     return is_varret_;
   }
+  bool is_aliasing(const c10::SchemaArgument &argument) const {
+    TORCH_INTERNAL_ASSERT(
+    argument.index < getCorrectList(argument.type).size(),
+    "Invalid index for schema.");
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
+    return aliasInfo;
+  }
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
@@ -376,11 +383,11 @@ struct TORCH_API FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
-  bool is_mutable(size_t index) const {
+  bool is_mutable(const c10::SchemaArgument &argument) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size(),
+        argument.index < getCorrectList(argument.type).size(),
         "Invalid index for schema.");
-    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
   bool is_mutable(c10::string_view name) const {
@@ -388,7 +395,7 @@ struct TORCH_API FunctionSchema {
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
-    return is_mutable(*index);
+    return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
 
   // Returns whether lhs and rhs may alias directly.
@@ -418,7 +425,7 @@ struct TORCH_API FunctionSchema {
 
   // Returns either arguments() or returns() depending on the SchemaArgType
   // output => returns(), input => arguments()
-  std::vector<Argument> getCorrectList(SchemaArgType type) const;
+  const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {

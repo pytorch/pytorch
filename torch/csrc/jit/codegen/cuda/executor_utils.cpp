@@ -30,6 +30,7 @@
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
@@ -101,6 +102,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -775,7 +777,12 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
-        const auto extent = root_domain[dim]->extent();
+        Val* extent = nullptr;
+        if (root_domain[dim]->hasExpandedExtent()) {
+          extent = root_domain[dim]->expandedExtent();
+        } else {
+          extent = root_domain[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -792,7 +799,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }
@@ -843,7 +850,12 @@ ExpressionEvaluator bindFusionInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");
       for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
+        Val* extent = nullptr;
+        if (root_dom[dim]->hasExpandedExtent()) {
+          extent = root_dom[dim]->expandedExtent();
+        } else {
+          extent = root_dom[dim]->extent();
+        }
         const auto value = aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
@@ -913,9 +925,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
+    std::stringstream ss;
+    ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
@@ -962,11 +977,13 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     args.push_back("--fmad=true");
   }
 #endif
-
-#ifndef NDEBUG
   // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
+  if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
+    args.push_back("-lineinfo");
+    args.push_back("-G");
+    args.push_back("--dopt=on");
+  }
+#ifdef NDEBUG
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
@@ -1007,6 +1024,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");

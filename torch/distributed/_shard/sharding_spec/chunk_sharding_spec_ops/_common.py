@@ -89,7 +89,7 @@ def _handle_col_wise_sharding_base(
     weight,
     local_shard,
     pg,
-    gathered_inputs=None,
+    gathered_inputs,
     mode=None,
     gathered_per_sample_weights=None,
     gathered_offsets=None,
@@ -125,10 +125,6 @@ def _handle_col_wise_sharding_base(
 
     Return: final result of input being applied with the op.
     """
-    if gathered_inputs is None:
-        # allgather the inputs first.
-        gathered_inputs = all_gather(input, group=pg)
-
     # run the operator's function for all the inputs.
     results = []
     for i, inp in enumerate(gathered_inputs):
@@ -186,7 +182,9 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
     dims = list(results[0].size())
     dims[0] = sharding_dim_size
     combined_results = torch.cat(results)
-    output = torch.empty(*dims, device=combined_results.device, dtype=combined_results.dtype)
+    output = torch.empty(
+        *dims, device=combined_results.device, dtype=combined_results.dtype
+    )
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
@@ -345,6 +343,8 @@ def _handle_row_wise_mask(gather_inp, padding_idx, weight, world_size, rank):
         and padding_idx < (start_pos + chunk_size)
     ):
         padding_idx = padding_idx - start_pos
+    else:
+        padding_idx = None
 
     # When max_norm is set, it will only re-norm the row being looked up.
     padding_row = torch.zeros(
