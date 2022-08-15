@@ -5,6 +5,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
+import json
 import sys
 import os
 import platform
@@ -34,7 +35,6 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 import tempfile
-import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
@@ -92,6 +92,18 @@ MAX_NUM_RETRIES = 3
 
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+
+disabled_tests_dict = {}
+slow_tests_dict = {}
+
+if os.getenv("IMPORT_SLOW_TESTS", ""):
+    with open(SLOW_TESTS_FILE, 'r') as fp:
+        slow_tests_dict = json.load(fp)
+        print("loaded slow tests dict")
+if os.getenv("DISABLED_TESTS_DICT", ""):
+    with open(DISABLED_TESTS_FILE, 'r') as fp:
+        disabled_tests_dict = json.load(fp)
+        print("loaded disabled tests dict")
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
@@ -623,19 +635,19 @@ def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
-            with open(IMPORT_SLOW_TESTS, 'r') as fp:
+            with open(SLOW_TESTS_FILE, 'r') as fp:
+                global slow_tests_dict
+                slow_tests_dict = json.load(fp)
                 # use env vars so pytest-xdist subprocesses can still access them
-                os.environ['SLOW_TESTS_DICT'] = fp.read()
+                os.environ['SLOW_TESTS_DICT'] = "1"
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
-        # This is unsafe to store the list of disabled tests on Windows in a single env
-        # variable because it has an upper limit of 32767 characters in length. We will
-        # need to think of a better way to handle this in Windows if the test time there
-        # is impact by this
-        if os.path.exists(IMPORT_DISABLED_TESTS) and not IS_WINDOWS:
-            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                os.environ['DISABLED_TESTS_DICT'] = fp.read()
+        if os.path.exists(IMPORT_DISABLED_TESTS):
+            with open(DISABLED_TESTS_FILE, 'r') as fp:
+                global disabled_tests_dict
+                disabled_tests_dict = json.load(fp)
+                os.environ['DISABLED_TESTS_DICT'] = "1"
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
                   f' or we are on Windows whose env variable has an upper limit of 32767 chars')
@@ -1568,24 +1580,12 @@ def check_if_enable(test: unittest.TestCase):
     if "USING_PYTEST" in os.environ:
         test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if raw_test_name in json.loads(os.environ.get("SLOW_TESTS_DICT", "{}")):
+    if raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-
     if not IS_SANDCASTLE:
-        disabled_tests_dict = {}
-
-        if "DISABLED_TESTS_DICT" in os.environ:
-            disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
-        elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
-            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                disabled_tests_dict = json.loads(fp.read())
-        else:
-            # IMPORT_DISABLED_TESTS can be None here
-            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
-
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
