@@ -576,6 +576,7 @@ def run_doctests(test_module, test_directory, options):
         # Is there a better check if quantization is enabled?
         import torch.nn.quantized as nnq  # NOQA
         torch.backends.quantized.engine = 'qnnpack'
+        torch.backends.quantized.engine = 'fbgemm'
     except (ImportError, RuntimeError):
         ...
     else:
