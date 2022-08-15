@@ -637,7 +637,8 @@ def run_tests(argv=UNITTEST_ARGS):
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
-            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
+                  f' or we are on Windows whose env variable has an upper limit of 32767 chars')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
