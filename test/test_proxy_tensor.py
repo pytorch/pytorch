@@ -411,13 +411,16 @@ def forward(self, x_1):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-        g = make_fx(f, tracing_mode=self.tracing_mode)()
-        self.assertEqual(g(), f())
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -588,17 +591,7 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    def test_mode_tracing_factory_function_no_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-        # setting the flag to false should not trace factory functions
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
-        self.assertFalse(
-            any(
-                node.target == aten.randn.default
-                for node in traced.graph.nodes
-            )
-        )
+    pass
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -678,6 +671,24 @@ class TestSymbolicTracing(TestCase):
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
         assert len(shape_env.guards) == 1
 
+    def test_new_empty(self):
+        def f(a, b):
+            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
+
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
+
+
+    def test_expand(self):
+        def f(a):
+            b = torch.mul(a, a)
+            c = b.expand(a.shape)
+            return c
+
+        self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
+        self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
+
+
+
 make_fx_failures = {
     # unknown
     xfail('allclose'),
@@ -701,6 +712,8 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
