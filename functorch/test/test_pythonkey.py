@@ -373,6 +373,8 @@ class TestEagerFusionOpInfo(TestCase):
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
 
+            # NB: We cache on function id, which is unreliable
+            # Can fix by using weakrefs, but not sure if it matters
             clear_compile_cache()
 
             compiled_f = compiled_function(f, nop, nop)
