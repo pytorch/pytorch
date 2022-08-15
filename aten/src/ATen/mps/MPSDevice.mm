@@ -42,7 +42,7 @@ MPSDevice* MPSDevice::getInstance() {
   return mps_device.get();
 }
 
-id<MTLFunction> MPSDevice::metalFunction(const std::string& kernel, MTLFunctionConstantValues* constantValues) {
+id<MTLFunction> MPSDevice::metalIndexingFunction(const std::string& kernel, MTLFunctionConstantValues* constantValues) {
   assert(_mtl_device);
   NSError* error = nil;
   if (!_mtl_indexing_library) {
@@ -55,9 +55,15 @@ id<MTLFunction> MPSDevice::metalFunction(const std::string& kernel, MTLFunctionC
     TORCH_CHECK(_mtl_indexing_library, "Failed to create indexing library, error: ", [[error description] UTF8String]);
   }
 
-  id<MTLFunction> indexFunction = [_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String:kernel.c_str()]
-                                                              constantValues: constantValues
-                                                                       error: &error];
+  id<MTLFunction> indexFunction = nil;
+  if (constantValues) {
+    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]
+                                                constantValues: constantValues
+                                                         error: &error] autorelease];
+  } else {
+    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]] autorelease];
+  }
+
   TORCH_CHECK(indexFunction, "Failed to create specialized function state object: ", kernel, ", error: ", [[error description] UTF8String]);
 
   return indexFunction;
@@ -65,10 +71,12 @@ id<MTLFunction> MPSDevice::metalFunction(const std::string& kernel, MTLFunctionC
 
 MPSDevice::~MPSDevice() {
   [_mtl_device release];
+  [_mtl_indexing_library release];
   _mtl_device = nil;
+  _mtl_indexing_library = nil;
 }
 
-MPSDevice::MPSDevice(): _mtl_device(nil) {
+MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
   // Check that MacOS 12.3+ version of MPS framework is available
   // Create the MPSGraph and check method introduced in 12.3+
   // which is used by MPS backend.
@@ -91,7 +99,6 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
       break;
     }
   }
-  _mtl_indexing_library = nil;
   assert(_mtl_device);
 }
 

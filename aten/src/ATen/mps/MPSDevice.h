@@ -54,7 +54,7 @@ class TORCH_API MPSDevice {
     return _mtl_device;
   }
 
-  MTLFunction_t metalFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
+  MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
 
   ~MPSDevice();
 
