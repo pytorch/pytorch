@@ -512,6 +512,27 @@ def wrapper_and_args_for_make_fx(func, args, kwargs):
         return func(*fn_args, **fn_kwargs)
     return wrapped, flat_args
 
+# Copied from torchdynamo
+# Needed so that tracing in-palce functions doesn't modify inputs
+def clone_input(x):
+    with torch.no_grad():
+        needed_size = sum(
+            (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
+        )
+        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        try:
+            result.copy_(x.clone())
+            result.requires_grad_(x.requires_grad)
+        except RuntimeError:
+            # RuntimeError: unsupported operation: more than one element of the written-to
+            # tensor refers to a single memory location. Please clone() the tensor before
+            # performing the operation.
+            return torch.clone(x)
+        return result
 
 def make_fx(f, decomposition_table=None, tracing_mode="real"):
     assert tracing_mode in ["real", "fake", "symbolic"]
@@ -535,6 +556,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
+        def wrap_real(x):
+            if isinstance(x, torch.Tensor):
+                return clone_input(x)
+            return x
+
         def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
@@ -551,7 +577,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             return x
 
         wrap_fn_map = {
-            "real": lambda x: x,
+            "real": wrap_real,
             "fake": wrap_fake_concrete,
         }
         if tracing_mode == "symbolic":
