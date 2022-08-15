@@ -1358,20 +1358,20 @@ class DetectorQConfigMapping():
         self.detector_classes = detector_classes
         self.mapping = mapping
 
-    def get_detector_class() -> List[DetectorBase]:
+    def get_detector_class(self) -> List[DetectorBase]:
         r"""
         Returns the classes of the detector this mapping corresponds to
         """
         return self.detector_classes
 
-    def get_detector_mapping() -> QConfigMapping:
+    def get_detector_mapping(self) -> QConfigMapping:
         r"""
         Returns the QConfigMapping that was generated based on the
         detector specific suggestions
         """
         return self.mapping
 
-    def merge_detector_mappings(mapping_to_merge: DetectorQConfigMapping) -> DetectorQConfigMapping:
+    def merge_detector_mappings(self, mapping_to_merge: DetectorQConfigMapping) -> DetectorQConfigMapping:
         r"""
         Returns a newly generated DetectorQConfigMapping resulting from merging
         two DetectorQConfigMappings together.
