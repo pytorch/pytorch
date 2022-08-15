@@ -421,7 +421,8 @@ inline InferredType tryToInferType(py::handle input) {
 inline InferredType tryToInferContainerType(py::handle input) {
   if (six::isTuple(input)) {
     // check if this is a NamedTuple. If so, it needs special handling.
-    py::object input_type = py::reinterpret_borrow<py::object>(input.get_type());
+    py::object input_type =
+        py::reinterpret_borrow<py::object>(input.get_type());
     if (PythonResolver::isNamedTupleClass(input_type)) {
       // fake SourceRange
       static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
