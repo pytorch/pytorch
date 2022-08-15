@@ -38,11 +38,12 @@ EXTRA_DOCKER_BUILD_FLAGS ?=
 BUILD                    ?= build
 # Intentionally left blank
 PLATFORMS_FLAG            =
-ifdef $(USE_BUILDX)
-BUILD                     = buildx
+USE_BUILDX               ?=
+ifneq ("$(USE_BUILDX)","")
+BUILD                     = buildx build
 # Only set platforms flags if using buildx
 ifdef $(BUILD_PLATFORMS)
-PLATFORMS_FLAG            = --platform $(BUILD_PLATFORMS)
+PLATFORMS_FLAG            = --platform="$(BUILD_PLATFORMS)"
 endif
 endif
 
@@ -50,6 +51,7 @@ DOCKER_BUILD              = DOCKER_BUILDKIT=1 \
 							docker $(BUILD) \
 								--progress=$(BUILD_PROGRESS) \
 								$(EXTRA_DOCKER_BUILD_FLAGS) \
+								$(PLATFORMS_FLAG) \
 								--target $(BUILD_TYPE) \
 								-t $(DOCKER_FULL_NAME):$(DOCKER_TAG) \
 								$(BUILD_ARGS) .

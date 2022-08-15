@@ -28,9 +28,16 @@ ENV PATH /opt/conda/bin:$PATH
 
 FROM dev-base as conda
 ARG PYTHON_VERSION=3.8
+# Automatically set by buildx
+ARG TARGETPLATFORM
+# translating Docker's TARGETPLATFORM into miniconda arches
+RUN case ${TARGETPLATFORM} in \
+         "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
+         *)              MINICONDA_ARCH=x86_64   ;; \
+    esac && \
+    curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
-RUN curl -fsSL -v -o ~/miniconda.sh -O  https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
-    chmod +x ~/miniconda.sh && \
+RUN chmod +x ~/miniconda.sh && \
     ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda install -y python=${PYTHON_VERSION} cmake conda-build pyyaml numpy ipython && \
@@ -56,7 +63,14 @@ ARG PYTHON_VERSION=3.8
 ARG MUTEX_PACKAGE=cpuonly
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y python=${PYTHON_VERSION} pytorch torchvision torchtext "${MUTEX_PACKAGE}" && \
+# Automatically set by buildx
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+ARG TARGETPLATFORM
+# On arm64 we can only install wheel packages
+RUN case ${TARGETPLATFORM} in \
+         "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchtext ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchtext "${MUTEX_PACKAGE}"  ;; \
+    esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
 
