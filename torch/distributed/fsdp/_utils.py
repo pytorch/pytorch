@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
+from torch.nn.parallel.scatter_gather import _is_namedtuple  # type: ignore[attr-defined]
 
 from torch.nn.utils.rnn import PackedSequence
 
@@ -43,6 +44,9 @@ def _apply_to_tensors(
             return x
         elif isinstance(x, dict):
             return {key: apply(value) for key, value in x.items()}
+        elif _is_namedtuple(x):
+            res = (apply(el) for el in x)
+            return type(x)(*res)
         elif isinstance(x, (list, tuple, set)):
             return type(x)(apply(el) for el in x)
         else:

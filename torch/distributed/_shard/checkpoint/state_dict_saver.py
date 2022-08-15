@@ -128,6 +128,7 @@ def save_state_dict(
         no_dist (bool): Don't attempt to save in SPMD style. Default to False
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
         >>> # We must call this function prior to state_dict()
         >>> my_model._register_state_dict_hook(state_dict_hook)
