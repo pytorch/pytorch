@@ -57,8 +57,7 @@
          ".circleci/**",
          ".jenkins/**",
          "scripts/**",
-         "tools/**",
-         ".github/ci_commit_pins/*"
+         "tools/**"
       ],
       "approved_by": ["alband", "dagitses", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
@@ -70,13 +69,25 @@
    {
       "name": "OSS CI / pytorchbot",
       "patterns": [
-         ".github/ci_commit_pins/*"
+         ".github/ci_commit_pins/vision.txt",
+         ".github/ci_commit_pins/torchdynamo.txt"
       ],
       "approved_by": ["pytorchbot"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
          "pull"
+      ]
+   },
+   {
+      "name": "OSS CI / pytorchbot / XLA",
+      "patterns": [".github/ci_commit_pins/xla.txt"],
+      "approved_by": ["pytorchbot"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull / linux-bionic-py3_7-clang8-xla / build",
+         "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)"
       ]
    },
    {
