@@ -108,7 +108,7 @@ size_t computeStorageNbytes(
 
 // not including mobile-only macros in this function,
 // since mobile shouldn't be using symints.
-SymInt computeStorageNbytesSymInt(
+SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     SymInt itemsize_bytes,
@@ -161,20 +161,20 @@ TensorBase empty_generic(
   return tensor;
 }
 
-TensorBase empty_strided_generic(
-    IntArrayRef size,
-    IntArrayRef stride,
+template <typename T>
+TensorBase _empty_strided_generic(
+    T size,
+    T stride,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type) {
   at::detail::check_size_nonnegative(size);
   at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
-  size_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
+  auto size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
-      allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
 
@@ -184,25 +184,22 @@ TensorBase empty_strided_generic(
   return tensor;
 }
 
+TensorBase empty_strided_generic(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type) {
+  return _empty_strided_generic<IntArrayRef>(size, stride, allocator, ks, scalar_type);
+}
+
 TensorBase empty_strided_symint_generic(
     SymIntArrayRef size,
     SymIntArrayRef stride,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type) {
-  at::detail::raise_warning_for_complex_half(scalar_type);
-  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
-  SymInt size_bytes = computeStorageNbytesSymInt(size, stride, dtype.itemsize());
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size_bytes,
-      allocator,
-      /*resizeable=*/true);
-
-  auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), ks, dtype);
-  tensor.unsafeGetTensorImpl()->set_sym_sizes_and_strides(size, stride);
-  return tensor;
+  return _empty_strided_generic<SymIntArrayRef>(size, stride, allocator, ks, scalar_type);
 }
 
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
@@ -345,9 +342,7 @@ TensorBase empty_symint_meta(
   auto scalar_type = dtype_or_default(dtype_opt);
   auto *allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
-  // TODO: do this.  Note that naive implementation will choke on truly
-  // unknown sizes without on the fly reasoning
-  // at::detail::check_size_nonnegative(size);
+  at::detail::check_size_nonnegative(size);
   at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   SymInt size_bytes = dtype.itemsize();
@@ -385,7 +380,7 @@ TensorBase empty_symint_meta(
       TORCH_CHECK(0, "other memory format not implemented yet");
   }
 
-  tensor.unsafeGetTensorImpl()->set_sym_sizes_and_strides(size, strides);
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, strides);
 
   return tensor;
 }

@@ -15,6 +15,12 @@ inline void check_size_nonnegative(IntArrayRef size) {
   }
 }
 
+inline void check_size_nonnegative(SymIntArrayRef size) {
+  // TODO: do this.  Note that naive implementation will choke on truly
+  // unknown sizes without on the fly reasoning
+  return;
+}
+
 TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize,
@@ -24,7 +30,7 @@ TORCH_API size_t computeStorageNbytes(
     IntArrayRef strides,
     size_t itemsize,
     size_t storage_offset = 0);
-TORCH_API SymInt computeStorageNbytesSymInt(
+TORCH_API SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     SymInt itemsize,
