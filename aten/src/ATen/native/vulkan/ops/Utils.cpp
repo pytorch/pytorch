@@ -32,10 +32,10 @@ namespace utils {
  *    tensor would be {NC_aligned/4, H, W, 4}
  */
 Tensor nchw_to_nc4hw(const Tensor& src) {
-  uint32_t N = batch_size(src.sizes());
-  uint32_t C = channels_size(src.sizes());
-  uint32_t H = height_size(src.sizes());
-  uint32_t W = width_size(src.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(src.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(src.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(src.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(src.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
@@ -57,10 +57,10 @@ Tensor nchw_to_nc4hw(const Tensor& src) {
  * same as the tensor produced by a call to format_src_tensor().
  */
 Tensor create_staging_tensor(const vTensor& v_in) {
-  uint32_t N = batch_size(v_in.sizes());
-  uint32_t C = channels_size(v_in.sizes());
-  uint32_t H = height_size(v_in.sizes());
-  uint32_t W = width_size(v_in.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(v_in.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(v_in.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(v_in.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(v_in.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
 
@@ -82,10 +82,10 @@ Tensor create_staging_tensor(const vTensor& v_in) {
  * the properties of the original tensor.
  */
 Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
-  uint32_t N = batch_size(sizes);
-  uint32_t C = channels_size(sizes);
-  uint32_t H = height_size(sizes);
-  uint32_t W = width_size(sizes);
+  uint32_t N = get_dim<Dim4D::Batch>(sizes);
+  uint32_t C = get_dim<Dim4D::Channel>(sizes);
+  uint32_t H = get_dim<Dim4D::Height>(sizes);
+  uint32_t W = get_dim<Dim4D::Width>(sizes);
 
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
 
