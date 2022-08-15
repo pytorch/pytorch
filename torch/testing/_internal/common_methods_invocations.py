@@ -985,7 +985,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         inp, *arg0 = shape
-        yield SampleInput(inp, args=arg0)
+        yield SampleInput(inp, args=tuple(arg0))
 
 def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
@@ -2483,8 +2483,13 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d,)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
+
+def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, None)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
 
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -2504,8 +2509,11 @@ def error_inputs_ormqr(op_info, device, **kwargs):
 
 def error_inputs_diag(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
+                     error_regex="matrix or a vector expected")
+    zero_d = torch.randn(1, 1, 1, device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
+                     error_regex="matrix or a vector expected")
 
 def error_inputs_embedding(op_info, device, **kwargs):
     indices = torch.rand(2, 2, device=device).long()
@@ -8785,7 +8793,15 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_addmm),
+           sample_inputs_func=sample_inputs_addmm,
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
@@ -8799,6 +8815,12 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
            skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.float16,)),
@@ -8855,7 +8877,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda')],
-           sample_inputs_func=sample_inputs_baddbmm),
+           sample_inputs_func=sample_inputs_baddbmm,
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -8864,7 +8894,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           ),
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -8872,7 +8909,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           ),
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -9443,6 +9487,12 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            ),
@@ -9516,6 +9566,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                # Pre-existing condition (calls .item); needs to be fixed
@@ -9911,8 +9967,7 @@ op_db: List[OpInfo] = [
                      # See https://github.com/pytorch/pytorch/pull/78358
                      check_batched_forward_grad=False,
                      decorators=[precisionOverride(
-                         {torch.float: 1e-4, torch.cfloat: 1e-4})],
-                     ),
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})]),
     SpectralFuncInfo('fft.hfft',
                      aten_name='fft_hfft',
                      decomp_aten_name='_fft_c2r',
@@ -9929,7 +9984,16 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
                      check_batched_forward_grad=False,
-                     check_batched_gradgrad=False),
+                     check_batched_gradgrad=False,
+                     skips=(
+                         # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+                         DecorateInfo(
+                             unittest.skip("Skipped!"),
+                             'TestSchemaCheckModeOpInfo',
+                             'test_schema_correctness',
+                             dtypes=(torch.complex64, torch.complex128)
+                         ),
+                     )),
     SpectralFuncInfo('fft.hfft2',
                      aten_name='fft_hfft2',
                      decomp_aten_name='_fft_c2r',
@@ -9951,7 +10015,14 @@ op_db: List[OpInfo] = [
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                              'TestFFT', 'test_reference_nd')],
-                     ),
+                     skips=(
+                         # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+                         DecorateInfo(
+                             unittest.skip("Skipped!"),
+                             'TestSchemaCheckModeOpInfo',
+                             'test_schema_correctness'
+                         ),
+                     )),
     SpectralFuncInfo('fft.hfftn',
                      aten_name='fft_hfftn',
                      decomp_aten_name='_fft_c2r',
@@ -9973,7 +10044,14 @@ op_db: List[OpInfo] = [
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                              'TestFFT', 'test_reference_nd'), ],
-                     ),
+                     skips=(
+                         # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+                         DecorateInfo(
+                             unittest.skip("Skipped!"),
+                             'TestSchemaCheckModeOpInfo',
+                             'test_schema_correctness'
+                         ),
+                     )),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
                      decomp_aten_name='_fft_r2c',
@@ -10624,7 +10702,15 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_vecdot,
            check_batched_forward_grad=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
@@ -10790,7 +10876,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           error_inputs_func=error_inputs_lstsq,
+           error_inputs_func=error_inputs_lstsq_grad_oriented,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_autograd=True,
@@ -11967,6 +12053,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -11987,6 +12074,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose2d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12006,6 +12094,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12044,6 +12133,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -12082,6 +12172,7 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -12759,8 +12850,6 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x, alpha=1.0:
             torch.nn.functional.elu(x, alpha, inplace=True),
         decorators=[
-            # Not implemented yet
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
@@ -12814,8 +12903,6 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x, alpha=1.0:
             torch.nn.functional.celu(x, alpha, inplace=True),
         decorators=[
-            # Not implemented yet
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
@@ -12878,8 +12965,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.selu(x, inplace=True),
         decorators=[
-            # Not implemented yet (depends on 'elu_')
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_forward_mode_AD'),
             DecorateInfo(
                 toleranceOverride({
                     torch.float16: tol(atol=1e-2, rtol=1.8e-2),
@@ -12897,7 +12982,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
-        assert_autodiffed=False,
+        assert_autodiffed=True,
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
@@ -12911,7 +12996,8 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=(torch.cfloat,), device_type='cpu'),
-        )
+        ),
+        autodiff_nonfusible_nodes=["aten::silu"],
     ),
     # TODO: combine this with the nn.functional.silu OpInfo when
     # complex autodiff for silu is supported or when
@@ -13375,7 +13461,15 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_mm),
+           sample_inputs_func=sample_inputs_mm,
+           skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
+           )),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -14606,6 +14700,12 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -16593,6 +16693,12 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
            skips=(
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestSchemaCheckModeOpInfo',
+                   'test_schema_correctness',
+                   dtypes=(torch.complex64, torch.complex128)),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # Arguments for call are not valid.
@@ -17481,6 +17587,12 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
+            # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestSchemaCheckModeOpInfo',
+                'test_schema_correctness',
+                dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -17519,6 +17631,12 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
+            # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestSchemaCheckModeOpInfo',
+                'test_schema_correctness',
+                dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -17833,6 +17951,13 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            # https://github.com/pytorch/pytorch/issues/82235
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestSchemaCheckModeOpInfo',
+                'test_schema_correctness',
+                device_type='cuda',
+            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
@@ -17849,6 +17974,13 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            # https://github.com/pytorch/pytorch/issues/82235
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestSchemaCheckModeOpInfo',
+                'test_schema_correctness',
+                device_type='cuda',
+            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
@@ -18690,7 +18822,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.signbit",
