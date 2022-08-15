@@ -18,10 +18,11 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       [&]() {
         using accscalar_t = acc_type<scalar_t, true>;
         scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-          scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
-          scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
-          if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
+        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
+          const accscalar_t x{x_}, y{y_};
+          auto min = at::_isnan(y) ? y : std::min(x, y); //std::min returns first arg if one of the args is nan
+          auto max = at::_isnan(y) ? y : std::max(x, y); //std::max returns first arg if one of the args is nan
+          if (min != max || ::isfinite(min)) {
           // nan will be propagated here
               return ::log1p(std::exp(min - max)) + max;
           } else {
