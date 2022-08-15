@@ -159,7 +159,7 @@ def gen_symint_kernel(int_kernel: NativeFunction, symint_kernel: NativeFunction)
 
     return f"""
 {symint_kernel_sig.defn()} {{
-  return at::{symint_kernel.func.name.unambiguous_name()}({exprs});
+  return at::{int_kernel.func.name.unambiguous_name()}({exprs});
 }}
 """
 
@@ -694,6 +694,7 @@ def gen_functionalization_registration(
     def emit_registration_helper(f: NativeFunction) -> str:
         if f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
+            #print(f"crash crash crash {f.func.name}")
             assert metadata is not None
             native_api_name = metadata.kernel
             sig = DispatcherSignature.from_schema(f.func)

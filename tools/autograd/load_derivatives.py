@@ -3,6 +3,7 @@
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 import re
+import dataclasses
 from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
@@ -44,6 +45,7 @@ from torchgen.model import (
     Type,
     Variant,
 )
+from torchgen.native_function_generation import ints_to_symints_nativefunction
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
@@ -126,8 +128,23 @@ def load_derivatives(
         ]
         infos += add_view_copy_derivatives(infos, view_groups)
 
+
+        symint_overloads = []
+        for info in infos:
+            f = info.func
+            if f.tags and "symint_ver_needed" in f.tags:
+                new_func = ints_to_symints_nativefunction(f)
+                new_derivatives = tuple([dataclasses.replace(d, formula = d.formula.replace('sizes()', 'sym_sizes()')) for d in info.derivatives])
+                new_info = dataclasses.replace(info, derivatives=new_derivatives)
+                new_info = dataclasses.replace(new_info, func=new_func)
+                symint_overloads.append(new_info)
+
+        infos.extend(symint_overloads)
+        #raise RuntimeError("Boom Boom!")
+
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
+    print("DONE LOADING DERIVATIVES")
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 

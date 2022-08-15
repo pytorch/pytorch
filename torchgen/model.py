@@ -486,6 +486,9 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
+
+    symint_args: List[str]
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -768,10 +771,14 @@ class NativeFunction:
         # metadata by OperatorName!
         backend_metadata = {k: {func.name: v} for k, v in dispatch.items()}
 
+
+        symint_args = e.pop("symint_args", [])
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
         e.pop("__line__", None)
         assert not e, f"leftover entries: {e}"
+
+        
 
         # Asserts that we can't do in post_init, because they rely on backend-specific info
         if structured_delegate is not None:
@@ -806,6 +813,7 @@ class NativeFunction:
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
                 namespace=namespace,
+                symint_args=symint_args,
             ),
             backend_metadata,
         )
@@ -2044,27 +2052,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple([
                     x.replace_with_base_type(orig, ty) for x in arguments.pre_self_positional
-                ],
+                ]),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple([
                     x.replace_with_base_type(orig, ty) for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ]),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple([
                 x.replace_with_base_type(orig, ty) for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ]),
+            pre_tensor_options_kwarg_only=tuple([
                 x.replace_with_base_type(orig, ty) for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ]),
         )
 
         return arguments
@@ -2076,27 +2084,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple([
                     x.symint_to_int() for x in arguments.pre_self_positional
-                ],
+                ]),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple([
                     x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ]),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple([
                 x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ]),
+            pre_tensor_options_kwarg_only=tuple([
                 x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ]),
         )
 
         return arguments

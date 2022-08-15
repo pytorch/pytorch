@@ -1350,7 +1350,8 @@ def get_grouped_native_functions(
         if r is None:
             # Invariant: any NativeFunctions that are code-generated
             # should have been grouped into NativeFunctionsGroup objects
-            assert not any("generated" in f.tags for f in d.values())
+            
+            #assert not any("generated" in f.tags for f in d.values())
             return list(d.values())
         else:
             return [r]
@@ -2447,14 +2448,15 @@ def gen_source_files(
                 )
 
     symint_overloads = defaultdict(list)
+    #print("==================================")
     for f in native_functions:
         if "symint_ver_needed" in f.tags:
             # original int kernel will come first
-            symint_overloads[f.func.name].append(f)
-            assert len(symint_overloads[f.func.name]) <= 2
+            symint_overloads[f.func.name.name].append(f)
+            #assert len(symint_overloads[f.func.name]) <= 2
 
-    symint_overloads_pairs = [ (v[0], v[1]) for (_, v) in symint_overloads]
-        
+    symint_overloads_pairs = [ (v[0], v[1]) for v in symint_overloads.values()]
+
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
     # needs to have a corresponding non-aliasing {view}_copy variant.
@@ -2490,6 +2492,13 @@ def gen_source_files(
                     if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions
+            ] 
+            + [
+                "\n".join(
+                    f"#include <ATen/ops/{f.root_name}.h>"
+                    for f in native_functions
+                    if f is not None and "generated" not in f.tags and "symint_ver_needed" in f.tags
+                )
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)

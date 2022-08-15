@@ -1,4 +1,5 @@
 import re
+import dataclasses
 from dataclasses import dataclass
 from typing import List, Match, Optional, Sequence, Set, Tuple
 
@@ -311,6 +312,13 @@ def match_differentiability_info(
         if info.func.func.kind() != SchemaKind.functional
     }
 
+    # use the basename for matching in case the SymInt overload
+    # is based on some other overload
+    int_overload_info_by_opname = {
+        info.func.func.name.name : info for info in differentiability_infos if "generated" not in info.func.tags and "symint_ver_needed" in info.func.tags
+    }
+
+
     def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:
         # (1) Check for an exact match
         if f.func in info_by_schema:
@@ -322,6 +330,24 @@ def match_differentiability_info(
         f_sig = f.func.signature(strip_default=True)
         if f_sig in functional_info_by_signature:
             return functional_info_by_signature[f_sig], False
+
+        
+        # if "generated" in f.tags and "symint_ver_needed" in f.tags:
+        #         # the SymInt overload may have been generated on an overload
+        #         # let's use the base name for matching
+
+                
+        #         info = int_overload_info_by_opname[f.func.name.name]
+        #         assert info
+        #         # TODO: do I need to do something about the original formula
+        #         new_derivatives = tuple([dataclasses.replace(d, formula = d.formula.replace('sizes()', 'sym_sizes()')) for d in info.derivatives])
+        #         new_info = dataclasses.replace(info, derivatives=new_derivatives)
+        #         new_info = dataclasses.replace(new_info, func=f)
+
+        #         print(f"replacing autograd formulas {new_info.func.func}")
+        #         return new_info, False
+                
+                
 
         # (3) Some operators have a derivative explicitly defined for the mutable
         # variant, but get a code-generated out-of-place variant which does *not*

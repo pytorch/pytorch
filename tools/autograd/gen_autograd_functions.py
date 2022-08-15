@@ -704,7 +704,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     )
     all_getter_definitions = "\n".join(getter_definitions)
 
-    return template.substitute(
+    tmp = template.substitute(
         op=info.op,
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
@@ -718,3 +718,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         all_getter_definitions=all_getter_definitions,
         all_getsetdef_structs=all_getsetdef_structs,
     )
+
+    if "symint_ver_needed" in info.func.tags:
+        print(f"generating autograd nodes for {info.func.func}")
+        print(f"TMP = {tmp}")
+
+    return tmp

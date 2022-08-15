@@ -265,10 +265,30 @@ def generate_function(
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
             namespace=f.namespace,
+            symint_args=[],
         ),
         backend_metadata,
     )
 
+
+def ints_to_symints_nativefunction(f):
+    assert "symint_ver_needed" in f.tags
+    new_post_self_positional = []
+    for arg in f.func.arguments.post_self_positional:
+        if arg.name in f.symint_args:
+            new_post_self_positional.append(arg.replace_with_base_type(BaseType(BaseTy.int), BaseType(BaseTy.SymInt)))
+        else:
+            new_post_self_positional.append(arg)
+    
+    
+    new_schema = f.func.replace_with_base_type(BaseType(BaseTy.int), BaseType(BaseTy.SymInt))
+    new_arguments = dataclasses.replace(new_schema.arguments, post_self_positional=tuple(new_post_self_positional))
+    new_schema = dataclasses.replace(new_schema, arguments = new_arguments)
+    new_name = dataclasses.replace(new_schema.name, overload_name='SymInt')
+    new_schema = dataclasses.replace(new_schema, name=new_name)
+    new_func = dataclasses.replace(f, func=new_schema)
+    new_func = dataclasses.replace(new_func, tags=frozenset(list(f.tags) + ["generated",]))
+    return new_func
 
 # This function is responsible for adding generated NativeFunctions which don't appear
 # explicitly in the codegen.
@@ -291,13 +311,11 @@ def add_generated_native_functions(
     symint_overloads = []
     for f in rs:
         if "symint_ver_needed" in f.tags:
-            new_schema = f.func.replace_with_base_type(BaseType(BaseTy.int), BaseType(BaseTy.SymInt))
-            new_name = dataclasses.replace(new_schema.name, overload_name='SymInt')
-            new_schema = dataclasses.replace(new_schema, name=new_name)
-            new_func = dataclasses.replace(f, func=new_schema)
-            dataclasses.replace(new_func, tags=f.tags + ["generated"])
+            #print(f"In symint_ver_needed {f.symint_args}")
+            new_func = ints_to_symints_nativefunction(f)
             symint_overloads.append(new_func)
-
+            #print(f"{f.func.signature()} {new_func.func.signature()}")
+            #raise RuntimeError("Boo!")
     rs.extend(symint_overloads)
 
 

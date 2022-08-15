@@ -2277,7 +2277,6 @@
 
 - func: unflatten.int(Tensor(a) self, int dim, int[] sizes) -> Tensor(a)
   variants: function, method
-  tags: symint_ver_needed
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
   variants: function, method
@@ -2804,6 +2803,9 @@
     CUDA: layer_norm_cuda
     MPS: layer_norm_mps
     CompositeExplicitAutograd: math_native_layer_norm
+  tags: symint_ver_needed
+  symint_args:
+    - normalized_shape
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
