@@ -7,4 +7,5 @@ torch.masked
 Introduction
 ++++++++++++
 
-Placeholder for MaskedTensor documentation.
+WIP. For more information, you can go to github.com/pytorch/maskedtensor for the source code 
+or http://pytorch.org/maskedtensor for a number of tutorials 
