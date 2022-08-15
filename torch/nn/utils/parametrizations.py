@@ -242,7 +242,7 @@ def orthogonal(module: Module,
 
     Example::
 
-        >>> # xdoctest: +REQUIRES(--lapack)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> orth_linear = orthogonal(nn.Linear(20, 40))
         >>> orth_linear
         ParametrizedLinear(
@@ -459,7 +459,7 @@ def spectral_norm(module: Module,
 
     Example::
 
-        >>> # xdoctest: +REQUIRES(--lapack)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> snm = spectral_norm(nn.Linear(20, 40))
         >>> snm
         ParametrizedLinear(

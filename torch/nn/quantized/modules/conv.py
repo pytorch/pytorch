@@ -31,6 +31,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
             _reversed_padding_repeated_twice.append(padding[N - idx - 1])
     return _reversed_padding_repeated_twice
 
+
 class _ConvNd(WeightedQuantizedModule):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -265,6 +266,7 @@ class _ConvNd(WeightedQuantizedModule):
         qconv.scale = float(output_scale)
         qconv.zero_point = int(output_zero_point)
         return qconv
+
 
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of
@@ -572,6 +574,7 @@ class Conv3d(_ConvNd):
 # === Transposed Convolutions ===
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
 
+
 class _ConvTransposeNd(_ConvNd):
 
     _FLOAT_MODULE = MOD
@@ -655,6 +658,7 @@ class _ConvTransposeNd(_ConvNd):
         qconv.zero_point = int(output_zero_point)
         return qconv
 
+
 class ConvTranspose1d(_ConvTransposeNd):
     r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
@@ -675,9 +679,9 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
-        >>> # xdoctest: +SKIP
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose1d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -692,6 +696,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         >>> h = downsample(q_input)
         >>> h.size()
         torch.Size([1, 16, 6])
+        >>> # xdoctest: +SKIP("FIXME: output_size is not a parameter)
         >>> output = upsample(h, output_size=input.size())
         >>> output.size()
         torch.Size([1, 16, 12])
@@ -763,11 +768,11 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Examples::
 
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ENABLE_QENGINE)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
-        >>> # xdoctest: +SKIP
+        >>> import torch.nn.quantized as nnq
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -782,6 +787,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> h = downsample(q_input)
         >>> h.size()
         torch.Size([1, 16, 6, 6])
+        >>> # xdoctest: +SKIP("FIXME: output_size is not a parameter)
         >>> output = upsample(h, output_size=input.size())
         >>> output.size()
         torch.Size([1, 16, 12, 12])
@@ -835,6 +841,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
         return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
 
+
 class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image
     composed of several input planes.
@@ -855,9 +862,9 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'fbgemm'
         >>> # With cubic kernels and equal stride
-        >>> # xdoctest: +SKIP
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1, 1), padding=(4, 2, 2))
@@ -872,6 +879,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         >>> h = downsample(q_input)
         >>> h.size()
         torch.Size([1, 16, 6, 6, 6])
+        >>> # xdoctest: +SKIP("FIXME: output_size is not a parameter)
         >>> output = upsample(h, output_size=input.size())
         >>> output.size()
         torch.Size([1, 16, 12, 12, 12])

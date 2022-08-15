@@ -149,11 +149,12 @@ class WithDevice(nn.Module):
         device(:class:`torch.device`): The device to run the module on.
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> fc1 = nn.Linear(16, 8).cuda(0)
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> dropout = nn.Dropout()
         >>>
-        >>> # xdoctest: +REQUIRES(env:CUDAHOME)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
         >>> # Dropout does not have any parameters/buffers, but we want to
         >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
         >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
@@ -185,6 +186,7 @@ def _assemble_partition(modules: List[nn.Module]):
         else:
             modules_list.append(module)
     return PipeSequential(*modules_list)
+
 
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []

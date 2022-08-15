@@ -780,7 +780,7 @@ class SyncBatchNorm(_BatchNorm):
         Example::
 
             >>> # Network with nn.BatchNorm layer
-            >>> # xdoctest: +REQUIRES(env:CUDAHOME)
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> module = torch.nn.Sequential(
             >>>            torch.nn.Linear(20, 100),
             >>>            torch.nn.BatchNorm1d(100),

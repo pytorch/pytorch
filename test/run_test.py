@@ -562,6 +562,25 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
+    # Determine if we should conditionally enable any of these doctests via
+    # environment variables.
+    if torch.cuda.is_available():
+        os.environ['TORCH_DOCTEST_CUDA'] = '1'
+        if torch.cuda.device_count() > 1:
+            os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+
+    if torch._C.has_lapack:
+        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+
+    try:
+        # Is there a better check if quantization is enabled?
+        import torch.nn.quantized as nnq  # NOQA
+        torch.backends.quantized.engine = 'qnnpack'
+    except (ImportError, RuntimeError):
+        ...
+    else:
+        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
         'global_exec': r'\n'.join([
