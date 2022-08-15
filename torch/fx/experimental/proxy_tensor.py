@@ -254,23 +254,20 @@ def dispatch_trace(
 
 
 def wrap_key(f, tensors, tracer):
-    flat_tensors, _ = pytree.tree_flatten(tensors)
+    flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
-        assert (len(flat_proxies) == len(flat_tensors))
+        assert len(flat_proxies) == len(flat_tensors)
         track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
-        tree_args = pytree.tree_unflatten(flat_tensors, proxies_spec)
-        out = f(*tree_args)
-        flat_outs, out_spec = pytree.tree_flatten(out)
-        for idx, tensor in enumerate(flat_outs):
-            if isinstance(tensor, torch.Tensor):
-                if tracer in tensor.__dict__:
-                    flat_outs[idx] = tensor.__dict__[tracer].proxy
-
-        return pytree.tree_unflatten(flat_outs, out_spec)
+        out = f(*tensors)
+        return pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: t.__dict__[tracer].proxy if tracer in t.__dict__ else t,
+            out
+        )
 
     return wrapped
 
@@ -351,7 +348,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             handled_types = [torch.Tensor, _ProxyTensor, torch.nn.Parameter]
 
             # If there are any tensor subclasses, we need to handle those tensor subclasses first
-            if any([isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args]):
+            # TODO: we could use types to test this
+            if any(isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args):
                 return NotImplemented
 
             if func_overload is torch.ops.aten.lift_fresh.default:
@@ -424,6 +422,8 @@ class ProxySymDispatchMode(SymDispatchMode):
         return out
 
 
+# TODO: I'm not sure what the point of this class is; you can just
+# make_fx through a regular Interpreter
 class DecompositionInterpreter(torch.fx.Interpreter):
     def __init__(self, module: torch.fx.GraphModule, new_graph: torch.fx.Graph, decomposition_table=None, **kwargs):
         super().__init__(module, **kwargs)
@@ -552,6 +552,7 @@ def get_torch_dispatch_modes():
 
 @contextlib.contextmanager
 def disable_proxy_modes_tracing():
+    # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
     modes = get_torch_dispatch_modes()
     proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
     olds = [m.enable_tracing for m in proxy_tensor_modes]
