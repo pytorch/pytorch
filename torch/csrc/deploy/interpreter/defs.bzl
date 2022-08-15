@@ -9,6 +9,7 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
     final_name = name
     is_all = suffix == "all"
     is_cuda = suffix == "cuda" or is_all
+    is_hip = suffix == "hip"
     platform_static_lib = []
     for platform in ["platform009", "platform010"]:
         name = platform + "_" + final_name
@@ -37,10 +38,13 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
                 ":builtin_registry_cuda",
                 "//caffe2:torch_python_cuda_without_torch",
                 "//deeplearning/trt/python:frozen_tensorrt",
-            ] if is_cuda else [
+            ] if is_cuda else ([
+                ":builtin_registry_hip",
+                "//caffe2:torch_python_hip_without_torch",
+            ] if is_hip else [
                 ":builtin_registry",
                 "//caffe2:torch_python_without_torch",
-            ]),
+            ])),
             external_deps =
                 [
                     # needed for interpreter.cpp itself, it uses pybind currently
