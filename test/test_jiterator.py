@@ -23,7 +23,6 @@ def ref_fn(x, y, alpha=1, beta=1):
     return alpha * x + beta * y
 
 class TestPythonJiterator(TestCase):
-    @skipCUDAIfRocm
     @parametrize("shape_strides", [
         (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
     ])
@@ -62,7 +61,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     @parametrize("alpha", [-1, 2.0, None])
     @parametrize("beta", [3, -4.2, None])
@@ -82,7 +80,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("is_train", [True, False])
     def test_bool_extra_args(self, device, is_train):
         code_string = "template <typename T> T conditional(T x, T mask, bool is_train) { return is_train ? x * mask : x; }"
@@ -98,7 +95,6 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(a, b, is_train=is_train)
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     def test_multiple_functors(self, device):
         code_string = '''
         template <typename T> T fn(T x, T mask) { return x * mask; }
@@ -117,7 +113,6 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(a, b, c)
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("num_inputs", [1, 5, 8])
     def test_various_num_inputs(self, num_inputs):
         inputs = []
@@ -137,7 +132,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("num_outputs", [1, 4, 8])
     def test_various_num_outputs(self, num_outputs):
         input = torch.rand(3, device='cuda')
@@ -146,7 +140,8 @@ class TestPythonJiterator(TestCase):
         function_body = ""
         for i in range(num_outputs):
             function_body += f"out{i} = input + {i};\n"
-        code_string = f"template <typename T> T my_kernel(T input, {output_string}) {{ {function_body} }}"
+        # NB: return type must be void, otherwise ROCm silently fails
+        code_string = f"template <typename T> void my_kernel(T input, {output_string}) {{ {function_body} }}"
 
         jitted_fn = create_multi_output_jit_fn(code_string, num_outputs)
 
@@ -165,7 +160,6 @@ class TestPythonJiterator(TestCase):
         for i in range(num_outputs):
             self.assertEqual(expected[i], result[i])
 
-    @skipCUDAIfRocm
     @parametrize("code_string", [
         "template <typename T> T my _kernel(T x) { return x; }",
         "template <typename T> Tmy_kernel(T x) { return x; }",
