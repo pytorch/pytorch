@@ -1584,7 +1584,7 @@ def check_if_enable(test: unittest.TestCase):
                 disabled_tests_dict = json.loads(fp.read())
         else:
             # IMPORT_DISABLED_TESTS can be None here
-            print(f'Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
+            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
