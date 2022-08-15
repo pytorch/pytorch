@@ -48,6 +48,7 @@ inline bool variable_excluded_from_dispatch() {
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
+
 }
 
 // NOTE: [Tensor vs. TensorBase]
