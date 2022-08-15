@@ -591,17 +591,7 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    def test_mode_tracing_factory_function_no_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-        # setting the flag to false should not trace factory functions
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
-        self.assertFalse(
-            any(
-                node.target == aten.randn.default
-                for node in traced.graph.nodes
-            )
-        )
+    pass
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -693,6 +683,24 @@ def forward(self, a_1):
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
         assert len(shape_env.guards) == 1
+
+    def test_new_empty(self):
+        def f(a, b):
+            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
+
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
+
+
+    def test_expand(self):
+        def f(a):
+            b = torch.mul(a, a)
+            c = b.expand(a.shape)
+            return c
+
+        self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
+        self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
+
+
 
 make_fx_failures = {
     # unknown
