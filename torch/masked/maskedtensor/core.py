@@ -265,17 +265,13 @@ class MaskedTensor(torch.Tensor):
         if data.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
             raise TypeError(f"data layout of {data.layout} is not supported.")
         if data.layout == torch.sparse_coo:
-            self.masked_layout = torch.sparse_coo
             if not _tensors_match(data.indices(), mask.indices(), exact=True):
                 raise ValueError("data and mask are both sparse COO tensors but do not have the same indices.")
         elif data.layout == torch.sparse_csr:
-            self.masked_layout = torch.sparse_csr
             if not _tensors_match(
                 data.crow_indices(), mask.crow_indices(), exact=True
             ) or not _tensors_match(data.col_indices(), mask.col_indices(), exact=True):
                 raise ValueError("data and mask are both spares CSR tensors but do not share either crow or col indices.")
-        else:
-            self.masked_layout = torch.strided
         if not torch.is_tensor(data):
             raise TypeError("data must be a tensor.")
         if mask.dtype != torch.bool:
@@ -565,7 +561,7 @@ class MaskedTensor(torch.Tensor):
         return self._masked_mask
 
     def layout(self):
-        return self.masked_layout
+        return self.get_data().layout
 
     def is_sparse_coo(self):
         return self.layout() == torch.sparse_coo
