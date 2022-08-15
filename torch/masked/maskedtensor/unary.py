@@ -2,7 +2,7 @@
 
 import torch
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 
 UNARY_NAMES = [
