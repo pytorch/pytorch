@@ -610,7 +610,7 @@ struct vector_args {
                 if (i == required) {
                     *format_it++ = '|';
                 }
-                if (i == names.size() - kwonly) {
+                if (i == (int)names.size() - kwonly) {
                     *format_it++ = '$';
                 }
                 *format_it++ = 'O';
