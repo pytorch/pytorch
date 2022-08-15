@@ -189,7 +189,7 @@ class TestCudaFuser(JitTestCase):
             self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
-    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1):
+    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1, tol=None):
         seed = 123
         torch.cuda.manual_seed_all(seed)
         jit_o = jit_op(*args)
@@ -206,7 +206,10 @@ class TestCudaFuser(JitTestCase):
 
             for oo, jit_oo in zip(o, jit_o):
                 self.assertEqual(oo.dtype, jit_oo.dtype)
-                self.assertEqual(oo, jit_oo)
+                if tol is None:
+                    self.assertEqual(oo, jit_oo)
+                else:
+                    self.assertEqual(oo, jit_oo, atol=tol, rtol=tol)
                 if check_stride:
                     self.assertEqual(oo.stride(), jit_oo.stride())
 
@@ -4870,9 +4873,13 @@ class TestCudaFuser(JitTestCase):
         def t_cpu(x):
             return torch.rand_like(x, device=torch.device(type='cpu'))
 
+        # ROCm jitted rand vs rocrand needed relaxed tolerance
+        # Mismatched elements: 4 / 8 (50.0%)
+        # Greatest absolute difference: 3.1106173986605867e-07 at index (1, 1) (up to 1e-07 allowed)
+        # Greatest relative difference: 7.083319357527836e-07 at index (0, 0) (up to 1e-07 allowed)
         with nvfuser_singleton_fusion(True):
             t_jit = torch.jit.script(t)
-            self._run_helper(t_jit, t, x)
+            self._run_helper(t_jit, t, x, tol=1e-6)
 
             t_cpu_jit = torch.jit.script(t_cpu)
             for i in range(5):
