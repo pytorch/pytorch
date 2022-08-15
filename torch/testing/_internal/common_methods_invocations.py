@@ -19308,13 +19308,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcdiv",
         torch_opinfo_name="addcdiv",
-        skips=(
-            # AssertionError: tensor(False, device='cuda:0') is not true :
-            # Reference result was farther (82.20965480270847) from the precise
-            # computation than the torch result was (0.0)!
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.float32,), device_type="cuda"),
-        )
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
