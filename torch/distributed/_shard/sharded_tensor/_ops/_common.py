@@ -12,11 +12,12 @@ def _sharded_op_common(op, early_stop_func, extra_check):
     different behaviors are done on either local shards or a local tensor.
 
     Example::
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> op = torch.transpose
         >>> @_sharded_op_impl(op)
         >>> @_sharded_op_common(op, early_stop_func, extra_check)
         >>> def sharded_tensor_op(types, args, kwargs, process_group):
-        >>>   ....
+        >>>   ...
         >>>
         >>> st = sharded_tensor.rand(32, 16)
         >>> st.transpose(1, 2)

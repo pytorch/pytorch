@@ -1,3 +1,5 @@
+# Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -21,7 +23,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -255,16 +257,16 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         graph_size = None
 
-        def assert_graph_empty(fx_g, _):
+        def get_graph_size(fx_g, _):
             nonlocal graph_size
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
         start_recompilations = num_of_recompilations()
-        f = aot_function(foo, nop, assert_graph_empty)
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertIsNone(graph_size)
         with torch.set_grad_enabled(True):
             f(*inps)
         self.assertTrue(graph_size > 2)
@@ -306,6 +308,20 @@ class TestAOTAutograd(TestCase):
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
 
+    def test_list_codegen(self):
+        def list_nop(f, _):
+            def g(inps):
+                return f(*inps)
+            g._boxed_call = True
+            return g
+
+        def f(a, b, c):
+            return a.sin() * b.cos() * c.sin()
+        f = aot_function(f, list_nop)
+        inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
+        f(*inp).sum().backward()
+
+
 
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -322,11 +338,11 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
-        xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
         xfail('corrcoef'),
         xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
@@ -546,6 +562,41 @@ class TestAOTModuleSimplified(TestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    def test_aot_module_simplified_preserves_stack_trace(self):
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule())
+        mod = torch.fx.GraphModule(tracer.root, graph)
+
+        for node in mod.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_pythonkey.py' in node.stack_trace
+
+        def assert_compiler(gm: torch.fx.GraphModule, _):
+            for node in gm.graph.nodes:
+                if node.op == 'output' or node.op == 'placeholder':
+                    continue
+                self.assertTrue(node.stack_trace is not None)
+                assert 'test_pythonkey.py' in node.stack_trace
+            return gm.forward  # return a python callable
+
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+        inputs = [x, y]
+        res = aot_mod(*inputs)
 
 class TestRandom(TestCase):
     def test_preserve_random(self):

@@ -1256,6 +1256,11 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
+  // We hit this function if either of the input tensor lives on CUDA.
+  // It is ok, if `value` is `CPU` tensor but we should not allow `self` or
+  // `mask` to be CPU tensor. Check for `self` and `mask` being on same device
+  // exists in `masked_fill__cuda` (Scalar version).
+  TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
   return masked_fill__cuda(self, mask, value.item());
 }
 

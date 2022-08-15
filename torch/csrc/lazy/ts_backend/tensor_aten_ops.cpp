@@ -39,7 +39,7 @@ torch::lazy::Value MaybeExpand(
 std::vector<int64_t> GetExpandDimensions(
     const torch::lazy::Shape& shape,
     std::vector<int64_t> dimensions) {
-  CHECK_GE(dimensions.size(), shape.dim()) << shape;
+  TORCH_CHECK_GE(dimensions.size(), shape.dim()) << shape;
   int64_t base = dimensions.size() - shape.dim();
   for (size_t i = 0; i < shape.dim(); ++i) {
     if (dimensions[base + i] == -1) {
