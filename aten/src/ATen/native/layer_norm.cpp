@@ -216,7 +216,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
       at::empty_like(input, c10::TensorOptions().dtype(result_type))
     );
   }
-  at::Tensor input_reshaped = input.view({1, M, -1});
+  at::Tensor input_reshaped = input.reshape({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
