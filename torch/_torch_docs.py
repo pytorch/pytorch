@@ -4215,6 +4215,7 @@ Args:
            to a lower diagonal, with the default being 0, the main diagonal
 
 Keyword arguments:
+    {k}
     {out}
     {dtype}
     {layout}

@@ -2312,6 +2312,7 @@
   dispatch:
     CompositeExplicitAutograd: eye
 
+# These are basically overloads for NumPy compatibility
 - func: eye.nk(int n, *, int? k, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: eye.nmk(int n, int m, int k, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
