@@ -3238,7 +3238,7 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @skipCUDAMemoryLeakCheckIf(True) # This test may incur an expected allocation for a cuBLAS workspace
+    @skipCUDAMemoryLeakCheckIf(True)  # This test may incur an expected allocation for a cuBLAS workspace
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device='cuda')
