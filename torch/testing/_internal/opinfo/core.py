@@ -2186,6 +2186,16 @@ class UnaryUfuncInfo(OpInfo):
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
+    def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        samples = super().sample_inputs(device, dtype, requires_grad, **kwargs)
+
+        def map_fn(sample):
+            torch_kwargs, _ = self.sample_kwargs(device, dtype, sample.input)
+            sample.kwargs = torch_kwargs
+            return sample
+
+        return map(map_fn, samples)
+
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
     is_fp16_or_chalf = dtype == torch.complex32 or dtype == torch.half
