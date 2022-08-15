@@ -1226,7 +1226,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionPreHook>(obj, 0));
+        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2051,7 +2051,7 @@ static int THPVariable_subclass_traverse(
       }
 
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }
@@ -2140,7 +2140,8 @@ py::object torchDispatchFromTensorImpl(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
           unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  //TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  // NB: this may not be a python tensor if you got here from a mode!
+  // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
