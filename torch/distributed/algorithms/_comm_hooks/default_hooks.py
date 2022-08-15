@@ -114,7 +114,7 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
     if state.gradient_postdivide_factor > 1:
         output.div_(state.gradient_postdivide_factor)
 
-def _lower_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
     grad.data = grad.data.to(prec)
     if output is not None:
         output.data = output.data.to(prec)
@@ -138,7 +138,7 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
         output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
-    fp16_hook = functools.partial(_lower_precision_hook, torch.float16)
+    fp16_hook = functools.partial(_low_precision_hook, torch.float16)
     return fp16_hook(state, grad, output)
 
 def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
@@ -155,5 +155,5 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
         output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
-    bf16_hook = functools.partial(_lower_precision_hook, torch.bfloat16)
+    bf16_hook = functools.partial(_low_precision_hook, torch.bfloat16)
     return bf16_hook(state, grad, output)
