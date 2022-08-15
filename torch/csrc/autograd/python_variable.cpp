@@ -2,6 +2,7 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
@@ -262,10 +263,25 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
-
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+template <const char*, typename... Ts>
+void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts...);
+static constexpr char trace_cuda_event_creation_fn_name[] =
+    "CUDAEventCreationCallbacks";
+static constexpr char trace_cuda_event_deletion_fn_name[] =
+    "CUDAEventDeletionCallbacks";
+static constexpr char trace_cuda_event_record_fn_name[] =
+    "CUDAEventRecordCallbacks";
+static constexpr char trace_cuda_event_wait_fn_name[] =
+    "CUDAEventWaitCallbacks";
+static constexpr char trace_cuda_memory_allocation_fn_name[] =
+    "CUDAMemoryAllocationCallbacks";
+static constexpr char trace_cuda_memory_deallocation_fn_name[] =
+    "CUDAMemoryDeallocationCallbacks";
+static constexpr char trace_cuda_stream_creation_fn_name[] =
+    "CUDAStreamCreationCallbacks";
 
 class PyInterpreterHolder {
  public:
@@ -282,7 +298,15 @@ class PyInterpreterHolder {
             &concrete_sizes_fn,
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
-            &concrete_sym_numel_fn)) {}
+            &concrete_sym_numel_fn,
+            c10::impl::GPUTraceFunctionWrapper(
+                &concrete_trace_cuda<trace_cuda_event_creation_fn_name>,
+                &concrete_trace_cuda<trace_cuda_event_deletion_fn_name>,
+                &concrete_trace_cuda<trace_cuda_event_record_fn_name>,
+                &concrete_trace_cuda<trace_cuda_event_wait_fn_name>,
+                &concrete_trace_cuda<trace_cuda_memory_allocation_fn_name>,
+                &concrete_trace_cuda<trace_cuda_memory_deallocation_fn_name>,
+                &concrete_trace_cuda<trace_cuda_stream_creation_fn_name>))) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -364,6 +388,10 @@ void registerPythonTensorClass(
 
 static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
+}
+
+void activateCUDATrace() {
+  c10::impl::GPUTrace::set_trace(self_interpreter.get());
 }
 
 // TODO: Make this take Variable by const reference
@@ -1198,7 +1226,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionPreHook>(obj, 0));
+        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2023,7 +2051,7 @@ static int THPVariable_subclass_traverse(
       }
 
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }
@@ -2489,6 +2517,22 @@ c10::SymInt concrete_sym_numel_fn(
   return torch::is_symint_node(out)
       ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
       : c10::SymInt{py::cast<int64_t>(out)};
+}
+
+template <const char* func_name, typename... Ts>
+void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts... args) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  if (Py_IsInitialized()) {
+    try {
+      py::module mod = py::module::import("torch.utils._cuda_trace");
+      py::object hook = mod.attr(func_name).attr("fire_callbacks");
+      hook(args...);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what();
+    }
+  }
 }
 
 } // anonymous namespace

@@ -55,6 +55,7 @@ class Allocate;
 class BlockSync;
 class GridSync;
 class CpAsyncWait;
+class CpAsyncCommit;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -258,11 +259,27 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
 };
 
 // CpAsyncWait represents wait intrinsics for cp.async
-// TODO: expand to support different wait modes of the intrinsic
-//  as the analysis passes build out.
 class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
-  explicit CpAsyncWait(IrBuilderPasskey passkey);
+  explicit CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages = 0);
+
+  //! Returns the remaining number of stages that are not synchronized
+  //!  after this op.
+  unsigned int keepStages() const {
+    return keep_stages_;
+  }
+
+ private:
+  //! Number of stage to leave un-sync'ed by this op.
+  unsigned int keep_stages_ = 0;
+};
+
+// CpAsyncCommit represents commit intrinsics for cp.async
+//  A commit intrinsic communicates delimiter of transaction groups
+// to the async load hardware. Example usage see [Cicular buffer].
+class TORCH_CUDA_CU_API CpAsyncCommit final : public Expr {
+ public:
+  explicit CpAsyncCommit(IrBuilderPasskey passkey);
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
