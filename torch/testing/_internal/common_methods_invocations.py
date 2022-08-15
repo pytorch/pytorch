@@ -13846,6 +13846,10 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     dtypes=(torch.complex32,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
@@ -19331,13 +19335,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19519,13 +19523,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
         )
     ),
@@ -19553,13 +19557,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19622,13 +19626,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
