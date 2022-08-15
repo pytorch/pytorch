@@ -155,7 +155,7 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
   }
 }
 
-void check_fits_in_unsigned(int64_t val, const char* name) {
+inline void check_fits_in_unsigned(int64_t val, const char* name) {
   constexpr auto umax = std::numeric_limits<uint32_t>::max();
   TORCH_CHECK(
       val >= 0 && val <= umax, name, " must fit in a 32-bit uint32_t value");
