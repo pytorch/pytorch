@@ -4,7 +4,7 @@ from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
 from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
 
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
 
 
 def execute(gm: GraphModule, *args, executor: str = "aten"):
@@ -55,16 +55,7 @@ def make_traced(fn: Callable):
 
     def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
-        nargs = len(args)
-        fn_kwargs = kwargs
-        flat_fn_kwargs = list(fn_kwargs.values())
-        all_args = list(args) + flat_fn_kwargs
-
-        def wrapped(args):
-            fn_args = args[:nargs]
-            kwargs_keys = list(fn_kwargs.keys())
-            kwargs = dict(zip(kwargs_keys, args[nargs:]))
-            return fn(*fn_args, **kwargs)
+        wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
 
         with NvfuserPrimsMode(), TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
