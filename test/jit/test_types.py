@@ -1,13 +1,14 @@
 # Owner(s): ["oncall: jit"]
 
 from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, NamedTuple
 
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from textwrap import dedent
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import inspect
+import io
 import os
 import sys
 import torch
@@ -316,3 +317,68 @@ class TestTypesAndAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "ErrorReason"):
             t = inferred_type.type()
+
+    def test_named_tuple(self):
+        class Inner(NamedTuple):
+            a: torch.Tensor
+            b: float
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, x: Inner):
+                super(TestModule, self).__init__()
+                self.x = x
+
+            def forward(self, y: torch.Tensor):
+                return torch.add(y, self.x.a, alpha=self.x.b)
+
+        inner = Inner(torch.rand(2, 2), 0.5)
+        mod = TestModule(inner)
+        y = torch.rand(2, 2)
+
+        expected = mod(y)
+
+        mod_s = torch.jit.script(mod)
+
+        actual = mod_s(y)
+
+        self.assertEqual(expected, actual)
+
+        b = io.BytesIO()
+        torch.jit.save(mod_s, b)
+        b.seek(0)
+        mod_s2 = torch.jit.load(b)
+
+    def test_nested_named_tuples(self):
+        class Inner(NamedTuple):
+            a: torch.Tensor
+            b: float
+
+        class Outer(NamedTuple):
+            c: Inner
+            d: float
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, x: Outer):
+                super(TestModule, self).__init__()
+                self.x = x
+
+            def forward(self, y: torch.Tensor):
+                return torch.add(y, self.x.c.a, alpha=self.x.c.b) * self.x.d
+
+        inner = Inner(torch.rand(2, 2), 0.5)
+        outer = Outer(inner, 0.25)
+        mod = TestModule(outer)
+        y = torch.rand(2, 2)
+
+        expected = mod(y)
+
+        mod_s = torch.jit.script(mod)
+
+        actual = mod_s(y)
+
+        self.assertEqual(expected, actual)
+
+        b = io.BytesIO()
+        torch.jit.save(mod_s, b)
+        b.seek(0)
+        mod_s2 = torch.jit.load(b)

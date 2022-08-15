@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_resolver.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -419,6 +420,16 @@ inline InferredType tryToInferType(py::handle input) {
 
 inline InferredType tryToInferContainerType(py::handle input) {
   if (six::isTuple(input)) {
+    // check if this is a NamedTuple. If so, it needs special handling.
+    py::object input_type = py::reinterpret_borrow<py::object>(input.get_type());
+    if (PythonResolver::isNamedTupleClass(input_type)) {
+      // fake SourceRange
+      static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
+      return InferredType(PythonResolver([](std::string) -> py::object {
+                            return py::none();
+                          }).resolveTypeFromObject(input_type, range));
+    }
+
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
