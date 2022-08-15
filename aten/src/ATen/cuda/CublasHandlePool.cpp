@@ -44,7 +44,7 @@ size_t parseChosenWorkspaceSize() {
       return 4096 * 1024;
     }
     while (next != end) {
-	  std::smatch match = *next;
+      std::smatch match = *next;
       TORCH_INTERNAL_ASSERT(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
       size_t curr_size = (size_t) std::stoi(match.str(1));
       total_size += curr_size * 1024;
