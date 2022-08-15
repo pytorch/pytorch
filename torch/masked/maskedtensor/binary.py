@@ -4,7 +4,7 @@ import torch
 
 from .core import _masks_match, _tensors_match, is_masked_tensor
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 BINARY_NAMES = [
     "add",
