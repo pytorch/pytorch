@@ -78,7 +78,7 @@ class DummyState(object):
         "noise"
     ]
 
-    def __init__(self, process_group, noise):
+    def __init__(self, process_group: dist.ProcessGroup, noise: int):
         self.process_group = process_group
         self.noise = noise
 
@@ -86,9 +86,9 @@ class DummyHook(object):
 
     def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
         """
-        This communication hook is for illustration and testing purpouse only.
-        This communication hook is used during FSDF ``NO_SHARD`` training. It adds some moise to
-        the provided ``grad`` porameter and uses ``all_reduce`` to communicate full, flattened,
+        This communication hook is for illustration and testing purpose only.
+        This communication hook is used during FSDP ``NO_SHARD`` training. It adds some noise to
+        the provided ``grad`` parameter and uses ``all_reduce`` to communicate full, flattened,
         unsharded gradient.
         """
         grad.add_(state.noise)
@@ -96,8 +96,8 @@ class DummyHook(object):
 
     def custom_reduce_scatter(self, output, input, group=None):
         """
-        This function is for illistrative purpose only.
-        It is meant to implement a custom reduce and scatter
+        This function is for illustrative purpose only.
+        It is meant to implement a custom reduce-scatter
         of a flattened tensor to all processes in a group.
         Currently a no-op.
         """
@@ -105,9 +105,9 @@ class DummyHook(object):
 
     def dummy_hook_for_sharded_fsdp(self, state: DummyState, grad: torch.Tensor, output: torch.Tensor):
         """
-        This communication hook is for illustration and testing purpouse only.
+        This communication hook is for illustration and testing purposes only.
         This communication hook is used during FSDF ``FULL_SHARD`` or ``SHARD_GRAD_OP`` training.
-        It adds some moise to the provided ``grad`` porameter and uses
+        It adds some noise to the provided ``grad`` parameter, uses
         ``reduce_scatter`` for gradient communication and stores a sharded gradient in ``output``.
         """
         grad.add_(state.noise)
@@ -131,15 +131,16 @@ class TestCommunicationHooks(FSDPTest):
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
-        This test creates a simple net ``1 X N``, where ``N`` - is the number of workers.
+        This test creates a simple linear net with weight shape  ``1 X N``,
+        where ``N`` - is the number of workers.
         For sharded cases, ``N`` parameters are sharded across ``N`` workers. This test
-        checks that after backward, each worker has a proper value in it's chunk of
+        checks that after backward, each worker has a proper value in its chunk of
         the gradient, or the whole gradient on every worker is equal to an expected value.
 
         Arguments:
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
         """
-        out_dim = torch.cuda.device_count()
+        out_dim = self.world_size
         net = torch.nn.Linear(1, out_dim, bias=False)
         inpt = torch.tensor([self.rank]).float().cuda(self.rank)
 
@@ -168,7 +169,7 @@ class TestCommunicationHooks(FSDPTest):
             # For each worker, the gradient on the weight should be worker_rank.
             grad = net_default_hook.params[0].grad
             if sharding_strategy != ShardingStrategy.NO_SHARD:
-                self.assertTrue(net_default_hook.params[0]._is_sharded, "Expected gradient to be a sharded chunk")
+                self.assertTrue(net_default_hook.params[0]._is_sharded, "Expected parameter to be a sharded chunk.")
             expected_grad = (
                 sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
             )

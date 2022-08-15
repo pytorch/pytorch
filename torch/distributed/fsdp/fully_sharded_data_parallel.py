@@ -948,7 +948,9 @@ class FullyShardedDataParallel(nn.Module):
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
 
-        # Setting communication hook to a default
+        # Setting communication hook to a default:
+        # ``reduce_scatter`` for shareded strategies and
+        # ``all_reduce`` for ``NO_SHARD``
         self.communication_hook = self._get_default_comm_hook()
         self.communication_hook_state = self._get_default_comm_hook_state()
         self._hook_registered = False
@@ -1585,17 +1587,6 @@ class FullyShardedDataParallel(nn.Module):
         # pass gradient computation (though this may not be true)
         self.reshard_after_forward = False
         self._exec_order_data.init(self)
-        # For all sharding strategies communication is performed through `communication_hook`:
-        # default comm hooks are: `reduce_scatter` for sharded strategies and
-        # `all_reduce` for non-sharded strategies. This check asserts that `communication_hook`
-        # and `communication_hook_state`, required for communication not `None`.` We only need to do
-        # this once in the beginning.
-        assert (
-            self.communication_hook is not None
-        ), "Communication hook should not be None"
-        assert (
-            self.communication_hook_state is not None
-        ), "Communication hook state should not be None"
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances (e.g. streams for overlapping)
         for fsdp_module in self.fsdp_modules(self):
@@ -2970,8 +2961,6 @@ class FullyShardedDataParallel(nn.Module):
                     num_pad = self.world_size * chunks[0].numel() - grad.numel()
                     input_flattened = F.pad(grad_flatten, [0, num_pad])
                     output = torch.zeros_like(chunks[0])
-                    # if a communication hook was not registered,
-                    # then a default hook (`reduce_scatter`) will be used
                     self.communication_hook(self.communication_hook_state, input_flattened, output)
 
                     self._cast_grad_to_param_dtype(output, param)
@@ -3007,8 +2996,6 @@ class FullyShardedDataParallel(nn.Module):
                     ), "Currently the way for _is_sharded to be False is \
                         world_size == 1 or sharding_stratagy is set to be NO_SHARD"
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
-                        # if a communication hook was not registered,
-                        # then a default hook (`all_reduce`) will be used
                         self.communication_hook(self.communication_hook_state, param.grad)
 
                     self._cast_grad_to_param_dtype(param.grad, param)
@@ -4128,7 +4115,7 @@ class FullyShardedDataParallel(nn.Module):
                             peers to communicate with next in `GossipGrad <https://arxiv.org/abs/1803.05880>`_, etc.
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (Callable): Callable, wich supports following signatures:
+            hook (Callable): Callable, which has one of the following signatures:
                             1) ``hook: Callable[torch.Tensor] -> None``:
                             This function takes in a Python tensor, which represents
                             the full, flattened, unsharded gradient with respect to all variables
