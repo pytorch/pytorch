@@ -3014,9 +3014,10 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
+    zero = torch.zeros(1, dtype=t.dtype, device=t.device, requires_grad=False)
+    result = torch.where(cond, t, zero)
 
-    result = where(cond, t, 0)
-    return _maybe_convert_to_dtype(result, t.dtype)  # type: ignore[return-value,arg-type]
+    return result
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3541,8 +3542,8 @@ def movedim(
     )
 
     rank = input.ndim
-    ss = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in source]  # type: ignore[union-attr]
-    ds = [utils.canonicalize_dim(rank=rank, idx=idx) for idx in destination]  # type: ignore[union-attr]
+    ss = tuple(utils.canonicalize_dims(rank=rank, indices=source))  # type: ignore[arg-type]
+    ds = tuple(utils.canonicalize_dims(rank=rank, indices=destination))  # type: ignore[arg-type]
 
     sss = set(ss)
     dss = set(ds)
