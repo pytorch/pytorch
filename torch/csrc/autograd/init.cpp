@@ -646,12 +646,14 @@ static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  AnomalyMode::set_enabled(arg == Py_True);
+  static PythonArgParser parser({
+    "set_anomaly_enabled(bool enabled, bool check_nan=True)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  AnomalyMode::set_enabled(r.toBool(0), r.toBool(1));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -659,6 +661,16 @@ static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* should_anomaly_check_nan(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::should_check_nan()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -778,8 +790,9 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
+    {"set_anomaly_enabled", castPyCFunctionWithKeywords(set_anomaly_mode_enabled), METH_VARARGS | METH_KEYWORDS, nullptr},
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+    {"should_anomaly_check_nan", should_anomaly_check_nan, METH_NOARGS, nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
