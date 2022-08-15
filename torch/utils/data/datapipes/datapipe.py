@@ -82,6 +82,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     Examples:
         General Usage:
+            >>> # xdoctest: +SKIP
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
@@ -223,6 +224,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         DataPipe with non-integral indices/keys, a custom sampler must be provided.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> dp = SequenceWrapper(range(10))
         >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
