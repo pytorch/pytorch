@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/is_integer.h>
 #include <ATen/native/special_functions/detail/gamma.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 upper_incomplete_gamma(T1 a, T1 x) {
@@ -24,5 +27,8 @@ upper_incomplete_gamma(T1 a, T1 x) {
 
     return std::exp(g.second) * g.first;
   }
+}
+}
+}
 }
 }

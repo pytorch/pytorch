@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1, typename T2>
 T2
 bose_einstein_integral_g(T1 s, T2 x) {
@@ -11,5 +14,8 @@ bose_einstein_integral_g(T1 s, T2 x) {
   } else {
     return std::real(polylog_exp(s + T1(1), x));
   }
+}
+}
+}
 }
 }

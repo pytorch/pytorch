@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/numeric_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct associated_legendre_q_t {
   unsigned int l; /// degree
@@ -116,5 +119,8 @@ associated_legendre_q(unsigned int l, unsigned int m, T1 x, T1 phase = T1(1)) {
         phase,
     };
   }
+}
+}
+}
 }
 }

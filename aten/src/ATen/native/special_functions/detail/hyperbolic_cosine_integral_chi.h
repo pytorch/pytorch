@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/expint.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 hyperbolic_cosine_integral_chi(const T1 x) {
@@ -13,5 +16,8 @@ hyperbolic_cosine_integral_chi(const T1 x) {
   } else {
     return (expint_Ei(x) - expint_E1(x)) / T1(2);
   }
+}
+}
+}
 }
 }

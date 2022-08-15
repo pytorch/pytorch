@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 Tp
 gamma_p(Tp a, Tp x) {
@@ -16,5 +19,8 @@ gamma_p(Tp a, Tp x) {
     return gamma_series(a, x).first;
   else
     return Val{1} - gamma_continued_fraction(a, x).first;
+}
+}
+}
 }
 }

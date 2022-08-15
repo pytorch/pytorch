@@ -9,7 +9,10 @@
 #include <ATen/native/special_functions/tan_pi.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 digamma(unsigned int n) {
@@ -91,5 +94,8 @@ digamma(T1 x) {
 
     return r - p;
   }
+}
+}
+}
 }
 }

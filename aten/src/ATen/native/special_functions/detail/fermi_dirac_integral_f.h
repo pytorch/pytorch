@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1, typename T2>
 T2
 fermi_dirac_integral_f(T1 s, T2 x) {
@@ -13,5 +16,8 @@ fermi_dirac_integral_f(T1 s, T2 x) {
   } else {
     return -std::real(exp_polylog(s + T1(1), x + std::complex<T2>{0, 1} * c10::numbers::pi_v<T2>));
   }
+}
+}
+}
 }
 }

@@ -5,7 +5,10 @@
 #include <ATen/native/special_functions/detail/complete_elliptic_integral_k.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 jacobi_zeta(T1 k, T1 phi) {
@@ -29,5 +32,8 @@ jacobi_zeta(T1 k, T1 phi) {
         * carlson_elliptic_r_j(T1(0), T1(1) - k * k, T2(1), T1(1) - k * k * std::sin(phi) * std::sin(phi))
         / (T1(3) * complete_elliptic_integral_k(k));
   }
+}
+}
+}
 }
 }

@@ -4,7 +4,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 
 template<typename Tp>
 Tp
@@ -125,5 +128,7 @@ bell(unsigned int n, Up x) {
     bell = Sn[n - i] + x * bell;
   return bell;
 }
-
+}
+}
+}
 }

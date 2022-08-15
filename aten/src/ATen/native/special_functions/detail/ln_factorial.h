@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/double_factorials.h>
 #include <ATen/native/special_functions/detail/ln_gamma.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 constexpr T1
 ln_factorial(unsigned int n) {
@@ -15,5 +18,8 @@ ln_factorial(unsigned int n) {
   } else {
     return ln_gamma(T1(n + 1));
   }
+}
+}
+}
 }
 }

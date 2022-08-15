@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/numeric_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 bulirsch_elliptic_integral_el1(T1 x, T1 k_c) {
@@ -13,5 +16,8 @@ bulirsch_elliptic_integral_el1(T1 x, T1 k_c) {
   } else {
     return x * carlson_elliptic_r_f(T1(1), T1(1) + k_c * k_c * (x * x), T1(1) + x * x);
   }
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include <cmath>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct gegenbauer_polynomial_t {
   unsigned int n;
@@ -44,5 +47,8 @@ gegenbauer_polynomial_c(unsigned int n, T1 lambda, T1 x) {
 
     return {n, lambda, x, r, p, q};
   }
+}
+}
+}
 }
 }

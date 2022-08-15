@@ -5,7 +5,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <ATen/native/special_functions/detail/riemann_zeta.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 hurwitz_zeta_euler_maclaurin(T1 s, T1 a) {
@@ -52,5 +55,8 @@ hurwitz_zeta(T1 s, T1 a) {
   } else {
     return hurwitz_zeta_euler_maclaurin(s, a);
   }
+}
+}
+}
 }
 }

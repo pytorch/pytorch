@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 complete_carlson_elliptic_r_g(T1 x, T1 y) {
@@ -30,5 +33,8 @@ complete_carlson_elliptic_r_g(T1 x, T1 y) {
       sf *= T2(2);
     }
   }
+}
+}
+}
 }
 }

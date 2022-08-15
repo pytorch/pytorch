@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct jacobi_t {
   unsigned int n;
@@ -55,5 +58,8 @@ jacobi_polynomial_p(unsigned int n, T1 alpha1, T1 beta1, T1 x) {
 
     return {n, alpha1, beta1, x, r, p, q};
   }
+}
+}
+}
 }
 }

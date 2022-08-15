@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 neville_theta_d(T1 k, T1 x) {
@@ -18,5 +21,8 @@ neville_theta_d(T1 k, T1 x) {
                   c10::numbers::pi_v<T2> / T2(2) * x
                       / at::native::special_functions::complete_elliptic_integral_k(k));
   }
+}
+}
+}
 }
 }

@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/riemann_zeta.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 debye_d(unsigned int n, T1 x) {
@@ -47,5 +50,8 @@ debye_d(unsigned int n, T1 x) {
   } else {
     return T1(0);
   }
+}
+}
+}
 }
 }

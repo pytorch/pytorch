@@ -4,7 +4,10 @@
 
 #include <ATen/native/special_functions/detail/expint.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 exponential_integral_ei(T1 x) {
@@ -13,5 +16,8 @@ exponential_integral_ei(T1 x) {
   } else {
     return expint_Ei(x);
   }
+}
+}
+}
 }
 }

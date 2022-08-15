@@ -2,7 +2,10 @@
 
 #include "ln_double_factorial.h"
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 constexpr T1
 double_factorial(int n) {
@@ -21,5 +24,8 @@ double_factorial(int n) {
   } else {
     return std::numeric_limits<T1>::infinity();
   }
+}
+}
+}
 }
 }

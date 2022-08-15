@@ -14,7 +14,10 @@
 #include <ATen/native/special_functions/detail/riemann_zeta.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 class Terminator {
  private:
@@ -671,5 +674,8 @@ exp_polylog(T1 s, T2 w) {
       return polylog_exp_neg_real(s, w);
     }
   }
+}
+}
+}
 }
 }

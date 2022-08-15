@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 
 template<typename Tp>
 void
@@ -985,5 +988,7 @@ sph_neumann(unsigned int n, const std::complex<Tp> &z) {
   auto hank = sph_hankel(n, z);
   return (hank.h1_value - hank.h2_value) / std::complex<Tp>{0, 2};
 }
-
+}
+}
+}
 }

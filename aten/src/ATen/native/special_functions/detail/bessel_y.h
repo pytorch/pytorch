@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/bessel.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 bessel_y(T1 x, T1 n) {
@@ -13,5 +16,8 @@ bessel_y(T1 x, T1 n) {
   } else {
     return bessel(x, n).y;
   }
+}
+}
+}
 }
 }

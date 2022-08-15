@@ -2,7 +2,10 @@
 
 #include "polylog.h"
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 dirichlet_beta(std::complex<T1> z) {
@@ -23,5 +26,8 @@ dirichlet_beta(T1 x) {
   } else {
     return std::imag(polylog(x, std::complex<T1>{0, 1}));
   }
+}
+}
+}
 }
 }

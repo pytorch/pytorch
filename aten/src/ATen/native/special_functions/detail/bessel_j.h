@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/ln_gamma.h>
 #include <ATen/native/special_functions/detail/bessel.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 bessel_j(T1 x, T1 n) {
@@ -39,5 +42,8 @@ bessel_j(T1 x, T1 n) {
   } else {
     return bessel(x, n).j;
   }
+}
+}
+}
 }
 }

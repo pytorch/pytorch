@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 lah_number_recurrence(unsigned int n, unsigned int k) {
@@ -27,5 +30,8 @@ template<typename Tp>
 inline Tp
 lah_number(unsigned int n, unsigned int k) {
   return lah_number_recurrence<Tp>(n, k);
+}
+}
+}
 }
 }

@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 Tp
 log_binomial_coefficient_sign(Tp nu, unsigned int k) {
@@ -18,5 +21,8 @@ template<typename Tp>
 std::complex<Tp>
 log_binomial_coefficient_sign(std::complex<Tp> n, unsigned int k) {
   return std::complex < Tp > {1};
+}
+}
+}
 }
 }

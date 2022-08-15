@@ -1,7 +1,10 @@
 #pragma once
 #define MMATH_NUMBERS.h
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 inline constexpr T1
     inv_tau_v = T1{0.159154943091895335768883763372514362035L};

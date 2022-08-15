@@ -5,7 +5,10 @@
 #include <ATen/native/special_functions/detail/bessel.h>
 #include <ATen/native/special_functions/polar_pi.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 hankel_h_1(T1 n, T1 x) {
@@ -20,5 +23,8 @@ hankel_h_1(T1 n, T1 x) {
   } else {
     return T2{bessel(x, n).j, bessel(x, n).y};
   }
+}
+}
+}
 }
 }

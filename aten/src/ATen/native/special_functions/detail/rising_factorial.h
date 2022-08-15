@@ -8,7 +8,10 @@
 #include <ATen/native/special_functions/detail/ln_factorial.h>
 #include <ATen/native/special_functions/detail/double_factorials.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 rising_factorial(T1 a, int n) {
@@ -58,5 +61,8 @@ rising_factorial(T1 a, T1 n) {
   } else {
     return log_gamma_sign(a + n) * log_gamma_sign(a) * std::numeric_limits<T1>::infinity();
   }
+}
+}
+}
 }
 }

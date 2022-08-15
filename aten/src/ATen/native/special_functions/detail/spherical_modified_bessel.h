@@ -5,7 +5,10 @@
 #include <c10/util/numbers.h>
 #include <ATen/native/special_functions/detail/modified_bessel.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1, typename T2, typename T3>
 struct spherical_modified_bessel_t {
   T1 n;
@@ -71,5 +74,8 @@ spherical_modified_bessel(unsigned int n, T1 x) {
         p * q.k_derivative - k / (x * T1(2)),
     };
   }
+}
+}
+}
 }
 }

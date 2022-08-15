@@ -7,7 +7,10 @@
 #include <ATen/native/special_functions/detail/factorial.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 falling_factorial(T1 a, int n) {
@@ -78,5 +81,8 @@ falling_factorial(T1 a, T1 nu) {
     else
       return sign * std::numeric_limits<T1>::infinity();
   }
+}
+}
+}
 }
 }

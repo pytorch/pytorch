@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/detail/legendre_polynomial_p.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 spherical_legendre_y(unsigned int l, unsigned int m, T1 theta) {
@@ -55,5 +58,8 @@ spherical_legendre_y(unsigned int l, unsigned int m, T1 theta) {
       return Y_lm;
     }
   }
+}
+}
+}
 }
 }

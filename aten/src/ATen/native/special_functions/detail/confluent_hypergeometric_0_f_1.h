@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/is_integer.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 confluent_hypergeometric_0_f_1(T1 c, T1 x) {
@@ -27,5 +30,8 @@ confluent_hypergeometric_0_f_1(T1 c, T1 x) {
 
     return q;
   }
+}
+}
+}
 }
 }

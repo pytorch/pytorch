@@ -4,7 +4,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 Tp expint_E1(Tp);
 
@@ -131,5 +134,8 @@ expint_E1(T1 x) {
 
     return std::exp(-x) * (q + r) / x;
   }
+}
+}
+}
 }
 }

@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/cos_pi.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 constexpr T1
 ln_double_factorial(T1 n) {
@@ -34,5 +37,8 @@ log_double_factorial(int n) {
   } else {
     return ln_double_factorial(T1(n));
   }
+}
+}
+}
 }
 }

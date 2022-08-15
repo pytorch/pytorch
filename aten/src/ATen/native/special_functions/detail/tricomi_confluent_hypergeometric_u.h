@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 tricomi_confluent_hypergeometric_u(T1 a, T1 c, T1 x) {
@@ -17,5 +20,8 @@ tricomi_confluent_hypergeometric_u(T1 a, T1 c, T1 x) {
   }
 
   return u + v;
+}
+}
+}
 }
 }

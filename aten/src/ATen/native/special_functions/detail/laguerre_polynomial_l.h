@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/detail/ln_gamma.h>
 #include <ATen/native/special_functions/sin_pi.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tpa, typename Tp>
 struct laguerre_t {
   unsigned int n;
@@ -101,5 +104,8 @@ laguerre_polynomial_l(unsigned int n, T1 alpha1, T2 x) {
   } else {
     return laguerre_hyperg(n, alpha1, x);
   }
+}
+}
+}
 }
 }

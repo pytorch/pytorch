@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/detail/is_integer.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 ln_falling_factorial(T1 a, T1 n) {
@@ -33,5 +36,8 @@ ln_falling_factorial(T1 a, T1 n) {
   } else {
     return ln_gamma(a + T1(1)) - ln_gamma(a - n + T1(1));
   }
+}
+}
+}
 }
 }

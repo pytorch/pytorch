@@ -2,7 +2,10 @@
 
 #include <complex>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 inline constexpr Tp
 l1_norm(const std::complex<Tp> &z) { return std::abs(std::real(z)) + std::abs(std::imag(z)); }
@@ -26,5 +29,7 @@ l2_norm(Tp x) { return std::abs(x); }
 template<typename Tp>
 inline constexpr Tp
 linf_norm(Tp x) { return std::abs(x); }
-
+}
+}
+}
 }

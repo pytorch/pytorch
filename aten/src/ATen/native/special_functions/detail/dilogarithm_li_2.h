@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 dilogarithm_li_2(T1 x) {
@@ -42,5 +45,8 @@ dilogarithm_li_2(T1 x) {
 
     return sum;
   }
+}
+}
+}
 }
 }

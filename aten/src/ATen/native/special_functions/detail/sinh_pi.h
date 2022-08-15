@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 sinh_pi(T1 x) {
@@ -25,5 +28,8 @@ sinh_pi(std::complex<T1> z) {
 
   return std::sinh(c10::numbers::pi_v<T3> * std::real(z)) * cos_pi(std::imag(z))
       + std::complex<T1>{0, 1} * std::cosh(c10::numbers::pi_v<T3> * std::real(z)) * sin_pi(std::imag(z));
+}
+}
+}
 }
 }

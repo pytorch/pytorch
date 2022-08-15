@@ -4,7 +4,10 @@
 
 #include <ATen/native/special_functions/detail/spherical_legendre_y.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 spherical_harmonic_y(unsigned int l, int m, T1 theta, T1 phi) {
@@ -15,5 +18,8 @@ spherical_harmonic_y(unsigned int l, int m, T1 theta, T1 phi) {
   } else {
     return spherical_legendre_y(l, std::abs(m), theta) * std::polar(T1(1), T1(m) * phi);
   }
+}
+}
+}
 }
 }

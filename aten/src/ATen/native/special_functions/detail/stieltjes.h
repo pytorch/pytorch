@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 constexpr std::size_t STIELTJES_SIZE = 21;
 
 constexpr long double STIELTJES[STIELTJES_SIZE] = {
@@ -26,4 +29,7 @@ constexpr long double STIELTJES[STIELTJES_SIZE] = {
     +0.0005036054530473556290555964377171600353212698L,
     +0.0004663435615115594494005948244335505251131434L,
 };
+}
+}
+}
 }

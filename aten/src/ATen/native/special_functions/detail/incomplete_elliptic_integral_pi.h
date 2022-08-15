@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 incomplete_elliptic_integral_pi(T1 k, T1 n, T1 phi) {
@@ -74,5 +77,8 @@ incomplete_elliptic_integral_pi(T1 k, T1 n, T1 phi) {
         / T1(3)
         + T1(2) * std::floor(std::real(phi) / c10::numbers::pi_v<T2> + T2(0.5L)) * complete_elliptic_integral_pi(n, k);
   }
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/spherical_bessel.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 spherical_hankel_h_2(unsigned int n, T1 x) {
@@ -18,5 +21,8 @@ spherical_hankel_h_2(unsigned int n, T1 x) {
   } else {
     return {spherical_bessel(n, x).j, -spherical_bessel(n, x).y};
   }
+}
+}
+}
 }
 }

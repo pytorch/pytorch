@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 promote_t<T1>
 sinc(T1 x) {
@@ -13,5 +16,8 @@ sinc(T1 x) {
   } else {
     return std::sin(x) / x;
   }
+}
+}
+}
 }
 }

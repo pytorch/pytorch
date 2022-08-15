@@ -2,7 +2,10 @@
 
 #include <ATen/native/special_functions/detail/factorial_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE = 0;
 
@@ -1014,4 +1017,7 @@ constexpr factorial_t<long double> NEGATIVE_DOUBLE_FACTORIALS[999] = {
     {-1995, -5.190153423883734953283871909194733e-2861L, -6.586049187797781882734662882380101e+03L},
     {-1997, 2.598975174703923361684462648570222e-2864L, -6.593648589131197697950483207309507e+03L},
 };
+}
+}
+}
 }

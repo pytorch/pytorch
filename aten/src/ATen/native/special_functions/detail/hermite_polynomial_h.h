@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/airy_ai.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct hermite_t {
   unsigned int n;
@@ -94,5 +97,8 @@ hermite_polynomial_h(unsigned int n, T1 x) {
   } else {
     return hermite_recurrence(n, x).H_n;
   }
+}
+}
+}
 }
 }

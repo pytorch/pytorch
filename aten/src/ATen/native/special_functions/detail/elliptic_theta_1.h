@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 inline constexpr T1
 elliptic_theta_1(T1 n, T1 x) {
@@ -50,5 +53,8 @@ elliptic_theta_1(T1 n, T1 x) {
 
     return T1(2) * p;
   }
+}
+}
+}
 }
 }

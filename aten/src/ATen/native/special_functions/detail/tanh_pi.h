@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 tanh_pi(T1 x) {
@@ -20,5 +23,8 @@ tanh_pi(std::complex<T1> z) {
 
   return (std::tanh(c10::numbers::pi_v<T3> * std::real(z)) + std::complex<T1>{0, 1} * tan_pi(std::imag(z)))
       / (T2(1) + std::complex<T1>{0, 1} * std::tanh(c10::numbers::pi_v<T3> * std::real(z)) * tan_pi(std::imag(z)));
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include "modified_bessel.h"
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 modified_bessel_k(T1 n, T1 x) {
@@ -13,5 +16,8 @@ modified_bessel_k(T1 n, T1 x) {
   } else {
     return modified_bessel(n, x).k;
   }
+}
+}
+}
 }
 }

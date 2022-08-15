@@ -10,12 +10,10 @@
 #include <ATen/native/special_functions/detail/gamma.h>
 #include <ATen/native/special_functions/prime_number.h>
 
-namespace at::native::special_functions {
-constexpr std::uint32_t
-prime_number(std::uint16_t n);
-}
-
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 riemann_zeta_laurent_series(T1 s) {
@@ -324,5 +322,8 @@ riemann_zeta(T1 s) {
   } else {
     return T2(1) + exp2(-s);
   }
+}
+}
+}
 }
 }

@@ -4,7 +4,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 void
 fresnel_series(const T1 ax, T1 &c, T1 &s) {
@@ -119,5 +122,8 @@ fresnel(const T1 x) {
   }
 
   return std::complex<T1>(c, s);
+}
+}
+}
 }
 }

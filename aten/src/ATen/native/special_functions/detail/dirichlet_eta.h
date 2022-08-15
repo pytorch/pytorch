@@ -7,7 +7,10 @@
 #include <ATen/native/special_functions/detail/sin_pi.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 dirichlet_eta(std::complex<T1> s) {
@@ -36,5 +39,8 @@ dirichlet_eta(T1 s) {
   } else {
     return -std::real(polylog(s, T1(-1)));
   }
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include <complex>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 std::complex<Tp>
 safe_div(const std::complex<Tp> &z1, const std::complex<Tp> &z2);
@@ -159,5 +162,8 @@ safe_sqr(const std::complex<Tp> &z) {
     return std::complex<Tp>(zm * zp, Tp{2} * rez * imz);
   } else
     throw std::runtime_error(__N("safe_sqr: overflow in complex multiplication"));
+}
+}
+}
 }
 }

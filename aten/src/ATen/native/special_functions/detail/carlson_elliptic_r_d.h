@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <ATen/native/special_functions/detail/is_complex_v.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 carlson_elliptic_r_d(T1 x, T1 y, T1 z) {
@@ -69,5 +72,8 @@ carlson_elliptic_r_d(T1 x, T1 y, T1 z) {
 
     return T1(0);
   }
+}
+}
+}
 }
 }

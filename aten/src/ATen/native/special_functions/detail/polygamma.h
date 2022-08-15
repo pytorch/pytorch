@@ -7,7 +7,10 @@
 #include <ATen/native/special_functions/detail/ln_gamma.h>
 #include <ATen/native/special_functions/detail/hurwitz_zeta.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 polygamma(unsigned int m, T1 x) {
@@ -20,5 +23,8 @@ polygamma(unsigned int m, T1 x) {
   } else {
     return +(std::exp(ln_gamma(T1(m + 1))) * hurwitz_zeta(T1(m + 1), x));
   }
+}
+}
+}
 }
 }

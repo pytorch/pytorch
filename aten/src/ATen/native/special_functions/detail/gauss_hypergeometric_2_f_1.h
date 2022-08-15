@@ -8,7 +8,10 @@
 #include <ATen/native/special_functions/detail/promote_t.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 gauss_hypergeometric_2_f_1(T1 a, T1 b, T1 c, T1 x) {
@@ -502,5 +505,8 @@ gauss_hypergeometric_2_f_1(T1 a, T1 b, T1 c, T1 x) {
 
     return f;
   }
+}
+}
+}
 }
 }

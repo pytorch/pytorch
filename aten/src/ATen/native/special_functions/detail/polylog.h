@@ -8,7 +8,10 @@
 #include "riemann_zeta.h"
 #include "zeta.h"
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 polylog(T1 s, T1 x) {
@@ -39,5 +42,8 @@ polylog(T1 s, std::complex<T1> w) {
   } else {
     return exp_polylog(s, std::log(w));
   }
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 jacobi_theta_3(std::complex<T1> q, std::complex<T1> x) {
@@ -66,5 +69,8 @@ jacobi_theta_3(Tp q, const Tp x) {
                              "Unexpected large imaginary part");
   else
     return std::real(ret);
+}
+}
+}
 }
 }

@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 Tp
 dawson_series(Tp x) {
@@ -176,5 +179,8 @@ dawson(Tp x) {
     return dawson_series(x);
   else
     return dawson_cont_frac(x);
+}
+}
+}
 }
 }

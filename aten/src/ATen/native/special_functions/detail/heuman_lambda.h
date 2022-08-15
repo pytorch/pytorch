@@ -7,7 +7,10 @@
 #include <ATen/native/special_functions/detail/jacobi_zeta.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 heuman_lambda(T1 k, T1 phi) {
@@ -48,5 +51,8 @@ heuman_lambda(T1 k, T1 phi) {
         + complete_elliptic_integral_k(k) * jacobi_zeta(std::sqrt(T1(1) - k * k), phi)
             / (c10::numbers::pi_v<T1> / T1(2));
   }
+}
+}
+}
 }
 }

@@ -2,7 +2,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 std::complex<T1>
 jacobi_theta_4(std::complex<T1> q, std::complex<T1> x) {
@@ -64,5 +67,8 @@ jacobi_theta_4(T1 q, const T1 x) {
   } else {
     return std::real(jacobi_theta_4(T2(q), T2(x)));
   }
+}
+}
+}
 }
 }

@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <ATen/native/special_functions/detail/complete_carlson_elliptic_r_f.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 complete_elliptic_integral_k(T1 k) {
@@ -19,5 +22,8 @@ complete_elliptic_integral_k(T1 k) {
 
     return r_f;
   }
+}
+}
+}
 }
 }

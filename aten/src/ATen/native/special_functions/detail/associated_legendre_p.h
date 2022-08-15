@@ -3,7 +3,10 @@
 #include "legendre_polynomial_p.h"
 #include <ATen/native/special_functions/detail/numeric_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 struct associated_legendre_p_t {
   unsigned int l;
@@ -81,5 +84,8 @@ associated_legendre_p(unsigned int l, unsigned int m, T1 x, T1 phase = T1(1)) {
 
     return {l, m, x, c, b, a};
   }
+}
+}
+}
 }
 }

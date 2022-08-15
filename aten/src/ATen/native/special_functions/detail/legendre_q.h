@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/numeric_t.h>
 #include <ATen/native/special_functions/gauss_hypergeometric_2_f_1.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct legendre_q_t {
   unsigned int l;
@@ -84,5 +87,8 @@ legendre_q(unsigned int l, T1 x) {
       }
     }
   }
+}
+}
+}
 }
 }

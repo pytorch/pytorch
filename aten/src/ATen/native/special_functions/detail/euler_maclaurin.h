@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 constexpr size_t EULER_MACLAURIN_SIZE = 100;
 
 constexpr long double EULER_MACLAURIN[EULER_MACLAURIN_SIZE] = {
@@ -105,4 +108,7 @@ constexpr long double EULER_MACLAURIN[EULER_MACLAURIN_SIZE] = {
     -7.20735306841513677412535382503699916e-157L,
     1.82564385955014175253212078464905862e-158L
 };
+}
+}
+}
 }

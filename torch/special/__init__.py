@@ -4,61 +4,183 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
     'airy_ai',
+    'airy_ai',
+    'airy_bi',
+    'associated_laguerre_polynomial_l',
+    'associated_legendre_p',
+    'associated_legendre_q',
+    'bell_polynomial_b',
+    'bernoulli_number',
+    'bernoulli_polynomial_b',
+    'bessel_j',
     'bessel_j_0',
     'bessel_j_1',
+    'bessel_y',
     'bessel_y_0',
     'bessel_y_1',
+    'beta',
+    'binomial_coefficient',
+    'bose_einstein_integral_g',
+    'bulirsch_elliptic_integral_cel',
+    'bulirsch_elliptic_integral_el1',
+    'bulirsch_elliptic_integral_el2',
+    'bulirsch_elliptic_integral_el3',
+    'carlson_elliptic_r_c',
+    'carlson_elliptic_r_d',
+    'carlson_elliptic_r_f',
+    'carlson_elliptic_r_g',
+    'carlson_elliptic_r_j',
     'chebyshev_polynomial_t',
     'chebyshev_polynomial_u',
     'chebyshev_polynomial_v',
     'chebyshev_polynomial_w',
+    'clausen_cl',
+    'clausen_sl',
+    'complete_carlson_elliptic_r_f',
+    'complete_carlson_elliptic_r_g',
+    'complete_elliptic_integral_e',
+    'complete_elliptic_integral_k',
+    'complete_elliptic_integral_pi',
+    'complete_legendre_elliptic_integral_d',
+    'confluent_hypergeometric_0_f_1',
+    'cos_pi',
+    'cosh_pi',
+    'cosine_integral_ci',
+    'debye_d',
     'digamma',
+    'dilogarithm_li_2',
+    'dirichlet_beta',
+    'dirichlet_eta',
+    'dirichlet_lambda',
+    'double_factorial',
     'entr',
     'erf',
     'erfc',
     'erfcx',
     'erfinv',
     'exp2',
+    'exp_airy_ai',
+    'exp_airy_bi',
+    'exp_modified_bessel_i',
+    'exp_modified_bessel_k',
+    'exp_modified_bessel_k_0',
+    'exp_modified_bessel_k_1',
     'expit',
     'expm1',
+    'exponential_integral_e',
+    'exponential_integral_ei',
+    'factorial',
+    'falling_factorial',
+    'fermi_dirac_integral_f',
+    'fresnel_integral_c',
+    'fresnel_integral_s',
     'gammainc',
     'gammaincc',
     'gammaln',
+    'gauss_hypergeometric_2_f_1',
+    'gegenbauer_polynomial_c',
+    'hankel_h_1',
+    'hankel_h_2',
+    'harmonic_number',
     'hermite_polynomial_h',
     'hermite_polynomial_he',
+    'heuman_lambda',
+    'hurwitz_zeta',
+    'hyperbolic_cosine_integral_chi',
+    'hyperbolic_sine_integral_shi',
     'i0',
     'i0e',
     'i1',
     'i1e',
+    'incomplete_beta',
+    'incomplete_elliptic_integral_e',
+    'incomplete_elliptic_integral_f',
+    'incomplete_elliptic_integral_pi',
+    'incomplete_legendre_elliptic_integral_d',
+    'jacobi_polynomial_p',
+    'jacobi_theta_1',
+    'jacobi_theta_2',
+    'jacobi_theta_3',
+    'jacobi_theta_4',
+    'jacobi_zeta',
+    'kummer_confluent_hypergeometric_1_f_1',
     'laguerre_polynomial_l',
+    'lah_number',
     'legendre_polynomial_p',
+    'legendre_q',
+    'ln_binomial_coefficient',
+    'ln_double_factorial',
+    'ln_factorial',
+    'ln_falling_factorial',
+    'ln_gamma',
+    'ln_gamma_sign',
+    'ln_rising_factorial',
     'log1p',
     'log_ndtr',
     'log_softmax',
+    'logarithmic_integral_li',
     'logit',
     'logsumexp',
+    'lower_incomplete_gamma',
+    'modified_bessel_i',
     'modified_bessel_i_0',
     'modified_bessel_i_1',
+    'modified_bessel_k',
     'modified_bessel_k_0',
     'modified_bessel_k_1',
     'multigammaln',
     'ndtr',
     'ndtri',
+    'neville_theta_c',
+    'neville_theta_d',
+    'neville_theta_n',
+    'neville_theta_s',
+    'nome_q',
+    'owens_t',
+    'polar_pi',
     'polygamma',
+    'polylogarithm_li',
+    'prime_number',
     'psi',
+    'radial_polynomial_r',
+    'reciprocal_gamma',
+    'riemann_zeta',
+    'rising_factorial',
     'round',
     'shifted_chebyshev_polynomial_t',
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
-    'exp_modified_bessel_k_0',
-    'exp_modified_bessel_k_1',
+    'sin_pi',
     'sinc',
+    'sinc_pi',
+    'sinh_pi',
+    'sinhc',
+    'sinhc_pi',
     'softmax',
+    'spherical_bessel_j',
     'spherical_bessel_j_0',
+    'spherical_bessel_y',
+    'spherical_hankel_h_1',
+    'spherical_hankel_h_2',
+    'spherical_harmonic_y',
+    'spherical_legendre_y',
+    'spherical_modified_bessel_i',
+    'spherical_modified_bessel_k',
+    'stirling_number_1',
+    'stirling_number_2',
+    'tan_pi',
+    'tanh_pi',
+    'theta_1',
+    'theta_2',
+    'theta_3',
+    'theta_4',
+    'tricomi_confluent_hypergeometric_u',
+    'upper_incomplete_gamma',
     'xlog1py',
     'xlogy',
-    'zeta',
+    'zernike_polynomial_z',
+    'zeta'
 ]
 
 Tensor = torch.Tensor
@@ -875,409 +997,2154 @@ Example::
 
 """.format(**common_args))
 
-airy_ai = _add_docstr(_special.special_airy_ai,
-                      r"""
-airy_ai(input, *, out=None) -> Tensor
+airy_ai = _add_docstr(
+    _special.special_airy_ai,
+    r"""
+airy_ai(z, *, out=None) -> Tensor
 
-Airy function :math:`\text{Ai}\left(\text{input}\right)`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-bessel_j_0 = _add_docstr(_special.special_bessel_j_0,
-                         r"""
-bessel_j_0(input, *, out=None) -> Tensor
+airy_bi = _add_docstr(
+    _special.special_airy_bi,
+    r"""
+airy_bi(z, *, out=None) -> Tensor
 
-Bessel function of the first kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-bessel_j_1 = _add_docstr(_special.special_bessel_j_1,
-                         r"""
-bessel_j_1(input, *, out=None) -> Tensor
+associated_laguerre_polynomial_l = _add_docstr(
+    _special.special_associated_laguerre_polynomial_l,
+    r"""
+associated_laguerre_polynomial_l(n, m, x, *, out=None) -> Tensor
 
-Bessel function of the first kind of order :math:`1`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    n (Scalar or Tensor):
+    m (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-bessel_y_0 = _add_docstr(_special.special_bessel_y_0,
-                         r"""
-bessel_y_0(input, *, out=None) -> Tensor
+associated_legendre_p = _add_docstr(
+    _special.special_associated_legendre_p,
+    r"""
+associated_legendre_p(l, m, x, *, out=None) -> Tensor
 
-Bessel function of the second kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    l (Scalar or Tensor):
+    m (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-bessel_y_1 = _add_docstr(_special.special_bessel_y_1,
-                         r"""
-bessel_y_1(input, *, out=None) -> Tensor
+associated_legendre_q = _add_docstr(
+    _special.special_associated_legendre_q,
+    r"""
+associated_legendre_q(l, m, x, *, out=None) -> Tensor
 
-Bessel function of the second kind of order :math:`1`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    l (Scalar or Tensor):
+    m (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,
-                                     r"""
-chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+bell_polynomial_b = _add_docstr(
+    _special.special_bell_polynomial_b,
+    r"""
+bell_polynomial_b(n, x, *, out=None) -> Tensor
 
-Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
-
-.. math::
-    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
-
-is evaluated. Otherwise, the explicit trigonometric formula:
-
-.. math::
-    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
-                                     r"""
-chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+bernoulli_number = _add_docstr(
+    _special.special_bernoulli_number,
+    r"""
+bernoulli_number(n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
-:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
-:math:`|\text{input}| > 1`, the recursion:
-
-.. math::
-    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
-
-is evaluated. Otherwise, the explicit trigonometric formula:
-
-.. math::
-    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    n (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-chebyshev_polynomial_v = _add_docstr(_special.special_chebyshev_polynomial_v,
-                                     r"""
-chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+bernoulli_polynomial_b = _add_docstr(
+    _special.special_bernoulli_polynomial_b,
+    r"""
+bernoulli_polynomial_b(n, x, *, out=None) -> Tensor
 
-Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-chebyshev_polynomial_w = _add_docstr(_special.special_chebyshev_polynomial_w,
-                                     r"""
-chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+bessel_j = _add_docstr(
+    _special.special_bessel_j,
+    r"""
+bessel_j(v, z, *, out=None) -> Tensor
 
-Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    v (Scalar or Tensor):
+    z (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
-                                   r"""
-hermite_polynomial_h(input, n, *, out=None) -> Tensor
+bessel_j_0 = _add_docstr(
+    _special.special_bessel_j_0,
+    r"""
+bessel_j_0(z, *, out=None) -> Tensor
 
-Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. Otherwise, the recursion:
-
-.. math::
-    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
-                                    r"""
-hermite_polynomial_he(input, n, *, out=None) -> Tensor
+bessel_j_1 = _add_docstr(
+    _special.special_bessel_j_1,
+    r"""
+bessel_j_1(z, *, out=None) -> Tensor
 
-Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. Otherwise, the recursion:
-
-.. math::
-    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
-                                    r"""
-laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+bessel_y = _add_docstr(
+    _special.special_bessel_y,
+    r"""
+bessel_y(v, z, *, out=None) -> Tensor
 
-Laguerre polynomial :math:`L_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. Otherwise, the recursion:
-
-.. math::
-    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    v (Scalar or Tensor):
+    z (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-legendre_polynomial_p = _add_docstr(_special.special_legendre_polynomial_p,
-                                    r"""
-legendre_polynomial_p(input, n, *, out=None) -> Tensor
+bessel_y_0 = _add_docstr(
+    _special.special_bessel_y_0,
+    r"""
+bessel_y_0(z, *, out=None) -> Tensor
 
-Legendre polynomial :math:`P_{n}(\text{input})`.
-
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. Otherwise, the recursion:
-
-.. math::
-    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
-
-is evaluated.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-modified_bessel_i_0 = _add_docstr(_special.special_modified_bessel_i_0,
-                                  r"""
-modified_bessel_i_0(input, *, out=None) -> Tensor
+bessel_y_1 = _add_docstr(
+    _special.special_bessel_y_1,
+    r"""
+bessel_y_1(z, *, out=None) -> Tensor
 
-Modified Bessel function of the first kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    z (Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-modified_bessel_i_1 = _add_docstr(_special.special_modified_bessel_i_1,
-                                  r"""
-modified_bessel_i_1(input, *, out=None) -> Tensor
+beta = _add_docstr(
+    _special.special_beta,
+    r"""
+beta(a, b, *, out=None) -> Tensor
 
-Modified Bessel function of the first kind of order :math:`1`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    a (Scalar or Tensor):
+    b (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-modified_bessel_k_0 = _add_docstr(_special.special_modified_bessel_k_0,
-                                  r"""
-modified_bessel_k_0(input, *, out=None) -> Tensor
+binomial_coefficient = _add_docstr(
+    _special.special_binomial_coefficient,
+    r"""
+binomial_coefficient(n, k, *, out=None) -> Tensor
 
-Modified Bessel function of the second kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    n (Scalar or Tensor):
+    k (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-modified_bessel_k_1 = _add_docstr(_special.special_modified_bessel_k_1,
-                                  r"""
-modified_bessel_k_1(input, *, out=None) -> Tensor
+bose_einstein_integral_g = _add_docstr(
+    _special.special_bose_einstein_integral_g,
+    r"""
+bose_einstein_integral_g(s, x, *, out=None) -> Tensor
 
-Modified Bessel function of the second kind of order :math:`1`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    s (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-exp_modified_bessel_k_0 = _add_docstr(_special.special_exp_modified_bessel_k_0,
-                                      r"""
-exp_modified_bessel_k_0(input, *, out=None) -> Tensor
+bulirsch_elliptic_integral_cel = _add_docstr(
+    _special.special_bulirsch_elliptic_integral_cel,
+    r"""
+bulirsch_elliptic_integral_cel(k, p, a, b, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    k (Scalar or Tensor):
+    p (Scalar or Tensor):
+    a (Scalar or Tensor):
+    b (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-exp_modified_bessel_k_1 = _add_docstr(_special.special_exp_modified_bessel_k_1,
-                                      r"""
-exp_modified_bessel_k_1(input, *, out=None) -> Tensor
+bulirsch_elliptic_integral_el1 = _add_docstr(
+    _special.special_bulirsch_elliptic_integral_el1,
+    r"""
+bulirsch_elliptic_integral_el1(x, k, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`1`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    k (Scalar or Tensor):
+    x (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-shifted_chebyshev_polynomial_t = _add_docstr(_special.special_shifted_chebyshev_polynomial_t,
-                                             r"""
-shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+bulirsch_elliptic_integral_el2 = _add_docstr(
+    _special.special_bulirsch_elliptic_integral_el2,
+    r"""
+bulirsch_elliptic_integral_el2(x, k, a, b, *, out=None) -> Tensor
 
-Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    x (Scalar or Tensor):
+    k (Scalar or Tensor):
+    a (Scalar or Tensor):
+    b (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-shifted_chebyshev_polynomial_u = _add_docstr(_special.special_shifted_chebyshev_polynomial_u,
-                                             r"""
-shifted_chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
+bulirsch_elliptic_integral_el3 = _add_docstr(
+    _special.special_bulirsch_elliptic_integral_el3,
+    r"""
+bulirsch_elliptic_integral_el3(x, k, p, *, out=None) -> Tensor
 
-Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    x (Scalar or Tensor):
+    k (Scalar or Tensor):
+    p (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-shifted_chebyshev_polynomial_v = _add_docstr(_special.special_shifted_chebyshev_polynomial_v,
-                                             r"""
-shifted_chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+carlson_elliptic_r_c = _add_docstr(
+    _special.special_carlson_elliptic_r_c,
+    r"""
+carlson_elliptic_r_c(x, y, *, out=None) -> Tensor
 
-Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-shifted_chebyshev_polynomial_w = _add_docstr(_special.special_shifted_chebyshev_polynomial_w,
-                                             r"""
-shifted_chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+carlson_elliptic_r_d = _add_docstr(
+    _special.special_carlson_elliptic_r_d,
+    r"""
+carlson_elliptic_r_d(x, y, z, *, out=None) -> Tensor
 
-Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
-    n (Tensor): Degree of the polynomial.
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+    z (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
 
-spherical_bessel_j_0 = _add_docstr(_special.special_spherical_bessel_j_0,
-                                   r"""
-spherical_bessel_j_0(input, *, out=None) -> Tensor
+carlson_elliptic_r_f = _add_docstr(
+    _special.special_carlson_elliptic_r_f,
+    r"""
+carlson_elliptic_r_f(x, y, z, *, out=None) -> Tensor
 
-Spherical Bessel function of the first kind of order :math:`0`.
-
-""" + r"""
+    """ + r"""
 Args:
-    {input}
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+    z (Scalar or Tensor):
 
 Keyword args:
     {out}
-""".format(**common_args))
+    """.format(**common_args),
+)
+
+carlson_elliptic_r_g = _add_docstr(
+    _special.special_carlson_elliptic_r_g,
+    r"""
+carlson_elliptic_r_g(x, y, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+carlson_elliptic_r_j = _add_docstr(
+    _special.special_carlson_elliptic_r_j,
+    r"""
+carlson_elliptic_r_j(x, y, z, p, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+    z (Scalar or Tensor):
+    p (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+chebyshev_polynomial_t = _add_docstr(
+    _special.special_chebyshev_polynomial_t,
+    r"""
+chebyshev_polynomial_t(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+chebyshev_polynomial_u = _add_docstr(
+    _special.special_chebyshev_polynomial_u,
+    r"""
+chebyshev_polynomial_u(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+chebyshev_polynomial_v = _add_docstr(
+    _special.special_chebyshev_polynomial_v,
+    r"""
+chebyshev_polynomial_v(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+chebyshev_polynomial_w = _add_docstr(
+    _special.special_chebyshev_polynomial_w,
+    r"""
+chebyshev_polynomial_w(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+clausen_cl = _add_docstr(
+    _special.special_clausen_cl,
+    r"""
+clausen_cl(m, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    m (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+clausen_sl = _add_docstr(
+    _special.special_clausen_sl,
+    r"""
+clausen_sl(m, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    m (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_carlson_elliptic_r_f = _add_docstr(
+    _special.special_complete_carlson_elliptic_r_f,
+    r"""
+complete_carlson_elliptic_r_f(x, y, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_carlson_elliptic_r_g = _add_docstr(
+    _special.special_complete_carlson_elliptic_r_g,
+    r"""
+complete_carlson_elliptic_r_g(x, y, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Scalar or Tensor):
+    y (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_elliptic_integral_e = _add_docstr(
+    _special.special_complete_elliptic_integral_e,
+    r"""
+complete_elliptic_integral_e(k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_elliptic_integral_k = _add_docstr(
+    _special.special_complete_elliptic_integral_k,
+    r"""
+complete_elliptic_integral_k(k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_elliptic_integral_pi = _add_docstr(
+    _special.special_complete_elliptic_integral_pi,
+    r"""
+complete_elliptic_integral_pi(k, n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    n (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+complete_legendre_elliptic_integral_d = _add_docstr(
+    _special.special_complete_legendre_elliptic_integral_d,
+    r"""
+complete_legendre_elliptic_integral_d(k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+confluent_hypergeometric_0_f_1 = _add_docstr(
+    _special.special_confluent_hypergeometric_0_f_1,
+    r"""
+confluent_hypergeometric_0_f_1(c, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    c (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+cos_pi = _add_docstr(
+    _special.special_cos_pi,
+    r"""
+cos_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+cosh_pi = _add_docstr(
+    _special.special_cosh_pi,
+    r"""
+cosh_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+cosine_integral_ci = _add_docstr(
+    _special.special_cosine_integral_ci,
+    r"""
+cosine_integral_ci(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+debye_d = _add_docstr(
+    _special.special_debye_d,
+    r"""
+debye_d(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+dilogarithm_li_2 = _add_docstr(
+    _special.special_dilogarithm_li_2,
+    r"""
+dilogarithm_li_2(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+dirichlet_beta = _add_docstr(
+    _special.special_dirichlet_beta,
+    r"""
+dirichlet_beta(s, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+dirichlet_eta = _add_docstr(
+    _special.special_dirichlet_eta,
+    r"""
+dirichlet_eta(s, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+dirichlet_lambda = _add_docstr(
+    _special.special_dirichlet_lambda,
+    r"""
+dirichlet_eta(s, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+double_factorial = _add_docstr(
+    _special.special_double_factorial,
+    r"""
+double_factorial(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_airy_ai = _add_docstr(
+    _special.special_exp_airy_ai,
+    r"""
+exp_airy_ai(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_airy_bi = _add_docstr(
+    _special.special_exp_airy_bi,
+    r"""
+exp_airy_bi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_modified_bessel_i = _add_docstr(
+    _special.special_exp_modified_bessel_i,
+    r"""
+exp_modified_bessel_i(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_modified_bessel_k = _add_docstr(
+    _special.special_exp_modified_bessel_k,
+    r"""
+exp_modified_bessel_k(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_modified_bessel_k_0 = _add_docstr(
+    _special.special_exp_modified_bessel_k_0,
+    r"""
+exp_modified_bessel_k_0(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exp_modified_bessel_k_1 = _add_docstr(
+    _special.special_exp_modified_bessel_k_1,
+    r"""
+exp_modified_bessel_k_1(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exponential_integral_e = _add_docstr(
+    _special.special_exponential_integral_e,
+    r"""
+exponential_integral_e(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+exponential_integral_ei = _add_docstr(
+    _special.special_exponential_integral_ei,
+    r"""
+exponential_integral_ei(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+factorial = _add_docstr(
+    _special.special_factorial,
+    r"""
+factorial(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+falling_factorial = _add_docstr(
+    _special.special_falling_factorial,
+    r"""
+falling_factorial(a, n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    n (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+fermi_dirac_integral_f = _add_docstr(
+    _special.special_fermi_dirac_integral_f,
+    r"""
+fermi_dirac_integral_f(s, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+fresnel_integral_c = _add_docstr(
+    _special.special_fresnel_integral_c,
+    r"""
+fresnel_integral_c(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+fresnel_integral_s = _add_docstr(
+    _special.special_fresnel_integral_s,
+    r"""
+fresnel_integral_s(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+gauss_hypergeometric_2_f_1 = _add_docstr(
+    _special.special_gauss_hypergeometric_2_f_1,
+    r"""
+gauss_hypergeometric_2_f_1(a, b, c, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    b (Scalar or Tensor):
+    c (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+gegenbauer_polynomial_c = _add_docstr(
+    _special.special_gegenbauer_polynomial_c,
+    r"""
+gegenbauer_polynomial_c(l, n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    l (Scalar or Tensor):
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hankel_h_1 = _add_docstr(
+    _special.special_hankel_h_1,
+    r"""
+hankel_h_1(v, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    v (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hankel_h_2 = _add_docstr(
+    _special.special_hankel_h_2,
+    r"""
+hankel_h_2(v, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    v (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+harmonic_number = _add_docstr(
+    _special.special_harmonic_number,
+    r"""
+harmonic_number(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hermite_polynomial_h = _add_docstr(
+    _special.special_hermite_polynomial_h,
+    r"""
+hermite_polynomial_h(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hermite_polynomial_he = _add_docstr(
+    _special.special_hermite_polynomial_he,
+    r"""
+hermite_polynomial_he(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+heuman_lambda = _add_docstr(
+    _special.special_heuman_lambda,
+    r"""
+heuman_lambda(k, p, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    p (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hurwitz_zeta = _add_docstr(
+    _special.special_hurwitz_zeta,
+    r"""
+hurwitz_zeta(s, a, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Scalar or Tensor):
+    a (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hyperbolic_cosine_integral_chi = _add_docstr(
+    _special.special_hyperbolic_cosine_integral_chi,
+    r"""
+hyperbolic_cosine_integral_chi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+hyperbolic_sine_integral_shi = _add_docstr(
+    _special.special_hyperbolic_sine_integral_shi,
+    r"""
+hyperbolic_sine_integral_shi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+incomplete_beta = _add_docstr(
+    _special.special_incomplete_beta,
+    r"""
+incomplete_beta(a, b, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    b (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+incomplete_elliptic_integral_e = _add_docstr(
+    _special.special_incomplete_elliptic_integral_e,
+    r"""
+incomplete_elliptic_integral_e(k, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+incomplete_elliptic_integral_f = _add_docstr(
+    _special.special_incomplete_elliptic_integral_f,
+    r"""
+incomplete_elliptic_integral_f(k, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+incomplete_elliptic_integral_pi = _add_docstr(
+    _special.special_incomplete_elliptic_integral_pi,
+    r"""
+incomplete_elliptic_integral_pi(k, n, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    n (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+incomplete_legendre_elliptic_integral_d = _add_docstr(
+    _special.special_incomplete_legendre_elliptic_integral_d,
+    r"""
+incomplete_legendre_elliptic_integral_d(k, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_polynomial_p = _add_docstr(
+    _special.special_jacobi_polynomial_p,
+    r"""
+jacobi_polynomial_p(alpha, beta, n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    alpha (Scalar or Tensor):
+    beta (Scalar or Tensor):
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_theta_1 = _add_docstr(
+    _special.special_jacobi_theta_1,
+    r"""
+jacobi_theta_1(q, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    q (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_theta_2 = _add_docstr(
+    _special.special_jacobi_theta_2,
+    r"""
+jacobi_theta_2(q, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    q (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_theta_3 = _add_docstr(
+    _special.special_jacobi_theta_3,
+    r"""
+jacobi_theta_3(q, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    q (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_theta_4 = _add_docstr(
+    _special.special_jacobi_theta_4,
+    r"""
+jacobi_theta_4(q, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    q (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+jacobi_zeta = _add_docstr(
+    _special.special_jacobi_zeta,
+    r"""
+jacobi_zeta(k, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+kummer_confluent_hypergeometric_1_f_1 = _add_docstr(
+    _special.special_kummer_confluent_hypergeometric_1_f_1,
+    r"""
+kummer_confluent_hypergeometric_1_f_1(a, c, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    c (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+laguerre_polynomial_l = _add_docstr(
+    _special.special_laguerre_polynomial_l,
+    r"""
+laguerre_polynomial_l(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+lah_number = _add_docstr(
+    _special.special_lah_number,
+    r"""
+lah_number(n, k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    k (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+legendre_polynomial_p = _add_docstr(
+    _special.special_legendre_polynomial_p,
+    r"""
+legendre_polynomial_p(l, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    l (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+legendre_q = _add_docstr(
+    _special.special_legendre_q,
+    r"""
+legendre_q(l, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    l (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_binomial_coefficient = _add_docstr(
+    _special.special_ln_binomial_coefficient,
+    r"""
+ln_binomial_coefficient(n, k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    k (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_double_factorial = _add_docstr(
+    _special.special_ln_double_factorial,
+    r"""
+ln_double_factorial(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_factorial = _add_docstr(
+    _special.special_ln_factorial,
+    r"""
+ln_gamma(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_falling_factorial = _add_docstr(
+    _special.special_ln_falling_factorial,
+    r"""
+ln_falling_factorial(a, n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    n (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_gamma = _add_docstr(
+    _special.special_ln_gamma,
+    r"""
+ln_gamma(a, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_gamma_sign = _add_docstr(
+    _special.special_ln_gamma_sign,
+    r"""
+ln_gamma_sign(a, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+ln_rising_factorial = _add_docstr(
+    _special.special_ln_rising_factorial,
+    r"""
+ln_rising_factorial(a, n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    n (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+logarithmic_integral_li = _add_docstr(
+    _special.special_logarithmic_integral_li,
+    r"""
+logarithmic_integral_li(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+lower_incomplete_gamma = _add_docstr(
+    _special.special_lower_incomplete_gamma,
+    r"""
+lower_incomplete_gamma(a, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_i = _add_docstr(
+    _special.special_modified_bessel_i,
+    r"""
+modified_bessel_k(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_i_0 = _add_docstr(
+    _special.special_modified_bessel_i_0,
+    r"""
+modified_bessel_i_0(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_i_1 = _add_docstr(
+    _special.special_modified_bessel_i_1,
+    r"""
+modified_bessel_i_1(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_k = _add_docstr(
+    _special.special_modified_bessel_k,
+    r"""
+modified_bessel_k(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_k_0 = _add_docstr(
+    _special.special_modified_bessel_k_0,
+    r"""
+modified_bessel_k_0(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+modified_bessel_k_1 = _add_docstr(
+    _special.special_modified_bessel_k_1,
+    r"""
+modified_bessel_k_1(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+neville_theta_c = _add_docstr(
+    _special.special_neville_theta_c,
+    r"""
+neville_theta_c(k, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+neville_theta_d = _add_docstr(
+    _special.special_neville_theta_d,
+    r"""
+neville_theta_d(k, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+neville_theta_n = _add_docstr(
+    _special.special_neville_theta_n,
+    r"""
+neville_theta_n(k, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+neville_theta_s = _add_docstr(
+    _special.special_neville_theta_s,
+    r"""
+neville_theta_s(k, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+nome_q = _add_docstr(
+    _special.special_nome_q,
+    r"""
+nome_q(k, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    k (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+owens_t = _add_docstr(
+    _special.special_owens_t,
+    r"""
+owens_t(h, a, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    h (Scalar or Tensor):
+    a (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+polar_pi = _add_docstr(
+    _special.special_polar_pi,
+    r"""
+polar_pi(rho, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    rho (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+polylogarithm_li = _add_docstr(
+    _special.special_polylogarithm_li,
+    r"""
+polylogarithm_li(s, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+prime_number = _add_docstr(
+    _special.special_prime_number,
+    r"""
+prime_number(n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+radial_polynomial_r = _add_docstr(
+    _special.special_radial_polynomial_r,
+    r"""
+radial_polynomial_r(m, n, rho, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    m (Scalar or Tensor):
+    n (Scalar or Tensor):
+    rho (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+reciprocal_gamma = _add_docstr(
+    _special.special_reciprocal_gamma,
+    r"""
+reciprocal_gamma(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+riemann_zeta = _add_docstr(
+    _special.special_riemann_zeta,
+    r"""
+riemann_zeta(s, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    s (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+rising_factorial = _add_docstr(
+    _special.special_rising_factorial,
+    r"""
+rising_factorial(a, n, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    n (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+shifted_chebyshev_polynomial_t = _add_docstr(
+    _special.special_shifted_chebyshev_polynomial_t,
+    r"""
+shifted_chebyshev_polynomial_t(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+shifted_chebyshev_polynomial_u = _add_docstr(
+    _special.special_shifted_chebyshev_polynomial_u,
+    r"""
+shifted_chebyshev_polynomial_u(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+shifted_chebyshev_polynomial_v = _add_docstr(
+    _special.special_shifted_chebyshev_polynomial_v,
+    r"""
+shifted_chebyshev_polynomial_v(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+shifted_chebyshev_polynomial_w = _add_docstr(
+    _special.special_shifted_chebyshev_polynomial_w,
+    r"""
+shifted_chebyshev_polynomial_w(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+sin_pi = _add_docstr(
+    _special.special_sin_pi,
+    r"""
+sin_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+sinc_pi = _add_docstr(
+    _special.special_sinc_pi,
+    r"""
+sinc_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+sinh_pi = _add_docstr(
+    _special.special_sinh_pi,
+    r"""
+sinh_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+sinhc = _add_docstr(
+    _special.special_sinhc,
+    r"""
+sinhc(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+sinhc_pi = _add_docstr(
+    _special.special_sinhc_pi,
+    r"""
+sinhc_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_bessel_j = _add_docstr(
+    _special.special_spherical_bessel_j,
+    r"""
+spherical_bessel_j(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_bessel_j_0 = _add_docstr(
+    _special.special_spherical_bessel_j_0,
+    r"""
+spherical_bessel_j_0(x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    x (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_bessel_y = _add_docstr(
+    _special.special_spherical_bessel_y,
+    r"""
+spherical_bessel_y(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_hankel_h_1 = _add_docstr(
+    _special.special_spherical_hankel_h_1,
+    r"""
+spherical_hankel_h_1(n, z, *, out=None) -> Tensor
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_hankel_h_2 = _add_docstr(
+    _special.special_spherical_hankel_h_2,
+    r"""
+spherical_hankel_h_2(n, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_harmonic_y = _add_docstr(
+    _special.special_spherical_harmonic_y,
+    r"""
+spherical_harmonic_y(l, m, t, p, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    l (Scalar or Tensor):
+    m (Scalar or Tensor):
+    t (Scalar or Tensor):
+    p (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_legendre_y = _add_docstr(
+    _special.special_spherical_legendre_y,
+    r"""
+spherical_legendre_y(l, m, theta, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    l (Scalar or Tensor):
+    m (Scalar or Tensor):
+    theta (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_modified_bessel_i = _add_docstr(
+    _special.special_spherical_modified_bessel_i,
+    r"""
+spherical_modified_bessel_i(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+spherical_modified_bessel_k = _add_docstr(
+    _special.special_spherical_modified_bessel_k,
+    r"""
+spherical_modified_bessel_k(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+stirling_number_1 = _add_docstr(
+    _special.special_stirling_number_1,
+    r"""
+stirling_number_1(n, m, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    m (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+stirling_number_2 = _add_docstr(
+    _special.special_stirling_number_2,
+    r"""
+stirling_number_2(n, m, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    m (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+tan_pi = _add_docstr(
+    _special.special_tan_pi,
+    r"""
+tan_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+tanh_pi = _add_docstr(
+    _special.special_tanh_pi,
+    r"""
+tanh_pi(z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    z (Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+theta_1 = _add_docstr(
+    _special.special_theta_1,
+    r"""
+theta_1(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+theta_2 = _add_docstr(
+    _special.special_theta_2,
+    r"""
+theta_2(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+theta_3 = _add_docstr(
+    _special.special_theta_3,
+    r"""
+theta_3(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+theta_4 = _add_docstr(
+    _special.special_theta_4,
+    r"""
+theta_4(n, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+tricomi_confluent_hypergeometric_u = _add_docstr(
+    _special.special_tricomi_confluent_hypergeometric_u,
+    r"""
+tricomi_confluent_hypergeometric_u(a, c, x, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    c (Scalar or Tensor):
+    x (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+upper_incomplete_gamma = _add_docstr(
+    _special.special_upper_incomplete_gamma,
+    r"""
+upper_incomplete_gamma(a, z, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    a (Scalar or Tensor):
+    z (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)
+
+zernike_polynomial_z = _add_docstr(
+    _special.special_zernike_polynomial_z,
+    r"""
+zernike_polynomial_z(n, m, rho, phi, *, out=None) -> Tensor
+
+    """ + r"""
+Args:
+    n (Scalar or Tensor):
+    m (Scalar or Tensor):
+    rho (Scalar or Tensor):
+    phi (Scalar or Tensor):
+
+Keyword args:
+    {out}
+    """.format(**common_args),
+)

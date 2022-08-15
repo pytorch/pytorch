@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/promote_t.h>
-#include <ATen/native/special_functions/detail/polylogarithm_li.h>
+#include <ATen/native/special_functions/detail/polylog.h>
 
 namespace at {
 namespace native {

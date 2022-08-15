@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/carlson_elliptic_r_c.h>
 #include <ATen/native/special_functions/detail/numeric_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 complete_legendre_elliptic_integral_d(T1 k) {
@@ -15,5 +18,8 @@ complete_legendre_elliptic_integral_d(T1 k) {
   } else {
     return carlson_elliptic_r_d(T1(0), T1(1) - k * k, T1(1)) / T2(3);
   }
+}
+}
+}
 }
 }

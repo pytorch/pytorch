@@ -5,7 +5,10 @@
 
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 cosine_integral_ci(T1 x) {
@@ -119,5 +122,8 @@ cosine_integral_ci(T1 x) {
 
     return c10::numbers::egamma_v<T1> + std::log(std::abs(x)) + p;
   }
+}
+}
+}
 }
 }

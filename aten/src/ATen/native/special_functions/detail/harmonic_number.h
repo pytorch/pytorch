@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 harmonic_number(unsigned int n) {
@@ -38,5 +41,8 @@ harmonic_number(unsigned int n) {
 
     return summation;
   }
+}
+}
+}
 }
 }

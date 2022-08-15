@@ -2,7 +2,10 @@
 
 #include "factorial_t.h"
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 constexpr std::size_t DOUBLE_FACTORIALS_SIZE = 0;
 
@@ -316,4 +319,7 @@ constexpr factorial_t<long double> DOUBLE_FACTORIALS[301] = {
     {299, 3.753274111571925953338588085074884e+306L, 7.059136670116525082762509823738331e+02L},
     {300, 8.154414069380594345561496918943231e+307L, 7.089921829334154802705575123181962e+02L}
 };
+}
+}
+}
 }

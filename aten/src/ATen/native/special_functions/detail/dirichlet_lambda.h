@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/dirichlet_eta.h>
 #include <ATen/native/special_functions/detail/riemann_zeta.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 dirichlet_lambda(T1 s) {
@@ -12,5 +15,8 @@ dirichlet_lambda(T1 s) {
   } else {
     return (riemann_zeta(s) + dirichlet_eta(s)) / T1(2);
   }
+}
+}
+}
 }
 }

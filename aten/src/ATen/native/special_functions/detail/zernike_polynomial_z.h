@@ -3,7 +3,10 @@
 #include <ATen/native/special_functions/detail/promote_t.h>
 #include <ATen/native/special_functions/detail/radial_polynomial_r.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 promote_t<T1>
 zernike_polynomial_z(unsigned int n, int m, T1 rho, T1 phi) {
@@ -14,6 +17,9 @@ zernike_polynomial_z(unsigned int n, int m, T1 rho, T1 phi) {
   } else {
     return radial_polynomial_r(n, std::abs(m), rho) * std::sin(m * phi);
   }
+}
+}
+}
 }
 }
 

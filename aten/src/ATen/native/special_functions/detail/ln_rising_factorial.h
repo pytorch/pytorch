@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/rising_factorial.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 log_rising_factorial(T1 a, T1 n) {
@@ -20,5 +23,8 @@ log_rising_factorial(T1 a, T1 n) {
   } else {
     return ln_gamma(a + n) - ln_gamma(a);
   }
+}
+}
+}
 }
 }

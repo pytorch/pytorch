@@ -4,7 +4,10 @@
 
 #include <ATen/native/special_functions/detail/jacobi_polynomial_p.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 radial_polynomial_r(unsigned int n, unsigned int m, T1 rho) {
@@ -19,5 +22,8 @@ radial_polynomial_r(unsigned int n, unsigned int m, T1 rho) {
     return -1 * std::pow(rho, m)
         * jacobi_polynomial_p((int(n) - int(m)) / 2, T1(m), T1(0), T1(1) - T1(2) * rho * rho).P_n;
   }
+}
+}
+}
 }
 }

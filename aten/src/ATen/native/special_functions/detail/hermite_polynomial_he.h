@@ -1,6 +1,9 @@
 #pragma once
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename Tp>
 struct hermite_he_t {
   unsigned int n;
@@ -36,5 +39,8 @@ hermite_polynomial_he(unsigned int n, T1 x) {
 
     return {n, x, r, p, q};
   }
+}
+}
+}
 }
 }

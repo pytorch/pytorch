@@ -6,7 +6,10 @@
 #include <ATen/native/special_functions/detail/bessel.h>
 #include <c10/util/numbers.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1, typename T2, typename T3>
 struct spherical_bessel_t {
   T1 n;
@@ -56,5 +59,8 @@ spherical_bessel_negative_x(unsigned int n, T1 x) {
                 - (c10::numbers::sqrtpi_v<T1> / c10::numbers::sqrt2_v<T1>) / std::sqrt(T2(x))
                     * bessel_negative_x(T1(n + 0.5L), x).y / (T1(2) * x)};
   }
+}
+}
+}
 }
 }

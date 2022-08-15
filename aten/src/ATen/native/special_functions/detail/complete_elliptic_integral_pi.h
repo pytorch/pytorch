@@ -4,7 +4,10 @@
 #include <ATen/native/special_functions/detail/carlson_elliptic_r_j.h>
 #include <ATen/native/special_functions/detail/numeric_t.h>
 
-namespace at::native::special_functions::detail {
+namespace at {
+namespace native {
+namespace special_functions {
+namespace detail {
 template<typename T1>
 T1
 complete_elliptic_integral_pi(T1 n, T1 k) {
@@ -27,5 +30,8 @@ complete_elliptic_integral_pi(T1 n, T1 k) {
 
     return r_f + n * r_j / T1(3);
   }
+}
+}
+}
 }
 }
