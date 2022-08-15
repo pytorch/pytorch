@@ -258,10 +258,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             with track_graph_compiling("forward"):
                 compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
-            # TODO: Delay this backwards compilation until the backwards pass
-            with torch.no_grad():
-                fw_outs = call_func_with_args(compiled_fw, flat_args)
-
             if config.debug_partitioner:
                 activation_sizes = 0
                 for out in fw_outs[num_outs:]:
