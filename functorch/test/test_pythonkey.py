@@ -15,6 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -23,11 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
 )
 
 from torch.testing._internal.common_device_type import ops
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
@@ -324,7 +324,7 @@ class TestAOTAutograd(TestCase):
 
 
 class TestEagerFusionOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
@@ -372,6 +372,10 @@ class TestEagerFusionOpInfo(TestCase):
 
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
+
+            # NB: We cache on function id, which is unreliable
+            # Can fix by using weakrefs, but not sure if it matters
+            clear_compile_cache()
 
             compiled_f = compiled_function(f, nop, nop)
 
