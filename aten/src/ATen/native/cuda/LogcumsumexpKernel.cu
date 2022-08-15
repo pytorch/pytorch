@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/core/TensorBase.h>
-#include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Dispatch.h>
 
 #include <ATen/native/cuda/ScanKernels.h>
@@ -16,10 +16,10 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
-        using accscalar_t = acc_type<scalar_t, true>;
+        using opmath_t = at::opmath_type<scalar_t>;
         scalar_t init = -std::numeric_limits<scalar_t>::infinity();
         auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
-          const accscalar_t x{x_}, y{y_};
+          const opmath_t x{x_}, y{y_};
           auto min = at::_isnan(y) ? y : std::min(x, y); //std::min returns first arg if one of the args is nan
           auto max = at::_isnan(y) ? y : std::max(x, y); //std::max returns first arg if one of the args is nan
           if (min != max || ::isfinite(min)) {
