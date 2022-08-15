@@ -38,7 +38,7 @@ def _compare_mts(mt1, mt2):
     mask2 = mt2.get_mask()
     if not _masks_match(mt1, mt2):
         raise ValueError("mt1 and mt2 must have matching masks")
-    if mask.layout != mt2.get_mask().layout:
+    if mask.layout != mask2.layout:
         raise ValueError("mt1's mask and mt2's mask do not have the same layout. "
                          f"mt1.get_mask().layout = {mask.layout} while mt2.get_mask().layout = {mask2.layout}")
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
