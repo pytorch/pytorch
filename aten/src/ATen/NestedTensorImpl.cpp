@@ -230,6 +230,9 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
   return sym_sizes_custom();
 }
+c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");

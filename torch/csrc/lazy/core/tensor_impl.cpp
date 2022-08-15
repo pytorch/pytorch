@@ -152,6 +152,10 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   return TensorImpl::sym_sizes_default();
 }
 
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return sym_strides_default();
+}
+
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
   return sym_sizes_custom();
 }

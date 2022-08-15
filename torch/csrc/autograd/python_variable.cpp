@@ -263,6 +263,9 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+c10::SymIntArrayRef concrete_sym_strides_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
@@ -299,6 +302,7 @@ class PyInterpreterHolder {
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
             &concrete_sym_numel_fn,
+            &concrete_sym_strides_fn,
             c10::impl::GPUTraceFunctionWrapper(
                 &concrete_trace_cuda<trace_cuda_event_creation_fn_name>,
                 &concrete_trace_cuda<trace_cuda_event_deletion_fn_name>,
@@ -2471,7 +2475,6 @@ c10::Layout concrete_layout_fn(
     const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
   auto out = torchDispatchFromTensorImpl(
       self,
       "layout",
@@ -2533,6 +2536,48 @@ void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts... args) {
       LOG(ERROR) << "CUDA trace hook execution failed: " << e.what();
     }
   }
+}
+
+c10::SymIntArrayRef concrete_sym_strides_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  HANDLE_TH_ERRORS
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_stride",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_stride")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    return self->sym_strides_default();
+  }
+  // We need to squeeze SymIntNodes and ints into `SymInts`
+  // since it's a format `sym_strides()` are stored in
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "Symshape must be a list or a tuple");
+  py::list symints;
+  for (auto it = out.begin(); it != out.end(); it++) {
+    auto elm = *it;
+    auto si = torch::is_symint_node(elm)
+        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
+        : c10::SymInt{py::cast<int64_t>(elm)};
+    symints.append(si.as_int_unchecked());
+  }
+
+  auto result = values_from_buffer(self, symints);
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // anonymous namespace
