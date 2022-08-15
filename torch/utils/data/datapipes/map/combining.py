@@ -21,6 +21,7 @@ class ConcaterMapDataPipe(MapDataPipe):
         datapipes: Map DataPipes being concatenated
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp1 = SequenceWrapper(range(3))
         >>> dp2 = SequenceWrapper(range(3))
@@ -66,6 +67,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         *datapipes: Map DataPipes being aggregated
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp1 = SequenceWrapper(range(3))
         >>> dp2 = SequenceWrapper(range(10, 13))
