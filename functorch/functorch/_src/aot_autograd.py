@@ -318,20 +318,27 @@ def create_aot_dispatcher_function(
     with preserve_rng_state(), fake_mode as mode:
 
         def process_inputs(flat_args):
-            flat_args = pytree.tree_map(
-                lambda x: x.detach().requires_grad_(x.requires_grad)
-                if isinstance(x, Tensor)
-                else x,
-                flat_args,
-            )
-            fake_flat_tensor_args = pytree.tree_map(
-                lambda x: mode.from_tensor(x)
-                if mode
-                else x
-                if isinstance(x, Tensor)
-                else x,
-                flat_args,
-            )
+            if mode:
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor, mode.from_tensor, flat_args
+                )
+            else:
+                # The detach().requires_grad_() pattern can cause some subtle bugs.
+                # These will be fixed once FakeTensor is always-on for AOTAutograd.
+                #
+                # For models that might resize their inputs, the input tensors
+                # must have allow_tensor_metadata_change() set to true.
+                # detach() returns a view tensor, but with that field set to false.
+                #
+                # Specifically, this breaks quantized models
+                # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
+                # because they use a "running-mean" style op that requires
+                # resizing the running counter buffers stored on the module.
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor,
+                    lambda x: x.detach().requires_grad_(x.requires_grad),
+                    flat_args,
+                )
             return fake_flat_tensor_args
 
         fake_flat_tensor_args = process_inputs(flat_args)
