@@ -1,6 +1,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -663,7 +664,7 @@ class DeviceCachingAllocator {
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
       TORCH_CHECK_WITH(
-          CUDAOutOfMemoryError,
+          OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
@@ -1406,9 +1407,12 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     // because of std::unique_ptr, block cannot be trivially copied
-    Block key(0, 0, 0);
-    std::memcpy(&key, &p.search_key, sizeof(Block));
-    key.history.release();
+    Block key(
+        p.search_key.device,
+        p.search_key.stream,
+        p.search_key.size,
+        p.search_key.pool,
+        p.search_key.ptr);
     key.size = (key.size < CachingAllocatorConfig::max_split_size())
         ? CachingAllocatorConfig::max_split_size()
         : key.size;
@@ -1677,6 +1681,10 @@ class THCCachingAllocator {
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(*devPtr));
+    }
   }
 
   void free(void* ptr) {
@@ -1686,6 +1694,11 @@ class THCCachingAllocator {
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
+    }
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_memory_deallocation(
+          reinterpret_cast<uintptr_t>(block->ptr));
     }
     device_allocator[block->device]->free(block);
   }
@@ -1772,6 +1785,10 @@ bool forceUncachedAllocator() {
 }
 
 static void uncached_delete(void* ptr) {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    interp->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
+  }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
@@ -1782,7 +1799,7 @@ struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
-        CUDAOutOfMemoryError,
+        OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
@@ -1792,6 +1809,10 @@ struct CudaCachingAllocator : public Allocator {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
       C10_CUDA_CHECK(cudaMalloc(&r, size));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        interp->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(r));
+      }
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
