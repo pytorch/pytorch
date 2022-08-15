@@ -17,10 +17,7 @@ def is_masked_tensor(a):
     r""" Returns True if the input is a MaskedTensor, else False
 
     Args:
-        a: input MaskedTensor
-
-    Shape:
-        a: :math:`(*)`, where :math:`*` means any number of dimensions.
+        a: any input
 
     Examples:
 
@@ -272,8 +269,6 @@ class MaskedTensor(torch.Tensor):
                 data.crow_indices(), mask.crow_indices(), exact=True
             ) or not _tensors_match(data.col_indices(), mask.col_indices(), exact=True):
                 raise ValueError("data and mask are both spares CSR tensors but do not share either crow or col indices.")
-        if not torch.is_tensor(data):
-            raise TypeError("data must be a tensor.")
         if mask.dtype != torch.bool:
             raise TypeError("mask must have dtype bool.")
         if not (
