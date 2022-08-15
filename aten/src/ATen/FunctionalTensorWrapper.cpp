@@ -34,7 +34,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
     // to plumb to the inner tensor.
     // However, it's important that has_symbolic_sizes_strides_ is properly set on the wrapper,
     // because that tells functionalization to turn off meta tensor kernels.
-    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
+    set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
   }
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
@@ -221,7 +221,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   } else {
     // For sym ints, this will check pointer equality, which I'm pretty sure is what we want.
     if (!sym_sizes().equals(value_.sym_sizes()) || !sym_strides().equals(value_.sym_strides())) {
-      set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
+      set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
     }
   }
 
@@ -271,7 +271,7 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   generation_ = 0;
   // And update the metadata on the wrapper to reflect the new sizes and strides
   if (has_symbolic_sizes_strides()) {
-    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
+    set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
   } else {
     set_sizes_and_strides(value_.sizes(), value_.strides());
     refresh_numel();
@@ -627,7 +627,7 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
   if (out.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
-    out.unsafeGetTensorImpl()->set_sym_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides());
+    out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides());
   } else {
     out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
   }
