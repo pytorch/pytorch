@@ -793,7 +793,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
     // TODO: this should probably be sym_sizes, sym_strides AND offset
-    tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
+    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides);
 
     // TODO: this may need to be symbolic as well
     auto storage_offset = r.toInt64Optional(3);
@@ -1230,7 +1230,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionPreHook>(obj, 0));
+        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2055,7 +2055,7 @@ static int THPVariable_subclass_traverse(
       }
 
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }
@@ -2457,9 +2457,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
+    auto si = py::cast<c10::SymInt>(elm);
     // TODO: the buffer will need to be made owning later
     symints.append(si.as_int_unchecked());
   }

@@ -871,7 +871,7 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-void TensorImpl::set_sym_sizes_and_strides(
+void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;

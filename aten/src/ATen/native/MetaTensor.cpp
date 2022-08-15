@@ -61,9 +61,6 @@ Tensor empty_strided_symint_meta(
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  return at::detail::empty_strided_symint_meta(
-      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-
   auto opt_size = asIntArrayRefSlowOpt(size);
   auto opt_stride = asIntArrayRefSlowOpt(stride);
   if (opt_size.has_value()) {
