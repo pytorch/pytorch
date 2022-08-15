@@ -91,7 +91,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
 
   int64_t get_buffer_size() const {
     return storage_.nbytes() / data_type_.itemsize();
-    ;
   }
 
  protected:
@@ -174,10 +173,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     auto buffer_key_set = this->key_set();
     const bool Autograd = buffer_key_set.has_any(c10::autograd_dispatch_keyset);
     // Remove nested tensor specific keys
-    buffer_key_set =
-        buffer_key_set - c10::DispatchKeySet{c10::DispatchKey::NestedTensor};
     buffer_key_set = buffer_key_set -
-        c10::DispatchKeySet{c10::DispatchKey::AutogradNestedTensor};
+        c10::DispatchKeySet{
+            c10::DispatchKey::NestedTensor,
+            c10::DispatchKey::AutogradNestedTensor};
 
     // Add dense tensor specific keys
     buffer_key_set =
