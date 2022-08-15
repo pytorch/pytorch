@@ -9,9 +9,13 @@ DOCKER_ORG                = $(shell whoami)
 endif
 
 CUDA_VERSION              = 11.3
+MUTEX_PACKAGE             = cudatoolkit=$(CUDA_VERSION)
 CUDNN_VERSION             = 8
 BASE_RUNTIME              = ubuntu:18.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
+ifeq ("$(CUDA_VERSION)","cpu")
+MUTEX_PACKAGE             = cpuonly
+endif
 
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia
@@ -25,13 +29,25 @@ BUILD_TYPE                = dev
 BUILD_PROGRESS            = auto
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
-							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+							--build-arg MUTEX_PACKAGE=$(MUTEX_PACKAGE) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL)
 EXTRA_DOCKER_BUILD_FLAGS ?=
+
+BUILD                    ?= build
+# Intentionally left blank
+PLATFORMS_FLAG            =
+ifdef $(USE_BUILDX)
+BUILD                     = buildx
+# Only set platforms flags if using buildx
+ifdef $(BUILD_PLATFORMS)
+PLATFORMS_FLAG            = --platform $(BUILD_PLATFORMS)
+endif
+endif
+
 DOCKER_BUILD              = DOCKER_BUILDKIT=1 \
-							docker build \
+							docker $(BUILD) \
 								--progress=$(BUILD_PROGRESS) \
 								$(EXTRA_DOCKER_BUILD_FLAGS) \
 								--target $(BUILD_TYPE) \
