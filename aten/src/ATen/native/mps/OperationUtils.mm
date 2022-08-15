@@ -396,30 +396,6 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
   return mem_format_key;
 }
 
-bool selectIndexFunctionName(ScalarType scalar_type, std::string& indexFunctionName) {
-    indexFunctionName = "index_select_";
-    switch (scalar_type) {
-      case ScalarType::Float:
-        indexFunctionName += "float"; return true;
-      case ScalarType::Half:
-        indexFunctionName += "half";  return true;
-      case ScalarType::Long:
-        indexFunctionName += "int64";  return true;
-      case ScalarType::Int:
-        indexFunctionName += "int32"; return true;
-      case ScalarType::Short:
-        indexFunctionName += "int16"; return true;
-      case ScalarType::Char:
-        indexFunctionName += "int8";  return true;
-      case ScalarType::Byte:
-        indexFunctionName += "uint8"; return true;
-      case ScalarType::Bool:
-        indexFunctionName += "bool";  return true;
-      default:
-        return false;
-    }
-}
-
 MPSGraphCache* MPSGraphCache::_instance_cache = nullptr;
 
 class MPSGraphCacheCallback : public IMpsAllocatorCallback {

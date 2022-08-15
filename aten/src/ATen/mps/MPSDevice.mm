@@ -19,14 +19,6 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
   languageVersion = MTLLanguageVersion3_0;
 #elif defined(__MAC_12_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_12_0
   languageVersion = MTLLanguageVersion2_4;
-#elif defined(__MAC_11_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_11_0
-  languageVersion = MTLLanguageVersion2_3;
-#elif defined(__MAC_10_15) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_15
-  languageVersion = MTLLanguageVersion2_2;
-#elif defined(__MAC_10_14) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_14
-  languageVersion = MTLLanguageVersion2_1;
-#elif defined(__MAC_10_13) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_13
-    languageVersion = MTLLanguageVersion2_0;
 #elif
   #error "Metal is not available on the current platform."
 #endif

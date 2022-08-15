@@ -105,13 +105,13 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
         const Tensor& indexTensor = iter.tensor(idx+2);
         [argumentEncoder setBuffer: getMTLBufferStorage(indexTensor)
                             offset: indexTensor.storage_offset() * indexTensor.element_size()
-                            atIndex: idx];
+                           atIndex: idx];
         TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
       }
 
       // FIXME: PSO needs to be cached
       id<MTLComputePipelineState> indexSelectPSO = [[device newComputePipelineStateWithFunction: indexKernelFunction
-                                                                                         error: &error] autorelease];
+                                                                                          error: &error] autorelease];
       TORCH_CHECK(indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
       for (uint32_t idx = 0; idx < num_indices; idx++) {
