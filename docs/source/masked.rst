@@ -7,5 +7,5 @@ torch.masked
 Introduction
 ++++++++++++
 
-WIP. For more information, you can go to github.com/pytorch/maskedtensor for the source code 
-or http://pytorch.org/maskedtensor for a number of tutorials 
+WIP. For more information, you can go to github.com/pytorch/maskedtensor for the source code
+or http://pytorch.org/maskedtensor for a number of tutorials
