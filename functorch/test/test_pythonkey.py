@@ -15,6 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -27,7 +28,6 @@ from functorch.compile import (
 )
 
 from torch.testing._internal.common_device_type import ops
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
@@ -324,7 +324,7 @@ class TestAOTAutograd(TestCase):
 
 
 class TestEagerFusionOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
