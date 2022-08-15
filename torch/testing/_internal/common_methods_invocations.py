@@ -4297,6 +4297,98 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
             args=([0, -1, -2, -3], [-3, -2, -1, -0]))
     )
 
+def reference_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # shape, source, destination
+    args = (
+        # empty inputs
+        ((), (), ()),
+        # int inputs, negative
+        ((3, 5, 7, 2), -2, 1),
+        # swap bounds
+        ((3, 5, 7, 2), (-1, 0), (0, -1)),
+        # non-sequential, negative
+        ((2, 3, 4, 5, 6), (3, -3, 4), (1, 0, -1)),
+        # idempotence, negative
+        ((2, 3, 4, 5, 6), (-3, 4, 3, 1), (-3, 4, 3, 1)),
+        # reverse, sequential, positive
+        ((6, 2, 3, 5, 4), (4, 3, 2, 1, 0), (0, 1, 2, 3, 4)),
+        # reverse, non-sequential
+        ((6, 2, 3, 5, 4), (-3, -2, -4, -5, -1), (2, 1, 3, 4, 0)),
+        # reverse, sequential, negative
+        ((6, 2, 3, 5, 4), (4, -2, 2, -4, -5), (-5, 1, 2, -2, -1)),
+    )
+
+    for shape, source, destination in args:
+        yield SampleInput(make_arg(shape), args=(source, destination))
+
+def error_movedim_moveaxis(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # source length < destination length
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((3, -3), (1, 0, -1))),
+        error_regex=(r"movedim: Invalid source or destination dims: source "
+                     r"\(\[3, -3\] dims\) should contain the same number of "
+                     r"dims as destination \(\[1, 0, -1\] dims\)"),
+    )
+
+    # source length > destination length
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((3, -3, 4), (1, 0))),
+        error_regex=(r"movedim: Invalid source or destination dims: source "
+                     r"\(\[3, -3, 4\] dims\) should contain the same number of "
+                     r"dims as destination \(\[1, 0\] dims\)"),
+    )
+
+    # repeated source dim, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((0, 4, -5), (1, 0, 2))),
+        error_regex=r"movedim: repeated dim in `source` \(\[0, 4, -5\]\)",
+    )
+
+    # repeated destination dim, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 0, 2), (0, 4, -5))),
+        error_regex=r"movedim: repeated dim in `destination` \(\[0, 4, -5\]\)",
+    )
+
+    # repeated dim (both), with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 0, -4), (0, 4, -5))),
+        error_regex=r"movedim: repeated dim in `source` \(\[1, 0, -4\]\)",
+    )
+
+    # out of bounds source inputs, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((0, 1, -6), (1, 4, 2))),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds destination inputs, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 4, 2), (0, 1, -6))),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds source input, int
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=(-6, 1)),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds destination input, int
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=(3, -6)),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
 
 def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -15969,7 +16061,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_movedim_moveaxis),
+           sample_inputs_func=sample_movedim_moveaxis,
+           reference_inputs_func=reference_movedim_moveaxis,
+           error_inputs_func=error_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
@@ -18755,6 +18849,12 @@ python_ref_db = [
         "_refs.meshgrid",
         torch_opinfo_name="meshgrid",
         torch_opinfo_variant_name="list_of_tensors",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.movedim",
+        aliases=('moveaxis',),
+        torch_opinfo_name="movedim",
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
