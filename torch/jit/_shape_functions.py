@@ -5,9 +5,17 @@ number = Union[int, float]
 
 ###
 # There are generated files that depend on this file
-# To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# To re-generate, please run from the root of the repo:
+# python torchgen/shape_functions/gen_jit_shape_functions.py
+
+# How to test:
+# After regenerating files, compile PyTorch.
+# Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
+# If you have enabled opinfo testing for the op, also run:
+# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# to reproduce errors from opinfo tests.
+
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
