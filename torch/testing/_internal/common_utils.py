@@ -629,7 +629,11 @@ def run_tests(argv=UNITTEST_ARGS):
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
-        if os.path.exists(IMPORT_DISABLED_TESTS):
+        # This is unsafe to store the list of disabled tests on Windows in a single env
+        # variable because it has an upper limit of 32767 characters in length. We will
+        # need to think of a better way to handle this in Windows if the test time there
+        # is impact by this
+        if os.path.exists(IMPORT_DISABLED_TESTS) and not IS_WINDOWS:
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
