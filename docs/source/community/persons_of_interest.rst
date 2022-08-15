@@ -111,13 +111,6 @@ Fast Fourier Transform (torch.fft)
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
-Sparse
-~~~~~~
-
--  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
--  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
-
-
 CPU Performance / SIMD
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -127,13 +120,12 @@ CPU Performance / SIMD
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
 
-NVIDIA
-~~~~~~
+NVIDIA / CUDA
+~~~~~~~~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
--  Christian Sarofeen (`csarofeen <https://github.com/csarofeen>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
 Intel / MKLDNN
