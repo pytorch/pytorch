@@ -13,7 +13,7 @@ class LSTM(torch.nn.quantizable.LSTM):
         See examples in :class:`~torch.nn.quantizable.LSTM`
 
     Examples::
-
+        >>> # xdoctest: +SKIP
         >>> custom_module_config = {
         ...     'float_to_observed_custom_module_class': {
         ...         nn.LSTM: nn.quantizable.LSTM,
