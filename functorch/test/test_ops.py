@@ -292,7 +292,7 @@ vjp_fail = {
 
 
 class TestOperators(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),
@@ -342,7 +342,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
         skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
@@ -432,7 +432,7 @@ class TestOperators(TestCase):
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
