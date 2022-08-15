@@ -164,10 +164,9 @@ test_python_shard() {
     exit 1
   fi
 
-  # Temporary logic to prevent slow-gradcheck CI from timing out until automatic sharding
-  # can take into account periodic jobs runtime
-  # See https://github.com/pytorch/pytorch/issues/83335#issuecomment-1213517290
   if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
+    # Manually shard to prevent slow-gradcheck CI from timing out
+    # See https://github.com/pytorch/pytorch/issues/83335#issuecomment-1213517290
     if [[ "$NUM_TEST_SHARDS" != "2" ]]; then
       echo "Expected NUM_TEST_SHARDS to equal 2 for slow-gradcheck"
       exit 1
