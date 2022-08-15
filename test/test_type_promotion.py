@@ -1073,6 +1073,13 @@ class TestTypePromotion(TestCase):
             res = torch.cat([x, y])
             self.assertEqual(res, expected_res, exact_dtype=True)
 
+            # cat: full and an empty tensor.
+            y = torch.tensor([], device=device, dtype=y_dtype)
+            res_dtype = torch.result_type(x, y)
+            expected_res = torch.tensor(x_vals + [], device=device, dtype=res_dtype)
+            res = torch.cat([x, y])
+            self.assertEqual(res, expected_res, exact_dtype=True)
+
     @onlyNativeDeviceTypes
     def test_cat_out_different_dtypes(self, device):
         dtypes = all_types_and_complex_and(torch.half)
