@@ -1,7 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
 from typing import Dict, Any, List, Type
-import traceback
 import operator
 
 try:
@@ -33,7 +32,7 @@ class SymDispatchMode:
         global SYM_FUNCTION_MODE
         old = SYM_FUNCTION_MODE
         if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
         else:
             self.inner = old
         SYM_FUNCTION_MODE = self
@@ -102,8 +101,6 @@ class PySymInt(object):
         self.expr = expr
         self.shape_env = shape_env
         self.constant = constant
-        # TODO: do this more efficiently
-        self.stack_trace = traceback.extract_stack()
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
