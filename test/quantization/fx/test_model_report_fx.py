@@ -1862,3 +1862,9 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
     return (prepared_for_callibrate_model, model_report)
+
+
+class TestFxDetectorQConfigMapping(QuantizationTestCase):
+
+    def test_simple_pass(self):
+        pass
