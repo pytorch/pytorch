@@ -1580,10 +1580,11 @@ def check_if_enable(test: unittest.TestCase):
 
         if "DISABLED_TESTS_DICT" in os.environ:
             disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
-        elif os.path.exists(IMPORT_DISABLED_TESTS):
+        elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 disabled_tests_dict = json.loads(fp.read())
         else:
+            # IMPORT_DISABLED_TESTS can be None here
             print(f'Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
