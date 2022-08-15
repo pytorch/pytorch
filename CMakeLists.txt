@@ -358,6 +358,8 @@ option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers f
 cmake_dependent_option(
     BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
     "NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
 
 if(USE_CCACHE)
@@ -1153,4 +1155,8 @@ caffe2_print_configuration_summary()
 # ---[ Torch Deploy
 if(USE_DEPLOY)
   add_subdirectory(torch/csrc/deploy)
+endif()
+
+if(BUILD_FUNCTORCH)
+  add_subdirectory(functorch)
 endif()
