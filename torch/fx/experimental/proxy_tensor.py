@@ -38,6 +38,7 @@ class ProxySymInt(object):
     def __init__(self, sym_int, proxy):
         assert isinstance(sym_int, torch._C.SymIntNode) or isinstance(sym_int, int)
         self.sym_int = sym_int
+        # Note, this doesn't have to be a proxy, it can also be an int
         self.proxy = proxy
 
     def wrap(self, num):
@@ -52,6 +53,11 @@ class ProxySymInt(object):
 
     def __bool__(self):
         return bool(self.sym_int)
+
+    def to_fx_node(self):
+        if isinstance(self.proxy, fx.Proxy):
+            return self.proxy.node
+        return self.proxy
 
 import operator
 
@@ -324,7 +330,7 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, torch._C.SymIntNode):
             py_symint = a.get_pyobj()
             assert isinstance(py_symint, ProxySymInt)
-            return py_symint.proxy.node
+            return py_symint.to_fx_node()
         return super().create_arg(a)
 
 
