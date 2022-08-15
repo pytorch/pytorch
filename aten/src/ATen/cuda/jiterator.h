@@ -33,7 +33,7 @@ TORCH_CUDA_CPP_API c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
   const c10::SmallVector<at::Tensor>& tensors,
   const c10::SmallVector<at::Scalar>& extra_args,
   bool return_by_ref) {
-    TORCH_CHECK(false, "Jiterator is not supported on ROCm");
+    TORCH_CHECK(false, "Jiterator is not supported");
   }
 }} // namespace at::cuda
 
