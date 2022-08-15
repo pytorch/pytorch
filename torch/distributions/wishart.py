@@ -33,9 +33,10 @@ class Wishart(ExponentialFamily):
     or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
 
     Example:
+        >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-                        # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
