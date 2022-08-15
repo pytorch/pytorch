@@ -715,7 +715,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -775,6 +775,7 @@ def t(g, self):
 
 def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
+    assert ndim is not None
     perm = list(reversed(range(0, ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
@@ -937,7 +938,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split", 9, 11, "Dynamic number of outputs not supported"
         )
-    split_val = split_size_or_sizes.node()["value"]
+    split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
         return split_with_sizes(g, self, split_size_or_sizes, dim, _outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
@@ -2499,7 +2500,9 @@ def bucketize(g, self, boundaries, out_int32=False, right=False):
     new_shape = g.op("Concat", g.op("Shape", boundaries), g.op("Shape", self), axis_i=0)
     # Unsqueeze step is performed to respect ONNX's numpy style broadcasting for comparison ops
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
-    unsqueeze_axes = list(range(1, symbolic_helper._get_tensor_rank(self) + 1))
+    tensor_rank = symbolic_helper._get_tensor_rank(self)
+    assert tensor_rank is not None
+    unsqueeze_axes = list(range(1, tensor_rank + 1))
     expanded_boundaries = expand(
         g,
         symbolic_helper._unsqueeze_helper(g, boundaries, unsqueeze_axes),
@@ -3343,7 +3346,7 @@ def to(g, self, *args):
             symbolic_helper._is_value(args[0])
             and args[0].node().kind() == "onnx::Constant"
         ):
-            tval = args[0].node()["value"]
+            tval = symbolic_helper._node_get(args[0].node(), "value")
             if isinstance(tval, torch.Tensor):
                 if len(tval.shape) == 0:
                     tval = tval.item()
@@ -4583,9 +4586,9 @@ def index(g, self, index):
             rank = symbolic_helper._get_tensor_rank(self)
             if rank is None:
                 raise NotImplementedError(
-                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank, "
-                    + "try turning on shape and type propagate during export: "
-                    + "torch.onnx._export(..., propagate=True)."
+                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank. "
+                    + "Try turning on shape inference during export: "
+                    + "torch.onnx._export(..., onnx_shape_inference=True)."
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,
             #       update the warning to recommend exporting with higher opset version.
@@ -5216,6 +5219,7 @@ def movedim(g, self, source, destination):
         return self
 
     self_rank = symbolic_helper._get_tensor_rank(self)
+    assert self_rank is not None
 
     perm = list(range(self_rank))
 
@@ -5359,6 +5363,7 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # Currently we ignore the 'compute_mode' variable as we use default to
     # using matrix multiplication to calculate the euclidean distance
     rank = symbolic_helper._get_tensor_rank(x1)
+    assert rank is not None
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
     broadcasted_x2 = symbolic_helper._unsqueeze_helper(g, x2, [rank - 2])
     return pairwise_distance(
@@ -5596,7 +5601,7 @@ class Prim:
             # %14 : Bool(device=cpu) = onnx::Equal(%13, %8)
             # %15 : Bool(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
             # %16 : Long(1, strides=[1], device=cpu) = onnx::Shape(%input.1)
-            input_flag = inputs[0].node()["value"].tolist()
+            input_flag = symbolic_helper._node_get(inputs[0].node(), "value").tolist()
             const_value = (
                 all(input_flag) if isinstance(input_flag, list) else bool(input_flag)
             )
@@ -5659,13 +5664,15 @@ class Prim:
         if isinstance(n.output().type(), _C.DeviceObjType):
             return None
         if n.kindOf("value") == "t":
-            return g.op("Constant", value_t=n["value"])
+            return g.op("Constant", value_t=symbolic_helper._node_get(n, "value"))
         if n.kindOf("value") == "s":
-            return g.op("Constant", value_s=n["value"])
+            return g.op("Constant", value_s=symbolic_helper._node_get(n, "value"))
         elif n.output().type().isSubtypeOf(
             _C.ListType.ofInts()
         ) or n.output().type().isSubtypeOf(_C.ListType.ofFloats()):
-            return g.op("Constant", value_t=torch.tensor(n["value"]))
+            return g.op(
+                "Constant", value_t=torch.tensor(symbolic_helper._node_get(n, "value"))
+            )
         else:
             raise RuntimeError(
                 f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. Send a bug report."
