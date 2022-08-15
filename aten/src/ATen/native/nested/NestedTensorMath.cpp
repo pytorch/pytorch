@@ -692,19 +692,22 @@ Tensor clone_nested(
   auto self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||
   (memory_format == c10::MemoryFormat::Contiguous && nested_tensor_impl_is_contiguous(self_ptr))) {
-    Tensor buffer = self_ptr->get_buffer().clone();
-    const Tensor& sizemat = self_ptr->get_nested_size_tensor(),
+    const Tensor& buffer = self_ptr->get_buffer(),
+        sizemat = self_ptr->get_nested_size_tensor(),
         stridemat = self_ptr->get_nested_stride_tensor();
     const std::vector<int64_t>& offsets = self_ptr->get_offsets();
     // TODO: The size and the stride do not necessarily need to be cloned,
     //       but it is more conservative.
     //       This is something we could revisit once we land a more
     //       efficient implementation of nested_size_tensor_ and nested_stride_tensor.
-    return wrap_buffer(buffer, sizemat.clone(), stridemat.clone(), offsets);
+    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), offsets);
   }
+  // actually, memory format is contiguous and self is noncontiguous
   else if (memory_format == c10::MemoryFormat::Contiguous) {
     const Tensor& self_buffer = self_ptr->get_buffer(),
         sizemat = self_ptr->get_nested_size_tensor();
+    // TODO: use self.empty_like() rather than self.new_empty(self.sizes())
+    //       once nested-tensor empty_like comes out
     Tensor output_buffer = self_buffer.new_empty(self_buffer.sizes());
     Tensor output = wrap_buffer(output_buffer, sizemat);
     std::vector<Tensor> self_unbind = self.unbind(),
@@ -1189,7 +1192,6 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   Tensor sizemat_reshaped, stridemat_reshaped;
   std::tie(reshape_as_view, sizemat_reshaped, stridemat_reshaped) = NestedTensor_reshape_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
-  // See Note [duplicate op due to nested tensor backward formula] TODO in derivatives.yaml
   if (reshape_as_view) {
     return self.view(proposed_shape);
   }
