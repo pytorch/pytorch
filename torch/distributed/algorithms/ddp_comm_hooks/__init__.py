@@ -97,6 +97,7 @@ def register_ddp_comm_hook(
     Uses Python comm hook implementations.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)
     """
     comm_hook_type.value(model=model, state=state)

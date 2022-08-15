@@ -17,7 +17,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -320,6 +320,32 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
+    def _test_complex_2d(self, optimizer_constructor, f=None):
+        if f is None:
+            f = rosenbrock
+        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
+        a1_real = a1.real.clone().detach()
+        a1_imag = a1.imag.clone().detach()
+        a1_real.requires_grad_()
+        a1_imag.requires_grad_()
+        optim1 = optimizer_constructor([a1])
+        optim2 = optimizer_constructor([a1_real, a1_imag])
+
+        for i in range(10):
+            optim1.zero_grad()
+            optim2.zero_grad()
+            a2 = torch.complex(a1_real, a1_imag)
+            f(a1).backward()
+            f(a2).backward()
+
+            self.assertEqual(a1.grad.real, a1_real.grad)
+            self.assertEqual(a1.grad.imag, a1_imag.grad)
+
+            optim1.step()
+            optim2.step()
+            self.assertEqual(a1.real, a1_real)
+            self.assertEqual(a1.imag, a1_imag)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -400,6 +426,11 @@ class TestOptim(TestCase):
                 optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=0.5, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
@@ -469,9 +500,8 @@ class TestOptim(TestCase):
 
         kIterations = 4
         device = 'cuda'
-
         for optimizers, params in optimizer_pairs_with_flags:
-            res = []
+            res, state = [], []
             for opt in optimizers:
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
@@ -495,10 +525,20 @@ class TestOptim(TestCase):
 
                     optimizer.step()
 
+                state.append(optimizer.state)
                 res.append(model.parameters())
 
-            for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2, atol=5e-5, rtol=0)
+            st_state = state[0]
+            mt_state = state[1]
+            for st_p, mt_p in zip(res[0], res[1]):
+                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
+
+                # check that optimizer states are the same
+                st_p_state = st_state[st_p]
+                mt_p_state = mt_state[mt_p]
+
+                for k in st_p_state:
+                    self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -566,26 +606,21 @@ class TestOptim(TestCase):
                  lambda opt: ReduceLROnPlateau(opt)],
                 constructor_accepts_maximize=True
             )
+
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
+                constructor_accepts_maximize=True
+            )
+            self._test_complex_2d(optimizer)
+
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-
-    # Test whether variance parameter is always real
-    def test_complex_adam_variance(self):
-        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        target = torch.randn(5, 5, dtype=torch.complex64)
-        optimizer = optim.Adam([complex_param], lr=0.001)
-
-        for i in range(20):
-            optimizer.zero_grad()
-            loss = (complex_param - target).pow(2).sum()
-            loss.backward()
-            optimizer.step()
-            for idx in optimizer.state_dict()['state'].keys():
-                variance = optimizer.state_dict()['state'][idx]['exp_avg_sq']
-                self.assertEqual(variance.imag, torch.zeros(variance.imag.shape))
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
@@ -606,6 +641,7 @@ class TestOptim(TestCase):
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
@@ -771,6 +807,7 @@ class TestOptim(TestCase):
                     [weight, bias], lr=1e-1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
@@ -1187,6 +1224,10 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
+    def test_polynomial_lr_is_constant_for_constant_epoch(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -1319,6 +1360,15 @@ class TestLRScheduler(TestCase):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test(scheduler, targets, epochs)
 
+    def test_poly_lr(self):
+        epochs = 10
+        power = 0.9
+        total_iters = 5
+        single_targets = [(1.0 - x / total_iters) ** power * 0.05 for x in range(total_iters)] + [0.0] * (epochs - total_iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters)
+        self._test(scheduler, targets, epochs)
+
     def test_cos_anneal_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -1352,6 +1402,11 @@ class TestLRScheduler(TestCase):
     def test_closed_form_exp_lr(self):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         closed_form_scheduler = ExponentialLR(self.opt, gamma=0.9)
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_poly_lr(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        closed_form_scheduler = PolynomialLR(self.opt, power=0.9)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_cos_anneal_lr(self):
@@ -1567,6 +1622,25 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
+    def test_chained_lr5(self):
+        def poly_lr(lr: float):
+            return [
+                (lr * ((1.0 - x / total_iters) ** power)) for x in range(total_iters)
+            ] + [0.0] * (epochs - total_iters)
+
+        schedulers = [None] * 2
+        epochs = 10
+        power = 0.9
+        total_iters = 5
+        const_factor = 0.1
+        single_targets = [x * const_factor for x in poly_lr(lr=0.05)]
+        targets = [single_targets, [x * const_factor for x in poly_lr(0.5)]]
+        schedulers[0] = PolynomialLR(self.opt, power=power, total_iters=total_iters)
+        schedulers[1] = ConstantLR(self.opt, factor=const_factor)
+        scheduler = ChainedScheduler(schedulers)
+        self._test(scheduler, targets, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_compound_step_and_multistep_lr(self):

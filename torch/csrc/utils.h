@@ -164,22 +164,8 @@ void THPUtils_addPyMethodDefs(
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result);
 
-#define THWTensorPtr TH_CONCAT_3(TH, Real, TensorPtr)
-#define THPStoragePtr TH_CONCAT_2(THP, StoragePtr)
-#define THPTensorPtr TH_CONCAT_3(THP, Real, TensorPtr)
-#define THSPTensorPtr TH_CONCAT_3(THSP, Real, TensorPtr)
-
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
-
-template <typename T>
-struct THPUtils_typeTraits {};
-
-// Disabling clang-format because the order of these includes matters.
-// This is mega-sus.
-// clang-format off
-#include <torch/csrc/generic/utils.h>
-#include <torch/csrc/THGenerateByteType.h>
-// clang-format on
+typedef class THPPointer<THPStorage> THPStoragePtr;
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
 PyObject* THPUtils_dispatchStateless(

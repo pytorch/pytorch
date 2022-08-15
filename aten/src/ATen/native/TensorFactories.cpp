@@ -101,8 +101,12 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
+Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+    return at::arange_out(result, start, end, /*step=*/1);
+}
+
 Tensor& arange_out(const Scalar& end, Tensor& result) {
-  return at::arange_out(result, /*start=*/0, end);
+  return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
 Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
@@ -458,6 +462,9 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
+
+  if (result.is_meta()) return result;
+
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
@@ -1088,19 +1095,19 @@ Tensor zeros(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  auto result = at::empty(size, options);
-  return result.zero_();
+  return at::zeros_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
 }
 
-Tensor zeros_symint(c10::SymIntArrayRef size,
+Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return zeros(asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty_symint(size, options);
+  return result.zero_();
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
@@ -1140,7 +1147,7 @@ Tensor zeros_like(
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
-    auto res = at::empty({0}, options); // to be resized
+    auto res = at::empty({0}, self.options().merge_in(options)); // to be resized
 
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
@@ -1183,11 +1190,12 @@ Tensor bartlett_window(int64_t window_length,
 Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("bartlett_window", options, window_length);
@@ -1221,11 +1229,12 @@ Tensor blackman_window(int64_t window_length,
 Tensor blackman_window(
     int64_t window_length,
     bool periodic,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("blackman_window", options, window_length);
@@ -1291,11 +1300,12 @@ Tensor hamming_window(
     bool periodic,
     double alpha,
     double beta,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("hamming_window", options, window_length);
@@ -1367,11 +1377,12 @@ Tensor kaiser_window(
     int64_t window_length,
     bool periodic,
     double beta,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);

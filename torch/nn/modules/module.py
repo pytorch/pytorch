@@ -342,7 +342,7 @@ class Module:
         Buffers can be accessed as attributes using given names.
 
         Args:
-            name (string): name of the buffer. The buffer can be accessed
+            name (str): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor or None): buffer to be registered. If ``None``, then operations
                 that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
@@ -352,6 +352,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
@@ -387,7 +388,7 @@ class Module:
         The parameter can be accessed as an attribute using given name.
 
         Args:
-            name (string): name of the parameter. The parameter can be accessed
+            name (str): name of the parameter. The parameter can be accessed
                 from this module using the given name
             param (Parameter or None): parameter to be added to the module. If
                 ``None``, then operations that run on parameters, such as :attr:`cuda`,
@@ -429,7 +430,7 @@ class Module:
         The module can be accessed as an attribute using the given name.
 
         Args:
-            name (string): name of the child module. The child module can be
+            name (str): name of the child module. The child module can be
                 accessed from this module using the given name
             module (Module): child module to be added to the module.
         """
@@ -705,20 +706,17 @@ class Module:
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            Sequential(
-              (0): Linear(in_features=2, out_features=2, bias=True)
-              (1): Linear(in_features=2, out_features=2, bias=True)
-            )
+
         """
         for module in self.children():
             module.apply(fn)
@@ -923,6 +921,7 @@ class Module:
 
         Examples::
 
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
             Parameter containing:
@@ -1368,11 +1367,15 @@ class Module:
     # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
-        r"""Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing references to the whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
+
+        .. note::
+            The returned object is a shallow copy. It contains references
+            to the module's parameters and buffers.
 
         .. warning::
             Currently ``state_dict()`` also accepts positional arguments for
@@ -1402,6 +1405,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> module.state_dict().keys()
             ['bias', 'weight']
 
@@ -1685,6 +1689,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for param in model.parameters():
             >>>     print(type(param), param.size())
             <class 'torch.Tensor'> (20L,)
@@ -1705,10 +1710,11 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, Parameter): Tuple containing the name and parameter
+            (str, Parameter): Tuple containing the name and parameter
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
@@ -1733,6 +1739,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for buf in model.buffers():
             >>>     print(type(buf), buf.size())
             <class 'torch.Tensor'> (20L,)
@@ -1753,10 +1760,11 @@ class Module:
                 are direct members of this module.
 
         Yields:
-            (string, torch.Tensor): Tuple containing the name and buffer
+            (str, torch.Tensor): Tuple containing the name and buffer
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, buf in self.named_buffers():
             >>>    if name in ['running_var']:
             >>>        print(buf.size())
@@ -1782,10 +1790,11 @@ class Module:
         the name of the module as well as the module itself.
 
         Yields:
-            (string, Module): Tuple containing a name and child module
+            (str, Module): Tuple containing a name and child module
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
@@ -1812,7 +1821,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
@@ -1835,7 +1844,7 @@ class Module:
                 or not
 
         Yields:
-            (string, Module): Tuple of name and module
+            (str, Module): Tuple of name and module
 
         Note:
             Duplicate modules are returned only once. In the following
@@ -1846,7 +1855,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> ('', Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)

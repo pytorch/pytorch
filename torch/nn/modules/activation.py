@@ -657,7 +657,7 @@ class GELU(Module):
         :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
@@ -934,6 +934,7 @@ class MultiheadAttention(Module):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -1124,7 +1125,8 @@ class MultiheadAttention(Module):
                     self.out_proj.bias,
                     key_padding_mask if key_padding_mask is not None else attn_mask,
                     need_weights,
-                    average_attn_weights)
+                    average_attn_weights,
+                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
