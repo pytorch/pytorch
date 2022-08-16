@@ -392,7 +392,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor& self, bool unbiased) {
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool unbiased,
     bool keepdim) {
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
@@ -454,19 +454,20 @@ std::vector<Shape> compute_shape_expand(
       c10::SymIntNode symbolicIntNode = _sizes[idx].toSymIntNodeImpl();
       auto* lazySymIntNode =
           dynamic_cast<torch::lazy::SymIntNodeImpl*>(symbolicIntNode.get());
+      TORCH_INTERNAL_ASSERT(lazySymIntNode);
       auto size_node = lazySymIntNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();
       target_size[idx] = static_value;
     } else {
-      target_size[idx] = _sizes[idx].data();
-      if (_sizes[idx].data() == -1) {
+      target_size[idx] = _sizes[idx].as_int_unchecked();
+      if (_sizes[idx].as_int_unchecked() == -1) {
         // -1 can't be specified for non-existing dimensions
         TORCH_CHECK(idx >= num_new_dimensions);
         target_size[idx] = padded_self[idx];
       } else {
-        target_size[idx] = _sizes[idx].data();
+        target_size[idx] = _sizes[idx].as_int_unchecked();
       }
     }
   }

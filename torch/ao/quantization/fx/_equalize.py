@@ -1,3 +1,8 @@
+import warnings
+
+from collections import namedtuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,25 +10,16 @@ import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
+from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
+from ..utils import _parent_name, check_min_max_valid
+
 from .utils import (
-    WEIGHT_INDEX_DICT,
     get_new_attr_name_with_prefix,
     maybe_get_next_module,
-)
-from ..observer import (
-    PerChannelMinMaxObserver,
-    _with_args,
-    ObserverBase,
-)
-from ..utils import (
-    check_min_max_valid,
-    _parent_name,
+    WEIGHT_INDEX_DICT,
 )
 
-from collections import namedtuple
-from typing import Dict, Any, List, Tuple, Optional
-import warnings
-
+CUSTOM_MODULE_SUPP_LIST: List[Any] = []
 
 def reshape_scale(scale: torch.Tensor, axis: int, input: torch.Tensor) -> torch.Tensor:
     """Reshapes the scale so that we can multiply it to the input by the given axis.
@@ -241,13 +237,19 @@ def nn_module_supports_equalization(module) -> bool:
     """ Checks if the torch.nn node supports equalization. """
     return type(module) in [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d]
 
+def custom_module_supports_equalization(module) -> bool:
+    """ Checks if the custom node supports equalization. """
+    return type(module) in CUSTOM_MODULE_SUPP_LIST
+
+
 def node_supports_equalization(node: Node, modules) -> bool:
     """ Checks if the current node supports equalization
     Currently we only support nn.Linear/F.Linear and nn.Conv/F.conv layers
     """
     if node.op == 'call_module':
         return nn_module_supports_equalization(modules[str(node.target)]) or \
-            fused_module_supports_equalization(modules[str(node.target)])
+            fused_module_supports_equalization(modules[str(node.target)]) or \
+            custom_module_supports_equalization(modules[str(node.target)])
     elif node.op == 'call_function':
         return node.target in [F.linear, F.conv1d, F.conv2d, F.conv3d]
     return False
@@ -413,7 +415,7 @@ def scale_weight_node(
         op_module = modules[str(node.target)][0]    # type: ignore[index]
     else:
         op_module = modules[str(node.target)]
-    assert(nn_module_supports_equalization(op_module))
+    assert(nn_module_supports_equalization(op_module) or custom_module_supports_equalization(op_module))
 
     # Scale the weights for input-weight equalization
     # If the following layer needs to be equalized then we will multiply its scale

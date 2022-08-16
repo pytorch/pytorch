@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-from torchgen.utils import assert_never, NamespaceHelper
+from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -51,6 +51,12 @@ DEFAULT_KERNEL_NAMESPACE = "at::native"
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
 BACKEND_COMPONENTS = "CPU CUDA HIP XLA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
 FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
+
+# This list guards dispatches that can be used in derivatives.yaml
+# For now we omit AutogradFunctionality and AutogradOther
+AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
+    "Autograd" + component for component in BACKEND_COMPONENTS
+]
 
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen
@@ -290,8 +296,8 @@ class ScalarType(Enum):
         return mb_r
 
     @staticmethod
-    def parse_set(values: str) -> Set["ScalarType"]:
-        dtypes: Set[ScalarType] = set()
+    def parse_set(values: str) -> OrderedSet["ScalarType"]:
+        dtypes: OrderedSet[ScalarType] = OrderedSet()
         for value in values.split(", "):
             if value in DTYPE_CLASSES:
                 dtypes.update(DTYPE_CLASSES[value])
@@ -300,18 +306,22 @@ class ScalarType(Enum):
         return dtypes
 
 
-DTYPE_CLASSES: Dict[str, Set[ScalarType]] = {}
+DTYPE_CLASSES: Dict[str, OrderedSet[ScalarType]] = {}
 # NB: Integral doesn't include boolean
-DTYPE_CLASSES["Integral"] = {
-    ScalarType.Byte,
-    ScalarType.Char,
-    ScalarType.Int,
-    ScalarType.Long,
-    ScalarType.Short,
-}
+DTYPE_CLASSES["Integral"] = OrderedSet(
+    [
+        ScalarType.Byte,
+        ScalarType.Char,
+        ScalarType.Int,
+        ScalarType.Long,
+        ScalarType.Short,
+    ]
+)
 # NB: Floating doesn't include low precision types
-DTYPE_CLASSES["Floating"] = {ScalarType.Float, ScalarType.Double}
-DTYPE_CLASSES["Complex"] = {ScalarType.ComplexFloat, ScalarType.ComplexDouble}
+DTYPE_CLASSES["Floating"] = OrderedSet([ScalarType.Float, ScalarType.Double])
+DTYPE_CLASSES["Complex"] = OrderedSet(
+    [ScalarType.ComplexFloat, ScalarType.ComplexDouble]
+)
 DTYPE_CLASSES["All"] = DTYPE_CLASSES["Integral"] | DTYPE_CLASSES["Floating"]
 DTYPE_CLASSES["AllAndComplex"] = DTYPE_CLASSES["All"] | DTYPE_CLASSES["Complex"]
 DTYPE_CLASSES["FloatingAndComplex"] = (
@@ -886,7 +896,10 @@ class NativeFunction:
         is_non_mutating_view = len(rets) > 0 and any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
-        is_inplace_view = "inplace_view" in self.tags
+        # See Note [resize_ in Functionalization] for more dtails
+        is_inplace_view = (
+            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+        )
         is_wildcard_view = any(
             inp.annotation is not None and inp.annotation.alias_set_after != ""
             for inp in self.func.schema_order_arguments()
@@ -961,12 +974,16 @@ class NativeFunctionsGroup:
             if self.inplace is not None:
                 assert self.inplace.structured_delegate == self.out.func.name
 
-        generated_fns = [
-            str(f.func.name) for f in self.functions() if "generated" in f.tags
-        ]
+        generated_fns = sorted(
+            [str(f.func.name) for f in self.functions() if "generated" in f.tags]
+        )
         generated_fns_str = ", ".join(str(x) for x in generated_fns)
-        expected_generated_fns = f.autogen
-        expected_generated_fns_str = ", ".join(str(x) for x in expected_generated_fns)
+        expected_generated_fns: Set[str] = set()
+        for f in self.functions():
+            expected_generated_fns.update(str(op) for op in f.autogen)
+        expected_generated_fns_str = ", ".join(
+            str(x) for x in sorted(list(expected_generated_fns))
+        )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
@@ -1045,7 +1062,7 @@ class BackendMetadata:
 @dataclass(frozen=True)
 class UfuncInnerLoop:
     name: str
-    supported_dtypes: Set[ScalarType]
+    supported_dtypes: OrderedSet[ScalarType]
     # key is stored here because it affects the semantics of name,
     # so its helpful to have them together for further processing
     ufunc_key: UfuncKey
@@ -1055,7 +1072,7 @@ class UfuncInnerLoop:
         name, supported_dtypes_str = value.split(" ", 1)
         assert supported_dtypes_str[0] == "("
         assert supported_dtypes_str[-1] == ")"
-        supported_dtypes = set()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for k in supported_dtypes_str[1:-1].split(", "):
             supported_dtypes |= ScalarType.parse_set(k)
         return UfuncInnerLoop(
@@ -1115,7 +1132,7 @@ class BackendIndex:
         elif isinstance(g, NativeFunctionsGroup):
             f = self.primary(g)
         else:
-            assert_never(f)
+            assert_never(g)
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
@@ -1313,7 +1330,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional, but has tensor options arguments."
+                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
@@ -1507,11 +1524,6 @@ class FunctionSchema:
         returns = original_returns + returns_from_mutable_inputs
 
         args_sig = self.arguments.signature(strip_default=strip_default)
-        # See Note [arange.start_step schema]
-        if str(self.name) == "arange.start_step":
-            args_sig = Arguments.parse(
-                str(args_sig).replace("Scalar step", "Scalar step=1")
-            )
         # See Note [bernoulli.p schema]
         if str(self.name) == "bernoulli.p":
             args_sig = Arguments.parse(str(args_sig).replace("float p", "float p=0.5"))
@@ -1622,6 +1634,11 @@ class Type:
         if m is not None:
             size = int(m.group(2)) if m.group(2) is not None else None
             return ListType(elem=Type.parse(m.group(1)), size=size)
+
+        # '__torch__.torch.classes.' is the prefix for custom class
+        m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$", t)
+        if m is not None:
+            return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
         except KeyError:
@@ -1715,6 +1732,36 @@ class OptionalType(Type):
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
+
+
+# A type representing a PyTorch custom class
+@dataclass(frozen=True)
+class CustomClassType(Type):
+    class_name: str
+
+    def __str__(self) -> str:
+        """
+        Return the class name will prefix __torch__.torch.classes
+        """
+        return f"__torch__.torch.classes.{self.class_name}"
+
+    def is_tensor_like(self) -> bool:
+        """
+        Assume a custom class is not a tensor.
+        """
+        return False
+
+    def is_nullable(self) -> bool:
+        """
+        Assume a custom class is not nullable.
+        """
+        return False
+
+    def symint_to_int(self) -> "Type":
+        return self
+
+    def is_list_like(self) -> Optional["ListType"]:
+        return None
 
 
 # List types specify that we may have multiples of an element.  We
@@ -2013,27 +2060,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple(
                     x.symint_to_int() for x in arguments.pre_self_positional
-                ],
+                ),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple(
                     x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple(
                 x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ),
+            pre_tensor_options_kwarg_only=tuple(
                 x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ),
         )
 
         return arguments
