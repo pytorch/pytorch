@@ -1001,7 +1001,8 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   // create transposed `sizemat` and `stridemat`
   Tensor sizemat_transposed = at::index_select(sizemat, 1, column_indices),
       stridemat_transposed = at::index_select(stridemat, 1, column_indices);
-  return wrap_buffer(self_ptr->get_buffer(), sizemat_transposed, stridemat_transposed, self_ptr->get_offsets());
+  return create_nested_view_tensor(
+      self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_offsets()));
 }
 
 // utilities supporting `_reshape_nested`
