@@ -985,7 +985,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         inp, *arg0 = shape
-        yield SampleInput(inp, args=arg0)
+        yield SampleInput(inp, args=tuple(arg0))
 
 def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
@@ -2483,8 +2483,13 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
-    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d,)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
+
+def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, None)), error_type=RuntimeError,
+                     error_regex="at least 2 dimensions")
 
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -10871,7 +10876,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           error_inputs_func=error_inputs_lstsq,
+           error_inputs_func=error_inputs_lstsq_grad_oriented,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_autograd=True,
@@ -12048,6 +12053,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12068,6 +12074,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose2d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12087,6 +12094,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12125,6 +12133,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -12163,6 +12172,7 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13610,6 +13620,10 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     dtypes=(torch.complex32,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
@@ -18812,7 +18826,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.signbit",
@@ -19063,13 +19076,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19251,13 +19264,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
         )
     ),
@@ -19285,13 +19298,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19354,13 +19367,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
