@@ -1534,7 +1534,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * ] for details.
    */
   bool allow_tensor_metadata_change() const {
-    return allow_tensor_metadata_change_;
+    return true;
   }
 
   /**
