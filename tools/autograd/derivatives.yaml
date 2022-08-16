@@ -878,9 +878,6 @@
   self: grad * digamma(self)
   result: auto_element_wise
 
-- name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
-
 - name: digamma(Tensor self) -> Tensor
   self: grad * polygamma(1, self)
   result: auto_element_wise
