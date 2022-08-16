@@ -2931,6 +2931,7 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: nested_linear_backward
     MPS: mps_linear_backward
+  autogen: linear_backward.out
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
