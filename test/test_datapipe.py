@@ -1588,6 +1588,16 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(10, len(shuffler_dp))
         exp = list(range(100))
 
+        # Serialization Test
+        shuffler_dp = input_dp.shuffle()
+        exp = []
+        it = iter(shuffler_dp)
+        for _ in range(2):
+            exp.append(next(it))
+        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+        exp.extend(list(it))
+        self.assertEqual(exp, list(shuffler_dp_copy))
+
     def test_zip_iterdatapipe(self):
 
         # Functional Test: raises TypeError when an input is not of type `IterDataPipe`
@@ -1819,6 +1829,16 @@ class TestFunctionalMapDataPipe(TestCase):
         # __len__ Test: returns the length of the input DataPipe
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
+
+        # Serialization Test
+        shuffler_dp = input_dp1.shuffle()
+        it = iter(shuffler_dp)
+        exp = []
+        for _ in range(2):
+            exp.append(next(it))
+        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+        exp.extend(list(it))
+        self.assertEqual(exp, list(shuffler_dp_copy))
 
     def test_map_mapdatapipe(self):
         arr = range(10)

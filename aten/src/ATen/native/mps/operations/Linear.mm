@@ -46,6 +46,10 @@ Tensor _mps_linear(
 
   TORCH_CHECK(output.is_mps());
 
+  if(output.numel() == 0) {
+    return output;
+  }
+
   MPSStream *stream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph
@@ -65,7 +69,6 @@ Tensor _mps_linear(
 
     MPSShape* wt_shape = getMPSShape(weight);
     string wt_key = string([[[wt_shape valueForKey:@"description"] componentsJoinedByString:@","] UTF8String]);
-    MPSShape* bias_shape = nil;
     string bias_key = "nobias";
     if(is_bias_defined) {
       bias_key = "bias";

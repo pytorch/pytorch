@@ -202,7 +202,7 @@ iterDP_method_to_special_output_type: Dict[str, str] = {"demux": "List[IterDataP
 mapDP_file_path: str = "map"
 mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 mapDP_deprecated_files: Set[str] = set()
-mapDP_method_to_special_output_type: Dict[str, str] = {}
+mapDP_method_to_special_output_type: Dict[str, str] = {"shuffle": "IterDataPipe"}
 
 
 def main() -> None:
