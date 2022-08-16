@@ -156,6 +156,7 @@ class WithDevice(nn.Module):
         >>> # Dropout does not have any parameters/buffers, but we want to
         >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
         >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
+        >>> # xdoctest: +SKIP
         >>> model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):
@@ -270,6 +271,7 @@ class Pipe(Module):
         Pipeline of two FC layers across GPUs 0 and 1.
 
         >>> # Need to initialize RPC framework first.
+        >>> # xdoctest: +SKIP
         >>> os.environ['MASTER_ADDR'] = 'localhost'
         >>> os.environ['MASTER_PORT'] = '29500'
         >>> torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)

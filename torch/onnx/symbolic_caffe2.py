@@ -38,8 +38,8 @@ def register_quantized_ops(domain: str, version: int):
 def _permute_helper(g, input, axes):
     quant_args = {
         "axes_i": axes,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Transpose", input, **quant_args)
     symbolic_helper._quantized_ops.add(output)
@@ -141,8 +141,8 @@ def relu(g, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.relu(g, input)
     kwargs = {
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Relu", input, **kwargs)
     symbolic_helper._quantized_ops.add(output)
@@ -181,8 +181,8 @@ def upsample_nearest2d(
     output_size = symbolic_helper._parse_arg(output_size, "is")
     kwargs = {
         "output_size_i": output_size,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
@@ -202,8 +202,8 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         "pads_i": padding + padding,
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8MaxPool", input, **kwargs)
@@ -239,8 +239,8 @@ def avg_pool2d(
         "pads_i": padding + padding,
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8AveragePool", input, **kwargs)
@@ -254,8 +254,8 @@ def reshape(g, input, shape):
         return opset9.reshape(g, input, shape)
 
     kwargs = {
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Reshape", input, shape, **kwargs)
     symbolic_helper._quantized_ops.add(output)
@@ -277,8 +277,8 @@ def slice(g, input, dim, start, end, step):
         "start_idx_i": start,
         "end_idx_i": end,
         "dim_i": dim,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Slice", input, **kwargs)
     symbolic_helper._quantized_ops.add(output)
