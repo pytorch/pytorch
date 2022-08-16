@@ -296,7 +296,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # seems flaky
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -1088,7 +1088,7 @@ class TestOperators(TestCase):
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('native_layer_norm', ''),
         xfail('sparse.sampled_addmm', ''),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),
         xfail('index_reduce', ''),
         xfail('segment_reduce', 'lengths'),

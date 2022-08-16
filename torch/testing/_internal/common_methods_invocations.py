@@ -10344,10 +10344,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
@@ -19605,8 +19601,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: .tolist() is not supported for tensor subclasses.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
     ),
     PythonRefInfo(

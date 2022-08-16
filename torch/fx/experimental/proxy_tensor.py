@@ -45,6 +45,11 @@ def decompose(decomposition_table):
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
 def track_tensor(tensor, proxy, *, constant, tracer):
+    # The basic idea is that we need to associate each tensor/SymInt
+    # with a Proxy.  How do we setup this association?  We just store
+    # the proxy on the __dict__ of the object, keyed on the tracer
+    # (so that if we have multiple tracers at the same time, they
+    # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
         if isinstance(s, SymInt):
             inner_s = s.get_pyobj()
@@ -393,6 +398,9 @@ class ProxySymDispatchMode(SymDispatchMode):
     def __init__(self, tracer):
         super().__init__()
         self.tracer = tracer
+        # When false, we don't trace operations.  If you do this, you MUST
+        # call track_tensor/track_tensor_tree on all results of the operation
+        # to ensure we can adeduately track the results
         self.enable_tracing = True
 
     @contextmanager
