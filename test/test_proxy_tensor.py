@@ -619,7 +619,7 @@ class TestFakeProxyTensor(TestCase):
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
-    def _test_dynamic(self, fn, trace_inputs, test_inputs):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
         Also returns shape env
@@ -628,7 +628,9 @@ class TestSymbolicTracing(TestCase):
         traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
-            self.assertEqual(traced_f(*input), fn(*input))
+            rx, ry = traced_f(*input), fn(*input)
+            if assert_eq:
+                self.assertEqual(rx, ry)
         return traced_f.shape_env
 
 
@@ -655,6 +657,19 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
         assert len(shape_env.guards) == 0
 
+    def test_multiply_shape(self):
+        def f(a):
+            return torch.empty(a.shape[0] * 2)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    size = a_1.size(0);  a_1 = None
+    mul = size * 2;  size = None
+    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    size_1 = empty.size(0)
+    return empty""")
+
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)
@@ -673,9 +688,9 @@ class TestSymbolicTracing(TestCase):
 
     def test_new_empty(self):
         def f(a, b):
-            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
+            return a.new_empty(b.shape[0], b.shape[1] * 2)
 
-        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
 
 
     def test_expand(self):
