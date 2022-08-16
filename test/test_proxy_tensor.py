@@ -175,9 +175,7 @@ class TestGenericProxyTensor(TestCase):
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
-        r1 = fx_f(*new_inps)
-        r2 = f(*new_inps)
-        self.assertEqual(r1, r2)
+        self.assertEqual(fx_f(*new_inps), f(*new_inps))
 
     def test_make_fx_simple(self):
         def f(x):
@@ -286,10 +284,11 @@ class TestGenericProxyTensor(TestCase):
             self.assertTrue(is_any_sigmoid(gm))
             return torch.digamma(x)
 
-        traced = make_fx(f2_logging_tensor)(torch.randn(3))
-        self.assertFalse(is_any_sum(traced))
-        self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
-        self.assertTrue(is_any_digamma(traced))
+        with self.assertRaisesRegex(AssertionError, "ProxyTensor is wrapped with another Tensor subclass"):
+            traced = make_fx(f2_logging_tensor)(torch.randn(3))
+            self.assertFalse(is_any_sum(traced))
+            self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+            self.assertTrue(is_any_digamma(traced))
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -515,8 +514,6 @@ def forward(self, x_1):
         model = Foo()
 
         def f(args, params, buffers):
-            for p in params.values():
-                p.grad = None
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
@@ -622,7 +619,7 @@ class TestFakeProxyTensor(TestCase):
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
-    def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs):
         """
         Tests fn traced with trace_inputs against test_inputs
         Also returns shape env
@@ -631,9 +628,7 @@ class TestSymbolicTracing(TestCase):
         traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
-            rx, ry = traced_f(*input), fn(*input)
-            if assert_eq:
-                self.assertEqual(rx, ry)
+            self.assertEqual(traced_f(*input), fn(*input))
         return traced_f.shape_env
 
 
@@ -660,19 +655,6 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
         assert len(shape_env.guards) == 0
 
-    def test_multiply_shape(self):
-        def f(a):
-            return torch.empty(a.shape[0] * 2)
-
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    size = a_1.size(0);  a_1 = None
-    mul = size * 2;  size = None
-    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    size_1 = empty.size(0)
-    return empty""")
-
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)
@@ -691,9 +673,9 @@ def forward(self, a_1):
 
     def test_new_empty(self):
         def f(a, b):
-            return a.new_empty(b.shape[0], b.shape[1] * 2)
+            return torch.clamp(a.new_empty(b.shape[0], b.shape[1] * 2), 1, 1)
 
-        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]])
 
 
     def test_expand(self):
