@@ -117,6 +117,8 @@ function clone_pytorch_xla() {
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    git submodule sync
+    git submodule update --init --recursive
     popd
   fi
 }
