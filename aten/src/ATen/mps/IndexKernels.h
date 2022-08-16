@@ -119,7 +119,6 @@ kernel void kernel_index_offsets(constant const packed_uint3 * strides         [
                                  constant const uint         & num_dimensions  [[buffer(3)]],
                                  constant const uint         & num_offsets     [[buffer(4)]],
                                  uint thread_index [[thread_position_in_grid]]) {
-    device uint3 & localDataOffsets = data_offsets[thread_index];
     uint32_t idx = thread_index;
     for (uint32_t dim = 0; dim < num_dimensions; dim++) {
         uint32_t remainder = idx % iter_shape[dim];
