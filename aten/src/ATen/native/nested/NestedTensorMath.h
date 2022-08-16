@@ -28,6 +28,10 @@ inline at::Tensor wrap_buffer(
       std::move(nested_stride_tensor), offsets);
 }
 
+inline at::Tensor get_buffer(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
 // The sizes of the underlying tensors
 inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* self_ptr) {
   int64_t ntensors = self_ptr->size(0);
@@ -42,7 +46,8 @@ inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* s
     return sizes;
   }
   const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
+
+  for(const auto i: c10::irange(ntensors)){
     sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
     sizemat_ptr += orig_dim;
   }
@@ -68,7 +73,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(const NestedTensorImpl*
     return strides;
   }
   const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for(const auto i: c10::irange(ntensors)) {
     strides[i] = IntArrayRef(stridemat_ptr, stridemat_ptr + orig_dim);
     stridemat_ptr += orig_dim;
   }
