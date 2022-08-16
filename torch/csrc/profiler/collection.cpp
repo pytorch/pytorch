@@ -69,9 +69,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*dim_=*/(uint32_t)dim,
         /*layout_=*/t.layout());
 
-    for (const auto i : sizes) {
-      tensor_sizes_.emplace_back(i);
-    }
+    tensor_sizes_strides_.copy(sizes);
+    tensor_sizes_strides_.copy(t.strides());
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
@@ -82,18 +81,23 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin(),
+          tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
+      out.strides_.emplace_back();
       switch (*tag_it) {
         case Tag::Tensor: {
           const auto& md = *tensor_metadata_it++;
           for (const auto _ : c10::irange(md.dim_)) {
             (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_it++);
+            out.shapes_.back().push_back(*tensor_size_strides_it++);
+          }
+          for (const auto _ : c10::irange(md.dim_)) {
+            (void)_; // Suppress unused variable warning
+            out.strides_.back().push_back(*tensor_size_strides_it++);
           }
           out.tensor_metadata_.emplace_back(md);
           out.ivalues_.emplace_back();
@@ -125,6 +129,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
         case Tag::TERMINATOR:
           // This marks the end of this op.
           out.shapes_.pop_back();
+          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -140,7 +145,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
-  tensor_sizes_.clear();
+  tensor_sizes_strides_.clear();
   ivalues_.clear();
 }
 
