@@ -306,19 +306,12 @@ def add_generated_native_functions(
     # First we group of NaitveFunctions by schema kind,
     # then we detect which ones are missing and generate them.
 
-
-    # TODO figure out what to do with autograd
     symint_overloads = []
     for f in rs:
         if "symint_ver_needed" in f.tags:
-            #print(f"In symint_ver_needed {f.symint_args}")
             new_func = ints_to_symints_nativefunction(f)
             symint_overloads.append(new_func)
-            print(f"2222 {f.func.signature()} {new_func.func.signature()}")
-            #raise RuntimeError("Boo!")
     rs.extend(symint_overloads)
-
-
 
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for k, d in pre_grouped_native_functions.items():

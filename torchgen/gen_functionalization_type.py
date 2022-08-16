@@ -694,7 +694,6 @@ def gen_functionalization_registration(
     def emit_registration_helper(f: NativeFunction) -> str:
         if f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
-            #print(f"crash crash crash {f.func.name}")
             assert metadata is not None
             native_api_name = metadata.kernel
             sig = DispatcherSignature.from_schema(f.func)

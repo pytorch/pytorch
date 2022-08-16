@@ -160,7 +160,6 @@ def load_derivatives(
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
-    print("DONE LOADING DERIVATIVES")
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
