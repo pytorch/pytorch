@@ -629,11 +629,16 @@ def run_tests(argv=UNITTEST_ARGS):
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
-        if os.path.exists(IMPORT_DISABLED_TESTS):
+        # This is unsafe to store the list of disabled tests on Windows in a single env
+        # variable because it has an upper limit of 32767 characters in length. We will
+        # need to think of a better way to handle this in Windows if the test time there
+        # is impact by this
+        if os.path.exists(IMPORT_DISABLED_TESTS) and not IS_WINDOWS:
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
-            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
+                  f' or we are on Windows whose env variable has an upper limit of 32767 chars')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -1568,8 +1573,19 @@ def check_if_enable(test: unittest.TestCase):
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
-        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
+
+    if not IS_SANDCASTLE:
+        disabled_tests_dict = {}
+
+        if "DISABLED_TESTS_DICT" in os.environ:
+            disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
+        elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
+            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+                disabled_tests_dict = json.loads(fp.read())
+        else:
+            # IMPORT_DISABLED_TESTS can be None here
+            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
