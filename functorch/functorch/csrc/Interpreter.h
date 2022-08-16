@@ -1,14 +1,11 @@
 #pragma once
 
-// variant.h doesn't clean up after itself...
-#include <c10/util/variant.h>
-#undef DECLTYPE_AUTO
-
 #include <functorch/csrc/Macros.h>
 #include <functorch/csrc/Constants.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/util/variant.h>
 
 namespace at { namespace functorch {
 
