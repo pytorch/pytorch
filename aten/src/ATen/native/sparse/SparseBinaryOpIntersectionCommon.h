@@ -7,7 +7,6 @@
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseTensorUtils.h>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -23,7 +22,7 @@
 #ifdef GPUCC
 #define NAME "sparse_binary_op_intersection_cuda"
 #else
-#define NAME "sparse_binary_op_intersection_cuda"
+#define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
 #define BINARY_OP_API static constexpr FUNCAPI INLINE
@@ -75,7 +74,7 @@ template <
   typename binary_op_t,
   typename hash_t = int64_t,
   typename offset_t = int64_t>
-Tensor _sparse_binary_op_intersection_kernel_impl(
+Tensor& _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
     const Tensor& y_,
@@ -329,7 +328,7 @@ Tensor _sparse_binary_op_intersection_kernel_impl(
 template <
   template <typename func_t> class kernel_t,
   typename binary_op_t>
-Tensor _sparse_binary_op_intersection_kernel_out(
+Tensor& _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
