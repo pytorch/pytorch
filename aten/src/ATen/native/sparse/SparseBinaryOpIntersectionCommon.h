@@ -37,7 +37,7 @@ using at::sparse::get_sparse_impl;
 // ForwardIt: only legacy random access iterator is supported.
 template<class ForwardIt, class T, bool is_lower = true>
 static FUNCAPI INLINE
-ForwardIt find_bound(ForwardIt RESTRICT first, ForwardIt RESTRICT last, const T& value) {
+ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
     ForwardIt RESTRICT it;
     typename std::iterator_traits<ForwardIt>::difference_type count, step;
     // NOTE: std::distance(first, last) compiles but produces wrong results on CUDA,
@@ -203,7 +203,7 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     AT_DISPATCH_INDEX_TYPES(source_arange.scalar_type(), NAME, [&]() {
         const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
-        auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
+        const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
         const auto sorted_hash_len = sorted_hash.numel();
         auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
@@ -221,13 +221,13 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
             }
 
             // Perform hash values intersection
-            const auto* RESTRICT lb = find_bound<hash_t*, hash_t, /*is_lower=*/true>(
+            const auto* RESTRICT lb = find_bound<const hash_t*, hash_t, /*is_lower=*/true>(
                 ptr_sorted_hash,
                 ptr_sorted_hash + sorted_hash_len,
                 hash
             );
 
-            const auto* RESTRICT ub = find_bound<hash_t*, hash_t, /*is_lower=*/false>(
+            const auto* RESTRICT ub = find_bound<const hash_t*, hash_t, /*is_lower=*/false>(
                 ptr_sorted_hash,
                 ptr_sorted_hash + sorted_hash_len,
                 hash
