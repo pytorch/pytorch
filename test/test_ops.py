@@ -1749,7 +1749,8 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(inner=None)
+                with FakeTensorMode() as mode:
+                    pass
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):

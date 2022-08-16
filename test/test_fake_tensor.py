@@ -12,7 +12,6 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
 )
 from torch.testing import FileCheck
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch import nn
 import unittest
 import torch._prims as prims
