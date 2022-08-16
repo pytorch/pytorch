@@ -1354,6 +1354,49 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     return tuple(sample_inputs)
 
+def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_addcmul_addcdiv(
+        op_info, device, dtype, requires_grad, **kwargs)
+
+    # type promotion cases
+    supported_dtypes = op_info.supported_dtypes(device)
+    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
+
+    types = (
+        (torch.float64, torch.complex128),
+        (torch.bfloat16, torch.float32),
+    )
+
+    values = (
+        None,
+        True, False,
+        3.14, 3,
+        1.0, 1,
+        0.0, 0,
+        -3.14, -3,
+        3.14 + 2.71j,
+    )
+
+    for (type2, type3), value in product(types, values):
+        if (type2 not in supported_dtypes or
+                type3 not in supported_dtypes):
+            continue
+
+        # RuntimeError: value cannot be converted without overflow
+        if (type(value) is complex and
+                type2 is not torch.complex128):
+            continue
+
+        arg1 = make_arg([5, 5], dtype=dtype)
+        arg2 = make_arg([5, 5], dtype=type2)
+        arg3 = make_arg([1, 5], dtype=type3)
+
+        # TypeError: addcdiv(): argument 'value' must be Number, not NoneType
+        if value is not None:
+            yield SampleInput(arg1, args=(arg2, arg3), kwargs=dict(value=value))
+        else:
+            yield SampleInput(arg1, args=(arg2, arg3))
+
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
                   ((1,), (S, S, S), (S, S, M), 1, 1, True),
@@ -2319,7 +2362,7 @@ def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
 def error_inputs_unbind(op_info, device):
     make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
     yield ErrorInput(SampleInput(make_arg(()), args=(0,)), error_type=IndexError,
-                     error_regex="dimension specified as 0 but tensor has no dimensions")
+                     error_regex="Dimension specified as 0 but tensor has no dimensions")
     yield ErrorInput(SampleInput(make_arg((2,)), args=(2,)), error_type=IndexError,
                      error_regex="Dimension out of range")
 
@@ -4254,6 +4297,98 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
             args=([0, -1, -2, -3], [-3, -2, -1, -0]))
     )
 
+def reference_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # shape, source, destination
+    args = (
+        # empty inputs
+        ((), (), ()),
+        # int inputs, negative
+        ((3, 5, 7, 2), -2, 1),
+        # swap bounds
+        ((3, 5, 7, 2), (-1, 0), (0, -1)),
+        # non-sequential, negative
+        ((2, 3, 4, 5, 6), (3, -3, 4), (1, 0, -1)),
+        # idempotence, negative
+        ((2, 3, 4, 5, 6), (-3, 4, 3, 1), (-3, 4, 3, 1)),
+        # reverse, sequential, positive
+        ((6, 2, 3, 5, 4), (4, 3, 2, 1, 0), (0, 1, 2, 3, 4)),
+        # reverse, non-sequential
+        ((6, 2, 3, 5, 4), (-3, -2, -4, -5, -1), (2, 1, 3, 4, 0)),
+        # reverse, sequential, negative
+        ((6, 2, 3, 5, 4), (4, -2, 2, -4, -5), (-5, 1, 2, -2, -1)),
+    )
+
+    for shape, source, destination in args:
+        yield SampleInput(make_arg(shape), args=(source, destination))
+
+def error_movedim_moveaxis(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # source length < destination length
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((3, -3), (1, 0, -1))),
+        error_regex=(r"movedim: Invalid source or destination dims: source "
+                     r"\(\[3, -3\] dims\) should contain the same number of "
+                     r"dims as destination \(\[1, 0, -1\] dims\)"),
+    )
+
+    # source length > destination length
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((3, -3, 4), (1, 0))),
+        error_regex=(r"movedim: Invalid source or destination dims: source "
+                     r"\(\[3, -3, 4\] dims\) should contain the same number of "
+                     r"dims as destination \(\[1, 0\] dims\)"),
+    )
+
+    # repeated source dim, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((0, 4, -5), (1, 0, 2))),
+        error_regex=r"movedim: repeated dim in `source` \(\[0, 4, -5\]\)",
+    )
+
+    # repeated destination dim, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 0, 2), (0, 4, -5))),
+        error_regex=r"movedim: repeated dim in `destination` \(\[0, 4, -5\]\)",
+    )
+
+    # repeated dim (both), with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 0, -4), (0, 4, -5))),
+        error_regex=r"movedim: repeated dim in `source` \(\[1, 0, -4\]\)",
+    )
+
+    # out of bounds source inputs, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((0, 1, -6), (1, 4, 2))),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds destination inputs, with negative indices
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=((1, 4, 2), (0, 1, -6))),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds source input, int
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=(-6, 1)),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
+
+    # out of bounds destination input, int
+    yield ErrorInput(
+        SampleInput(make_arg(2, 3, 4, 5, 6), args=(3, -6)),
+        error_regex=r"Dimension out of range \(expected to be in range of \[-5, 4\], but got -6\)",
+        error_type=IndexError,
+    )
 
 def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -5655,6 +5790,78 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     for shape, kwarg in chain(product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)):
         yield SampleInput(make_arg(shape), kwargs=kwarg)
 
+def reference_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_diagonal_diag_embed(
+        op_info, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes2d = ((L, M),)
+    shapes3d = ((L, M, S),)
+
+    kwargs2d = (
+        # dim1 > dim2 is allowed
+        dict(dim1=1, dim2=0),
+        # negative dims are allowed
+        dict(dim1=-2, dim2=-1),
+        # out of bounds offset should return an empty tensor
+        dict(offset=10000),
+    )
+
+    kwargs3d = kwargs2d + (
+        # make sure we can use non-sequential dims
+        dict(offset=-1, dim1=0, dim2=2),
+    )
+
+    samples2d = product(shapes2d, kwargs2d)
+    samples3d = product(shapes3d, kwargs3d)
+
+    for shape, kwargs in chain(samples2d, samples3d):
+        yield SampleInput(input=make_arg(shape), kwargs=kwargs)
+
+def error_inputs_diagonal(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    shapes2d = ((M, L),)
+    shapes3d = ((M, S, L),)
+
+    kwargs2d = (
+        # dim1 == dim2 is not allowed
+        dict(dim1=1, dim2=1),
+        # out of bounds dims are not allowed
+        dict(dim1=10000),
+        dict(dim2=10000),
+    )
+
+    kwargs3d = kwargs2d
+
+    samples2d = product(shapes2d, kwargs2d)
+    samples3d = product(shapes3d, kwargs3d)
+
+    for shape, kwargs in chain(samples2d, samples3d):
+        arg = make_arg(shape)
+        sample = SampleInput(input=arg, kwargs=kwargs)
+
+        dim1 = kwargs.get('dim1')
+        dim2 = kwargs.get('dim2')
+        num_dim = arg.dim()
+        bound1 = -num_dim
+        bound2 = num_dim - 1
+        dim_range = range(bound1, bound2 + 1)
+        dim1_cond = dim1 and dim1 not in dim_range
+        dim2_cond = dim2 and dim2 not in dim_range
+
+        if dim1 == dim2:
+            err = f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+            yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+        elif dim1_cond or dim2_cond:
+            err_dim = dim1 if dim1_cond else dim2
+            err = (r"Dimension out of range \(expected to be in range of "
+                   rf"\[{bound1}, {bound2}\], but got {err_dim}\)")
+            yield ErrorInput(sample, error_regex=err, error_type=IndexError)
+        else:
+            raise RuntimeError("should be unreachable")
 
 def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -8967,7 +9174,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
-           sample_inputs_func=sample_inputs_addcmul_addcdiv),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv,
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -8979,7 +9188,9 @@ op_db: List[OpInfo] = [
                             'TestCommon',
                             'test_variant_consistency_eager'),
            ),
-           sample_inputs_func=sample_inputs_addcmul_addcdiv),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv,
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -9810,7 +10021,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_diagonal_diag_embed),
+           sample_inputs_func=sample_inputs_diagonal_diag_embed,
+           reference_inputs_func=reference_inputs_diagonal,
+           error_inputs_func=error_inputs_diagonal),
     OpInfo('diagonal_scatter',
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
@@ -10344,10 +10557,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
@@ -12053,6 +12262,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12073,6 +12283,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose2d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12092,6 +12303,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12130,6 +12342,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -12168,6 +12381,7 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13615,6 +13829,10 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     dtypes=(torch.complex32,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
@@ -15843,7 +16061,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_movedim_moveaxis),
+           sample_inputs_func=sample_movedim_moveaxis,
+           reference_inputs_func=reference_movedim_moveaxis,
+           error_inputs_func=error_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
@@ -18631,6 +18851,12 @@ python_ref_db = [
         torch_opinfo_variant_name="list_of_tensors",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.movedim",
+        aliases=('moveaxis',),
+        torch_opinfo_name="movedim",
+        supports_nvfuser=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
@@ -19067,13 +19293,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19255,13 +19481,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
         )
     ),
@@ -19289,13 +19515,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19358,13 +19584,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19380,6 +19606,11 @@ python_ref_db = [
     #
     # Elementwise Ternary Reference OpInfos
     #
+    PythonRefInfo(
+        "_refs.addcdiv",
+        torch_opinfo_name="addcdiv",
+        supports_nvfuser=False,
+    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
@@ -19496,6 +19727,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.diagonal",
+        torch_opinfo_name="diagonal",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
