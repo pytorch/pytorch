@@ -616,17 +616,31 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_sum_dim(self, device, dtype):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
 
-        def test_sum(nt, dim, keepdim=True):
+        def test_sum(device, dtype, ntensors, max_sizes, dim, keepdim=True):
+            nt = self.random_nt(device, dtype, ntensors, max_sizes)
             nt2 = nt.clone()
-            nt = nt.sum(dim=dim, keepdim=keepdim)
             ub2 = nt2.unbind()
-            ub2 = [t.sum(-1, keepdim=keepdim) for t in ub2]
-            nt2 = torch.nested_tensor(ub2)
-            self.assertEqual(nt, nt2)
+            nt.requires_grad_(True)
+            [t.requires_grad_(True) for t in ub2]
+            nt_sum = nt.sum(dim=dim, keepdim=keepdim)
+            ub2_sum = [t.sum(-1, keepdim=keepdim) for t in ub2]
+            self.assertEqual(nt_sum, torch.nested_tensor(ub2_sum))
+
+            # test backward
+            # generate gradient tensor that has the same size as the output
+            size = nt_sum._nested_tensor_size()
+            gt2 = []
+            for i in range(ntensors):
+                gt2.append(torch.randn(size[i].tolist(), device=device, dtype=dtype))
+            gt = torch.nested_tensor(gt2).clone()
+            nt_sum.backward(gt)
+            for t2, g2 in zip(ub2_sum, gt2):
+                t2.backward(g2)
+            self.assertEqual(nt.grad, torch.nested_tensor([t.grad for t in ub2]))
             return
 
         for ntensors, max_sizes in params:
-            test_sum(self.random_nt(device, dtype, ntensors, max_sizes), len(max_sizes))
+            test_sum(device, dtype, ntensors, max_sizes, len(max_sizes))
 
         # Test error inputs
         with self.assertRaisesRegex(RuntimeError, "NestedTensor can only be reduced across the last"):
