@@ -292,7 +292,7 @@ auto handle_torch_function_no_python_arg_parser(
       torch_function_name == TorchFunctionName::TorchFunction;
   auto get_mode = [&]() {
     return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
-                             : at::impl::TorchDispatchModeTLS::get_state();
+                             : c10::impl::TorchDispatchModeTLS::get_state();
   };
 
   const auto& maybe_mode = get_mode();

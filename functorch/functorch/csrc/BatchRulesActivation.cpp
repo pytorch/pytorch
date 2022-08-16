@@ -58,6 +58,11 @@ std::tuple<Tensor,optional<int64_t>> prelu_batch_rule(
   const auto input_ = moveBatchDimToFront(input, input_bdim);
   auto weight_flatten = moveBatchDimToFront(weight, weight_bdim);
 
+  const auto weight_logical_dim = rankWithoutBatchDim(weight, weight_bdim);
+  TORCH_CHECK(weight_logical_dim == 0 || weight_logical_dim == 1,
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ",
+      weight_logical_dim);
+
   if (weight_flatten.dim() > 1) {
     // for an input [N, C, ...]
     // weight can be a non-vector but the total number of elements must be the same as C
