@@ -107,7 +107,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
                 if new_nodes < old_nodes:
                     progress_made = True
                     print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
-                if new_nodes == old_nodes and new_inps > old_inps:
+                if new_inps > old_inps:
                     progress_made = True
                     print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs")
                 if new_outs < old_outs:
