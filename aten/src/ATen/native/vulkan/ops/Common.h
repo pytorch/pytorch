@@ -43,17 +43,40 @@ struct Layout final {
   };
 };
 
-uint32_t batch_size(const IntArrayRef);
-uint32_t batch_size(const Tensor&);
+/*
+ * Maps a semantic dimension name to an integer that corresponds to its
+ * innermost ordering in a 4D tensor in NCHW format. Width is the innermost
+ * dimension, so it corresponds to 1, height is the next innermost, so it
+ * corresponds to 2, and so on.
+ */
+struct Dim4D {
+  static constexpr uint32_t Width = 1u;
+  static constexpr uint32_t Height = 2u;
+  static constexpr uint32_t Channel = 3u;
+  static constexpr uint32_t Batch = 4u;
+};
 
-uint32_t channels_size(const IntArrayRef);
-uint32_t channels_size(const Tensor&);
+/*
+ * The functions below safely return the size of the dimension at the N-th
+ * innermost index. If the dimensionality of the size array is not sufficient
+ * then 1 will be returned. The structs above are intended to be used with
+ * these functions.
+ */
+template <uint32_t N>
+uint32_t get_dim(const IntArrayRef sizes) {
+  const uint32_t dims = sizes.size();
+  return dims < N ? 1 : sizes[dims - N];
+}
 
-uint32_t height_size(const IntArrayRef);
-uint32_t height_size(const Tensor&);
+template <uint32_t N>
+uint32_t get_dim(const Tensor& t_in) {
+  return get_dim<N>(t_in.sizes());
+}
 
-uint32_t width_size(const IntArrayRef);
-uint32_t width_size(const Tensor&);
+template <uint32_t N>
+uint32_t get_dim(const vTensor& v_in) {
+  return get_dim<N>(v_in.sizes());
+}
 
 api::utils::uvec3 adaptive_work_group_size(
     const api::utils::uvec3& global_work_group);
