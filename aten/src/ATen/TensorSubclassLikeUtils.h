@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace at {
 
@@ -39,16 +40,22 @@ constexpr auto kTensorSubclassLike =
     DispatchKeySet(BackendComponent::MetaBit);
 
 inline bool isTensorSubclassLike(const Tensor& tensor) {
+  if (c10::impl::dispatch_mode_enabled())
+    return true;
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();
   return !(key_set & kTensorSubclassLike).empty();
 }
 
 inline bool areAnyTensorSubclassLike(TensorList tensors) {
+  if (c10::impl::dispatch_mode_enabled())
+    return true;
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
 inline bool areAnyOptionalTensorSubclassLike(
     const c10::List<c10::optional<Tensor>>& tensors) {
+  if (c10::impl::dispatch_mode_enabled())
+    return true;
   return std::any_of(
       tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
         return (
