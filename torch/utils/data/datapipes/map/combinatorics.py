@@ -53,7 +53,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._seed = None
         self._rng = random.Random()
         self._rng_state = self._rng.getstate()
-        self._shuffled_indices: Optional[List] = None
+        self._shuffled_indices: List = self.indices
 
     def set_shuffle(self, shuffle=True):
         self._enabled = shuffle
