@@ -250,6 +250,7 @@ jobs:
       sync-tag: rocm-build
 
   linux-focal-rocm5_2-py3_7-test:
+    if: false # Disable temporarily due to bad hosts
     name: linux-focal-rocm5.2-py3.7
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_2-py3_7-build
