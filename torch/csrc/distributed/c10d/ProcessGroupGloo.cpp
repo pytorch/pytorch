@@ -2842,10 +2842,6 @@ void ProcessGroupGloo::monitoredBarrier(
   }
 
   waitLoop(sendWorkMap);
-
-  using namespace std::chrono;
-  C10_UNUSED auto elapsedTime =
-      duration_cast<milliseconds>(steady_clock::now() - startTime);
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {
