@@ -13,6 +13,7 @@ class LinearReLU(nnq.Linear):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.intrinsic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)

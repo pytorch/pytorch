@@ -29,6 +29,8 @@ enum class DebugDumpOption {
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
   CudaFull, //!< Dump the complete CUDA C++ code
   CudaToFile, //!< Dump CUDA Strings to File
+  DebugInfo, //!< Embed line info and debug info to compiled kernel, and dump
+             //!< the full CUDA C++ code
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
   FusionSegmenterLog, //!< Dump Detailed Segmenter Logging
@@ -46,6 +48,8 @@ enum class DebugDumpOption {
                     //! associated with what's running
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
+  InlinePropagator, //! When running InlinePropagator, print propagation
+                    //! path and inlining result
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
