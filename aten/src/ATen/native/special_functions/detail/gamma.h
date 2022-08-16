@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/numbers.h>
+#include <ATen/native/special_functions/detail/bernoulli_number.h>
 #include <ATen/native/special_functions/detail/is_integer.h>
 #include <ATen/native/special_functions/detail/promote_t.h>
 #include <ATen/native/special_functions/detail/ln_gamma_sign.h>

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/native/special_functions/detail/double_factorials.h>
 #include <ATen/native/special_functions/detail/ln_gamma.h>
 #include <ATen/native/special_functions/detail/negative_double_factorials.h>
 #include <ATen/native/special_functions/cos_pi.h>
@@ -32,8 +31,8 @@ log_double_factorial(int n) {
     } else {
       return std::numeric_limits<T1>::quiet_NaN();
     }
-  } else if (n < static_cast<int>(DOUBLE_FACTORIALS_SIZE < T1 > )) {
-    return DOUBLE_FACTORIALS[n].log_factorial;
+  } else if (n < static_cast<int>(c10::numbers::DOUBLE_FACTORIALS_SIZE < T1 > )) {
+    return c10::numbers::log_double_factorials_v[n];
   } else {
     return ln_double_factorial(T1(n));
   }

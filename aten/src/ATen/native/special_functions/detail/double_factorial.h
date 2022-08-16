@@ -19,8 +19,8 @@ double_factorial(int n) {
     } else {
       return std::numeric_limits<T1>::quiet_NaN();
     }
-  } else if (n < int(DOUBLE_FACTORIALS_SIZE < T1 > )) {
-    return DOUBLE_FACTORIALS[n].factorial;
+  } else if (n < int(c10::numbers::DOUBLE_FACTORIALS_SIZE < T1 > )) {
+    return c10::numbers::double_factorials_v[n];
   } else {
     return std::numeric_limits<T1>::infinity();
   }

@@ -15,7 +15,9 @@ carlson_elliptic_r_c(T1 x, T1 y) {
   bool negative_x = false;
   bool negative_y = false;
 
-  if constexpr (!is_complex_v<T1>) {
+  const auto p = !is_complex_v < T1 >;
+
+  if (p) {
     if (std::real(x) < T2(0)) {
       negative_x = true;
     }

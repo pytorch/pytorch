@@ -436,7 +436,7 @@ constexpr std::array<long double, 171> log_factorials_v = {
     7.065730622457873471107222627212983e+02L,
 };
 
-template<typename Tp>
+template<typename T1>
 constexpr std::size_t DOUBLE_FACTORIALS_SIZE = 0;
 
 template<>

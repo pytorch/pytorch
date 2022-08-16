@@ -6,17 +6,19 @@ namespace at {
 namespace native {
 namespace special_functions {
 namespace detail {
-template<typename Tp>
+template<typename T1>
 constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE = 0;
 
 template<>
 constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<float> = 27;
+
 template<>
 constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<double> = 150;
+
 template<>
 constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<long double> = 999;
 
-constexpr factorial_t<long double> NEGATIVE_DOUBLE_FACTORIALS[999] = {
+static constexpr factorial_t<long double> NEGATIVE_DOUBLE_FACTORIALS[999] = {
     {-1, 1.000000000000000000000000000000000e+00L, 0.000000000000000000000000000000000e+00L},
     {-3, -3.333333333333333333333333333333333e-01L, -1.098612288668109691395245236922526e+00L},
     {-5, 6.666666666666666666666666666666667e-02L, -2.708050201102210065996004570148713e+00L},

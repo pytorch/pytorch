@@ -13,10 +13,11 @@ carlson_elliptic_r_j(T1 x, T1 y, T1 z, T1 p) {
   using T2 = numeric_t<T1>;
 
   bool neg_arg = false;
-  if constexpr (!is_complex_v < T1 >)
-    if (std::real(x) < T2(0)
-        || std::real(y) < T2(0)
-        || std::real(z) < T2(0))
+
+  const auto is_complex_t1 = !is_complex_v < T1 >;
+
+  if (is_complex_t1)
+    if (std::real(x) < T2(0) || std::real(y) < T2(0) || std::real(z) < T2(0))
       neg_arg = true;
 
   if (std::isnan(x) || std::isnan(y) || std::isnan(z) || std::isnan(p)) {

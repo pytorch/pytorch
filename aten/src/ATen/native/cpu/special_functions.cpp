@@ -6,122 +6,121 @@
 #include <limits>
 #include <type_traits>
 
-//#include <ATen/native/special_functions/airy_ai.h>
-//#include <ATen/native/special_functions/airy_bi.h>
-//#include <ATen/native/special_functions/associated_laguerre_polynomial_l.h>
-//#include <ATen/native/special_functions/associated_legendre_p.h>
-//#include <ATen/native/special_functions/associated_legendre_q.h>
-//#include <ATen/native/special_functions/bell_polynomial_b.h>
-//#include <ATen/native/special_functions/bernoulli_number.h>
-//#include <ATen/native/special_functions/bernoulli_polynomial_b.h>
-//#include <ATen/native/special_functions/bessel_j.h>
+#include <ATen/native/special_functions/airy_ai.h>
+#include <ATen/native/special_functions/airy_bi.h>
+#include <ATen/native/special_functions/associated_laguerre_polynomial_l.h>
+#include <ATen/native/special_functions/associated_legendre_p.h>
+#include <ATen/native/special_functions/associated_legendre_q.h>
+#include <ATen/native/special_functions/bernoulli_number.h>
+#include <ATen/native/special_functions/bernoulli_polynomial_b.h>
+#include <ATen/native/special_functions/bessel_j.h>
 #include <ATen/native/special_functions/bessel_j_0.h>
 #include <ATen/native/special_functions/bessel_j_1.h>
-//#include <ATen/native/special_functions/bessel_y.h>
+#include <ATen/native/special_functions/bessel_y.h>
 #include <ATen/native/special_functions/bessel_y_0.h>
 #include <ATen/native/special_functions/bessel_y_1.h>
-//#include <ATen/native/special_functions/beta.h>
-//#include <ATen/native/special_functions/binomial_coefficient.h>
-//#include <ATen/native/special_functions/bose_einstein_integral_g.h>
-//#include <ATen/native/special_functions/bulirsch_elliptic_integral_cel.h>
-//#include <ATen/native/special_functions/bulirsch_elliptic_integral_el1.h>
-//#include <ATen/native/special_functions/bulirsch_elliptic_integral_el2.h>
-//#include <ATen/native/special_functions/bulirsch_elliptic_integral_el3.h>
-//#include <ATen/native/special_functions/carlson_elliptic_r_c.h>
-//#include <ATen/native/special_functions/carlson_elliptic_r_d.h>
-//#include <ATen/native/special_functions/carlson_elliptic_r_f.h>
-//#include <ATen/native/special_functions/carlson_elliptic_r_g.h>
-//#include <ATen/native/special_functions/carlson_elliptic_r_j.h>
+#include <ATen/native/special_functions/beta.h>
+#include <ATen/native/special_functions/binomial_coefficient.h>
+#include <ATen/native/special_functions/bose_einstein_integral_g.h>
+#include <ATen/native/special_functions/bulirsch_elliptic_integral_cel.h>
+#include <ATen/native/special_functions/bulirsch_elliptic_integral_el1.h>
+#include <ATen/native/special_functions/bulirsch_elliptic_integral_el2.h>
+#include <ATen/native/special_functions/bulirsch_elliptic_integral_el3.h>
+#include <ATen/native/special_functions/carlson_elliptic_r_c.h>
+#include <ATen/native/special_functions/carlson_elliptic_r_d.h>
+#include <ATen/native/special_functions/carlson_elliptic_r_f.h>
+#include <ATen/native/special_functions/carlson_elliptic_r_g.h>
+#include <ATen/native/special_functions/carlson_elliptic_r_j.h>
 #include <ATen/native/special_functions/chebyshev_polynomial_t.h>
 #include <ATen/native/special_functions/chebyshev_polynomial_u.h>
 #include <ATen/native/special_functions/chebyshev_polynomial_v.h>
 #include <ATen/native/special_functions/chebyshev_polynomial_w.h>
 //#include <ATen/native/special_functions/clausen_cl.h>
 //#include <ATen/native/special_functions/clausen_sl.h>
-//#include <ATen/native/special_functions/complete_carlson_elliptic_r_f.h>
-//#include <ATen/native/special_functions/complete_carlson_elliptic_r_g.h>
-//#include <ATen/native/special_functions/complete_elliptic_integral_e.h>
-//#include <ATen/native/special_functions/complete_elliptic_integral_k.h>
-//#include <ATen/native/special_functions/complete_elliptic_integral_pi.h>
-//#include <ATen/native/special_functions/complete_legendre_elliptic_integral_d.h>
-//#include <ATen/native/special_functions/confluent_hypergeometric_0_f_1.h>
+#include <ATen/native/special_functions/complete_carlson_elliptic_r_f.h>
+#include <ATen/native/special_functions/complete_carlson_elliptic_r_g.h>
+#include <ATen/native/special_functions/complete_elliptic_integral_e.h>
+#include <ATen/native/special_functions/complete_elliptic_integral_k.h>
+#include <ATen/native/special_functions/complete_elliptic_integral_pi.h>
+#include <ATen/native/special_functions/complete_legendre_elliptic_integral_d.h>
+#include <ATen/native/special_functions/confluent_hypergeometric_0_f_1.h>
 #include <ATen/native/special_functions/cos_pi.h>
 #include <ATen/native/special_functions/cosh_pi.h>
-//#include <ATen/native/special_functions/cosine_integral_ci.h>
-//#include <ATen/native/special_functions/debye_d.h>
-//#include <ATen/native/special_functions/dilogarithm_li_2.h>
-//#include <ATen/native/special_functions/dirichlet_beta.h>
-//#include <ATen/native/special_functions/dirichlet_eta.h>
-//#include <ATen/native/special_functions/dirichlet_lambda.h>
-//#include <ATen/native/special_functions/double_factorial.h>
-//#include <ATen/native/special_functions/exp_airy_ai.h>
-//#include <ATen/native/special_functions/exp_airy_bi.h>
-//#include <ATen/native/special_functions/exp_modified_bessel_i.h>
-//#include <ATen/native/special_functions/exp_modified_bessel_k.h>
+#include <ATen/native/special_functions/cosine_integral_ci.h>
+#include <ATen/native/special_functions/debye_d.h>
+#include <ATen/native/special_functions/dilogarithm_li_2.h>
+#include <ATen/native/special_functions/dirichlet_beta.h>
+#include <ATen/native/special_functions/dirichlet_eta.h>
+#include <ATen/native/special_functions/dirichlet_lambda.h>
+#include <ATen/native/special_functions/double_factorial.h>
+#include <ATen/native/special_functions/exp_airy_ai.h>
+#include <ATen/native/special_functions/exp_airy_bi.h>
+#include <ATen/native/special_functions/exp_modified_bessel_i.h>
+#include <ATen/native/special_functions/exp_modified_bessel_k.h>
 #include <ATen/native/special_functions/exp_modified_bessel_k_0.h>
 #include <ATen/native/special_functions/exp_modified_bessel_k_1.h>
-//#include <ATen/native/special_functions/exponential_integral_e.h>
-//#include <ATen/native/special_functions/exponential_integral_ei.h>
-//#include <ATen/native/special_functions/factorial.h>
-//#include <ATen/native/special_functions/falling_factorial.h>
-//#include <ATen/native/special_functions/fermi_dirac_integral_f.h>
-//#include <ATen/native/special_functions/fresnel_integral_c.h>
-//#include <ATen/native/special_functions/fresnel_integral_s.h>
-//#include <ATen/native/special_functions/gauss_hypergeometric_2_f_1.h>
-//#include <ATen/native/special_functions/gegenbauer_polynomial_c.h>
-//#include <ATen/native/special_functions/hankel_h_1.h>
-//#include <ATen/native/special_functions/hankel_h_2.h>
-//#include <ATen/native/special_functions/harmonic_number.h>
-//#include <ATen/native/special_functions/hermite_polynomial_h.h>
-//#include <ATen/native/special_functions/hermite_polynomial_he.h>
-//#include <ATen/native/special_functions/heuman_lambda.h>
-//#include <ATen/native/special_functions/hurwitz_zeta.h>
-//#include <ATen/native/special_functions/hyperbolic_cosine_integral_chi.h>
-//#include <ATen/native/special_functions/hyperbolic_sine_integral_shi.h>
-//#include <ATen/native/special_functions/incomplete_beta.h>
-//#include <ATen/native/special_functions/incomplete_elliptic_integral_e.h>
-//#include <ATen/native/special_functions/incomplete_elliptic_integral_f.h>
-//#include <ATen/native/special_functions/incomplete_elliptic_integral_pi.h>
-//#include <ATen/native/special_functions/incomplete_legendre_elliptic_integral_d.h>
-//#include <ATen/native/special_functions/jacobi_polynomial_p.h>
+#include <ATen/native/special_functions/exponential_integral_e.h>
+#include <ATen/native/special_functions/exponential_integral_ei.h>
+#include <ATen/native/special_functions/factorial.h>
+#include <ATen/native/special_functions/falling_factorial.h>
+#include <ATen/native/special_functions/fermi_dirac_integral_f.h>
+#include <ATen/native/special_functions/fresnel_integral_c.h>
+#include <ATen/native/special_functions/fresnel_integral_s.h>
+#include <ATen/native/special_functions/gauss_hypergeometric_2_f_1.h>
+#include <ATen/native/special_functions/gegenbauer_polynomial_c.h>
+#include <ATen/native/special_functions/hankel_h_1.h>
+#include <ATen/native/special_functions/hankel_h_2.h>
+#include <ATen/native/special_functions/harmonic_number.h>
+#include <ATen/native/special_functions/hermite_polynomial_h.h>
+#include <ATen/native/special_functions/hermite_polynomial_he.h>
+#include <ATen/native/special_functions/heuman_lambda.h>
+#include <ATen/native/special_functions/hurwitz_zeta.h>
+#include <ATen/native/special_functions/hyperbolic_cosine_integral_chi.h>
+#include <ATen/native/special_functions/hyperbolic_sine_integral_shi.h>
+#include <ATen/native/special_functions/incomplete_beta.h>
+#include <ATen/native/special_functions/incomplete_elliptic_integral_e.h>
+#include <ATen/native/special_functions/incomplete_elliptic_integral_f.h>
+#include <ATen/native/special_functions/incomplete_elliptic_integral_pi.h>
+#include <ATen/native/special_functions/incomplete_legendre_elliptic_integral_d.h>
+#include <ATen/native/special_functions/jacobi_polynomial_p.h>
 //#include <ATen/native/special_functions/jacobi_theta_1.h>
 //#include <ATen/native/special_functions/jacobi_theta_2.h>
 //#include <ATen/native/special_functions/jacobi_theta_3.h>
 //#include <ATen/native/special_functions/jacobi_theta_4.h>
-//#include <ATen/native/special_functions/jacobi_zeta.h>
-//#include <ATen/native/special_functions/kummer_confluent_hypergeometric_1_f_1.h>
-//#include <ATen/native/special_functions/laguerre_polynomial_l.h>
-//#include <ATen/native/special_functions/lah_number.h>
-//#include <ATen/native/special_functions/legendre_polynomial_p.h>
-//#include <ATen/native/special_functions/legendre_q.h>
-//#include <ATen/native/special_functions/ln_binomial_coefficient.h>
-//#include <ATen/native/special_functions/ln_double_factorial.h>
-//#include <ATen/native/special_functions/ln_factorial.h>
-//#include <ATen/native/special_functions/ln_falling_factorial.h>
-//#include <ATen/native/special_functions/ln_gamma.h>
-//#include <ATen/native/special_functions/ln_gamma_sign.h>
-//#include <ATen/native/special_functions/ln_rising_factorial.h>
-//#include <ATen/native/special_functions/logarithmic_integral_li.h>
-//#include <ATen/native/special_functions/lower_incomplete_gamma.h>
-//#include <ATen/native/special_functions/modified_bessel_i.h>
+#include <ATen/native/special_functions/jacobi_zeta.h>
+#include <ATen/native/special_functions/kummer_confluent_hypergeometric_1_f_1.h>
+#include <ATen/native/special_functions/laguerre_polynomial_l.h>
+#include <ATen/native/special_functions/lah_number.h>
+#include <ATen/native/special_functions/legendre_polynomial_p.h>
+#include <ATen/native/special_functions/legendre_q.h>
+#include <ATen/native/special_functions/ln_binomial_coefficient.h>
+#include <ATen/native/special_functions/ln_double_factorial.h>
+#include <ATen/native/special_functions/ln_factorial.h>
+#include <ATen/native/special_functions/ln_falling_factorial.h>
+#include <ATen/native/special_functions/ln_gamma.h>
+#include <ATen/native/special_functions/ln_gamma_sign.h>
+#include <ATen/native/special_functions/ln_rising_factorial.h>
+#include <ATen/native/special_functions/logarithmic_integral_li.h>
+#include <ATen/native/special_functions/lower_incomplete_gamma.h>
+#include <ATen/native/special_functions/modified_bessel_i.h>
 #include <ATen/native/special_functions/modified_bessel_i_0.h>
 #include <ATen/native/special_functions/modified_bessel_i_1.h>
-//#include <ATen/native/special_functions/modified_bessel_k.h>
+#include <ATen/native/special_functions/modified_bessel_k.h>
 #include <ATen/native/special_functions/modified_bessel_k_0.h>
 #include <ATen/native/special_functions/modified_bessel_k_1.h>
-//#include <ATen/native/special_functions/neville_theta_c.h>
-//#include <ATen/native/special_functions/neville_theta_d.h>
-//#include <ATen/native/special_functions/neville_theta_n.h>
-//#include <ATen/native/special_functions/neville_theta_s.h>
-//#include <ATen/native/special_functions/nome_q.h>
-//#include <ATen/native/special_functions/owens_t.h>
-//#include <ATen/native/special_functions/polar_pi.h>
-//#include <ATen/native/special_functions/polylogarithm_li.h>
+#include <ATen/native/special_functions/neville_theta_c.h>
+#include <ATen/native/special_functions/neville_theta_d.h>
+#include <ATen/native/special_functions/neville_theta_n.h>
+#include <ATen/native/special_functions/neville_theta_s.h>
+#include <ATen/native/special_functions/nome_q.h>
+#include <ATen/native/special_functions/owens_t.h>
+#include <ATen/native/special_functions/polar_pi.h>
+#include <ATen/native/special_functions/polylogarithm_li.h>
 #include <ATen/native/special_functions/prime_number.h>
-//#include <ATen/native/special_functions/radial_polynomial_r.h>
-//#include <ATen/native/special_functions/reciprocal_gamma.h>
-//#include <ATen/native/special_functions/riemann_zeta.h>
-//#include <ATen/native/special_functions/rising_factorial.h>
+#include <ATen/native/special_functions/radial_polynomial_r.h>
+#include <ATen/native/special_functions/reciprocal_gamma.h>
+#include <ATen/native/special_functions/riemann_zeta.h>
+#include <ATen/native/special_functions/rising_factorial.h>
 #include <ATen/native/special_functions/shifted_chebyshev_polynomial_t.h>
 #include <ATen/native/special_functions/shifted_chebyshev_polynomial_u.h>
 #include <ATen/native/special_functions/shifted_chebyshev_polynomial_v.h>
@@ -131,26 +130,26 @@
 #include <ATen/native/special_functions/sinh_pi.h>
 #include <ATen/native/special_functions/sinhc.h>
 #include <ATen/native/special_functions/sinhc_pi.h>
-//#include <ATen/native/special_functions/spherical_bessel_j.h>
+#include <ATen/native/special_functions/spherical_bessel_j.h>
 #include <ATen/native/special_functions/spherical_bessel_j_0.h>
-//#include <ATen/native/special_functions/spherical_bessel_y.h>
-//#include <ATen/native/special_functions/spherical_hankel_h_1.h>
-//#include <ATen/native/special_functions/spherical_hankel_h_2.h>
-//#include <ATen/native/special_functions/spherical_harmonic_y.h>
-//#include <ATen/native/special_functions/spherical_legendre_y.h>
-//#include <ATen/native/special_functions/spherical_modified_bessel_i.h>
-//#include <ATen/native/special_functions/spherical_modified_bessel_k.h>
-//#include <ATen/native/special_functions/stirling_number_1.h>
-//#include <ATen/native/special_functions/stirling_number_2.h>
+#include <ATen/native/special_functions/spherical_bessel_y.h>
+#include <ATen/native/special_functions/spherical_hankel_h_1.h>
+#include <ATen/native/special_functions/spherical_hankel_h_2.h>
+#include <ATen/native/special_functions/spherical_harmonic_y.h>
+#include <ATen/native/special_functions/spherical_legendre_y.h>
+#include <ATen/native/special_functions/spherical_modified_bessel_i.h>
+#include <ATen/native/special_functions/spherical_modified_bessel_k.h>
+#include <ATen/native/special_functions/stirling_number_1.h>
+#include <ATen/native/special_functions/stirling_number_2.h>
 #include <ATen/native/special_functions/tan_pi.h>
 #include <ATen/native/special_functions/tanh_pi.h>
-//#include <ATen/native/special_functions/theta_1.h>
-//#include <ATen/native/special_functions/theta_2.h>
-//#include <ATen/native/special_functions/theta_3.h>
-//#include <ATen/native/special_functions/theta_4.h>
-//#include <ATen/native/special_functions/tricomi_confluent_hypergeometric_u.h>
-//#include <ATen/native/special_functions/upper_incomplete_gamma.h>
-//#include <ATen/native/special_functions/zernike_polynomial_z.h>
+#include <ATen/native/special_functions/theta_1.h>
+#include <ATen/native/special_functions/theta_2.h>
+#include <ATen/native/special_functions/theta_3.h>
+#include <ATen/native/special_functions/theta_4.h>
+#include <ATen/native/special_functions/tricomi_confluent_hypergeometric_u.h>
+#include <ATen/native/special_functions/upper_incomplete_gamma.h>
+#include <ATen/native/special_functions/zernike_polynomial_z.h>
 
 #include <ATen/Config.h>
 #include <ATen/Context.h>
@@ -174,8 +173,6 @@ namespace at {
 namespace native {
 inline namespace CPU_CAPABILITY {
 void airy_ai_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -184,8 +181,6 @@ void airy_ai_cpu_kernel(TensorIteratorBase &iterator) {
 } // void airy_ai_cpu_kernel(TensorIteratorBase &iterator)
 
 void airy_bi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -226,8 +221,6 @@ void bell_polynomial_b_cpu_kernel(TensorIteratorBase &iterator) {
 } // void bell_polynomial_b_cpu_kernel(TensorIteratorBase &iterator)
 
 void bernoulli_number_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bernoulli_number_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t n) {
       return n;
@@ -243,18 +236,15 @@ void bernoulli_polynomial_b_cpu_kernel(TensorIteratorBase &iterator) {
   });
 } // void bernoulli_polynomial_b_cpu_kernel(TensorIteratorBase &iterator)
 
-
 void bessel_j_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-      return x;
+    cpu_kernel(iterator, [](scalar_t v, scalar_t z) -> scalar_t {
+      return z;
     });
   });
 } // void bessel_j_cpu_kernel(TensorIteratorBase &iterator)
 
 void bessel_j_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::bessel_j_0(x);
@@ -263,8 +253,6 @@ void bessel_j_0_cpu_kernel(TensorIteratorBase &iterator) {
 } // void bessel_j_0_cpu_kernel(TensorIteratorBase &iterator)
 
 void bessel_j_1_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j_1_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::bessel_j_1(x);
@@ -274,15 +262,13 @@ void bessel_j_1_cpu_kernel(TensorIteratorBase &iterator) {
 
 void bessel_y_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-      return x;
+    cpu_kernel(iterator, [](scalar_t v, scalar_t z) -> scalar_t {
+      return z;
     });
   });
 } // void bessel_y_cpu_kernel(TensorIteratorBase &iterator)
 
 void bessel_y_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::bessel_y_0(x);
@@ -291,8 +277,6 @@ void bessel_y_0_cpu_kernel(TensorIteratorBase &iterator) {
 } // void bessel_y_0_cpu_kernel(TensorIteratorBase &iterator)
 
 void bessel_y_1_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y_1_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::bessel_y_1(x);
@@ -302,23 +286,23 @@ void bessel_y_1_cpu_kernel(TensorIteratorBase &iterator) {
 
 void beta_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "beta_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-      return x;
+    cpu_kernel(iterator, [](scalar_t a, scalar_t b) -> scalar_t {
+      return a;
     });
   });
 } // void beta_cpu_kernel(TensorIteratorBase &iterator)
 
 void binomial_coefficient_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "binomial_coefficient_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-      return x;
+    cpu_kernel(iterator, [](scalar_t n, scalar_t k) -> scalar_t {
+      return n;
     });
   });
 } // void binomial_coefficient_cpu_kernel(TensorIteratorBase &iterator)
 
 void bose_einstein_integral_g_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bose_einstein_integral_g_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t s, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -326,7 +310,7 @@ void bose_einstein_integral_g_cpu_kernel(TensorIteratorBase &iterator) {
 
 void bulirsch_elliptic_integral_cel_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bulirsch_elliptic_integral_cel_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t a, scalar_t b, scalar_t c, scalar_t d) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t k, scalar_t p, scalar_t a, scalar_t b) -> scalar_t {
       return a;
     });
   });
@@ -334,7 +318,7 @@ void bulirsch_elliptic_integral_cel_cpu_kernel(TensorIteratorBase &iterator) {
 
 void bulirsch_elliptic_integral_el1_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bulirsch_elliptic_integral_el1_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t x, scalar_t k) -> scalar_t {
       return x;
     });
   });
@@ -342,7 +326,7 @@ void bulirsch_elliptic_integral_el1_cpu_kernel(TensorIteratorBase &iterator) {
 
 void bulirsch_elliptic_integral_el2_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bulirsch_elliptic_integral_el2_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t a, scalar_t b, scalar_t c, scalar_t d) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t x, scalar_t k, scalar_t a, scalar_t b) -> scalar_t {
       return a;
     });
   });
@@ -350,7 +334,7 @@ void bulirsch_elliptic_integral_el2_cpu_kernel(TensorIteratorBase &iterator) {
 
 void bulirsch_elliptic_integral_el3_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bulirsch_elliptic_integral_el3_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y, scalar_t z) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t x, scalar_t k, scalar_t p) -> scalar_t {
       return x;
     });
   });
@@ -390,15 +374,15 @@ void carlson_elliptic_r_g_cpu_kernel(TensorIteratorBase &iterator) {
 
 void carlson_elliptic_r_j_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "carlson_elliptic_r_j_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t a, scalar_t b, scalar_t c, scalar_t d) -> scalar_t {
-      return a;
+    cpu_kernel(iterator, [](scalar_t x, scalar_t y, scalar_t z, scalar_t p) -> scalar_t {
+      return x;
     });
   });
 } // void carlson_elliptic_r_j_cpu_kernel(TensorIteratorBase &iterator)
 
 void chebyshev_polynomial_t_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_t_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t n, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -406,7 +390,7 @@ void chebyshev_polynomial_t_cpu_kernel(TensorIteratorBase &iterator) {
 
 void chebyshev_polynomial_u_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_u_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t n, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -414,7 +398,7 @@ void chebyshev_polynomial_u_cpu_kernel(TensorIteratorBase &iterator) {
 
 void chebyshev_polynomial_v_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_v_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t n, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -422,7 +406,7 @@ void chebyshev_polynomial_v_cpu_kernel(TensorIteratorBase &iterator) {
 
 void chebyshev_polynomial_w_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_w_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t n, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -461,8 +445,6 @@ void complete_carlson_elliptic_r_g_cpu_kernel(TensorIteratorBase &iterator) {
 } // void complete_carlson_elliptic_r_g_cpu_kernel(TensorIteratorBase &iterator)
 
 void complete_elliptic_integral_e_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_e_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t k) {
       return k;
@@ -471,8 +453,6 @@ void complete_elliptic_integral_e_cpu_kernel(TensorIteratorBase &iterator) {
 } // void complete_elliptic_integral_e_cpu_kernel(TensorIteratorBase &iterator)
 
 void complete_elliptic_integral_k_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -489,8 +469,6 @@ void complete_elliptic_integral_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void complete_elliptic_integral_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void complete_legendre_elliptic_integral_d_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_legendre_elliptic_integral_d_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -507,8 +485,6 @@ void confluent_hypergeometric_0_f_1_cpu_kernel(TensorIteratorBase &iterator) {
 } // void confluent_hypergeometric_0_f_1_cpu_kernel(TensorIteratorBase &iterator)
 
 void cos_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cos_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::cos_pi(x);
@@ -517,8 +493,6 @@ void cos_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void cos_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void cosh_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cosh_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::cosh_pi(x);
@@ -527,8 +501,6 @@ void cosh_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void cosh_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void cosine_integral_ci_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cosine_integral_ci_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -545,8 +517,6 @@ void debye_d_cpu_kernel(TensorIteratorBase &iterator) {
 } // void debye_d_cpu_kernel(TensorIteratorBase &iterator)
 
 void dilogarithm_li_2_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dilogarithm_li_2_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -555,8 +525,6 @@ void dilogarithm_li_2_cpu_kernel(TensorIteratorBase &iterator) {
 } // void dilogarithm_li_2_cpu_kernel(TensorIteratorBase &iterator)
 
 void dirichlet_beta_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dirichlet_beta_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -565,8 +533,6 @@ void dirichlet_beta_cpu_kernel(TensorIteratorBase &iterator) {
 } // void dirichlet_beta_cpu_kernel(TensorIteratorBase &iterator)
 
 void dirichlet_eta_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dirichlet_eta_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -575,8 +541,6 @@ void dirichlet_eta_cpu_kernel(TensorIteratorBase &iterator) {
 } // void dirichlet_eta_cpu_kernel(TensorIteratorBase &iterator)
 
 void dirichlet_lambda_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dirichlet_lambda_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -585,8 +549,6 @@ void dirichlet_lambda_cpu_kernel(TensorIteratorBase &iterator) {
 } // void dirichlet_lambda_cpu_kernel(TensorIteratorBase &iterator)
 
 void double_factorial_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "double_factorial_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -595,8 +557,6 @@ void double_factorial_cpu_kernel(TensorIteratorBase &iterator) {
 } // void double_factorial_cpu_kernel(TensorIteratorBase &iterator)
 
 void exp_airy_ai_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "exp_airy_ai_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -605,8 +565,6 @@ void exp_airy_ai_cpu_kernel(TensorIteratorBase &iterator) {
 } // void exp_airy_ai_cpu_kernel(TensorIteratorBase &iterator)
 
 void exp_airy_bi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "exp_airy_bi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -631,8 +589,6 @@ void exp_modified_bessel_k_cpu_kernel(TensorIteratorBase &iterator) {
 } // void exp_modified_bessel_k_cpu_kernel(TensorIteratorBase &iterator)
 
 void exp_modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "exp_modified_bessel_k_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::exp_modified_bessel_k_0(x);
@@ -641,8 +597,6 @@ void exp_modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator) {
 } // void exp_modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator)
 
 void exp_modified_bessel_k_1_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "exp_modified_bessel_k_1_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::exp_modified_bessel_k_1(x);
@@ -659,8 +613,6 @@ void exponential_integral_e_cpu_kernel(TensorIteratorBase &iterator) {
 } // void exponential_integral_e_cpu_kernel(TensorIteratorBase &iterator)
 
 void exponential_integral_ei_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "exponential_integral_ei_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -669,8 +621,6 @@ void exponential_integral_ei_cpu_kernel(TensorIteratorBase &iterator) {
 } // void exponential_integral_ei_cpu_kernel(TensorIteratorBase &iterator)
 
 void factorial_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "factorial_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -695,8 +645,6 @@ void fermi_dirac_integral_f_cpu_kernel(TensorIteratorBase &iterator) {
 } // void fermi_dirac_integral_f_cpu_kernel(TensorIteratorBase &iterator)
 
 void fresnel_integral_c_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "fresnel_integral_c_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -705,8 +653,6 @@ void fresnel_integral_c_cpu_kernel(TensorIteratorBase &iterator) {
 } // void fresnel_integral_c_cpu_kernel(TensorIteratorBase &iterator)
 
 void fresnel_integral_s_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "fresnel_integral_s_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -747,8 +693,6 @@ void hankel_h_2_cpu_kernel(TensorIteratorBase &iterator) {
 } // void hankel_h_2_cpu_kernel(TensorIteratorBase &iterator)
 
 void harmonic_number_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "harmonic_number_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -789,8 +733,6 @@ void hurwitz_zeta_cpu_kernel(TensorIteratorBase &iterator) {
 } // void hurwitz_zeta_cpu_kernel(TensorIteratorBase &iterator)
 
 void hyperbolic_cosine_integral_chi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hyperbolic_cosine_integral_chi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -799,8 +741,6 @@ void hyperbolic_cosine_integral_chi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void hyperbolic_cosine_integral_chi_cpu_kernel(TensorIteratorBase &iterator)
 
 void hyperbolic_sine_integral_shi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hyperbolic_sine_integral_shi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -945,8 +885,6 @@ void ln_binomial_coefficient_cpu_kernel(TensorIteratorBase &iterator) {
 } // void ln_binomial_coefficient_cpu_kernel(TensorIteratorBase &iterator)
 
 void ln_double_factorial_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "ln_double_factorial_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -955,8 +893,6 @@ void ln_double_factorial_cpu_kernel(TensorIteratorBase &iterator) {
 } // void ln_double_factorial_cpu_kernel(TensorIteratorBase &iterator)
 
 void ln_factorial_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "ln_factorial_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -973,8 +909,6 @@ void ln_falling_factorial_cpu_kernel(TensorIteratorBase &iterator) {
 } // void ln_falling_factorial_cpu_kernel(TensorIteratorBase &iterator)
 
 void ln_gamma_sign_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "ln_gamma_sign_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -983,8 +917,6 @@ void ln_gamma_sign_cpu_kernel(TensorIteratorBase &iterator) {
 } // void ln_gamma_sign_cpu_kernel(TensorIteratorBase &iterator)
 
 void ln_gamma_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "ln_gamma_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -1001,8 +933,6 @@ void ln_rising_factorial_cpu_kernel(TensorIteratorBase &iterator) {
 } // void ln_rising_factorial_cpu_kernel(TensorIteratorBase &iterator)
 
 void logarithmic_integral_li_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "logarithmic_integral_li_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -1027,8 +957,6 @@ void modified_bessel_i_cpu_kernel(TensorIteratorBase &iterator) {
 } // void modified_bessel_i_cpu_kernel(TensorIteratorBase &iterator)
 
 void modified_bessel_i_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::modified_bessel_i_0(x);
@@ -1037,8 +965,6 @@ void modified_bessel_i_0_cpu_kernel(TensorIteratorBase &iterator) {
 } // void modified_bessel_i_0_cpu_kernel(TensorIteratorBase &iterator)
 
 void modified_bessel_i_1_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i_1_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::modified_bessel_i_1(x);
@@ -1055,8 +981,6 @@ void modified_bessel_k_cpu_kernel(TensorIteratorBase &iterator) {
 } // void modified_bessel_k_cpu_kernel(TensorIteratorBase &iterator)
 
 void modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::modified_bessel_k_0(x);
@@ -1065,8 +989,6 @@ void modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator) {
 } // void modified_bessel_k_0_cpu_kernel(TensorIteratorBase &iterator)
 
 void modified_bessel_k_1_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k_1_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::modified_bessel_k_1(x);
@@ -1107,8 +1029,6 @@ void neville_theta_s_cpu_kernel(TensorIteratorBase &iterator) {
 } // void neville_theta_s_cpu_kernel(TensorIteratorBase &iterator)
 
 void nome_q_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "nome_q_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -1141,11 +1061,9 @@ void polylogarithm_li_cpu_kernel(TensorIteratorBase &iterator) {
 } // void polylogarithm_li_cpu_kernel(TensorIteratorBase &iterator)
 
 void prime_number_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "prime_number_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
-      return special_functions::prime_number(x);
+      return x;
     });
   });
 } // void prime_number_cpu_kernel(TensorIteratorBase &iterator)
@@ -1159,8 +1077,6 @@ void radial_polynomial_r_cpu_kernel(TensorIteratorBase &iterator) {
 } // void radial_polynomial_r_cpu_kernel(TensorIteratorBase &iterator)
 
 void reciprocal_gamma_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "reciprocal_gamma_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -1169,8 +1085,6 @@ void reciprocal_gamma_cpu_kernel(TensorIteratorBase &iterator) {
 } // void reciprocal_gamma_cpu_kernel(TensorIteratorBase &iterator)
 
 void riemann_zeta_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "riemann_zeta_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return x;
@@ -1219,8 +1133,6 @@ void shifted_chebyshev_polynomial_w_cpu_kernel(TensorIteratorBase &iterator) {
 } // void shifted_chebyshev_polynomial_w_cpu_kernel(TensorIteratorBase &iterator)
 
 void sin_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sin_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::sin_pi(x);
@@ -1229,8 +1141,6 @@ void sin_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void sin_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void sinc_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinc_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::sinc_pi(x);
@@ -1249,8 +1159,6 @@ void sinc_pi_cpu_kernel(TensorIteratorBase &iterator) {
 //} // void sinc_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void sinh_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinh_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::sinh_pi(x);
@@ -1259,8 +1167,6 @@ void sinh_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void sinh_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void sinhc_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::sinhc(x);
@@ -1269,8 +1175,6 @@ void sinhc_cpu_kernel(TensorIteratorBase &iterator) {
 } // void sinhc_cpu_kernel(TensorIteratorBase &iterator)
 
 void sinhc_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::sinhc_pi(x);
@@ -1287,8 +1191,6 @@ void spherical_bessel_j_cpu_kernel(TensorIteratorBase &iterator) {
 } // void spherical_bessel_j_cpu_kernel(TensorIteratorBase &iterator)
 
 void spherical_bessel_j_0_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "spherical_bessel_j_0_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::spherical_bessel_j_0(x);
@@ -1369,8 +1271,6 @@ void stirling_number_2_cpu_kernel(TensorIteratorBase &iterator) {
 } // void stirling_number_2_cpu_kernel(TensorIteratorBase &iterator)
 
 void tan_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tan_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::tan_pi(x);
@@ -1379,8 +1279,6 @@ void tan_pi_cpu_kernel(TensorIteratorBase &iterator) {
 } // void tan_pi_cpu_kernel(TensorIteratorBase &iterator)
 
 void tanh_pi_cpu_kernel(TensorIteratorBase &iterator) {
-  TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
-
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tanh_pi_cpu_kernel", [&]() {
     cpu_kernel(iterator, [](scalar_t x) {
       return special_functions::tanh_pi(x);
@@ -1422,7 +1320,7 @@ void theta_4_cpu_kernel(TensorIteratorBase &iterator) {
 
 void tricomi_confluent_hypergeometric_u_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tricomi_confluent_hypergeometric_u_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y, scalar_t z) -> scalar_t {
+    cpu_kernel(iterator, [](scalar_t a, scalar_t c, scalar_t x) -> scalar_t {
       return x;
     });
   });
@@ -1430,16 +1328,16 @@ void tricomi_confluent_hypergeometric_u_cpu_kernel(TensorIteratorBase &iterator)
 
 void upper_incomplete_gamma_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "upper_incomplete_gamma_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-      return x;
+    cpu_kernel(iterator, [](scalar_t a, scalar_t z) -> scalar_t {
+      return a;
     });
   });
 } // void upper_incomplete_gamma_cpu_kernel(TensorIteratorBase &iterator)
 
 void zernike_polynomial_z_cpu_kernel(TensorIteratorBase &iterator) {
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "zernike_polynomial_z_cpu_kernel", [&]() {
-    cpu_kernel(iterator, [](scalar_t a, scalar_t b, scalar_t c, scalar_t d) -> scalar_t {
-      return a;
+    cpu_kernel(iterator, [](scalar_t n, scalar_t m, scalar_t rho, scalar_t phi) -> scalar_t {
+      return n;
     });
   });
 } // void zernike_polynomial_z_cpu_kernel(TensorIteratorBase &iterator)

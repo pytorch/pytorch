@@ -6,7 +6,6 @@
 #include <ATen/native/special_functions/detail/factorial.h>
 #include <c10/util/numbers.h>
 #include <ATen/native/special_functions/detail/ln_factorial.h>
-#include <ATen/native/special_functions/detail/double_factorials.h>
 
 namespace at {
 namespace native {

@@ -7,13 +7,16 @@ namespace at {
 namespace native {
 namespace special_functions {
 namespace detail {
-template<typename Tp>
-Tp
-exp2(Tp x) {
-  if constexpr (is_complex_v < Tp >)
-    return std::pow(numeric_t < Tp > {2}, x);
-  else
+template<typename T1>
+T1
+exp2(T1 x) {
+  const auto p = is_complex_v<T1>;
+
+  if (p) {
+    return std::pow(numeric_t<T1>(2), x);
+  } else {
     return std::exp2(x);
+  }
 }
 }
 }

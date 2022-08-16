@@ -13,7 +13,10 @@ carlson_elliptic_r_f(T1 x, T1 y, T1 z) {
   using T2 = numeric_t<T1>;
 
   bool neg_arg = false;
-  if constexpr (!is_complex_v<T1>)
+
+  const auto p = !is_complex_v < T1 >;
+
+  if (p)
     if (std::real(x) < T2(0)
         || std::real(y) < T2(0)
         || std::real(z) < T2(0))

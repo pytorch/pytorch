@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/numbers.h>
+#include <ATen/native/special_functions/detail/theta.h>
 
 namespace at {
 namespace native {
