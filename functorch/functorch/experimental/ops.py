@@ -4,21 +4,18 @@ class PyOperator:
     def __init__(self, name):
         self.name = name
         self.table = {}
-        self.entrance_rules = {}
 
         # TODO: torch_dispatch expects PyOperator to be an instance of a torch.ops.aten op.
         self.overloadpacket = self
         self.__name__ = name
 
-    def impl(self, dispatch_key, fn, reentrant=False):
+    def impl(self, dispatch_key, fn):
         assert dispatch_key not in self.table
         self.table[dispatch_key] = fn
-        self.entrance_rules[dispatch_key] = reentrant
 
     def fallthrough(self, dispatch_key):
         assert dispatch_key not in self.table
         self.table[dispatch_key] = fallthrough_fn(self, dispatch_key)
-        self.entrance_rules[dispatch_key] = False
 
     def __call__(self, *args, **kwargs):
         flat_args = to_flat_tuple(args, kwargs)

@@ -57,9 +57,6 @@ dispatcher_singleton = PyDispatcher()
 
 
 def compute_dispatch_key(operator, args, kwargs, current_key, additional_exclude=None):
-    if current_key is not None and operator.entrance_rules[current_key]:
-        return current_key
-
     tensors = get_tensors(args, kwargs)
     dispatch_key = key_extractor(tensors, additional_exclude)
     return dispatch_key

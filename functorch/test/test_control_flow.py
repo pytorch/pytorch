@@ -62,8 +62,7 @@ class TestControlFlowTraced(TestCase):
         result_false_true = graph.forward(x, torch.tensor(False), torch.tensor(True))  #  False + either -> cos
         result_false_false = graph.forward(x, torch.tensor(False), torch.tensor(False))  #  False + either -> cos
 
-
-        self.assertFalse(torch.allclose(result_true_true, result_true_false))
+        self.assertNotEqual(result_true_true, result_true_false)
         self.assertFalse(torch.allclose(result_false_true, result_true_true))
 
         self.assertTrue(torch.allclose(result_false_true, result_false_false))

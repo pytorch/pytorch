@@ -4,6 +4,7 @@ from functorch.experimental.ops import PyOperator
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import ProxyTensor, get_isolated_graphmodule
 import torch.utils._pytree as pytree
+from torch.dispatch.dispatcher import dispatcher_singleton
 
 """
 We're going to define a `cond` operation.
@@ -22,6 +23,10 @@ def suspend_mode(mode):
 def trace_cond(proxy_mode, func_overload, args, kwargs=None):
     assert kwargs is None or not kwargs
     pred, true_fn, false_fn, operands = args
+    # We only get to this step if we are (1) in tracing (2) In the right dispatch step
+    # As this op is recursively re-entrant, we need to reset the record
+    # TODO(voz): Make this feel better?
+    dispatcher_singleton.reset_dispatch_record()
 
     if isinstance(operands, ProxyTensor):
         operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
@@ -54,10 +59,13 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
     if mode:
-        with suspend_mode(mode):
-            args = (pred, true_fn, false_fn, operands)
-            return trace_cond(mode, cond, args, {})
+        # Back to dispatch
+        return cond(pred, true_fn, false_fn, *operands)
     try:
+        # We only get to this step if we are (1) NOT in tracing (2) In the right dispatch step
+        # As this op is recursively re-entrant, we need to reset the record
+        # TODO(voz): Make this feel better?
+        dispatcher_singleton.reset_dispatch_record()
         if pred:
             return true_fn(operands)
         else:
@@ -65,7 +73,6 @@ def cond_dense(pred, true_fn, false_fn, operands):
     except Exception as e:
         # Do something proper here, someday
         print("Exception", e)
-
 
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
@@ -82,24 +89,30 @@ def cond_adinplaceorview(*args, **kwargs):
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.ADInplaceOrView))
     return cond(*args, **kwargs)
 
+def cond_backendselect(*args, **kwargs):
+    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect))
+    return cond(*args, **kwargs)
 
 def python_fallback(op):
     def inner(*args, **kwargs):
         mode = torch._C._get_torch_dispatch_mode()
         if mode:
             with suspend_mode(mode):
-                return trace_cond(mode, op, args, kwargs)
+                res = trace_cond(mode, op, args, kwargs)
+                return res
         else:
-            return cond_dense(*args)
+            # Unlikely to ever get here / something went wrong
+            return cond(*args, **kwargs)
 
     return inner
 
 
 cond = PyOperator('cond')
-cond.impl(DispatchKey.CPU, cond_dense, True)
-cond.impl(DispatchKey.AutogradCPU, cond_autograd)
-cond.fallthrough(DispatchKey.ADInplaceOrView)
-cond.fallthrough(DispatchKey.BackendSelect)
+cond.impl(DispatchKey.CPU, cond_dense)
 
 cond.impl(DispatchKey.Python, python_fallback(cond))
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
+
+cond.impl(DispatchKey.AutogradCPU, cond_autograd)
+cond.impl(DispatchKey.ADInplaceOrView, cond_adinplaceorview)
+cond.fallthrough(DispatchKey.BackendSelect)
