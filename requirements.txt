@@ -11,3 +11,6 @@ six
 types-dataclasses
 typing_extensions
 sympy
+pytest
+pytest-xdist
+pytest-rerunfailures
