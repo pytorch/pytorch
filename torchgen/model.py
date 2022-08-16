@@ -901,7 +901,7 @@ class NativeFunction:
             "inplace_view" in self.tags and str(self.func.name) != "resize_"
         )
         is_wildcard_view = any(
-            inp.annotation is not None and '*' in inp.annotation.alias_set_after
+            inp.annotation is not None and "*" in inp.annotation.alias_set_after
             for inp in self.func.schema_order_arguments()
         )
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -1581,6 +1581,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> "Annotation":
+        # TODO: implement a proper parser if this gets more ugly
         # Regex Explanation:
         # Example: "a! -> a|b"
         # Group #1: alias before optional '|', required. Matches the first
@@ -1597,13 +1598,13 @@ class Annotation:
         m = re.match(r"^([a-z])(\|[a-z])*(!?)( -> (\*|[a-z](\|[a-z])*))?$", ann)
 
         assert m is not None, f"unrecognized alias annotation {ann}"
-        before_alias = m.group(1) + (m.group(2) if m.group(2) else '')
-        alias_set = tuple(before_alias.split('|'))
+        before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
+        alias_set = tuple(before_alias.split("|"))
         is_write = m.group(3) == "!"
-        assert not (is_write and len(alias_set) > 1), (
-            f"alias set larger than 1 is not mutable, got {ann} instead."
-        )
-        after_set = tuple(m.group(5).split('|')) if m.group(5) else tuple()
+        assert not (
+            is_write and len(alias_set) > 1
+        ), f"alias set larger than 1 is not mutable, got {ann} instead."
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
