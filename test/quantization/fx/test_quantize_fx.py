@@ -25,7 +25,6 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
-from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -4783,29 +4782,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
             weight=torch.ao.quantization.default_per_channel_weight_observer
         )
         self.common_quant_patterns = {
-            torch.nn.ConvTranspose1d: CommonQuantizeHandler,
-            torch.nn.ConvTranspose2d: CommonQuantizeHandler,
-            torch.nn.ELU: CommonQuantizeHandler,
-            torch.nn.LeakyReLU: CommonQuantizeHandler,
-            torch.nn.Hardswish: CommonQuantizeHandler,
-            torch.nn.InstanceNorm1d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm2d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm3d: CommonQuantizeHandler,
-            torch.nn.LayerNorm: CommonQuantizeHandler,
-            torch.nn.SiLU: CommonQuantizeHandler,
-            torch.nn.Mish: CommonQuantizeHandler,
-            torch.nn.GELU: CommonQuantizeHandler,
-            torch.nn.Softmax: CommonQuantizeHandler,
-            torch.nn.functional.elu: CommonQuantizeHandler,
-            torch.nn.functional.hardswish: CommonQuantizeHandler,
-            torch.nn.functional.instance_norm: CommonQuantizeHandler,
-            torch.nn.functional.layer_norm: CommonQuantizeHandler,
-            torch.nn.functional.leaky_relu: CommonQuantizeHandler,
-            torch.nn.functional.silu: CommonQuantizeHandler,
-            torch.nn.functional.mish: CommonQuantizeHandler,
-            torch.nn.functional.gelu: CommonQuantizeHandler,
-            torch.nn.functional.softmax: CommonQuantizeHandler,
-            torch.sum: CommonQuantizeHandler
+            torch.nn.ConvTranspose1d: DefaultNodeQuantizeHandler,
+            torch.nn.ConvTranspose2d: DefaultNodeQuantizeHandler,
+            torch.nn.ELU: DefaultNodeQuantizeHandler,
+            torch.nn.LeakyReLU: DefaultNodeQuantizeHandler,
+            torch.nn.Hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm1d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm2d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm3d: DefaultNodeQuantizeHandler,
+            torch.nn.LayerNorm: DefaultNodeQuantizeHandler,
+            torch.nn.SiLU: DefaultNodeQuantizeHandler,
+            torch.nn.Mish: DefaultNodeQuantizeHandler,
+            torch.nn.GELU: DefaultNodeQuantizeHandler,
+            torch.nn.Softmax: DefaultNodeQuantizeHandler,
+            torch.nn.functional.elu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.instance_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.layer_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.leaky_relu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.silu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.mish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.gelu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.softmax: DefaultNodeQuantizeHandler,
+            torch.sum: DefaultNodeQuantizeHandler
         }
 
     """Unit tests for individual ops
