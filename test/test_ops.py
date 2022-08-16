@@ -1568,6 +1568,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
         # CompositeImplicitAutograd
         '_refs.allclose',
         '_refs.atleast_1d',
