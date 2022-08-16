@@ -988,19 +988,30 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
     return _mul_sparse_sparse_zero_dim_out(t_, src_, r);
   }
 
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
-      ", but ", t_.sizes(), " != ", src_.sizes());
+  const auto is_equal_size_inputs = t_.sizes().equals(src_.sizes());
 
-  // mul_sparse_sparse_out
-  // is faster if there is an uncoalesced input
-  if (!t_.is_coalesced() || !src_.is_coalesced()) {
+  // mul(sparse, sparse) with inputs which broadcast only in dense dims
+  if (!is_equal_size_inputs) {
     return at::_mul_sparse_sparse_out(r, t_, src_);
   }
 
+  TORCH_CHECK(is_equal_size_inputs, "mul: expected 'self' and 'other' to have same sizes when both are sparse"
+      ", but ", t_.sizes(), " != ", src_.sizes());
+
+  // Shirt-circuit when there is zero nnz
   if (!t_._nnz() || !src_._nnz()) {
     r.resize_as_(t_);
     return r.zero_();
   }
+
+  // _mul_sparse_sparse_out is faster for large inputs
+  // and when either of the inputs is uncoalesced.
+  if (!t_.is_coalesced() || !src_.is_coalesced()) {
+    return at::_mul_sparse_sparse_out(r, t_, src_);
+  }
+
+  // Otherwise _mul_sparse_sparse_out might be slower
+  // than the brute-force solution below.
 
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
