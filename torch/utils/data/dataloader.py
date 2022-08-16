@@ -210,7 +210,7 @@ class DataLoader(Generic[T_co]):
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
     prefetch_factor: int
-    _iterator : Optional['_BaseDataLoaderIter']
+    _iterator : Optional['_BaseDataLoaderIter[T_co]']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
@@ -382,7 +382,7 @@ class DataLoader(Generic[T_co]):
 
         torch.set_vital('Dataloader', 'enabled', 'True')  # type: ignore[attr-defined]
 
-    def _get_iterator(self) -> '_BaseDataLoaderIter':
+    def _get_iterator(self) -> '_BaseDataLoaderIter[T_co]':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -428,7 +428,7 @@ class DataLoader(Generic[T_co]):
 
     # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
     # since '_BaseDataLoaderIter' references 'DataLoader'.
-    def __iter__(self) -> '_BaseDataLoaderIter':
+    def __iter__(self) -> '_BaseDataLoaderIter[T_co]':
         # When using a single worker the returned iterator should be
         # created everytime to avoid reseting its state
         # However, in the case of a multiple workers iterator
@@ -617,8 +617,8 @@ class DataLoader(Generic[T_co]):
             return None
 
 
-class _BaseDataLoaderIter(object):
-    def __init__(self, loader: DataLoader) -> None:
+class _BaseDataLoaderIter(Generic[T_co]):
+    def __init__(self, loader: DataLoader[T_co]) -> None:
         self._dataset = loader.dataset
         self._shared_seed = loader._get_shared_seed()
         if isinstance(self._dataset, IterDataPipe):
@@ -654,7 +654,7 @@ class _BaseDataLoaderIter(object):
         self._num_yielded = 0
         self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
 
-    def __iter__(self) -> '_BaseDataLoaderIter':
+    def __iter__(self) -> '_BaseDataLoaderIter[T_co]':
         return self
 
     def _reset(self, loader, first_iter=False):
@@ -670,10 +670,10 @@ class _BaseDataLoaderIter(object):
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
 
-    def _next_data(self):
+    def _next_data(self) -> T_co:
         raise NotImplementedError
 
-    def __next__(self) -> Any:
+    def __next__(self) -> T_co:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
                 # TODO(https://github.com/pytorch/pytorch/issues/76750)
@@ -705,7 +705,7 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
 
 
-class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
+class _SingleProcessDataLoaderIter(_BaseDataLoaderIter[T_co]):
     def __init__(self, loader):
         super(_SingleProcessDataLoaderIter, self).__init__(loader)
         assert self._timeout == 0
@@ -714,7 +714,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
 
-    def _next_data(self):
+    def _next_data(self) -> T_co:
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
@@ -722,7 +722,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         return data
 
 
-class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
+class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter[T_co]):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
