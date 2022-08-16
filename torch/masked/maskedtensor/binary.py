@@ -164,7 +164,7 @@ def _binary_helper(fn, args, kwargs, inplace):
         return _wrap_result(result_data, result_mask)
 
 
-def torch_binary(fn_name):
+def _torch_binary(fn_name):
     fn = getattr(torch.ops.aten, fn_name)
 
     def binary_fn(*args, **kwargs):
@@ -173,7 +173,7 @@ def torch_binary(fn_name):
     return binary_fn
 
 
-def torch_inplace_binary(fn_name):
+def _torch_inplace_binary(fn_name):
     fn = getattr(torch.ops.aten, fn_name)
 
     def binary_fn(*args, **kwargs):
@@ -183,10 +183,10 @@ def torch_inplace_binary(fn_name):
 
 
 NATIVE_BINARY_MAP = {
-    getattr(torch.ops.aten, name): torch_binary(name) for name in BINARY_NAMES
+    getattr(torch.ops.aten, name): _torch_binary(name) for name in BINARY_NAMES
 }
 NATIVE_INPLACE_BINARY_MAP = {
-    getattr(torch.ops.aten, name): torch_inplace_binary(name)
+    getattr(torch.ops.aten, name): _torch_inplace_binary(name)
     for name in INPLACE_BINARY_NAMES
 }
 
@@ -194,11 +194,11 @@ NATIVE_BINARY_FNS = list(NATIVE_BINARY_MAP.keys())
 NATIVE_INPLACE_BINARY_FNS = list(NATIVE_INPLACE_BINARY_MAP.keys())
 
 
-def is_native_binary(fn):
+def _is_native_binary(fn):
     return fn in NATIVE_BINARY_FNS or fn in NATIVE_INPLACE_BINARY_FNS
 
 
-def apply_native_binary(fn, *args, **kwargs):
+def _apply_native_binary(fn, *args, **kwargs):
     if fn in NATIVE_BINARY_FNS:
         return NATIVE_BINARY_MAP[fn](*args, **kwargs)
     if fn in NATIVE_INPLACE_BINARY_FNS:

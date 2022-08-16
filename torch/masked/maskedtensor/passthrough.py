@@ -67,11 +67,11 @@ def _wrap_result(result_data, result_mask):
     return NotImplemented
 
 
-def is_pass_through_fn(fn):
+def _is_pass_through_fn(fn):
     return fn in PASSTHROUGH_FNS
 
 
-def apply_pass_through_fn(fn, *args, **kwargs):
+def _apply_pass_through_fn(fn, *args, **kwargs):
     data_args, data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
     result_data = fn(*data_args, **data_kwargs)
     mask_args, mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())

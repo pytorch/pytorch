@@ -1,10 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import logging
-
 import torch
 
 from .creation import masked_tensor
+
+__all__ = [
+    'MaskedBmm',
+    'masked_bmm'
+]
 
 
 class MaskedBmm(torch.autograd.Function):
@@ -23,7 +26,7 @@ class MaskedBmm(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
-        attn_mask, k_mask, q, k = ctx.saved_tensors
+        _, k_mask, q, k = ctx.saved_tensors
         grad_data = grad.get_data()
 
         k_trans = k.transpose(1, 2)
@@ -40,13 +43,12 @@ def masked_bmm(q, k, attn_mask):
     return MaskedBmm.apply(q, k, attn_mask)
 
 
-def torch_matmul(func_name):
+def _torch_matmul(func_name):
     func = getattr(torch.ops.aten, func_name)
 
     def matmul(input0, input1):
         from .core import is_masked_tensor, MaskedTensor
 
-        logging.debug("Calling matmul with type({type(input0)}, {type(input1)})")
         if is_masked_tensor(input0) and is_masked_tensor(input1):
             data0 = input0.get_data()
             data1 = input1.get_data()
@@ -87,17 +89,17 @@ def torch_matmul(func_name):
 MATMUL_NAMES = ["mm", "bmm"]
 
 NATIVE_MATMUL_MAP = {
-    getattr(torch.ops.aten, name): torch_matmul(name) for name in MATMUL_NAMES
+    getattr(torch.ops.aten, name): _torch_matmul(name) for name in MATMUL_NAMES
 }
 
 NATIVE_MATMUL_FNS = list(NATIVE_MATMUL_MAP.keys())
 
 
-def is_native_matmul(fn):
+def _is_native_matmul(fn):
     return fn in NATIVE_MATMUL_FNS
 
 
-def apply_native_matmul(fn, *args, **kwargs):
+def _apply_native_matmul(fn, *args, **kwargs):
     if fn in NATIVE_MATMUL_FNS:
         return NATIVE_MATMUL_MAP[fn](*args, **kwargs)
     return NotImplemented

@@ -4,53 +4,53 @@ import warnings
 
 import torch
 
-from .creation import masked_tensor
+from .creation import is_masked_tensor, masked_tensor
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 
-def masked_all_all(data, mask=None):
+def _masked_all_all(data, mask=None):
     if mask is None:
         return data.all()
     return data.masked_fill(~mask, True).all()
 
 
-def masked_all_dim(data, dim, keepdim=False, mask=None):
+def _masked_all_dim(data, dim, keepdim=False, mask=None):
     if mask is None:
         return torch.all(data, dim=dim, keepdim=keepdim)
     return torch.all(data.masked_fill(~mask, True), dim=dim, keepdim=keepdim)
 
 
-# TODO: Add masked_all to torch._masked?
-def masked_all(*args, **kwargs):
+# TODO: Add masked_all to torch._masked
+def _masked_all(*args, **kwargs):
     if len(args) == 1 and len(kwargs) == 1:
-        return masked_all_all(args[0], mask=kwargs["mask"])
-    return masked_all_dim(*args, **kwargs)
+        return _masked_all_all(args[0], mask=kwargs["mask"])
+    return _masked_all_dim(*args, **kwargs)
 
 
-def multidim_any(mask, dim, keepdim):
+def _multidim_any(mask, dim, keepdim):
     if isinstance(dim, int):
-        return multidim_any(mask, [dim], keepdim)
+        return _multidim_any(mask, [dim], keepdim)
     for d in sorted(dim)[::-1]:
         mask = torch.any(mask, dim=d, keepdim=keepdim)
     return mask
 
 
-def get_masked_fn(fn):
+def _get_masked_fn(fn):
     if fn == "all":
-        return masked_all
+        return _masked_all
     return getattr(torch._masked, fn)
 
 
-def torch_reduce_all(fn):
+def _torch_reduce_all(fn):
     def reduce_all(self):
-        masked_fn = get_masked_fn(fn)
+        masked_fn = _get_masked_fn(fn)
         if self.is_sparse():
-            data = self._masked_data.values()
-            mask = self._masked_mask.values()
+            data = self.get_data().values()
+            mask = self.get_mask().values()
         else:
-            data = self._masked_data
-            mask = self._masked_mask
+            data = self.get_data()
+            mask = self.get_mask()
         # When reduction is "all", then torch.argmin/torch.argmax needs to return the index of the
         # element corresponding to the min/max, but this operation isn't supported correctly for sparse layouts.
         # Therefore, this implementation calculates it using the strides.
@@ -73,8 +73,7 @@ def torch_reduce_all(fn):
     return reduce_all
 
 
-# If hope this signature won't change to frequently
-def torch_reduce_dim(fn):
+def _torch_reduce_dim(fn):
     def reduce_dim(self, dim, keepdim=False, dtype=None):
         if self.is_sparse():
             msg = (
@@ -86,38 +85,40 @@ def torch_reduce_dim(fn):
             )
             warnings.warn(msg)
             return NotImplemented
+        if not is_masked_tensor(self):
+            raise TypeError("Input to reduce_dim must be a MaskedTensor")
 
-        data = self._masked_data
-        mask = self._masked_mask
-        masked_fn = get_masked_fn(fn)
+        data = self.get_data()
+        mask = self.get_mask()
+        masked_fn = _get_masked_fn(fn)
         if fn == "all":
             result_data = masked_fn(data, dim=dim, keepdim=keepdim, mask=mask)
         else:
             result_data = masked_fn(
                 data, dim=dim, keepdim=keepdim, dtype=dtype, mask=mask
             )
-        return masked_tensor(result_data, multidim_any(mask, dim, keepdim))
+        return masked_tensor(result_data, _multidim_any(mask, dim, keepdim))
 
     return reduce_dim
 
 
-def torch_reduce(fn):
+def _torch_reduce(fn):
     def torch_sum(*args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0:
-            return torch_reduce_all(fn)(args[0])
-        return torch_reduce_dim(fn)(*args, **kwargs)
+            return _torch_reduce_all(fn)(args[0])
+        return _torch_reduce_dim(fn)(*args, **kwargs)
 
     return torch_sum
 
 
-def torch_grad_reduce_all(fn):
+def _torch_grad_reduce_all(fn):
     class MaskedReduceAll(torch.autograd.Function):
         @staticmethod
         def forward(ctx, input):
             mask = input._masked_mask
             ctx.mark_non_differentiable(mask)
             ctx.save_for_backward(mask)
-            return torch_reduce_all(fn)(input)
+            return _torch_reduce_all(fn)(input)
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -128,14 +129,14 @@ def torch_grad_reduce_all(fn):
     return MaskedReduceAll.apply
 
 
-def torch_grad_reduce_dim(fn):
+def _torch_grad_reduce_dim(fn):
     class MaskedReduceDim(torch.autograd.Function):
         @staticmethod
         def forward(ctx, input, dim, keepdim, dtype):
             mask = input._masked_mask
             ctx.mark_non_differentiable(mask)
             ctx.save_for_backward(mask)
-            return torch_reduce_dim(fn)(input, dim, keepdim, dtype)
+            return _torch_reduce_dim(fn)(input, dim, keepdim, dtype)
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -146,17 +147,17 @@ def torch_grad_reduce_dim(fn):
     return MaskedReduceDim.apply
 
 
-def reduce_dim_args(input, dim, keepdim=False, dtype=None):
+def _reduce_dim_args(input, dim, keepdim=False, dtype=None):
     return input, dim, keepdim, dtype
 
 
-def torch_grad_reduce(fn):
+def _torch_grad_reduce(fn):
     def grad_reduce(*args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0:
-            return torch_grad_reduce_all(fn)(args[0])
+            return _torch_grad_reduce_all(fn)(args[0])
         # TODO: autograd.Function doesn't support kwarg
-        input, dim, keepdim, dtype = reduce_dim_args(*args, **kwargs)
-        return torch_grad_reduce_dim(fn)(input, dim, keepdim, dtype)
+        input, dim, keepdim, dtype = _reduce_dim_args(*args, **kwargs)
+        return _torch_grad_reduce_dim(fn)(input, dim, keepdim, dtype)
 
     return grad_reduce
 
@@ -176,23 +177,23 @@ REDUCE_NAMES = [
 ]
 
 NATIVE_REDUCE_MAP = {
-    getattr(torch.ops.aten, name): torch_reduce(name) for name in REDUCE_NAMES
+    getattr(torch.ops.aten, name): _torch_reduce(name) for name in REDUCE_NAMES
 }
 
 TORCH_REDUCE_MAP = {
-    getattr(torch, name): torch_grad_reduce(name) for name in REDUCE_NAMES
+    getattr(torch, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
 
 TENSOR_REDUCE_MAP = {
-    getattr(torch.Tensor, name): torch_grad_reduce(name) for name in REDUCE_NAMES
+    getattr(torch.Tensor, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
 
 
-def is_reduction(fn):
+def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP
 
 
-def apply_reduction(fn, *args, **kwargs):
+def _apply_reduction(fn, *args, **kwargs):
     if fn in NATIVE_REDUCE_MAP:
         return NATIVE_REDUCE_MAP[fn](*args, **kwargs)
     if fn in TORCH_REDUCE_MAP:
