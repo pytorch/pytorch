@@ -121,6 +121,7 @@ __all__ = [
     "hypot",
     "igamma",
     "igammac",
+    "imag",
     "isclose",
     "lcm",
     # 'ldexp',
@@ -139,6 +140,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
+    "real",
     "remainder",
     "rsub",
     # # special.xlog1py
@@ -150,6 +152,7 @@ __all__ = [
     #
     # Elementwise Ternary References
     #
+    "addcdiv",
     "clamp",
     #
     # Conditional references
@@ -195,6 +198,7 @@ __all__ = [
     "conj",
     "constant_pad_nd",
     "contiguous",
+    "diagonal",
     "dsplit",
     "dstack",
     "expand",
@@ -205,6 +209,7 @@ __all__ = [
     "hsplit",
     "hstack",
     "meshgrid",
+    "movedim",
     "narrow",
     "native_layer_norm",
     "permute",
@@ -1484,6 +1489,36 @@ trunc_divide = _make_elementwise_binary_reference(
 #
 
 
+@register_decomposition(torch.ops.aten.addcdiv)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "tensor1", "tensor2"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def addcdiv(
+    self: TensorLikeType,
+    tensor1: TensorLikeType,
+    tensor2: TensorLikeType,
+    *,
+    value: NumberType = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.addcdiv
+    """
+    if value is not None:
+        dtype = self.dtype  # no scalars allowed, see add
+        python_type = utils.dtype_to_type(dtype)
+        if not utils.is_weakly_lesser_type(type(value), python_type):
+            msg = (
+                "value argument of type {0} cannot be safely cast to type {1}!".format(
+                    type(value), python_type
+                )
+            )
+            raise ValueError(msg)
+
+    return self + value * tensor1 / tensor2
+
+
 @register_decomposition(torch.ops.aten.clamp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -2139,8 +2174,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 @out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = tuple(
-        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
-        for x in tensors
+        x if x.ndim > 1 else x.reshape((x.numel(), 1)) for x in tensors
     )
     return cat(aligned_tensors, 1)
 
@@ -2651,16 +2685,17 @@ def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
     """Reference implementation of :func:`torch.rot90`."""
-    dims_ = utils.canonicalize_dims(a.ndim, dims)
-    # Required to silence MyPy errors
-    assert isinstance(dims_, (tuple, list))
-    dims = dims_
     if len(dims) != 2:
         raise RuntimeError(
             f"expected total rotation dims == 2, but got dims = {len(dims)}"
         )
     if a.ndim < 2:
         raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+
+    # Do this after the initial checks to be compatible with the behavior in
+    # core.
+    dims = utils.canonicalize_dims(a.ndim, dims)
+
     if dims[0] == dims[1]:
         raise RuntimeError(
             f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
@@ -2944,6 +2979,48 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
+@register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
+def diagonal(
+    self: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.diagonal
+    """
+    num_dims = self.dim()
+    dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
+    dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    storage_offset = self.storage_offset()
+
+    if offset >= 0:
+        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+    else:
+        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+
+    if diag_size > 0:
+        if offset >= 0:
+            storage_offset += offset * self.stride()[dim2]
+        else:
+            storage_offset -= offset * self.stride()[dim1]
+
+    sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
+    sizes.append(diag_size)
+
+    strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
+    strides.append(self.stride()[dim1] + self.stride()[dim2])
+
+    result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
+
+    return result
+
+
 # CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
@@ -2996,8 +3073,9 @@ swap_axes = transpose
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
-    dim = utils.canonicalize_dim(a.ndim + 1, dim)
-    return prims.expand_dims(a, (dim,))
+    ndim = a.ndim + 1
+    dim = utils.canonicalize_dim(ndim, dim)
+    return prims.expand_dims(a, (dim,), ndim=ndim)
 
 
 # NOTE: shape is a vararg because Tensor.reshape can be called with as
@@ -3439,6 +3517,66 @@ def meshgrid(
         grids[0], grids[1] = grids[1], grids[0]
 
     return grids
+
+
+# CompositeImplicitAutograd - don't register decomp
+def movedim(
+    input: TensorLikeType,
+    source: Union[int, DimsSequenceType],
+    destination: Union[int, DimsSequenceType],
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.movedim
+    """
+    if type(source) is int:
+        source = (source,)
+    if type(destination) is int:
+        destination = (destination,)
+
+    utils.check(
+        len(source) == len(destination),  # type: ignore[arg-type]
+        lambda: (
+            "movedim: Invalid source or destination dims: source "
+            f"({source} dims) should contain the same number of dims as "
+            f"destination ({destination} dims)"
+        ),
+    )
+
+    rank = input.ndim
+    ss = tuple(utils.canonicalize_dims(rank=rank, indices=source))  # type: ignore[arg-type]
+    ds = tuple(utils.canonicalize_dims(rank=rank, indices=destination))  # type: ignore[arg-type]
+
+    sss = set(ss)
+    dss = set(ds)
+
+    utils.check(
+        len(ss) == len(sss),
+        lambda: f"movedim: repeated dim in `source` {source}",
+    )
+    utils.check(
+        len(ds) == len(dss),
+        lambda: f"movedim: repeated dim in `destination` {destination}",
+    )
+
+    m = dict(zip(ds, ss))
+    dims = []
+    si = 0  # source index
+    for di in range(rank):
+        # check if the destination index is in the mapping
+        s = m.get(di)
+        if s is not None:
+            # insert source index if found
+            dims.append(s)
+        else:
+            # insert source index sequentially, skipping indices from the mapping
+            while si in sss:
+                si += 1
+            dims.append(si)
+            si += 1
+
+    result = torch.permute(input, tuple(dims))
+
+    return result
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
