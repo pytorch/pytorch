@@ -15,7 +15,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten, tree_map, tree_any
 
 
 aten = torch.ops.aten
@@ -566,18 +566,17 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
-        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        has_symbolic_sizes = (
+            any(i.has_sym_ints for i in flat_arg_tensors)
+            or tree_any(lambda a: isinstance(a, torch._C.SymIntNode), (args, kwargs))
+        )
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
-            # TODO: hack, doesn't actually work.
-            # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
-            with enable_torch_dispatch_mode(
-                self
-            ), torch.overrides.enable_reentrant_dispatch():
+            with self.restore():
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
@@ -585,6 +584,8 @@ class FakeTensorMode(TorchDispatchMode):
                     return decomposition_table[func](*args, **kwargs)
 
             with no_dispatch():
+                # TODO: the naming of this function is awful, this doesn't
+                # mean that an op is SymInt, it is more narrow
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
@@ -592,6 +593,19 @@ class FakeTensorMode(TorchDispatchMode):
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+
+        # TODO: this list is duped with proxy tensor
+        if func not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.dim.default,
+            torch.ops.aten.sym_numel.default,
+        ]:
+            with self.restore():
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
