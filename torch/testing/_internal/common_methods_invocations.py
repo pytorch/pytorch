@@ -19705,6 +19705,17 @@ python_ref_db = [
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
     ),
+    PythonRefInfo(
+        "ops.nvprims.var_mean",
+        torch_opinfo_name="var_mean",
+        validate_view_consistency=False,
+        # Complex types are currently disabled
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
+    ),
     #
     # Linear Algebra Operators
     #
