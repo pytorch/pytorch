@@ -242,7 +242,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType(), N);
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
