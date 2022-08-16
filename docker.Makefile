@@ -8,17 +8,10 @@ $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION_FULL         = 11.3.1
-CUDA_VERSION_MAJOR_MINOR  = $(shell echo $(CUDA_VERSION_FULL) | cut -d. -f1-2)
-BASE_RUNTIME              = ubuntu:18.04
-ifeq ("$(CUDA_VERSION_FULL)","cpu")
-MUTEX_PACKAGE             = cpuonly
-BASE_DEVEL                = $(BASE_RUNTIME)
-else
+CUDA_VERSION              = 11.3
 CUDNN_VERSION             = 8
-MUTEX_PACKAGE             = cudatoolkit=$(CUDA_VERSION_MAJOR_MINOR)
-BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION_FULL)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
-endif
+BASE_RUNTIME              = ubuntu:18.04
+BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
 
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia

@@ -59,16 +59,17 @@ RUN --mount=type=cache,target=/opt/ccache \
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.8
-ARG MUTEX_PACKAGE=cpuonly
+ARG CUDA_VERSION=11.3
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
+ENV CONDA_OVERRIDE_CUDA=${CUDA_VERSION}
 # Automatically set by buildx
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
 # On arm64 we can only install wheel packages
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchtext ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchtext "${MUTEX_PACKAGE}"  ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchtext "cudatoolkit=${CUDA_VERSION}"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
