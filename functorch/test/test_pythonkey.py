@@ -23,7 +23,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -372,6 +372,10 @@ class TestEagerFusionOpInfo(TestCase):
 
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
+
+            # NB: We cache on function id, which is unreliable
+            # Can fix by using weakrefs, but not sure if it matters
+            clear_compile_cache()
 
             compiled_f = compiled_function(f, nop, nop)
 
