@@ -639,6 +639,9 @@ class FlatParamHandle:
         """
         if not self.needs_unshard():
             if self._uses_sharded_strategy:
+                # The handle may have been resharded without freeing the padded
+                # unsharded flattened parameter, in which case we need to
+                # switch to using the unsharded parameter
                 unsharded_flat_param = self._get_padded_unsharded_flat_param()
                 self._use_unsharded_flat_param(unsharded_flat_param)
             return

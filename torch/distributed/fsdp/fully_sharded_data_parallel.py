@@ -1575,33 +1575,21 @@ class FullyShardedDataParallel(nn.Module):
         Whether user explicitly enabled mixed precision for
         parameters or not.
         """
-        return (
-            # self.mixed_precision is not None
-            # and self.mixed_precision.param_dtype is not None
-            self.mixed_precision.param_dtype is not None
-        )
+        return self.mixed_precision.param_dtype is not None
 
     def _mixed_precision_enabled_for_buffers(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
         buffers or not.
         """
-        return (
-            # self.mixed_precision is not None
-            # and self.mixed_precision.buffer_dtype is not None
-            self.mixed_precision.buffer_dtype is not None
-        )
+        return self.mixed_precision.buffer_dtype is not None
 
     def _mixed_precision_enabled_for_reduce(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
         gradient reduction or not.
         """
-        return (
-            # self.mixed_precision is not None
-            # and self.mixed_precision.reduce_dtype is not None
-            self.mixed_precision.reduce_dtype is not None
-        )
+        return self.mixed_precision.reduce_dtype is not None
 
     def _low_precision_hook_enabled(self) -> bool:
         """
