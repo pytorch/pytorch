@@ -672,7 +672,7 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !(defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION < 11000)
+#if (!defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   TORCH_CHECK(
       false,
       "Calling addmm with sparse GPU tensors requires compiling ",
