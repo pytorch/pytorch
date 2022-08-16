@@ -376,14 +376,23 @@ inline std::string convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
+    std::string device_str = "";
     if (t->has_storage()) {
-      storage_id = getObjectID(ob, t->storage().data());
+      auto& t_storage = t->storage();
+      storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();
       numel = t->numel();
       itemsize = t->itemsize();
+      device_str = t->device().str();
     }
-    return vectorToString(
-        std::vector<size_t>{tensor_id, storage_id, offset, numel, itemsize});
+    return fmt::format(
+        "[{},{},{},{},{},\"{}\"]",
+        tensor_id,
+        storage_id,
+        offset,
+        numel,
+        itemsize,
+        device_str);
   } else if (val.isTuple()) {
     std::vector<std::string> str_array;
     const auto& val_tuple = val.toTupleRef().elements();
