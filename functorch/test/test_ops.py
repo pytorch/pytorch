@@ -283,11 +283,9 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    xfail('tensor_split'),
+    xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
     xfail('to_sparse'),
-    xfail('nn.functional.ctc_loss'),
-    skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
-    skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
 }
 
 
@@ -295,9 +293,9 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
-        xfail('chalf', '', device_type='cpu'),
-        xfail('as_strided_scatter', ''),
-        xfail('sparse.sampled_addmm', ''),
+        xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+        skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
+        xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -344,26 +342,16 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
-        skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
-        skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
-        skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
-
-        # =============================================
-        # NB: The above failures also fail using PyTorch core's
-        #     forward-mode AD and vmap.
-        #     The failures below are functorch-specific issues
-        # =============================================
-
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
-        # BUG: runs and produces numerical differences
+        # BUG: silent incorrectness: runs and produces numerical differences
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
 
-        xfail('nn.functional.rrelu')  # in-place test fails
+        xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -434,9 +422,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
-        xfail('pca_lowrank', ''),
-        xfail('svd_lowrank', ''),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # silent incorrectness; also might be flaky
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
@@ -479,10 +465,10 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
-        skip('nn.functional.max_unpool1d'),  # Flaky
-        skip('nn.functional.max_unpool2d'),  # Flaky
-        xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', ''),
+        skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
+        skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
+        xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
+        xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -574,6 +560,7 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
     vmapvjp_fail = vjp_fail.union({
+        # -------------------- ALLOWED FAILURES --------------------------------
         # The following are not bugs and are expected behavior
         xfail('masked_select'),  # Not possible due to dynamic shapes
         skip('bernoulli'),  # randomness
@@ -584,13 +571,18 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.dropout2d'),  # randomness
+        skip('nn.functional.dropout3d', ''),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('take'),  # dynamic
+        xfail('pca_lowrank', ''),  # randomness
+        xfail('svd_lowrank', ''),  # randomness
+        # ----------------------------------------------------------------------
 
+        # ---------------------------- BUGS ------------------------------------
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
@@ -602,14 +594,15 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
-        xfail('stft'),
-        xfail('view_as_complex'),
+        xfail('stft'),  # calls as_strided
+        xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('chalf', ''),
 
         xfail('scatter_reduce', 'prod'),  # item call
 
@@ -617,11 +610,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
 
-        xfail('chalf', ''),
         xfail('sparse.sampled_addmm', ''),
-        xfail('as_strided_scatter', ''),
-        xfail('index_reduce', ''),
-        xfail('nn.functional.dropout3d', ''),
+        xfail('as_strided_scatter', ''),  # calls as_strided
+        xfail('index_reduce', ''),  # .item() call
+        # ---------------------------------------------------------------------
     })
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -655,6 +647,7 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
+        # -------------------- ALLOWED FAILURES --------------------------------
         # The following are expected (not a bug)
         skip('bernoulli', ''),  # randomness
         skip('nn.functional.dropout'),  # randomness
@@ -665,34 +658,37 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
         xfail('nn.functional.fractional_max_pool3d'),  # Cannot access data pointer of Tensor that doesn't have storage
-
-        # The following are bugs that we should fix
-        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('_masked.mean'),
-        xfail('_masked.prod'),
-
         # Not actually a problem: embedding with max_norm mutates the weight
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
-        xfail('nn.functional.soft_margin_loss', ''),
-        xfail('linalg.householder_product'),
-        xfail('tensor_split'),
-        xfail('quantile'),
-        xfail('as_strided'),
-        xfail('nn.functional.gaussian_nll_loss'),
-        xfail('scatter'),
-        xfail('nanquantile'),
-        xfail('view_as_complex'),
-        xfail('prod'),
+        # ----------------------------------------------------------------------
 
-        skip('pca_lowrank', ''),
-        skip('svd_lowrank', ''),
+        # ---------------------------- BUGS ------------------------------------
+        # The following are bugs that we should fix
+        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
+        xfail('_masked.mean'),  # silent incorrectness (nan difference)
+        xfail('_masked.prod'),  # .item or data-dependent control flow
+
+        xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
+        xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
+        xfail('tensor_split'),  # data_ptr composite compliance
+        xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
+        xfail('as_strided'),  # as_strided too weird
+        xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
+        xfail('scatter'),  # forward-mode AD does not support at::scatter
+        xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
+        xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
+        xfail('prod'),  # .item or data-dependent control flow
+
+        skip('pca_lowrank', ''),  # randomness
+        skip('svd_lowrank', ''),  # randomness
 
         xfail('stft'),  # transpose_ fallback
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
 
+        # potential silent incorrectness
         skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
@@ -702,6 +698,7 @@ class TestOperators(TestCase):
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
+        # ----------------------------------------------------------------------
     }
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -1073,8 +1070,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('renorm', ''),
         xfail('symeig', ''),
-        xfail('pca_lowrank', ''),
-        xfail('svd_lowrank', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.multilabel_soft_margin_loss', ''),
         xfail('scatter_reduce', 'amax'),
@@ -1088,7 +1083,7 @@ class TestOperators(TestCase):
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('native_layer_norm', ''),
         xfail('sparse.sampled_addmm', ''),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),
         xfail('index_reduce', ''),
         xfail('segment_reduce', 'lengths'),

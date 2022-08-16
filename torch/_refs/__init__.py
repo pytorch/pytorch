@@ -121,6 +121,7 @@ __all__ = [
     "hypot",
     "igamma",
     "igammac",
+    "imag",
     "isclose",
     "lcm",
     # 'ldexp',
@@ -139,6 +140,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
+    "real",
     "remainder",
     "rsub",
     # # special.xlog1py
@@ -150,6 +152,7 @@ __all__ = [
     #
     # Elementwise Ternary References
     #
+    "addcdiv",
     "clamp",
     #
     # Conditional references
@@ -1280,8 +1283,17 @@ def isclose(
 
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
-    g = gcd(a, b)
-    return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
+    dtype = a.dtype
+    promote_to_int = dtype in (torch.int8, torch.int16)
+    if promote_to_int:
+        a = prims.convert_element_type(a, torch.int32)
+        b = prims.convert_element_type(b, torch.int32)
+
+    g = torch.gcd(a, b)
+    # Avoid division by zero in case gcd(0, 0) == 0
+    g = torch.where(g == 0, 1, g)
+    res = torch.abs(prims.div(a, g) * b)
+    return res if not promote_to_int else prims.convert_element_type(res, dtype)
 
 
 # TODO: add docstring
@@ -1486,6 +1498,36 @@ trunc_divide = _make_elementwise_binary_reference(
 #
 # Elementwise Ternary References
 #
+
+
+@register_decomposition(torch.ops.aten.addcdiv)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "tensor1", "tensor2"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def addcdiv(
+    self: TensorLikeType,
+    tensor1: TensorLikeType,
+    tensor2: TensorLikeType,
+    *,
+    value: NumberType = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.addcdiv
+    """
+    if value is not None:
+        dtype = self.dtype  # no scalars allowed, see add
+        python_type = utils.dtype_to_type(dtype)
+        if not utils.is_weakly_lesser_type(type(value), python_type):
+            msg = (
+                "value argument of type {0} cannot be safely cast to type {1}!".format(
+                    type(value), python_type
+                )
+            )
+            raise ValueError(msg)
+
+    return self + value * tensor1 / tensor2
 
 
 @register_decomposition(torch.ops.aten.clamp)
@@ -3041,8 +3083,7 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    zero = torch.zeros(1, dtype=t.dtype, device=t.device, requires_grad=False)
-    result = torch.where(cond, t, zero)
+    result = torch.where(cond, t, False)
 
     return result
 
@@ -3667,8 +3708,7 @@ def eye(
     cond = range_n.unsqueeze(-1) == range_m
     # TODO: pin_memory=pin_memory, layout=layout
     one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
-    zero = torch.zeros(1, dtype=dtype, device=device, requires_grad=False)
-    result = torch.where(cond, one, zero)
+    result = torch.where(cond, one, False)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
     # result.requires_grad_(requires_grad)
