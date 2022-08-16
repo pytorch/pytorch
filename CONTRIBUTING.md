@@ -17,6 +17,7 @@
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
