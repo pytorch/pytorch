@@ -5,74 +5,94 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
-import json
-import sys
-import os
-import platform
-import re
+import argparse
+import contextlib
+import copy
+import ctypes
+import errno
+import functools
 import gc
-import types
-import math
-from functools import partial
 import inspect
 import io
-import copy
+import json
+import math
 import operator
-import argparse
-import unittest
-import warnings
+import os
+import platform
 import random
-import contextlib
+import re
 import shutil
-import threading
-from pathlib import Path
 import socket
 import subprocess
-import time
-from collections.abc import Sequence, Mapping
-from contextlib import contextmanager, closing
-from functools import wraps
-from itertools import product
-from copy import deepcopy
+import sys
 import tempfile
-import __main__  # type: ignore[import]
-import errno
-import ctypes
-from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
+import threading
+import time
+import types
+import unittest
+import warnings
+from collections.abc import Mapping, Sequence
+from contextlib import closing, contextmanager
+from copy import deepcopy
+from enum import Enum
+from functools import partial, wraps
+from itertools import product
+from pathlib import Path
+from statistics import mean
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 from unittest.mock import MagicMock
 
+import expecttest
 import numpy as np
 
-import expecttest
-from torch.testing._comparison import (
-    assert_equal as assert_equal,
-    Pair,
-    TensorLikePair,
-    BooleanPair,
-    NumberPair,
-    UnsupportedInputs,
-    NonePair,
-    ErrorMeta,
-)
-
+import __main__  # type: ignore[import]
 import torch
-import torch.cuda
-from torch.testing import make_tensor
-from torch._utils_internal import get_writable_path
-from torch._six import string_classes
-from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.xnnpack
-from enum import Enum
-from statistics import mean
-import functools
-from .composite_compliance import no_dispatch
+import torch.cuda
+from torch import Tensor
+from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
+from torch._six import string_classes
+from torch._utils_internal import get_writable_path
+from torch.nn import (
+    ModuleDict,
+    ModuleList,
+    ParameterDict,
+    ParameterList,
+    Sequential,
+)
+from torch.onnx import (
+    register_custom_op_symbolic,
+    unregister_custom_op_symbolic,
+)
+from torch.testing import make_tensor
+from torch.testing._comparison import (
+    BooleanPair,
+    ErrorMeta,
+    NonePair,
+    NumberPair,
+    Pair,
+    TensorLikePair,
+    UnsupportedInputs,
+)
+from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
-from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
-from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
-from torch.onnx import (register_custom_op_symbolic,
-                        unregister_custom_op_symbolic)
+
+from .composite_compliance import no_dispatch
+
 torch.backends.disable_global_flags()
 
 PYTEST_FILES = ["test_ops", "test_ops_gradients", "test_ops_jit"]
@@ -90,20 +110,20 @@ RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
 MAX_NUM_RETRIES = 3
 
-DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
-SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
+DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
-if os.getenv("IMPORT_SLOW_TESTS", ""):
-    with open(SLOW_TESTS_FILE, 'r') as fp:
+if os.getenv("SLOW_TESTS_FILE", ""):
+    with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
         slow_tests_dict = json.load(fp)
-        print("loaded slow tests dict")
+        warnings.warn(f"loaded {len(slow_tests_dict)} slow tests")
 if os.getenv("DISABLED_TESTS_DICT", ""):
-    with open(DISABLED_TESTS_FILE, 'r') as fp:
+    with open(os.getenv("DISABLED_TESTS_DICT"), 'r') as fp:
         disabled_tests_dict = json.load(fp)
-        print("loaded disabled tests dict")
+        warnings.warn(f"loaded {len(disabled_tests_dict)} disabled tests")
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
@@ -483,8 +503,8 @@ parser.add_argument('--save-xml', nargs='?', type=str,
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
-parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
-parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
+parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
+parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -507,8 +527,8 @@ else:
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
 
-IMPORT_SLOW_TESTS = args.import_slow_tests
-IMPORT_DISABLED_TESTS = args.import_disabled_tests
+SLOW_TESTS_FILE = args.import_slow_tests
+DISABLED_TESTS_FILE = args.import_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -633,24 +653,24 @@ def sanitize_pytest_xml(xml_file: str):
 
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
-    if IMPORT_SLOW_TESTS:
-        if os.path.exists(IMPORT_SLOW_TESTS):
+    if SLOW_TESTS_FILE:
+        if os.path.exists(SLOW_TESTS_FILE):
             with open(SLOW_TESTS_FILE, 'r') as fp:
                 global slow_tests_dict
                 slow_tests_dict = json.load(fp)
                 # use env vars so pytest-xdist subprocesses can still access them
-                os.environ['SLOW_TESTS_DICT'] = "1"
+                os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
         else:
-            print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
-    if IMPORT_DISABLED_TESTS:
-        if os.path.exists(IMPORT_DISABLED_TESTS):
+            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
+    if DISABLED_TESTS_FILE:
+        if os.path.exists(DISABLED_TESTS_FILE):
             with open(DISABLED_TESTS_FILE, 'r') as fp:
                 global disabled_tests_dict
                 disabled_tests_dict = json.load(fp)
-                os.environ['DISABLED_TESTS_DICT'] = "1"
+                os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
         else:
-            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
-                  f' or we are on Windows whose env variable has an upper limit of 32767 chars')
+            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}'
+                          f' or we are on Windows whose env variable has an upper limit of 32767 chars')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -667,9 +687,9 @@ def run_tests(argv=UNITTEST_ARGS):
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             other_args = []
-            if IMPORT_DISABLED_TESTS:
+            if DISABLED_TESTS_FILE:
                 other_args.append('--import-disabled-tests')
-            if IMPORT_SLOW_TESTS:
+            if SLOW_TESTS_FILE:
                 other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
