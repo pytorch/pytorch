@@ -46,22 +46,20 @@ def _convert_node_to_placeholder(node, inps):
         for tuple_user in list(node.users):
             _convert_node_to_placeholder(tuple_user, inps)
 
-def generate_repro(fx_g, inps):
+def dump_state(fx_g, inps):
     print(f"""
-inps = {[(i.shape, i.dtype) for i in inps]}
+# Working Repro with {len(fx_g.graph.nodes)} nodes
+inps = {[(i.shape, i.dtype, i.device.type) for i in inps]}
 inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
 {fx_g.code}
-f = torch.jit.script(forward)
-with torch.jit.fuser("fuser2"):
-    for _ in range(5):
-        f(*inps)""")
+""")
 
 @dataclass
 class ReproState:
     graph: fx.Graph
     inps: List[torch.Tensor]
 
-def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callable = generate_repro):
+def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -95,8 +93,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
     def _register_strategy(strategy: Callable, name: str):
         @wraps(strategy)
         def new_func(old_state: ReproState, granularity=1):
-            print(f"Strategy: {name} ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
-            print(f"Granularity: {granularity}")
+            print()
+            print(f"Strategy: {name} (G: {granularity}) ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
             new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps), granularity)
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
@@ -105,19 +103,23 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                 old_inps = len(old_state.inps)
                 new_outs = len(get_outputs(new_state.graph))
                 old_outs = len(get_outputs(old_state.graph))
+                progress_made = False
                 if new_nodes < old_nodes:
+                    progress_made = True
                     print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
-                elif new_nodes == old_nodes and new_inps > old_inps:
+                if new_nodes == old_nodes and new_inps > old_inps:
+                    progress_made = True
                     print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs")
-                elif new_outs < old_outs:
+                if new_outs < old_outs:
+                    progress_made = True
                     print(f"SUCCESS: Went from {old_outs} to {new_outs} outputs")
-                else:
+
+                if not progress_made:
                     raise RuntimeError("Success raised but no progress made?")
 
                 if not graph_fails(new_state.graph, new_state.inps):
                     print("WARNING: Something went wrong, not applying this minification")
                     return None
-
                 return new_state
             else:
                 print(f"FAIL: {name}")
@@ -144,7 +146,6 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
                         tested.add(idx)
                         new_graph.erase_node(output_node)
             env[node] = new_node
-        print("FAIL: Could not remove suffix")
         return None
 
     @register_strategy("Remove outputs")
@@ -180,21 +181,22 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
             return ReproState(cur_graph, new_inps)
         return None
 
+    def remove_unused_inputs_checked(cur_state: ReproState):
+        new_state = remove_unused_inputs_unchecked(cur_state)
+        if new_state is not None and graph_fails(new_state.graph, new_state.inps):
+            return new_state
+        return None
+
     def _remove_unused_wrapper(cur_graph, cur_inps, granularity):
-        return remove_unused_inputs_unchecked(ReproState(cur_graph, cur_inps))
+        return remove_unused_inputs_checked(ReproState(cur_graph, cur_inps))
 
     remove_unused_inputs = register_strategy("Remove unused inputs")(_remove_unused_wrapper)
 
     @register_strategy("Eliminate dead code")
     def eliminate_dead_code(cur_graph, cur_inps, granularity):
         if cur_graph.eliminate_dead_code() and graph_fails(cur_graph, cur_inps):
-            cur_state = ReproState(cur_graph, cur_inps)
-            new_state = remove_unused_inputs(cur_state)
-            if new_state is not None:
-                return new_state
-            return cur_state
-
-        return remove_unused_inputs(ReproState(cur_graph, cur_inps))
+            return ReproState(cur_graph, cur_inps)
+        return None
 
 
     def _consolidate_placeholders(cur_graph):
@@ -239,7 +241,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
 
     def try_granularity(failing_state, granularity):
         print(f"Trying granularity {granularity}")
-        for strategy in [delta_debugging, eliminate_dead_code, remove_suffix, eliminate_dead_code]:
+        for strategy in [delta_debugging, eliminate_dead_code, remove_suffix, eliminate_dead_code, remove_unused_inputs]:
             new_state = strategy(failing_state, granularity)
             if new_state is not None:
                 return new_state
@@ -251,6 +253,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
         while granularity >= 1:
             new_state = try_granularity(failing_state, granularity)
             if new_state is not None:
+                dump_state(fx.GraphModule(fail_f, new_state.graph), new_state.inps)
                 failing_state = new_state
                 has_progress = True
                 break
@@ -268,5 +271,5 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, generate_repro: Callabl
 
     print(f"Made {num_queries} queries")
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
-    generate_repro(failing_fx, failing_state.inps)
+    dump_state(failing_fx, failing_state.inps)
     return failing_fx, failing_state.inps
