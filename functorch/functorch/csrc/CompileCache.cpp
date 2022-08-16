@@ -244,7 +244,7 @@ public:
     cache_.emplace(cacheKey, compileFn);
   }
 
-  const int64_t size() const { return cache_.size(); }
+  int64_t size() const { return cache_.size(); }
 
   /// Clear the cache.
   void clear() { cache_.clear(); }
