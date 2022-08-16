@@ -3172,6 +3172,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             test()
 
     vmap_fail = {
+        # -------------------- ALLOWED FAILURES --------------------------------
         # These are things that we either cannot fix or are not actually problems
         xfail('resize_'),
         xfail('resize_as_'),
@@ -3192,25 +3193,37 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding', ''),  # we only support some cases
         xfail('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.dropout2d', ''),  # randomness
+        xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # as_strided is too crazy
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
+        xfail('pca_lowrank', ''),  # random operation
+        xfail('svd_lowrank', ''),  # random operation
+        xfail('linspace', ''),  # test runner can't handle factory functions
+        xfail('arange', ''),  # test runner can't handle factory functions
+        xfail('logspace', ''),  # test runner can't handle factory functions
+        xfail('empty', ''),  # test runner can't handle factory functions
+        xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
+        xfail('sparse.sampled_addmm'),  # sparse
+        # ----------------------------------------------------------------------
 
+        # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('view_as_complex'),
-        xfail('tensor_split'),
-        xfail('svd', device_type='cuda'),
-        xfail('linalg.svd', device_type='cuda'),
-        xfail('histogramdd'),
-        xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.embedding_bag'),
+        xfail('svd', device_type='cuda'),  # silent incorrectness
+        xfail('linalg.svd', device_type='cuda'),  # silent incorrectness
+        skip('linalg.eigh', ''),  # silent incorrectness; Flaky but is likely a real problem
+        xfail('clamp_min', ''),  # Exception not raised on error input
+        xfail('clamp_max', ''),  # Exception not raised on error input
+
+        xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
+        xfail('tensor_split'),  # data_ptr
+        xfail('histogramdd'),  # expected Tensor as element 0 in argument 0, but got tuple
+        xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
+        xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('column_stack', ''),
-        xfail('pca_lowrank', ''),
-        xfail('svd_lowrank', ''),
-        skip('linalg.eigh', ''),  # Flaky but is likely a real problem
+        xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3224,21 +3237,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('long'),
         xfail('short'),
 
-        xfail('linspace', ''),
-        xfail('nn.functional.dropout3d', ''),
-        xfail('broadcast_shapes', ''),
-        xfail('clamp_min', ''),
-        xfail('sparse.sampled_addmm'),
-        xfail('jiterator_binary', device_type='cuda'),
-        xfail('arange', ''),
-        xfail('clamp_max', ''),
-        xfail('jiterator_binary_return_by_ref', device_type='cuda'),
-        xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
-        xfail('equal', ''),
-        xfail('jiterator_unary', device_type='cuda'),
-        xfail('logspace', ''),
-        xfail('jiterator_2inputs_2outputs', device_type='cuda'),
-        xfail('empty', ''),
+        xfail('jiterator_binary', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
+        xfail('jiterator_binary_return_by_ref', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
+        xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
+        xfail('equal', ''),  # TypeError: object of type 'bool' has no len(); likely testrunner problem
+        xfail('jiterator_unary', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
+        xfail('jiterator_2inputs_2outputs', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
+        # ---------------------------------------------------------------------
     }
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
