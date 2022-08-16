@@ -116,12 +116,13 @@ DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+# set them here in case the tests are running in a subprocess that doesn't call run_tests
 if os.getenv("SLOW_TESTS_FILE", ""):
     with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
         slow_tests_dict = json.load(fp)
         warnings.warn(f"loaded {len(slow_tests_dict)} slow tests")
-if os.getenv("DISABLED_TESTS_DICT", ""):
-    with open(os.getenv("DISABLED_TESTS_DICT"), 'r') as fp:
+if os.getenv("DISABLED_TESTS_FILE", ""):
+    with open(os.getenv("DISABLED_TESTS_FILE"), 'r') as fp:
         disabled_tests_dict = json.load(fp)
         warnings.warn(f"loaded {len(disabled_tests_dict)} disabled tests")
 
