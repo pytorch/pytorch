@@ -27,6 +27,7 @@ jobs:
     env:
       GPU_ARCH_TYPE: cuda
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+      PYTHON_VERSION: ${{ matrix.python_version }}
     steps:
       - name: Checkout PyTorch builder
         uses: actions/checkout@v2
@@ -51,3 +52,14 @@ jobs:
           # Test torch is importable, by changing cwd and running import commands
           conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
           conda env remove -p ${ENV_NAME}
+      - name: Pip Install pytorch and smoke test
+        env:
+          ENV_NAME: conda-env-${{ github.run_id }}
+          CUDA_VER: ${{ matrix.cuda_version }}
+        run: |
+          set -ex
+          if [[ $CUDA_VER == "10.2"]]; than
+            pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu102
+          else
+            pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+          fi
