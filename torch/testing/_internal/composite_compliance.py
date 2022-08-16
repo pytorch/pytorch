@@ -525,9 +525,9 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
             # with requires_grad set.
             primal, tangent = dual
             if isinstance(primal, torch.Tensor) and primal.requires_grad:
-                return fwAD.make_dual(primal, tangent)
+                return fwAD.make_dual(primal.detach(), tangent)
             elif is_tensorlist(primal):
-                return tuple(fwAD.make_dual(pri, tang) if tang is not None else pri
+                return tuple(fwAD.make_dual(pri.detach(), tang) if tang is not None else pri
                              for pri, tang in zip(primal, tangent))
             return primal
 
