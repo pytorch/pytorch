@@ -1979,7 +1979,7 @@ t1.start()
 t2.start()
 """])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
+    @unittest.skipIf(TEST_WITH_ROCM, "In ROCm, kernel asserts are disabled due to performance overhead")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -4444,6 +4444,10 @@ class TestCudaComm(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(False)
+
+    def test_raises_oom(self):
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
 instantiate_parametrized_tests(TestCuda)
 
