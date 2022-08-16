@@ -20,6 +20,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
       across iterations.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
         >>> list(dp)
