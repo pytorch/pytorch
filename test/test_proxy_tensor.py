@@ -708,6 +708,7 @@ make_fx_failures = {
 
     # data-dependent control flow
     xfail('cov'),
+    xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
@@ -734,8 +735,6 @@ fake_tensor_failures = {
     xfail('mvlgamma', 'mvlgamma_p_5'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
-    # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
-    xfail('istft'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
@@ -853,7 +852,6 @@ symbolic_tensor_failures = {
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('istft'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes.
     xfail('index_add', ''),  # Float
     xfail('index_copy', ''),  # Expected a long tensor for index, but got Float
     xfail('index_fill', ''),  # aten.index_fill.int_Scalar - couldn't find symbolic meta function/decomposition
