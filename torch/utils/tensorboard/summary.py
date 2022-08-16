@@ -571,12 +571,11 @@ def audio(tag, tensor, sample_rate=44100):
     import wave
 
     fio = io.BytesIO()
-    wave_write = wave.open(fio, "wb")
-    wave_write.setnchannels(1)
-    wave_write.setsampwidth(2)
-    wave_write.setframerate(sample_rate)
-    wave_write.writeframes(array.data)
-    wave_write.close()
+    with wave.open(fio, "wb") as wave_write:
+        wave_write.setnchannels(1)
+        wave_write.setsampwidth(2)
+        wave_write.setframerate(sample_rate)
+        wave_write.writeframes(array.data)
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(
