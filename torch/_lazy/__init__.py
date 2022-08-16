@@ -1,4 +1,5 @@
 import torch._C._lazy
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 def mark_step(device: str = "", wait=False):
@@ -37,13 +38,11 @@ def get_tensor_id(tensor):
 
 
 def to_cpu(tensors, devices=None):
-    from .visit import flatten_tensors, visit_tensors
-
     devices = devices or ["lazy"]
 
-    flattened = flatten_tensors(tensors)
+    flattened, spec = tree_flatten(tensors)
     sync_multi(flattened, devices)
-    return visit_tensors(tensors, lambda t, s: t.to("cpu"))
+    return tree_unflatten([t.to("cpu") for t in flattened], spec)
 
 
 def save(tensors, *args, **kwargs):
