@@ -13,6 +13,24 @@
 namespace at {
 namespace native {
 
+// See Note [nested tensor matmul] TODO in NestedTensorMath.cpp
+std::tuple<Tensor, Tensor> matmul_backward_nested(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& other,
+    std::array<bool, 2> grad_input_mask) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor(), Tensor());
+  }
+  Tensor grad_self, grad_other;
+  if (grad_input_mask[0]) {
+    grad_self = at::matmul(grad, other.transpose(-1, -2));
+  }
+  if (grad_input_mask[1]) {
+    grad_other = at::matmul(self.transpose(-1, -2), grad);
+  }
+  return std::make_tuple(grad_self, grad_other);
+}
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     const Tensor& input,

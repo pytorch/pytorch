@@ -274,6 +274,7 @@ def unfold(g, input, dimension, size, step):
         )
 
         ndim = symbolic_helper._get_tensor_rank(input)
+        assert ndim is not None
         perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
 
