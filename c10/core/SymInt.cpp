@@ -2,8 +2,10 @@
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
 
-namespace c10 {
+#define TORCH_CHECK_NO_MOBILE(X, ...) TORCH_CHECK((X), __VA_ARGS__)
 
+namespace c10 {
+#ifndef C10_MOBILE
 std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNode a, b;
   if (a_.is_symbolic())
@@ -35,9 +37,10 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto rep = (ptr & ~MASK) | IS_SYM;
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
+#endif
 
 SymInt SymInt::operator+(SymInt sci) const {
-  TORCH_CHECK(
+  TORCH_CHECK_NO_MOBILE(
       !this->is_symbolic() && !sci.is_symbolic(),
       "Symbolic Add isn't supported yet");
   return SymInt(data_ + sci.data_);
@@ -72,21 +75,22 @@ bool SymInt::operator!=(SymInt sci) const {
 }
 
 bool SymInt::operator<(SymInt sci) const {
-  TORCH_CHECK(
+  TORCH_CHECK_NO_MOBILE(
       !this->is_symbolic() && !sci.is_symbolic(),
       "Symbolic lt isn't supported yet");
   return data_ < sci.data_;
 }
 
 void SymInt::operator*=(SymInt sci) {
-  TORCH_CHECK(
+  TORCH_CHECK_NO_MOBILE(
       !this->is_symbolic() && !sci.is_symbolic(),
       "Symbolic mul_ isn't supported yet");
   data_ = data_ * sci.data_;
 }
 
 bool SymInt::operator<(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
+  TORCH_CHECK_NO_MOBILE(
+      !this->is_symbolic(), "Symbolic lt isn't supported yet");
   return data_ < sci;
 }
 
@@ -99,8 +103,11 @@ bool SymInt::operator!=(int64_t sci) const {
 }
 
 SymInt SymInt::operator*(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
+  TORCH_CHECK_NO_MOBILE(
+      !this->is_symbolic(), "Symbolic mul isn't supported yet");
   return SymInt(data_ * sci);
 }
+
+#undef TORCH_CHECK_NO_MOBILE
 
 } // namespace c10

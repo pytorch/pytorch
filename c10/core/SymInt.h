@@ -44,31 +44,45 @@ class C10_API SymInt {
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
+#ifndef C10_MOBILE
+    // TODO: compiler might be able to fold this since is_symbolic is always
+    // false
+    // if C10_MOBILE
     if (s.is_symbolic()) {
       *this = SymInt::toSymInt(s.toSymIntNodeImpl());
     } else {
       data_ = s.data_;
     }
+#else
+    data_ = s.data_;
+#endif
   }
   SymInt(SymInt&& s) : data_(s.data_) {
     s.data_ = 0;
   }
 
   SymInt& operator=(const SymInt& s) {
+#ifndef C10_MOBILE
     if (s.is_symbolic()) {
       *this = SymInt::toSymInt(s.toSymIntNodeImpl());
     } else {
       data_ = s.data_;
     }
+#else
+    data_ = s.data_;
+#endif
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
     data_ = s.data_;
+#ifndef C10_MOBILE
     if (s.is_symbolic())
       s.data_ = 0;
+#endif
     return *this;
   }
 
+#ifndef C10_MOBILE
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
@@ -77,20 +91,29 @@ class C10_API SymInt {
     return static_cast<SymIntNodeImpl*>(
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
+#endif
 
   ~SymInt() {
+#ifndef C10_MOBILE
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
+#endif
   }
 
   int64_t expect_int() const {
+#ifndef C10_MOBILE
     TORCH_CHECK(!is_symbolic());
+#endif
     return data_;
   }
 
   bool is_symbolic() const {
+#ifdef C10_MOBILE
+    return false;
+#else
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
+#endif
   }
 
   SymInt operator+(SymInt sci) const;
@@ -106,8 +129,10 @@ class C10_API SymInt {
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
 
+#ifndef C10_MOBILE
   SymIntNode toSymIntNodeImpl() const;
   static c10::SymInt toSymInt(SymIntNode sin);
+#endif
 
   int64_t as_int_unchecked() const {
     return data_;
