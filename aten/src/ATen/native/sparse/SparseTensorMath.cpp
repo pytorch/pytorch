@@ -776,7 +776,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
     const auto sparse_dim = static_cast<int64_t>(res_shape.size());
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
     const auto values = at::empty({0}, s_._values().options().dtype(res.scalar_type()));
-    get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*shape=*/res_shape);
+    get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*size=*/res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
     get_sparse_impl(res)->set_nnz_and_narrow(0);
     return res._coalesced_(true);
@@ -838,14 +838,14 @@ Tensor& intersection_binary_op_sparse_dense_out(
     intersec_indices.reserve(d_dim);
 
     if (d_start_dim_intersec) {
-      intersec_indices.push_back(Ellipsis);
+      intersec_indices.emplace_back(Ellipsis);
     }
     for (const auto i : c10::irange(sparse_dim_intersec)) {
       const auto s_idx = s_start_dim_intersec + i;
-      intersec_indices.push_back(s_indices[s_idx]);
+      intersec_indices.emplace_back(s_indices[s_idx]);
     }
     for (auto i = d_start_dim_intersec + sparse_dim_intersec; i < d_dim; ++i) {
-      intersec_indices.push_back(Slice());
+      intersec_indices.emplace_back(Slice());
     }
     // we need to expand d in the dimensions it is being indexed into
     // to avoid out of bound indices
@@ -862,10 +862,10 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   // Otherwise nnz gets larger, and both indices and values need an update.
   const auto d_batch_shape = d.sizes().slice(0, d_start_dim_intersec);
-  const auto d_batch_len = d_batch_shape.size();
-  int64_t batch_count;
-  int64_t max_batch_dim;
-  std::tie(batch_count, max_batch_dim) = [&]() -> std::tuple<int64_t, int64_t> {
+  const auto d_batch_len = static_cast<int64_t>(d_batch_shape.size());
+  int64_t batch_count = 1;
+  int64_t max_batch_dim = 0;
+  std::tie(batch_count, max_batch_dim) = [d_batch_shape]() -> std::tuple<int64_t, int64_t> {
     int64_t batch_count = 1;
     int64_t max_batch_dim = 0;
     for (const auto& b : d_batch_shape) {
@@ -884,31 +884,31 @@ Tensor& intersection_binary_op_sparse_dense_out(
   const auto res_values = op(d_filtered, s_values).reshape(res_values_shape);
   const auto res_indices = [&]() -> Tensor {
     const auto index_buffer = at::arange(max_batch_dim, s_indices.options());
-    auto res_indices = at::empty({res_sparse_dim, res_nnz}, s_indices.options());
+    auto indices = at::empty({res_sparse_dim, res_nnz}, s_indices.options());
     // fill in indices corresponding to the "batch" dimensions of d.
     int64_t n_repeat_interleave = res_nnz;
-    int n_repeat = 1;
+    int64_t n_repeat = 1;
     for (const auto dim : c10::irange(d_batch_len)) {
       const auto dim_size = d_batch_shape[dim];
       n_repeat_interleave /= dim_size;
       // fill in indices corresponding to the "batch" dimension dim.
-      // Equivalent to res_indices[dim].copy_(repeat_interleave(dim_index, n_repeat_interleave).repeat(n_repeat))
+      // Equivalent to indices[dim].copy_(repeat_interleave(dim_index, n_repeat_interleave).repeat(n_repeat))
       const std::initializer_list<int64_t> dim_index_expanded_shape = {n_repeat, dim_size, n_repeat_interleave};
       const auto dim_index = index_buffer.slice(-1, 0, dim_size);
       const auto dim_index_expanded = dim_index.unsqueeze(0).unsqueeze_(-1).expand(dim_index_expanded_shape);
-      // NOTE: res_indices is contiguous, so view is safe
-      res_indices[dim].view(dim_index_expanded_shape).copy_(dim_index_expanded);
+      // NOTE: indices is contiguous, so view is safe
+      indices[dim].view(dim_index_expanded_shape).copy_(dim_index_expanded);
       n_repeat *= dim_size;
     }
     // fill in indices corresponding to s_indices.
-    // Equivalent to res_indices_sparse.copy(s_indices.repeat({1, n_repeat})
+    // Equivalent to indices_sparse.copy(s_indices.repeat({1, n_repeat})
     n_repeat = res_nnz / s_nnz;
-    auto res_indices_sparse = res_indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
+    auto indices_sparse = indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
     const std::initializer_list<int64_t> s_indices_expanded_shape = {-1, n_repeat, s_nnz};
     const auto s_indices_expanded = s_indices.unsqueeze(1).expand(s_indices_expanded_shape);
-    res_indices_sparse.view(s_indices_expanded_shape).copy_(s_indices_expanded);
+    indices_sparse.view(s_indices_expanded_shape).copy_(s_indices_expanded);
 
-    return res_indices;
+    return indices;
   }();
 
   get_sparse_impl(res)->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
@@ -931,7 +931,7 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   };
 
   const auto extract_vals_from_wrapped_scalar = [](const Tensor& s) -> Tensor {
-    const auto vals = s._values().squeeze(0);
+    auto vals = s._values().squeeze(0);
     // if squeeze does not kill the dim, it means that
     // vals is empty with shape [0]. In such a case we
     // return a 0-dim empty tensor to avoid broadcasting

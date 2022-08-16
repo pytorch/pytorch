@@ -17,7 +17,7 @@ struct TORCH_API AnomalyMode {
   static bool should_check_nan() {
     return _check_nan;
   }
-  static void set_enabled(bool enabled, bool check_nan=true) {
+  static void set_enabled(bool enabled, bool check_nan = true) {
     _enabled = enabled;
     _check_nan = check_nan;
   }
@@ -51,8 +51,9 @@ struct TORCH_API AnomalyMode {
 /// @endcode
 class TORCH_API DetectAnomalyGuard {
  public:
-  DetectAnomalyGuard(bool check_nan=false);
+  DetectAnomalyGuard(bool check_nan = true);
   ~DetectAnomalyGuard();
+
  private:
   bool prev_check_nan_;
 };

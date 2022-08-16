@@ -41,6 +41,17 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
+struct EnableTorchFunction {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+  }
+  ~EnableTorchFunction() {
+    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+  }
+  bool old_;
+};
+
 } // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
@@ -219,34 +230,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def(
-          "shapes",
-          [](const KinetoEvent& e) {
-            if (e.hasShapes()) {
-              return e.shapes();
-            } else {
-              return std::vector<std::vector<int64_t>>();
-            }
-          })
-      .def(
-          "dtypes",
-          [](const KinetoEvent& e) {
-            if (e.hasTypes()) {
-              return e.dtypes();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
-      .def(
-          "stack",
-          [](const KinetoEvent& e) {
-            if (e.hasStack()) {
-              return e.stack();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) { return e.scope(); })
@@ -286,15 +273,32 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
-        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
-        .def_readonly("dtypes", &Inputs::dtypes_);
+        .def_readonly("dtypes", &Inputs::dtypes_)
+        .def_property_readonly(
+            "ivalues",
+            [](const Inputs& inputs) {
+              py::list list;
+              for (auto& v : inputs.ivalues_) {
+                list.append(torch::jit::toPyObject(v));
+              }
+              return list;
+            })
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
     py::class_<TensorMetadata>(m, "_TensorMetadata")
-        .def_property_readonly("layout", [](const TensorMetadata& metadata) {
-          PyObject* layout_obj = torch::autograd::utils::wrap(metadata.layout_);
-          return py::reinterpret_borrow<py::object>(layout_obj);
+        .def_property_readonly(
+            "layout",
+            [](const TensorMetadata& metadata) {
+              PyObject* layout_obj =
+                  torch::autograd::utils::wrap(metadata.layout_);
+              return py::reinterpret_borrow<py::object>(layout_obj);
+            })
+        .def_property_readonly("device", [](const TensorMetadata& metadata) {
+          // Have to pull a copy of the existing Python Device object.
+          PyObject* thp_device = THPDevice_New(
+              c10::Device(metadata.device_type_, metadata.device_index_));
+          return py::reinterpret_borrow<py::object>(thp_device);
         });
-
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
@@ -332,6 +336,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -459,6 +465,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         registerPythonTensorClass(device, cls);
       });
 
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
+
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
   py::class_<at::impl::RestorePythonTLSSnapshot>(
@@ -467,6 +475,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
+  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
@@ -646,10 +656,13 @@ static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+static PyObject* set_anomaly_mode_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "set_anomaly_enabled(bool enabled, bool check_nan=True)",
+      "set_anomaly_enabled(bool enabled, bool check_nan=True)",
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -707,10 +720,10 @@ static PyObject* python_exit_dual_level(
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
   } else {
     Py_INCREF(arg);
-    at::impl::TorchDispatchModeTLS::set_state(
+    c10::impl::TorchDispatchModeTLS::set_state(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -721,7 +734,7 @@ static PyObject* get_torch_dispatch_mode(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
   if (!mode) {
     Py_RETURN_NONE;
   } else {
@@ -790,9 +803,15 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"set_anomaly_enabled", castPyCFunctionWithKeywords(set_anomaly_mode_enabled), METH_VARARGS | METH_KEYWORDS, nullptr},
+    {"set_anomaly_enabled",
+     castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
-    {"should_anomaly_check_nan", should_anomaly_check_nan, METH_NOARGS, nullptr},
+    {"should_anomaly_check_nan",
+     should_anomaly_check_nan,
+     METH_NOARGS,
+     nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),

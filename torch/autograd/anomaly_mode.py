@@ -100,7 +100,7 @@ class set_detect_anomaly(object):
 
     """
 
-    def __init__(self, mode: bool, check_nan: bool=True) -> None:
+    def __init__(self, mode: bool, check_nan: bool = True) -> None:
         self.prev = torch.is_anomaly_enabled()
         self.prev_check_nan = torch.should_anomaly_check_nan()
         torch.set_anomaly_enabled(mode, check_nan)

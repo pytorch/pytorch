@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
-    _NOTHING,
     UnaryUfuncInfo,
     ReductionOpInfo,
     ReductionPythonRefInfo,
@@ -89,8 +88,7 @@ _ref_test_ops = tuple(
         lambda op: not isinstance(
             op, (UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, BinaryUfuncInfo)
         )
-        and op.ref is not None
-        and op.ref is not _NOTHING,
+        and op.ref is not None,
         op_db,
     )
 )
@@ -1624,6 +1622,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
+        '_refs.real',
+        '_refs.imag',
     }
 
     @parametrize("op", ref_ops_names)

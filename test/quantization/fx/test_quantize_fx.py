@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 import os
+import contextlib
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -72,8 +73,12 @@ from torch.ao.quantization import (
     default_embedding_qat_qconfig,
 )
 
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+)
 from torch.ao.quantization.backend_config.native import (
-    get_test_only_legacy_native_backend_config_dict,
+    get_test_only_legacy_native_backend_config,
 )
 
 from torch.ao.quantization.qconfig_mapping import (
@@ -115,10 +120,6 @@ from torch.ao.quantization.fx.custom_config import (
     ConvertCustomConfig,
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
-)
-
-from torch.ao.quantization.fx.prepare import (
-    is_activation_post_process_node,
 )
 
 from torch.ao.quantization.fx.qconfig_utils import (
@@ -167,7 +168,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -540,27 +541,21 @@ class TestFuseFx(QuantizationTestCase):
                 bn, conv = bn_pattern
                 return conv
 
-            conv_bn_res_relu_config1 = {
-                "pattern": (nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
-                "fuser_method": fuse_conv_bn_relu,
-            }
-
-            conv_bn_res_relu_config2 = {
-                "pattern": (nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
-                "fuser_method": fuse_conv_bn_relu,
-            }
-
-            backend_config_dict = {
-                "configs": [conv_bn_res_relu_config1, conv_bn_res_relu_config2]
-            }
-            m = fuse_fx(m, backend_config_dict=backend_config_dict)
+            conv_bn_res_relu_config1 = BackendPatternConfig((nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
+                .set_fuser_method(fuse_conv_bn_relu)
+            conv_bn_res_relu_config2 = BackendPatternConfig((nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
+                .set_fuser_method(fuse_conv_bn_relu)
+            backend_config = BackendConfig() \
+                .set_backend_pattern_config(conv_bn_res_relu_config1) \
+                .set_backend_pattern_config(conv_bn_res_relu_config2)
+            m = fuse_fx(m, backend_config=backend_config)
             self.assertEqual(type(m.conv), torch.nn.Conv2d)
             # check bn and relu are gone since we replaced the whole pattern to conv
             self.assertFalse(hasattr(m, "bn"))
             self.assertFalse(hasattr(m, "relu"))
 
     def test_fusion_pattern_with_multiple_inputs(self):
-        """ This test tests two keys in backend_config_dict: root_node_getter and
+        """ This test tests two keys in backend_config: root_node_getter and
         extra_inputs_getter,
         root_node_getter is used to identify a "root" module in the node pattern,
         the node that we'll keep after fusion.
@@ -606,17 +601,12 @@ class TestFuseFx(QuantizationTestCase):
             bn, conv = bn_pattern
             return [extra_input]
 
-        conv_bn_res_relu_config = {
-            "pattern": (nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)),
-            "fuser_method": fuse_conv_bn_relu,
-            "root_node_getter": conv_bn_res_relu_root_node_getter,
-            "extra_inputs_getter": conv_bn_res_relu_extra_inputs_getter
-        }
-
-        backend_config_dict = {
-            "configs": [conv_bn_res_relu_config],
-        }
-        m = fuse_fx(m, backend_config_dict=backend_config_dict)
+        conv_bn_res_relu_config = BackendPatternConfig((nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))) \
+            .set_fuser_method(fuse_conv_bn_relu) \
+            ._set_root_node_getter(conv_bn_res_relu_root_node_getter) \
+            ._set_extra_inputs_getter(conv_bn_res_relu_extra_inputs_getter)
+        backend_config = BackendConfig().set_backend_pattern_config(conv_bn_res_relu_config)
+        m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv), torch.nn.Conv2d)
         # check bn and relu are gone since we replaced the whole pattern to conv
         self.assertFalse(hasattr(m, "bn"))
@@ -674,24 +664,16 @@ class TestFuseFx(QuantizationTestCase):
             relu, (_, _, extra_input) = pattern
             return [extra_input]
 
-        conv_relu_config = {
-            "pattern": (nn.ReLU, nn.Conv2d),
-            "fuser_method": fuse_conv_relu,
-        }
-        conv_res_relu_config = {
-            "pattern": (nn.ReLU, (torch.add, nn.Conv2d, MatchAllNode)),
-            "fuser_method": fuse_conv_res_relu,
-            "root_node_getter": conv_res_relu_root_node_getter,
-            "extra_inputs_getter": conv_res_relu_extra_inputs_getter,
-        }
-
-        backend_config_dict = {
-            "configs": [
-                conv_relu_config,
-                conv_res_relu_config,
-            ],
-        }
-        m = fuse_fx(m, backend_config_dict=backend_config_dict)
+        conv_relu_config = BackendPatternConfig((nn.ReLU, nn.Conv2d)) \
+            .set_fuser_method(fuse_conv_relu)
+        conv_res_relu_config = BackendPatternConfig((nn.ReLU, (torch.add, nn.Conv2d, MatchAllNode))) \
+            .set_fuser_method(fuse_conv_res_relu) \
+            ._set_root_node_getter(conv_res_relu_root_node_getter) \
+            ._set_extra_inputs_getter(conv_res_relu_extra_inputs_getter)
+        backend_config = BackendConfig() \
+            .set_backend_pattern_config(conv_relu_config) \
+            .set_backend_pattern_config(conv_res_relu_config)
+        m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv1), torch.nn.Conv2d)
         self.assertEqual(type(m.conv2), torch.nn.Conv2d)
         # check relu are gone since we replaced the both patterns to conv
@@ -2075,13 +2057,13 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = QConfigMapping()
         example_inputs = (torch.randn(3),)
         child_prepare_custom_config = PrepareCustomConfig()
-        backend_config_dict = {"name": "my_backend"}
+        backend_config = BackendConfig("my_backend")
         config_entry = StandaloneModuleConfigEntry(
-            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config)
         prepare_custom_config = PrepareCustomConfig()
         self.assertEqual(len(prepare_custom_config.standalone_module_names), 0)
         prepare_custom_config.set_standalone_module_name(
-            "module1", qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+            "module1", qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config)
         self.assertEqual(list(prepare_custom_config.standalone_module_names.keys()), ["module1"])
         self.assertEqual(prepare_custom_config.standalone_module_names["module1"], config_entry)
 
@@ -2089,13 +2071,13 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = QConfigMapping()
         example_inputs = (torch.randn(3),)
         child_prepare_custom_config = PrepareCustomConfig()
-        backend_config_dict = {"name": "my_backend"}
+        backend_config = BackendConfig("my_backend")
         config_entry = StandaloneModuleConfigEntry(
-            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config)
         prepare_custom_config = PrepareCustomConfig()
         self.assertEqual(len(prepare_custom_config.standalone_module_classes), 0)
         prepare_custom_config.set_standalone_module_class(
-            self._DummyStandaloneModule, qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+            self._DummyStandaloneModule, qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config)
         self.assertEqual(len(prepare_custom_config.standalone_module_classes), 1)
         self.assertTrue(self._DummyStandaloneModule in prepare_custom_config.standalone_module_classes)
         self.assertEqual(prepare_custom_config.standalone_module_classes[self._DummyStandaloneModule], config_entry)
@@ -2152,14 +2134,14 @@ class TestQuantizeFx(QuantizationTestCase):
                 QConfigMapping(),
                 (torch.randn(3),),
                 PrepareCustomConfig(),
-                {"name", "my_backend"},
+                BackendConfig("my_backend"),
             )],
             STANDALONE_MODULE_CLASS_DICT_KEY: [(
                 self._DummyStandaloneModule,
                 QConfigMapping(),
                 (torch.randn(10),),
                 PrepareCustomConfig(),
-                {"name", "my_backend"},
+                BackendConfig("my_backend"),
             )],
             FLOAT_TO_OBSERVED_DICT_KEY: {
                 "static": {
@@ -4966,7 +4948,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 else:
                     # we will have an extra quantize_per_tensor_dynamic + dequantize for
                     # nn.Identity right now, but it will be fixed after we use
-                    # backend_config_dict to configure the default pt backend
+                    # backend_config to configure the default pt backend
                     num_dequantize = int(not has_relu)
 
                 convert_node_occurrence = {
@@ -5072,7 +5054,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
             (True, False),  # is_reference
         )
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
             linear_fun = ns.call_function(torch.nn.functional.linear)
@@ -5103,7 +5085,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
@@ -5323,7 +5305,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         custom_qconfig_dict = {
             "object_type": [(binary_op, float16_static_qconfig)]
         }
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         for is_inplace, is_scalar in options:
             node_occurrence = {
                 # output_conv1, output_add1, output_add2 for scalar
@@ -5334,7 +5316,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
                 custom_qconfig_dict=custom_qconfig_dict,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
 
             node_occurrence = {
                 # input_add, output_add for scalar
@@ -5345,7 +5327,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
                 custom_qconfig_dict=custom_qconfig_dict,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
 
     def _test_binary_op_relu_int8_impl(self, binary_op, ibinary_op, quantized_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
@@ -5370,7 +5352,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             "": float16_static_qconfig,
             "object_type": [(torch.nn.Conv2d, None)]
         }
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         for is_inplace_op, is_functional_relu, is_scalar in options:
             node_occurrence = {
                 ns.call_method("to"): 3 if is_scalar else 4
@@ -5380,7 +5362,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 model, data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
                 expected_node_occurrence=node_occurrence,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
 
 
     @skipIfNoFBGEMM
@@ -5979,7 +5961,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
-    @unittest.skip("TODO: reenable with backend_config_dict api")
+    @unittest.skip("TODO: reenable with backend_config api")
     def test_gelu_normal(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5992,7 +5974,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
-    @unittest.skip("TODO: reenable with backend_config_dict api")
+    @unittest.skip("TODO: reenable with backend_config api")
     def test_softmax_normal(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -6021,7 +6003,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method('dequantize')
         ]
-        # TODO: change these to use backend_config_dict
+        # TODO: change these to use backend_config
         additional_patterns = {torch.nn.GELU: DefaultNodeQuantizeHandler,
                                torch.nn.functional.gelu: DefaultNodeQuantizeHandler}
         self._test_default_node_quant_handler_ops(
@@ -6204,14 +6186,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quant_type = QuantType.STATIC
         # TODO: use get_default_qconfig_mapping once it handles fp16
         qconfig_mapping = QConfigMapping().set_global(float16_static_qconfig)
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         node_occurrence = {
             ns.call_method("to"): 7
         }
         self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_mapping,
             expected_node_occurrence=node_occurrence,
-            backend_config_dict=backend_config_dict)
+            backend_config=backend_config)
 
     def test_fixed_qparams_ops_qint8(self):
         class M(torch.nn.Module):
@@ -6559,57 +6541,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ])
         m3(*example_inputs)
 
-    def test_getitem_wrapped_in_observers(self):
-        """
-        Test that, for cases when there are observers around a getitem node:
-            (1) These observers are the same, and
-            (2) The pattern (dequant - getitem - quant) will be fused during the lowering step
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
-                self.conv2 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
-
-            def forward(self, inputs):
-                # inputs: [1, 5, 10]
-                x1 = self.conv1(inputs)
-                # x: [1, 5, 6]
-                x1 = x1 + inputs[:, :, -6:]
-                x2 = self.conv2(x1)
-                x2 = x2 + x1[:, :, -2:]
-                return x2
-
-        m = M()
-        m.eval()
-        qconfig_mapping = get_default_qconfig_mapping()
-        m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
-
-        # Input and output observers of getitem should be the same
-        modules = dict(m.named_modules(remove_duplicate=False))
-        for n in m.graph.nodes:
-            if not is_activation_post_process_node(n, modules):
-                continue
-            if n.args[0].op != "call_function" or n.args[0].target != operator.getitem:
-                continue
-            getitem_node = n.args[0]
-            input_observer_node = getitem_node.args[0]
-            output_observer_node = n
-            if not is_activation_post_process_node(input_observer_node, modules):
-                continue
-            input_observer = getattr(m, input_observer_node.name)
-            output_observer = getattr(m, output_observer_node.name)
-            self.assertTrue(input_observer is output_observer,
-                            "Input observer %s for %s is not the same as output observer %s" %
-                            (input_observer_node.name, getitem_node.name, output_observer_node.name))
-
-        m(torch.rand(1, 5, 10))
-        m = convert_fx(m)
-
-        # There should only be one dequantize at the end
-        self.checkGraphModuleNodes(m, expected_node_occurrence={
-            ns.call_method("dequantize") : 1,
-        })
 
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):
@@ -6979,11 +6910,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 (torch.nn.functional.linear, default_qconfig)
             ]
         }
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         example_inputs = (torch.randn(1, 4),)
         m = prepare_fx(
             m, qconfig_dict, example_inputs=example_inputs,
-            backend_config_dict=backend_config_dict)
+            backend_config=backend_config)
         expected_occurrence = {
             # input and weight of first and second linear, output of first and second linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 6,
@@ -6994,7 +6925,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence
         )
-        m = convert_fx(m, backend_config_dict=backend_config_dict)
+        m = convert_fx(m, backend_config=backend_config)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
             # dequantize after first linear, before reshape and before output
@@ -7031,10 +6962,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             .set_global(float16_static_qconfig) \
             .set_object_type(torch.nn.functional.linear, default_qconfig)
         example_inputs = (torch.randn(1, 4),)
-        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
+        backend_config = get_test_only_legacy_native_backend_config()
         m = prepare_fx(
             m, qconfig_mapping, example_inputs=example_inputs,
-            backend_config_dict=backend_config_dict)
+            backend_config=backend_config)
         expected_occurrence = {
             # input and weight of linear, output of linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 3,
@@ -7244,8 +7175,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 224, 224),)
         mp = prepare_qat_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mp(*example_inputs)
-        mq = convert_fx(mp)
-        res = mq(*example_inputs)
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+            mq = convert_fx(mp)
+        mq(*example_inputs)
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
