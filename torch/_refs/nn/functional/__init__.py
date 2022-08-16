@@ -599,10 +599,14 @@ def pairwise_distance(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 @out_wrapper()
-def pdist(a: TensorLikeType, p: int = 2) -> TensorLikeType:
+def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
     check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
     check(p >= 0, lambda: "pdist only supports non-negative p values")
-    t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
-    xs = torch.arange(t.shape[0], device=a.device)
-    mask = xs.unsqueeze(0) > xs.unsqueeze(1)
-    return t.masked_select(mask)
+    if p == 2:
+        aTa = torch.matmul(a, a.T)
+        aTa_diag = torch.diag(aTa)
+        t = torch.sqrt(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa)
+    else:
+        t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
+    i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
+    return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])

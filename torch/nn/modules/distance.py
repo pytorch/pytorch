@@ -20,11 +20,6 @@ class PairwiseDistance(Module):
     .. math ::
         \Vert \mathbf{x} \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
 
-    Returns either a scalar (if input tensors are rank 1) or a vector of a vector of all pairs of distances
-    (if input tensors are rank 2). In the second case, the output components are distances of pairs
-    ordered in the same way as the as output of
-    :func:`torch.triu_indices`.
-
     Args:
         p (real, optional): the norm degree. Can be negative. Default: 2
         eps (float, optional): Small value to avoid division by zero.

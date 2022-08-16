@@ -1087,6 +1087,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(1, args=(3, 1))
 
+
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
     starts = (-2., 0, 1, 2, 4.3)
@@ -6501,16 +6502,35 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
     # (row, col, offset)
-    args = ((S, S, 0),
-            (S, S, 1),
-            (S, S, -1),
-            (S, M, 0),
-            (M, S, 2),
-            (S, M, -2),
-            (M, M, -3),
-            (0, S, 0))
-    for row, col, offset in args:
-        yield SampleInput(row, args=(col, offset), kwargs={"dtype": dtype, "device": device})
+    args_list = ((1, 1),
+                 (3, 3, 1),
+                 (3, 3, 2),
+                 (3, 3, 200),
+                 (3, 3, -1),
+                 (3, 3, -2),
+                 (3, 3, -200),
+                 (0, 3, 0),
+                 (3, 0, 0),
+                 (0, 0, 0),
+                 (20, 21, 0),
+                 (20, 21, 10),
+                 (20, 21, -10),
+                 (60, 3),
+                 (60, 3, 37),
+                 (60, 3, -37),
+                 (3, 60, 37),
+                 (3, 60, -37),
+                 # Large test cases below are deliberately commented out to speed up CI
+                 # tests and to avoid OOM error. When modifying implementations of
+                 # tril_indices and triu_indices, please enable these tests and make sure
+                 # they pass.
+                 # (2, 68435455, 3),
+                 # (5000, 5000),
+                 # (5000, 5000, 1234),
+                 # (5000, 5000, -1233),
+                 )
+    for args in args_list:
+        yield SampleInput(args[0], args=args[1:], kwargs={"dtype": dtype, "device": device})
 
 def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -10358,10 +10378,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
@@ -12067,6 +12083,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12087,6 +12104,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose2d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -12106,6 +12124,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12144,6 +12163,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -12182,6 +12202,7 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13629,6 +13650,10 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     dtypes=(torch.complex32,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
@@ -16161,10 +16186,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu_indices',
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_trilu_indices,
-           ref=lambda h, w, ofs, dtype, device : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
            supports_out=False,
            supports_autograd=False,
            skips=(
@@ -16173,16 +16197,20 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-               # NotImplementedError: Could not run 'aten::triu_indices' with arguments from the 'Meta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               # test_dtypes will find this works for float dtypes, but it doesn't really
+               # make sense to call this with floats
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+               # for some small dtypes, the torch cpu implementation gives the wrong results
+               # when you run it for large input, so we skip those tests
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
+                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_quick',
+                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
            )),
     OpInfo('tril_indices',
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_trilu_indices,
-           ref=lambda h, w, ofs, dtype, device : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
            supports_out=False,
            supports_autograd=False,
            skips=(
@@ -16191,10 +16219,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-               # NotImplementedError: Could not run 'aten::tril_indices' with arguments from the 'Meta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               # test_dtypes will find this works for float dtypes, but it doesn't really
+               # make sense to use this with floats
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+               # for some small dtypes, the torch cpu implementation gives the wrong results
+               # when you run it for large input, so we skip those tests
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
+                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_quick',
+                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
            )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18692,19 +18725,17 @@ python_ref_db = [
         # the implementation uses torch.stack that violates view consistency
         validate_view_consistency=False,
         skips=(
-            # RunTimError: no _refs support for torch.Tensor.masked_select
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # skip these tests since we have non tensor input
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-            # NotImplementedError: Could not run 'aten::triu_indices' with arguments from the 'Meta' backend.
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
-            DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+            # for some small dtypes, the torch cpu implementation gives the wrong results
+            # when you run it for large input, so we skip those tests
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
         )),
     PythonRefInfo(
         "_refs.tril_indices",
@@ -18713,19 +18744,17 @@ python_ref_db = [
         # the implementation uses torch.stack that violates view consistency
         validate_view_consistency=False,
         skips=(
-            # RunTimError: no _refs support for torch.Tensor.masked_select
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # skip these tests since we have non tensor input
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-            # NotImplementedError: Could not run 'aten::tril_indices' with arguments from the 'Meta' backend.
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake_autocast'),
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
-            DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+            # for some small dtypes, the torch cpu implementation gives the wrong results
+            # when you run it for large input, so we skip those tests
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
         )),
     PythonRefInfo(
         "_refs.meshgrid",
@@ -18919,7 +18948,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.signbit",
@@ -19066,10 +19094,8 @@ python_ref_db = [
         supports_out=True,
         supports_nvfuser=False,
         skips=(
-            # RunTimError: no _refs support for torch.Tensor.masked_select
+            # RunTimeError: no _refs support for torch.Tensor.index_select
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.masked_select.default
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
@@ -19192,13 +19218,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19380,13 +19406,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
         )
     ),
@@ -19414,13 +19440,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19483,13 +19509,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
