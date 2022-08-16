@@ -16,7 +16,7 @@ namespace autograd {
 
 void PyAnomalyMetadata::store_stack() {
   pybind11::gil_scoped_acquire gil;
-  THPObjectPtr mod(PyImport_ImportModule("traceback"));
+  THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
   if (!mod) {
     throw python_error();
   }
@@ -27,6 +27,23 @@ void PyAnomalyMetadata::store_stack() {
   }
 
   if (PyDict_SetItemString(dict(), ANOMALY_TRACE_KEY, list.get())) {
+    throw python_error();
+  }
+}
+
+void PyAnomalyMetadata::override_stack() {
+  pybind11::gil_scoped_acquire gil;
+
+  PyObject* stack = PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY);
+
+  THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
+  if (!mod) {
+    throw python_error();
+  }
+
+  PyObject *result = PyObject_CallMethod(mod.get(), "set_stack_trace", "O", stack);
+
+  if (!result) {
     throw python_error();
   }
 }

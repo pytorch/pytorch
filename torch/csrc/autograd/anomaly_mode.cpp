@@ -43,6 +43,11 @@ void AnomalyMetadata::store_stack() {
   traceback_ = c10::get_backtrace(/* frames_to_skip */ 1);
 }
 
+void AnomalyMetadata::override_stack() {
+  // noop for non-python anomaly mode
+  return;
+}
+
 void AnomalyMetadata::print_stack(const std::string& current_node_name) {
   TORCH_WARN(
       "Error detected in ",

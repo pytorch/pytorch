@@ -96,12 +96,13 @@ def create_joint_forward_backward(fn):
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            backward_out = torch.autograd.grad(
-                needed_outs,
-                grad_primals,
-                grad_outputs=needed_tangents,
-                allow_unused=True,
-            )
+            with fx_traceback.override_stack_trace(), torch.autograd.detect_anomaly():
+                    backward_out = torch.autograd.grad(
+                        needed_outs,
+                        grad_primals,
+                        grad_outputs=needed_tangents,
+                        allow_unused=True,
+                    )
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -235,12 +236,24 @@ def create_aot_autograd_function(
 
                 if config.debug_joint:
                     print(fx_g.code)
+                    print("====== joint graph =======")
+                    for node in fx_g.graph.nodes:
+                        print(node, node.stack_trace)
+
 
                 with track_graph_compiling("joint"):
                     fw_module, bw_module = partition_fn(fx_g, joint_inputs)
 
                 if config.debug_graphs:
                     print(fw_module.code, bw_module.code)
+
+                    print("====== forward graph =======")
+                    for node in fw_module.graph.nodes:
+                        print(node, node.stack_trace)
+
+                    print("====== backward graph =======")
+                    for node in bw_module.graph.nodes:
+                        print(node, node.stack_trace)
 
                 with track_graph_compiling("forward"):
                     compiled_fw = fw_compiler(fw_module, flat_tensor_args)
@@ -659,8 +672,13 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace():
-                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                with fx_traceback.override_stack_trace(), torch.autograd.detect_anomaly():
+                        # print("=====aot_module_simplified=====")
+                        # for node in mod.graph.nodes:
+                        #     print(node, node.stack_trace)
+                        # print("\n")
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+
             else:
                 out = mod(*args[params_len:], **kwargs)
 

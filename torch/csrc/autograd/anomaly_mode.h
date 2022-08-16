@@ -53,6 +53,7 @@ class TORCH_API DetectAnomalyGuard {
 struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack();
+  virtual void override_stack();
   virtual void print_stack(const std::string& current_node_name);
   virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
 

@@ -146,6 +146,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
+    if (AnomalyMode::is_enabled()) {
+      metadata()->override_stack();
+    }
+
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
