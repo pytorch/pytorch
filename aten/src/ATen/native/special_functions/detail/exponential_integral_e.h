@@ -30,12 +30,12 @@ exponential_integral_e(unsigned int n, T1 x) {
     for (unsigned int j = 1; j <= 1000; j++) {
       q = q * (-x / T1(j));
 
-      if (int(j) != n - 1) {
+      if (j != n - 1) {
         r = -q / T1(j - (n - 1));
       } else {
         T1 s = -c10::numbers::egamma_v<T1>;
 
-        for (int k = 1; k <= n - 1; ++k) {
+        for (unsigned int k = 1; k <= n - 1; k++) {
           s = s + (T1(1) / T1(k));
         }
 

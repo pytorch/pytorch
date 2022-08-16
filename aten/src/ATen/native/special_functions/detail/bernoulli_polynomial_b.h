@@ -13,7 +13,7 @@ bernoulli_polynomial_b(unsigned int n, T1 x) {
     auto p = bernoulli_number<T1>(0);
     auto q = T1(1);
 
-    for (auto j = 1; j <= n; j++) {
+    for (unsigned int j = 1; j <= n; j++) {
       q = q * (T1(n + 1 - j) / T1(j));
       p = x * p + q * bernoulli_number<T1>(j);
     }

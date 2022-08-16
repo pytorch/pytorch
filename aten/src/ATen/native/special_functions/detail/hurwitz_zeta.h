@@ -24,7 +24,7 @@ hurwitz_zeta_euler_maclaurin(T1 s, T1 a) {
   auto sfact = s;
   auto pfact = std::pow(T2{10 + std::numeric_limits<T3>::digits10 / 2} + a, -s)
       / (T2(10 + std::numeric_limits<T3>::digits10 / 2) + a);
-  for (auto j = 0; j < EULER_MACLAURIN_SIZE - 1; ++j) {
+  for (unsigned long j = 0; j < EULER_MACLAURIN_SIZE - 1; j++) {
     auto delta = T3(EULER_MACLAURIN[j + 1])
         * sfact * pfact;
     ans += delta;

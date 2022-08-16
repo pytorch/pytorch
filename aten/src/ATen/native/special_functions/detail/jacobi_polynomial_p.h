@@ -42,7 +42,7 @@ jacobi_polynomial_p(unsigned int n, T1 alpha1, T1 beta1, T1 x) {
         - (T1(2) * (alpha1 + T1(1)) * (beta1 + T1(1)) * ((alpha1 + beta1 + T1(2)) + T1(2))) * T1(1))
         / (T1(4) * (alpha1 + beta1 + T1(2)) * ((((alpha1 + beta1 + T1(2)) + T1(2)) - T1(1)) - T1(1)));
 
-    for (auto j = 3; j <= n; j++) {
+    for (unsigned int j = 3; j <= n; j++) {
       if (T1(2) * j * (alpha1 + beta1 + T1(j)) * (alpha1 + beta1 + T1(j) + T1(j) - T1(1) - T1(1)) == T1(0)) {
         throw std::runtime_error("jacobi_polynomial_p: Failure in recursion");
       }
