@@ -329,9 +329,9 @@ class MaskedTensor(torch.Tensor):
             from .functions import multi_head_attention_forward as mha_mt
             return mha_mt(*args, **kwargs)
 
-        from .reductions import apply_reduction, is_reduction
-        if is_reduction(func):
-            return apply_reduction(func, *args, **kwargs)
+        from .reductions import _apply_reduction, _is_reduction
+        if _is_reduction(func):
+            return _apply_reduction(func, *args, **kwargs)
 
         if func in [torch.Tensor.where, torch.where]:
             _check_args_kwargs_length(args, kwargs, "__torch_function__, torch.where", len_args=3, len_kwargs=0)
@@ -361,30 +361,30 @@ class MaskedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
 
-        from .reductions import apply_reduction, is_reduction
+        from .reductions import _apply_reduction, _is_reduction
 
-        if is_reduction(func):
-            return apply_reduction(func, *args, **kwargs)
+        if _is_reduction(func):
+            return _apply_reduction(func, *args, **kwargs)
 
-        from .passthrough import apply_pass_through_fn, is_pass_through_fn
+        from .passthrough import _apply_pass_through_fn, _is_pass_through_fn
 
-        if is_pass_through_fn(func):
-            return apply_pass_through_fn(func, *args, **kwargs)
+        if _is_pass_through_fn(func):
+            return _apply_pass_through_fn(func, *args, **kwargs)
 
-        from .unary import apply_native_unary, is_native_unary
+        from .unary import _apply_native_unary, _is_native_unary
 
-        if is_native_unary(func):
-            return apply_native_unary(func, *args, **kwargs)
+        if _is_native_unary(func):
+            return _apply_native_unary(func, *args, **kwargs)
 
-        from .binary import apply_native_binary, is_native_binary
+        from .binary import _apply_native_binary, _is_native_binary
 
-        if is_native_binary(func):
-            return apply_native_binary(func, *args, **kwargs)
+        if _is_native_binary(func):
+            return _apply_native_binary(func, *args, **kwargs)
 
-        from .matmul import apply_native_matmul, is_native_matmul
+        from .matmul import _apply_native_matmul, _is_native_matmul
 
-        if is_native_matmul(func):
-            return apply_native_matmul(func, *args, **kwargs)
+        if _is_native_matmul(func):
+            return _apply_native_matmul(func, *args, **kwargs)
 
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
