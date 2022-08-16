@@ -1,8 +1,7 @@
-from typing import List, Dict, Any, cast
+from typing import List, Any
 
 import torch
 
-from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
@@ -196,4 +195,5 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     return _create_sharded_read_items(
         fqn,
         md,
-        local_shards)
+        local_shards
+    )
