@@ -154,7 +154,8 @@ class Adam(Optimizer):
 
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-
+                    if group['differentiable']:
+                        assert not state['step'].requires_grad
                     state_steps.append(state['step'])
 
             adam(params_with_grad,
@@ -315,7 +316,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq, out=max_exp_avg_sqs[i])
+                torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
                 # Use the max. for normalizing running avg. of gradient
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
             else:
@@ -338,6 +339,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        weight_decay: float,
                        eps: float,
                        maximize: bool,
+                       capturable: bool,
                        differentiable: bool):
     if len(params) == 0:
         return
@@ -349,6 +351,7 @@ def _multi_tensor_adam(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
+    assert not differentiable, "_foreach ops don't support autograd"
     # Handle complex parameters
     grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
     exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
