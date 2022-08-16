@@ -1,5 +1,3 @@
-import collections
-
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
@@ -41,7 +39,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(to_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
-                return [list(i) for i in zip(*map(to_map, obj))]
+            return [list(i) for i in zip(*map(to_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
             return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
         return [obj]
