@@ -50,7 +50,6 @@ std::string getIndexFunctionName(ScalarType scalar_type, bool index_select, bool
 
   return indexFunction + getMetalScalarType(scalar_type);
 }
-
 }
 }
 }

@@ -128,7 +128,6 @@ kernel void kernel_index_offsets(constant const packed_uint3 * strides         [
             data_offsets[thread_index][offset] += remainder * strides[dim][offset];
     }
 }
-
 )INDEX_METAL";
 }
 }
