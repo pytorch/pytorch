@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Adadelta', 'adadelta']
 
 class Adadelta(Optimizer):
     r"""Implements Adadelta algorithm.

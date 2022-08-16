@@ -326,7 +326,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

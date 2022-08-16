@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
@@ -3721,7 +3722,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   auto inp_tile = gather(inp, {1, 1, 3, 3}, {{0, 0}, {0, 0}, {1, 1}, {1, 1}});
   // inp_tile: [N, C, H, W, 1, 1, 3, 3]
 
-  auto inp_col = transpose(inp_tile, {{1, 3}, {2, 1}, {3, 2}});
+  auto inp_col = permute(inp_tile, {0, 2, 3, 1, 4, 5, 6, 7});
   // inp_col: [N, H, W, C, 1, 1, 3, 3]
 
   fusion.addOutput(inp_col);

@@ -1,5 +1,7 @@
 #include <c10d/NCCLUtils.hpp>
 
+#include <c10/util/CallOnce.h>
+
 #ifdef USE_C10D_NCCL
 
 #include <mutex>
@@ -24,10 +26,10 @@ ncclComm_t NCCLComm::getNcclComm() {
 }
 
 std::string getNcclVersion() {
-  static std::once_flag ncclGetVersionFlag;
+  static c10::once_flag ncclGetVersionFlag;
   static std::string versionString;
 
-  std::call_once(ncclGetVersionFlag, []() {
+  c10::call_once(ncclGetVersionFlag, []() {
     int version;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version

@@ -399,7 +399,9 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     for submodule_name, submodule in module.named_modules():
         for attr_name, attr in submodule.__dict__.items():
             if isinstance(attr, ShardedTensor):
-                destination[prefix + submodule_name + '.' + attr_name] = attr
+                mod_prefix = prefix + submodule_name
+                key = mod_prefix + ('.' if mod_prefix else '') + attr_name
+                destination[key] = attr
 
 def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
     """
@@ -407,7 +409,8 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
     """
     for submodule_name, submodule in module.named_modules():
         for attr_name, attr in submodule.__dict__.items():
-            key = prefix + submodule_name + '.' + attr_name
+            mod_prefix = prefix + submodule_name
+            key = mod_prefix + ('.' if mod_prefix else '') + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
                     setattr(submodule, attr_name, state_dict[key])

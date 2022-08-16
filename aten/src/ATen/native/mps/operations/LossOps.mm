@@ -277,7 +277,7 @@ Tensor& bce_loss_out_impl(const Tensor& input, const Tensor& target,
                             newCachedGraph->gradInputTensor = bceLoss;
                         }
                     } else {
-                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
+                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
                     }
                 }
                 return newCachedGraph;
@@ -1004,7 +1004,7 @@ void smooth_l1_loss_backward_impl(
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder .getMPSGraphTensorData()
+      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
     };
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()
@@ -1034,6 +1034,244 @@ void smooth_l1_loss_backward_template(
 } // namespace mps
 
 // APIs exposed to at::native scope
+
+// HuberLoss
+
+Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output){
+    string op_name = __func__;
+    using namespace mps;
+    TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+    TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+    TORCH_CHECK(output.is_mps());
+
+    if(reduction == Reduction::None)
+        output.resize_(target.sizes());
+    if(reduction == Reduction::Sum)
+        output.resize_({});
+    if(reduction == Reduction::Mean)
+        output.resize_({});
+
+    struct CachedGraph : public MPSCachedGraph
+    {
+        CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+        MPSGraphTensor* inputTensor_ = nil;
+        MPSGraphTensor* targetTensor_ = nil;
+        MPSGraphTensor* outputTensor_ = nil;
+    };
+    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+    MPSStream* stream = getCurrentMPSStream();
+
+    @autoreleasepool {
+        string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" + getTensorsStringKey({input, target});
+        CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+        if(!cachedGraph) {
+            MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+                CachedGraph *newCachedGraph = nil;
+
+                @autoreleasepool {
+                    MPSGraph* mpsGraph = make_mps_graph();
+                    newCachedGraph = new CachedGraph(mpsGraph);
+
+                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
+                    MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
+                                                                             shape:@[@1]
+                                                                          dataType:MPSDataTypeFloat32];
+                    MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f
+                                                                             shape:@[@1]
+                                                                          dataType:MPSDataTypeFloat32];
+
+                    MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor: inputTensor
+                                                                        secondaryTensor: targetTensor
+                                                                                   name: nil];
+                    MPSGraphTensor* absDiffTensor = [mpsGraph absoluteWithTensor: diffTensor
+                                                                            name: nil];
+                    MPSGraphTensor* firstCondTensor = [mpsGraph multiplicationWithPrimaryTensor: absDiffTensor
+                                                                secondaryTensor: absDiffTensor
+                                                                            name: nil];
+                    firstCondTensor = [mpsGraph multiplicationWithPrimaryTensor: firstCondTensor
+                                                                secondaryTensor: halfTensor
+                                                                            name: nil];
+                    MPSGraphTensor* secondCondTensor = [mpsGraph multiplicationWithPrimaryTensor: deltaTensor
+                                                                secondaryTensor: halfTensor
+                                                                            name: nil];
+                    secondCondTensor = [mpsGraph subtractionWithPrimaryTensor: absDiffTensor
+                                                                secondaryTensor: secondCondTensor
+                                                                            name: nil];
+                    secondCondTensor = [mpsGraph multiplicationWithPrimaryTensor: deltaTensor
+                                                                secondaryTensor: secondCondTensor
+                                                                            name: nil];
+                    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph lessThanOrEqualToWithPrimaryTensor:absDiffTensor
+                                                                                                                     secondaryTensor:deltaTensor
+                                                                                                                                name:nil]
+                                                                 truePredicateTensor: firstCondTensor
+                                                                falsePredicateTensor: secondCondTensor
+                                                                                name:nil];
+
+                    newCachedGraph->inputTensor_ = inputTensor;
+                    newCachedGraph->targetTensor_ = targetTensor;
+                    newCachedGraph->outputTensor_ = reduceTensor(outputTensor, reduction, mpsGraph, input.sizes().size());
+                }
+                return newCachedGraph;
+            });
+            cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+        }
+        Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor_, input);
+        Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
+        Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+
+        // Create dictionary of inputs and outputs
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+            inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+            targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
+        };
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+            outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+        };
+
+        runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    }
+    return output;
+}
+
+Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
+  Tensor output = at::native::empty_mps(
+                      input.sizes(),
+                      input.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+  return huber_loss_out_mps(input, target, reduction, delta, output);
+}
+
+Tensor& huber_loss_backward_out_mps(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction,
+    double delta,
+    Tensor& grad_input)
+{
+    using namespace mps;
+    auto is_mean_reduction = reduction == Reduction::Mean;
+    auto input_numel = input.numel();
+
+    auto new_grad_output = grad_output.contiguous();
+
+    struct CachedGraph : public MPSCachedGraph
+    {
+        CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+        MPSGraphTensor *gradOutputTensor_ = nil;
+        MPSGraphTensor *inputTensor_ = nil;
+        MPSGraphTensor *targetTensor_ = nil;
+        MPSGraphTensor *outputTensor_ = nil;
+    };
+
+    MPSGraphCache *cache_ = MPSGraphCache::getInstance();
+
+    MPSStream *stream= getCurrentMPSStream();
+
+    @autoreleasepool {
+        MPSShape* input_shape = getMPSShape(input);
+        NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
+
+        string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" +
+                                            std::to_string(delta) + ":" +
+                                            [ns_shape_key UTF8String] + ":" +
+                                            getMPSTypeString(input.scalar_type()) + ":" +
+                                            getMPSTypeString(target.scalar_type());
+        CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+        if(!cachedGraph) {
+            cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+                CachedGraph *newCachedGraph = nil;
+
+                @autoreleasepool {
+                    // Initialize graph
+                    MPSGraph* mpsGraph = make_mps_graph();
+                    newCachedGraph = new CachedGraph(mpsGraph);
+                    MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output.scalar_type()), getMPSShape(new_grad_output));
+                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
+                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()), getMPSShape(target));
+                    MPSGraphTensor* isMeanReductionTensor = [mpsGraph constantWithScalar:is_mean_reduction
+                                                                                dataType:MPSDataTypeInt64]; // constant does not support MPSDataTypeBool
+                    MPSGraphTensor* inputNumelTensor = [mpsGraph constantWithScalar:input_numel
+                                                                           dataType:getMPSDataType(new_grad_output.scalar_type())];
+
+                    MPSGraphTensor* normGradOutputTensor = [mpsGraph selectWithPredicateTensor:isMeanReductionTensor
+                                                               truePredicateTensor: [mpsGraph divisionWithPrimaryTensor:gradOutputTensor
+                                                                                                        secondaryTensor:inputNumelTensor
+                                                                                                                   name:nil]
+                                                              falsePredicateTensor: gradOutputTensor
+                                                                              name:nil];
+                    MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
+                                                                         shape:getMPSShape(target)
+                                                                      dataType:MPSDataTypeFloat32];
+                    MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                                                        secondaryTensor:targetTensor
+                                                                                   name:nil];
+                    MPSGraphTensor* normGradOutputDeltaTensor = [mpsGraph multiplicationWithPrimaryTensor:normGradOutputTensor
+                                                                                          secondaryTensor:deltaTensor
+                                                                                                     name:nil];
+                    // first condition: (input - target) <= -delta
+                    // formula: -norm * grad_output * delta
+                    MPSGraphTensor* firstCondTensor = [mpsGraph negativeWithTensor: normGradOutputDeltaTensor
+                                                                              name: nil];
+                    // second condition: (input - target) >= delta
+                    // formula: norm * grad_output * delta
+                    MPSGraphTensor* secondCondTensor = normGradOutputDeltaTensor;
+
+                    // third condition: (input - target) within -delta to delta
+                    // formula: norm * (input - target) * grad_output
+                    MPSGraphTensor* thirdCondTensor = [mpsGraph multiplicationWithPrimaryTensor:normGradOutputTensor
+                                                                                secondaryTensor:diffTensor
+                                                                                           name:nil];
+
+                    MPSGraphTensor* secondThirdTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph greaterThanOrEqualToWithPrimaryTensor:diffTensor
+                                                                                                                             secondaryTensor:deltaTensor
+                                                                                                                                        name:nil]
+                                                                        truePredicateTensor: secondCondTensor
+                                                                       falsePredicateTensor: thirdCondTensor
+                                                                                       name:nil];
+                    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph lessThanOrEqualToWithPrimaryTensor: diffTensor
+                                                                                                                     secondaryTensor:[mpsGraph negativeWithTensor: deltaTensor
+                                                                                                                                                             name: nil]
+                                                                                                                                name:nil]
+                                                                   truePredicateTensor: firstCondTensor
+                                                                  falsePredicateTensor: secondThirdTensor
+                                                                                  name:nil];
+
+                    newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+                    newCachedGraph->inputTensor_ = inputTensor;
+                    newCachedGraph->targetTensor_ = targetTensor;
+                    newCachedGraph->outputTensor_ = outputTensor;
+                }
+                return newCachedGraph;
+            }));
+        }
+
+        Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, new_grad_output);
+        Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
+        Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
+        Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
+
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+          gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
+          inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+          targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
+        };
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+          outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+        };
+
+        runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    }
+    return grad_input;
+}
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps) (

@@ -28,11 +28,8 @@ static void cat_op_channel_perf_gpu_only(benchmark::State& state) {
 
   // Act
   for (auto _ : state) {
-    at::native::vulkan::api::context()->querypool().enable();
     const auto vulkan_out = at::cat({in_vulkan1, in_vulkan2, in_vulkan3}, 1);
     vulkan_out.cpu();
-    auto perf_info = at::native::vulkan::api::context()->querypool().disable(true);
-    state.SetIterationTime(perf_info[0].execution_time_us / 1'000'000.); // us to sec
   }
 }
 
@@ -80,11 +77,6 @@ static void gru_op_perf(benchmark::State& state) {
 
     auto vulkan_output = std::get<0>(out_vulkan);
     auto vulkan_hidden = std::get<1>(out_vulkan);
-
-    // to avoid out-of-memory issues, release resources by waiting and flushing all GPU operations
-    at::native::vulkan::api::context()->wait(vulkan_output);
-    at::native::vulkan::api::context()->wait(vulkan_hidden);
-    at::native::vulkan::api::context()->flush();
   }
 }
 

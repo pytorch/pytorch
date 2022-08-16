@@ -3439,7 +3439,7 @@ add_docstr_all('scatter_add_',
                r"""
 scatter_add_(dim, index, src) -> Tensor
 
-Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
+Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
 :meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
 an index in :attr:`self` which is specified by its index in :attr:`src`
@@ -4831,6 +4831,13 @@ add_docstr_all('tensor_split',
 tensor_split(indices_or_sections, dim=0) -> List of Tensors
 
 See :func:`torch.tensor_split`
+""")
+
+add_docstr_all('split',
+               r"""
+split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.split`
 """)
 
 add_docstr_all('hsplit',

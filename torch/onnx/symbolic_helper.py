@@ -810,7 +810,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             if interpolate_mode == "nearest"
             else "align_corners"
             if align_corners
-            else "pytorch_half_pixel"
+            else "half_pixel"
         )
 
         if scales is None:
@@ -880,7 +880,7 @@ def __interpolate_helper(
         if mode == "nearest"
         else "align_corners"
         if align_corners
-        else "pytorch_half_pixel"
+        else "half_pixel"
     )
 
     if not _is_none(size):
@@ -1329,10 +1329,6 @@ def _set_opset_version(opset_version: int):
 
 def _set_operator_export_type(operator_export_type):
     GLOBALS.operator_export_type = operator_export_type
-
-
-def _set_training_mode(training_mode):
-    GLOBALS.training_mode = training_mode
 
 
 # This function is for debug use only.

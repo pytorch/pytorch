@@ -86,7 +86,7 @@ class TORCH_API BackendImplInterface {
       std::vector<ComputationPtr> instances) const = 0;
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
-      Computation& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<BackendDataPtr> arguments,
       const BackendDevice& device) const = 0;
 
@@ -107,6 +107,10 @@ class TORCH_API BackendImplInterface {
 
   // Query all available backend devices
   virtual std::vector<BackendDevice> GetBackendDevices() const = 0;
+
+  virtual std::string CreateMetricReport() const {
+    return "";
+  }
 
   // Map a particular c10:: device to a concrete backend device
   // Note:: c10:: devices may be virtual or concrete.  xla:: and lazy:: are

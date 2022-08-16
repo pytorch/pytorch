@@ -32,6 +32,7 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
     ViewSchemaKind,
     BaseOperatorName,
+    DEFAULT_KERNEL_NAMESPACE,
 )
 from torchgen.native_function_generation import (
     pre_group_native_functions,
@@ -64,6 +65,7 @@ from torchgen.utils import (
     FileManager,
     assert_never,
     make_file_manager,
+    NamespaceHelper,
 )
 from torchgen.context import (
     method_with_native_function,
@@ -77,6 +79,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
+    gen_symint_view_copy_kernel,
 )
 
 T = TypeVar("T")
@@ -108,37 +111,6 @@ T = TypeVar("T")
 #                         HELPER FUNCTIONS
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-
-class NamespaceHelper:
-    """A helper for constructing the namespace open and close strings for a nested set of namespaces.
-
-    e.g. for namespace_str torch::lazy,
-
-    prologue:
-    namespace torch {
-    namespace lazy {
-
-    epilogue:
-    } // namespace lazy
-    } // namespace torch
-    """
-
-    def __init__(self, namespace_str: str):
-        # cpp_namespace can be a colon joined string such as torch::lazy
-        cpp_namespaces = namespace_str.split("::")
-        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
-        self.epilogue_ = "\n".join(
-            [f"}} // namespace {n}" for n in reversed(cpp_namespaces)]
-        )
-
-    @property
-    def prologue(self) -> str:
-        return self.prologue_
-
-    @property
-    def epilogue(self) -> str:
-        return self.epilogue_
 
 
 # A custom loader for YAML to let us also keep track of line numbers
@@ -318,6 +290,7 @@ def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
         return [backend.dispatch_key for backend in backends] + [
             DispatchKey.CompositeImplicitAutograd,
             DispatchKey.CompositeExplicitAutograd,
+            DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]
 
 
@@ -332,6 +305,8 @@ def get_static_dispatch_backend(
         return backend_index.dispatch_key
     elif f.has_composite_explicit_autograd_kernel:
         return DispatchKey.CompositeExplicitAutograd
+    elif f.has_composite_explicit_autograd_non_functional_kernel:
+        return DispatchKey.CompositeExplicitAutogradNonFunctional
     elif f.has_composite_implicit_autograd_kernel:
         return DispatchKey.CompositeImplicitAutograd
     return None
@@ -420,6 +395,8 @@ def generate_static_dispatch_fallback_call(
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
+    elif f.has_composite_explicit_autograd_non_functional_kernel:
+        return f"return {ns}::{DispatchKey.CompositeExplicitAutogradNonFunctional.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
     else:
@@ -634,7 +611,7 @@ class ComputeFunction:
 
             return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl()} {{
+inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
@@ -725,7 +702,7 @@ class ComputeRedispatchFunction:
 
             return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl(is_redispatching_fn=True)} {{
+inline {sig.decl(is_redispatching_fn=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
 }}
 """
@@ -1368,6 +1345,53 @@ def get_grouped_native_functions(
     )
 
 
+# Return native function declarations grouped by their namespaces.
+def get_native_function_declarations(
+    *,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    backend_indices: Dict[DispatchKey, BackendIndex],
+) -> List[str]:
+    declarations: List[str] = []
+    ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
+    newline = "\n"
+    for f in grouped_native_functions:
+        native_function_namespaces = set()
+        for backend_idx in backend_indices.values():
+            backend_metadata = backend_idx.get_kernel(f)
+            namespace = (
+                backend_metadata.cpp_namespace
+                if backend_metadata
+                else DEFAULT_KERNEL_NAMESPACE
+            )
+            native_function_namespaces.add(namespace)
+            assert (
+                len(native_function_namespaces) == 1
+            ), "Codegen only supports one namespace per operator."
+            ns_grouped_kernels[namespace].extend(
+                dest.compute_native_function_declaration(f, backend_idx)
+            )
+
+    for namespace, kernels in ns_grouped_kernels.items():
+        ns_helper = NamespaceHelper(
+            namespace_str=namespace,
+            entity_name="",
+            max_level=3,
+        )
+        # Convert to a set first to remove duplicate kernel names. Backends are
+        # allowed to repeat kernel names; only generate the declaration once!
+        ordered_kernels = list(OrderedDict.fromkeys(kernels))
+        declarations.extend(
+            f"""
+{ns_helper.prologue}
+{newline.join(ordered_kernels)}
+{ns_helper.epilogue}
+        """.split(
+                newline
+            )
+        )
+    return declarations
+
+
 def gen_aggregated_headers(
     *,
     native_functions: Sequence[NativeFunction],
@@ -1444,27 +1468,15 @@ def gen_aggregated_headers(
             ),
         },
     )
+    declarations = get_native_function_declarations(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+    )
     cpu_fm.write(
         "NativeFunctions.h",
         lambda: {
             "NativeFunctions_includes": ["#include <ATen/NativeMetaFunctions.h>"],
-            "NativeFunctions_declarations": list(
-                concatMap(
-                    # Convert to a set first to remove duplicate kernel names.
-                    # Backends are allowed to repeat kernel names; only generate the declaration once!
-                    lambda f: list(
-                        OrderedDict.fromkeys(
-                            concatMap(
-                                lambda backend_idx: dest.compute_native_function_declaration(
-                                    f, backend_idx
-                                ),
-                                backend_indices.values(),
-                            )
-                        )
-                    ),
-                    grouped_native_functions,
-                )
-            ),
+            "NativeFunctions_declarations": declarations,
         },
     )
 
@@ -1592,7 +1604,9 @@ def gen_per_operator_headers(
                     ),
                 },
             )
-
+        declarations = get_native_function_declarations(
+            grouped_native_functions=grouped_functions, backend_indices=backend_indices
+        )
         ops_fm.write_with_template(
             f"{name}_native.h",
             "NativeFunction.h",
@@ -1600,23 +1614,7 @@ def gen_per_operator_headers(
                 "extra_includes": (
                     f"#include <ATen/ops/{name}_meta.h>" if is_structured else []
                 ),
-                "native_function_declarations": list(
-                    concatMap(
-                        # Convert to a set first to remove duplicate kernel names.
-                        # Backends are allowed to repeat kernel names; only generate the declaration once!
-                        lambda f: list(
-                            OrderedDict.fromkeys(
-                                concatMap(
-                                    lambda backend_idx: dest.compute_native_function_declaration(
-                                        f, backend_idx
-                                    ),
-                                    backend_indices.values(),
-                                )
-                            )
-                        ),
-                        grouped_functions,
-                    )
-                ),
+                "native_function_declarations": declarations,
             },
         )
 
@@ -1902,16 +1900,21 @@ def gen_source_files(
                     ):
                         is_registered = True
                     # TODO: this condition is a bit questionable
+                    # (It has to do with the fact that structured kernels get generated kernels
+                    # to the Meta + CompositeExplicitAutogradNonFunctional keys).
                     elif g.structured and dispatch_key in (
                         DispatchKey.Meta,
-                        DispatchKey.CompositeExplicitAutograd,
+                        DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
                         is_registered = True
                     if not is_registered:
                         continue
 
                     headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
-                    if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                    if (
+                        dispatch_key
+                        == DispatchKey.CompositeExplicitAutogradNonFunctional
+                    ):
                         headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
                         headers.append(
@@ -1924,7 +1927,7 @@ def gen_source_files(
 
             def operator_headers() -> List[str]:
                 headers = ["#include <ATen/NativeFunctions.h>"]
-                if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                if dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
                     headers.append("#include <ATen/Functions.h>")
                 if dispatch_key in functions_keys:
                     headers.append(f"#include <ATen/{dispatch_key!s}Functions.h>")
@@ -2271,6 +2274,24 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             )
         },
     )
+    view_copy_with_symint_pairs: List[Tuple[NativeFunction, NativeFunction]] = []
+    for g1 in view_groups:
+        for g2 in view_groups:
+            if g1.view_copy is None or g2.view_copy is None:
+                continue
+            # TODO: make this more first class in the data model
+            same_base_op = str(g1.view_copy.func.name.name) == str(
+                g2.view_copy.func.name.name
+            )
+            op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
+            op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
+            if same_base_op and op1_not_symint and op2_symint:
+                view_copy_with_symint_pairs.append(
+                    (
+                        g1.view_copy,
+                        g2.view_copy,
+                    )
+                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2279,7 +2300,7 @@ TORCH_LIBRARY({custom_namespace}, m) {{
     # are expected to implement kernels for these {view}_copy kernels instead.
     # The code for {view}_copy operators in core is pretty boilerplate-heavy however,
     # so we codegen the following:
-    # (1) A CompositeExplicitAutograd kernel for every {view}_copy operator.
+    # (1) A CompositeExplicitAutogradNonFunctional kernel for every {view}_copy operator.
     #     These are never explicitly invoked by the functionalization pass,
     #     but they could theoretically be called from user code (I added these kernels for completeness,
     #     since the ops are part of the public API).
@@ -2310,6 +2331,12 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
+            ),
+            "SymIntViewCopyKernel_Definitions": list(
+                mapMaybe(
+                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
+                    view_copy_with_symint_pairs,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
@@ -2512,8 +2539,12 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
     }
+    if options.mps:
+        functions_keys.add(DispatchKey.MPS)
+
     if options.backend_whitelist:
         dispatch_keys = [
             k

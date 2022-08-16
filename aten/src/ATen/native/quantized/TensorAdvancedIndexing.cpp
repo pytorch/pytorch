@@ -35,7 +35,7 @@ static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mas
             "please use a mask with dtype torch.bool instead.");
   }
 
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -82,7 +82,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
   TORCH_CHECK(!accumulate, "index_put for quantized tensors is currently only supported for accumulate=False");
 
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of index_put_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "

@@ -78,6 +78,8 @@
 
 namespace torch {
 
+bool should_allow_numbers_as_tensors(const std::string& name);
+
 enum class ParameterType {
   TENSOR,
   SCALAR,
@@ -523,6 +525,15 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         res.push_back(
             py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
       } else {
+        // Elements of torch.Size are tensors during tracing, and we need to
+        // record extra information before they are turned into an IntArrayRef
+        if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
+          auto& var = THPVariable_Unpack(obj);
+          jit::tracer::ArgumentStash::stashIntArrayRefElem(
+              signature.params[i].name, size2, idx, var);
+          res.push_back(var.item<int64_t>());
+          continue;
+        }
         res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
       }
     } catch (const std::exception& e) {
@@ -662,10 +673,15 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
+inline at::Layout toLayout(PyObject* obj) {
+  const auto layout = reinterpret_cast<THPLayout*>(obj);
+  return layout->layout;
+}
+
 inline at::Layout PythonArgs::layout(int i) {
   if (!args[i])
     return signature.params[i].default_layout;
-  return reinterpret_cast<THPLayout*>(args[i])->layout;
+  return toLayout(args[i]);
 }
 
 inline at::Layout PythonArgs::layoutWithDefault(

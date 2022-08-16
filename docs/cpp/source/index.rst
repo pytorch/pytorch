@@ -42,8 +42,7 @@ look as follows:
   auto c = a + b.to(at::kInt);
 
 This ``Tensor`` class and all other symbols in ATen are found in the ``at::``
-namespace, documented
-`here <https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at>`_.
+namespace.
 
 Autograd
 --------
@@ -92,18 +91,8 @@ frontend includes the following:
 
 See `this document <https://pytorch.org/cppdocs/frontend.html>`_ for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
-namespace related to the C++ Frontend include `torch::nn
-<https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
-`torch::optim
-<https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim>`_,
-`torch::data
-<https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data>`_,
-`torch::serialize
-<https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize>`_,
-`torch::jit
-<https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit>`_
-and `torch::python
-<https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
+namespace related to the C++ Frontend include `torch::nn`,
+`torch::optim`, `torch::data`, `torch::serialize`, `torch::jit`, and `torch::python`.
 Examples of the C++ frontend can be found in `this repository
 <https://github.com/pytorch/examples/tree/master/cpp>`_ which is being
 expanded on a continuous and active basis.
@@ -136,8 +125,7 @@ about this by following `this
 <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ link. The second
 API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
-invoked from C++ during inference. Lastly, the `torch::jit::compile
-<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a176d99fd5bf0233119a5f49c07a1d01d.html#exhale-function-namespacetorch-1-1jit-1a176d99fd5bf0233119a5f49c07a1d01d>`_
+invoked from C++ during inference. Lastly, the `torch::jit::compile`
 function may be used to access the TorchScript compiler directly from C++.
 
 C++ Extensions
@@ -161,7 +149,6 @@ Contents
 
    installing
    frontend
-   api/library_root
 
 .. toctree::
   :glob:
@@ -169,13 +156,6 @@ Contents
   :caption: Notes
 
   notes/*
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
 
 Acknowledgements
 ----------------

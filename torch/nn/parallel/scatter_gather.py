@@ -1,7 +1,15 @@
 import torch
 from ._functions import Scatter, Gather
+import warnings
+
+__all__ = ['scatter', 'scatter_kwargs', 'gather']
 
 def is_namedtuple(obj):
+    # Check if type was created from collections.namedtuple or a typing.NamedTuple.
+    warnings.warn("is_namedtuple is deprecated, please use the python checks instead")
+    return _is_namedtuple(obj)
+
+def _is_namedtuple(obj):
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.
     return (
         isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")

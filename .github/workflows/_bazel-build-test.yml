@@ -11,6 +11,13 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -68,7 +75,6 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -80,7 +86,6 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -104,7 +109,6 @@ jobs:
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         env:
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -117,8 +121,14 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
+
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          export PR_BODY="${PR_BODY//[$'\n\r']}"
+
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
@@ -128,9 +138,10 @@ jobs:
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
@@ -163,7 +174,6 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1

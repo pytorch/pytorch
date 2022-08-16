@@ -5,6 +5,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['ASGD', 'asgd']
 
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.

@@ -16,6 +16,7 @@ from test_pytorch_common import (
     TestCase,
     flatten,
     run_tests,
+    skipIfCaffe2,
     skipIfNoLapack,
 )
 
@@ -35,7 +36,6 @@ from torch.onnx.symbolic_helper import (
     _get_tensor_sizes,
     parse_args,
 )
-from torch.testing._internal.common_utils import skipIfCaffe2
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -845,6 +845,16 @@ class TestOperators(TestCase):
             lambda data, index: data.scatter_add(1, indices, values),
             (data, (indices, values)),
             opset_version=11,
+        )
+
+    def test_scatter_add_opset16(self):
+        data = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[0, 0], [1, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.assertONNX(
+            lambda data, index: data.scatter_add(1, indices, values),
+            (data, (indices, values)),
+            opset_version=16,
         )
 
     def test_master_opset(self):

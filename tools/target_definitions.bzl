@@ -153,7 +153,7 @@ def add_torch_libs():
         ] if enable_flatbuffer else []),
         link_whole = True,
         include_directories = include_directories,
-        propagated_pp_flags = propagated_pp_flags_cpu + (["-DENABLE_FLATBUFFER"] if enable_flatbuffer else []),
+        propagated_pp_flags = propagated_pp_flags_cpu,
         exported_deps = (
             [
                 ":ATen-cpu",
@@ -193,6 +193,9 @@ def add_torch_libs():
             ("llvm-fb", None, "LLVMTarget"),
             ("llvm-fb", None, "LLVMTransformUtils"),
             ("llvm-fb", None, "LLVMVectorize"),
+            ("llvm-fb", None, "LLVMAArch64AsmParser"),
+            ("llvm-fb", None, "LLVMAArch64CodeGen"),
+            ("llvm-fb", None, "LLVMAArch64Info"),
             ("llvm-fb", None, "LLVMWebAssemblyAsmParser"),
             ("llvm-fb", None, "LLVMWebAssemblyCodeGen"),
             ("llvm-fb", None, "LLVMWebAssemblyInfo"),
@@ -253,13 +256,13 @@ def add_torch_libs():
             "//caffe2/torch/lib/libshm:libshm",
             "//gloo:gloo_gpu_cuda",
             "//tensorpipe:tensorpipe_cuda",
-        ],
+        ] + get_nccl_dependency(),
         exported_external_deps = [
             ("cudnn", None, "cudnn-lazy"),
             ("cuda", None, "nvToolsExt-lazy"),
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
-        ] + get_nccl_dependency(),
+        ],
         compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )

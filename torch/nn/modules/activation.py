@@ -9,6 +9,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 
+__all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsigmoid', 'Tanh',
+           'SiLU', 'Mish', 'Hardswish', 'ELU', 'CELU', 'SELU', 'GLU', 'GELU', 'Hardshrink', 'LeakyReLU',
+           'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
+           'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.

@@ -4,6 +4,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -173,10 +174,14 @@ struct type_caster<at::Device> {
   }
 };
 
-// Pybind11 bindings for our optional type.
+// Pybind11 bindings for our optional and variant types.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
+
+template <typename... Ts>
+struct C10_MPARK_VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
+    : variant_caster<c10::variant<Ts...>> {};
 } // namespace detail
 } // namespace pybind11
 

@@ -95,6 +95,7 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
 }
 
 TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
+  FLAGS_ltc_enable_symbolic_shapes = true;
   auto xc = torch::rand({10});
   auto x = xc.to(kLazy);
   const size_t Y_DIM = 3;
@@ -105,6 +106,7 @@ TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
   ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
   // shape inference assumes narrow_copy can copy the whole tensor
   AllClose(z.cpu(), zc);
+  FLAGS_ltc_enable_symbolic_shapes = false;
 }
 
 TEST_F(LazyOpsTest, TestScalarTensor) {

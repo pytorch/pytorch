@@ -47,7 +47,8 @@ TORCH_API mobile::Module initialize_mobile_module(
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device = c10::nullopt);
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
 
 // Load a mobile::Module from a filepath.
 // This function does steps 1+2+3 described above.
@@ -56,23 +57,32 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 // versions above.
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt);
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
 
 TORCH_API void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files);
 
-TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
-    const char* filename);
-
-TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
-    std::istream& in);
-
 TORCH_API uint64_t get_bytecode_version(std::istream& in);
 TORCH_API uint64_t get_bytecode_version(const std::string& filename);
+TORCH_API uint64_t get_bytecode_version_from_bytes(char* flatbuffer_content);
 
 TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
     char* flatbuffer_content);
+
+// The methods below are less efficient because it need to read the stream in
+// its entirity to a buffer
+TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
+    std::istream& in,
+    c10::optional<at::Device> device = c10::nullopt,
+    ExtraFilesMap* extra_files = nullptr);
+
+// This function will make the capabilities to load
+// Module as a flatbuffer file available for use by _load_for_mobile
+// and friends. This is NOT needed if using the other functions
+// in this file directly.
+TORCH_API bool register_flatbuffer_loader();
 
 class TORCH_API FlatbufferLoader {
  public:

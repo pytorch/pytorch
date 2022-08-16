@@ -160,8 +160,7 @@ class AllocationInserter : public kir::ExprMutator {
     std::vector<Val*> alloc_dims;
 
     for (const auto id : maybe_rfactor_domain) {
-      if (id->isReduction() || id->isStride() ||
-          id->getIterType() == IterType::BroadcastWithoutStride) {
+      if (id->isReduction() || id->isStride() || id->isBroadcast()) {
         continue;
       }
       auto extent = id->extent();

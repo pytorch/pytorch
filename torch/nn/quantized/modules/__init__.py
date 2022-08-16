@@ -1,7 +1,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax
+from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention
 from .dropout import Dropout
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
@@ -10,6 +10,7 @@ from .conv import Conv1d, Conv2d, Conv3d
 from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
+from .rnn import LSTM
 
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
@@ -109,7 +110,9 @@ __all__ = [
     'LayerNorm',
     'LeakyReLU',
     'Linear',
+    'LSTM',
     'MaxPool2d',
+    'MultiheadAttention',
     'Quantize',
     'ReLU6',
     'Sigmoid',

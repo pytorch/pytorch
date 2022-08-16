@@ -294,9 +294,14 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
-  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
-              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name, const bool allow_low_precision_dtypes=true) {
+  auto dtype = t.scalar_type();
+  TORCH_CHECK((at::isFloatingType(dtype) || at::isComplexType(dtype)),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", dtype);
+  if (!allow_low_precision_dtypes) {
+    TORCH_CHECK(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
+                f_name, ": Low precision dtypes not supported. Got ", dtype);
+  }
 }
 
 /*

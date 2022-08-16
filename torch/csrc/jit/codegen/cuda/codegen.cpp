@@ -201,10 +201,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const auto nDims = std::count_if(
           maybe_rfactor_domain.begin(),
           maybe_rfactor_domain.end(),
-          [](const IterDomain* id) {
-            return !id->isReduction() &&
-                id->getIterType() != IterType::BroadcastWithoutStride;
-          });
+          [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
             << varName(tv);
     }
@@ -1583,6 +1580,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else {
       func_args.arg(read_pred);
     }
+
+    func_args.arg(genInline(grouped_grop->entrance_index()));
+    func_args.arg(genInline(grouped_grop->entrances()));
 
     addProfileArguments(func_args, grouped_grop);
 

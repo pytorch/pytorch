@@ -344,7 +344,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       remove_invalid = true;
     }
   }
-  if (remove_invalid) {
+  if (remove_invalid || max_plans) {
     cudnn_frontend::executionPlans_t new_valid_plans;
     unsigned int plan_count = 0;
     for (auto &plan : valid_plans) {
@@ -370,7 +370,8 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr, benchmark_limit);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
@@ -400,7 +401,8 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr, benchmark_limit);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)

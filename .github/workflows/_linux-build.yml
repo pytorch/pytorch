@@ -21,6 +21,13 @@ on:
         type: boolean
         default: false
         description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     outputs:
       docker-image:
@@ -85,7 +92,6 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -102,7 +108,6 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \

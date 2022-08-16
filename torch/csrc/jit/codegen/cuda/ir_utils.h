@@ -126,6 +126,14 @@ auto filterByType(const ContainerType& inputs) {
 
 //! Returns a list of new-to-old mappings.
 //!
+//! This funcion canonicalizes the dimensions and validates that multiple old
+//! dimension are mapped to the same new dimension.
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims);
+
+//! Returns a list of new-to-old mappings.
+//!
 //! The input map does not need to be complete. Missing axes are
 //! assumed not to be affected.
 //!

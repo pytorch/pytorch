@@ -7,6 +7,9 @@ import collections
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
 
+__all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
+           'type_before_parametrizations', 'transfer_parametrizations_and_params']
+
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 
@@ -254,6 +257,8 @@ class ParametrizationList(ModuleList):
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         # Unpack the originals for the first parametrization
         if self.is_tensor:
             x = self[0](self.original)
@@ -325,6 +330,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -341,6 +348,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
