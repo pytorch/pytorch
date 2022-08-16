@@ -16,8 +16,10 @@ from contextlib import contextmanager
 @contextmanager
 def suspend_mode(mode):
     torch._C._set_torch_dispatch_mode(None)
-    yield
-    torch._C._set_torch_dispatch_mode(mode)
+    try:
+        yield
+    finally:
+        torch._C._set_torch_dispatch_mode(mode)
 
 
 def trace_cond(proxy_mode, func_overload, args, kwargs=None):

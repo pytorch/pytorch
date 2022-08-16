@@ -23,11 +23,10 @@ class PyDispatcher:
     def __init__(self):
         self.current_dispatching_op = None
         self.already_dispatched_keys = None
-        self.current_key = None
 
     def call(self, operator, args, kwargs):
         try:
-            key = compute_dispatch_key(operator, args, kwargs, self.current_key)
+            key = compute_dispatch_key(operator, args, kwargs)
             self.record_dispatch(key, operator)
             return dispatch(key, operator, args, kwargs)
         finally:
@@ -36,7 +35,7 @@ class PyDispatcher:
     def redispatch(self, operator, args, kwargs):
         # Redispatch doesn't go to the top
         assert operator == self.currently_dispatching_op
-        key = compute_dispatch_key(operator, args, kwargs, self.current_key, self.already_dispatched_keys)
+        key = compute_dispatch_key(operator, args, kwargs, self.already_dispatched_keys)
         self.record_dispatch(key, operator)
         return dispatch(key, operator, args, kwargs)
 
@@ -46,7 +45,6 @@ class PyDispatcher:
 
     def record_dispatch(self, dispatch_key, operator):
         self.currently_dispatching_op = operator
-        self.current_key = dispatch_key
         if self.already_dispatched_keys is None:
             self.already_dispatched_keys = DispatchKeySet(dispatch_key)
         else:
@@ -56,7 +54,7 @@ class PyDispatcher:
 dispatcher_singleton = PyDispatcher()
 
 
-def compute_dispatch_key(operator, args, kwargs, current_key, additional_exclude=None):
+def compute_dispatch_key(operator, args, kwargs, additional_exclude=None):
     tensors = get_tensors(args, kwargs)
     dispatch_key = key_extractor(tensors, additional_exclude)
     return dispatch_key
