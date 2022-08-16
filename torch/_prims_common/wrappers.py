@@ -314,3 +314,21 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
+
+def wrap_tensor_meta(f):
+    def wrap(t):
+        if (
+            isinstance(t, torch.Tensor)
+            and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
+        ):
+            return FakeTensor.from_tensor(t, get_prim_fake_mode())
+        else:
+            return t
+
+    def wrapper(*args, **kwargs):
+        wrapped_args = tree_map(wrap, args)
+        wrapped_kwargs = tree_map(wrap, kwargs)
+        return f(*wrapped_args, **wrapped_kwargs)
+
+    return wrapper

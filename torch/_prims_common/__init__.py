@@ -990,6 +990,19 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     ALWAYS_BOOL = (3,)
 
 
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
