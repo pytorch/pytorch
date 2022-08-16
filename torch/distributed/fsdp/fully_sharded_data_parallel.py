@@ -1866,7 +1866,7 @@ class FullyShardedDataParallel(nn.Module):
         # as needed. The storage may contain padding elements so that it is
         # evenly divisible by world_size, although these padding elements will
         # be removed before the relevant computation.
-        if handle._uses_sharded_strategy:  # type: ignore[attr-defined]
+        if handle.uses_sharded_strategy:  # type: ignore[attr-defined]
             # We set p._full_param_padded's dtype to the desired parameter dtype
             # in the case of mixed precision. This is so that when we all_gather
             # into full_param_padded it can occur without issues and result in
@@ -2360,7 +2360,7 @@ class FullyShardedDataParallel(nn.Module):
         ):
             if (
                 self._fsdp_wrapped_module.flat_param is not None and
-                not self._fsdp_wrapped_module.handle._uses_sharded_strategy
+                not self._fsdp_wrapped_module.handle.uses_sharded_strategy
             ):
                 raise RuntimeError(
                     "sharded_state_dict/local_state_dict can only be called "
@@ -2469,7 +2469,7 @@ class FullyShardedDataParallel(nn.Module):
         if not self._fsdp_wrapped_module.has_params:
             return
 
-        if not self._fsdp_wrapped_module.handle._uses_sharded_strategy:
+        if not self._fsdp_wrapped_module.handle.uses_sharded_strategy:
             raise RuntimeError(
                 "load_sharded_state_dict can only be called when parameters "
                 "are flatten and sharded."
@@ -2940,7 +2940,7 @@ class FullyShardedDataParallel(nn.Module):
             with contextlib.ExitStack() as stack:
                 # Invariant: rank == 0 or !rank0_only
                 for handle in self._handles:
-                    if offload_to_cpu and handle._uses_sharded_strategy:
+                    if offload_to_cpu and handle.uses_sharded_strategy:
                         stack.enter_context(handle.to_cpu())
                 # TODO (awgu): This FPW call assumes 1 `FlatParameter`
                 stack.enter_context(self._fsdp_wrapped_module.unflatten_as_params())
@@ -2967,7 +2967,7 @@ class FullyShardedDataParallel(nn.Module):
         for handle in handles:
             # For `NO_SHARD`, `_local_shard` is the unsharded flattened
             # parameter as well
-            if not handle._uses_sharded_strategy:
+            if not handle.uses_sharded_strategy:
                 continue
             assert (
                 handle.flat_param.ndim == 1
@@ -3170,7 +3170,7 @@ class FullyShardedDataParallel(nn.Module):
                 )
 
             free_unsharded_flat_param = (
-                (self._sync_gradients and handle._uses_sharded_strategy)
+                (self._sync_gradients and handle.uses_sharded_strategy)
                 or handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
             )
             self._reshard([handle], [free_unsharded_flat_param])
@@ -3213,7 +3213,7 @@ class FullyShardedDataParallel(nn.Module):
                     param.grad.div_(self.gradient_predivide_factor)
 
                 grad = param.grad.data
-                if handle._uses_sharded_strategy:
+                if handle.uses_sharded_strategy:
                     # We clear `param.grad` to permit repeated gradient
                     # computations when this FSDP module is called multiple times.
                     # This is to avoid a race among multiple re-entrant backward
@@ -3402,7 +3402,7 @@ class FullyShardedDataParallel(nn.Module):
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
                         p_assert(
-                            not handle._uses_sharded_strategy or not p._post_backward_called,
+                            not handle.uses_sharded_strategy or not p._post_backward_called,
                             "All sharded parameters that received a gradient "
                             "should use `_saved_grad_shard`"
                         )

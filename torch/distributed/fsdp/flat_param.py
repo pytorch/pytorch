@@ -389,7 +389,7 @@ class FlatParamHandle:
         now, we decouple ``FlattenParamsWrapper` from a process group, but this
         makes the process-group-related attributes not necessarily defined.
         """
-        if not self._uses_sharded_strategy:
+        if not self.uses_sharded_strategy:
             return
         flat_param = self.flat_param
         self.process_group = process_group
@@ -597,7 +597,7 @@ class FlatParamHandle:
             communication and is what should be all-gathered. This means that
             it matches the dtype of the expected unsharded parameter.
         """
-        if self._uses_sharded_strategy and not self.needs_unshard():
+        if self.uses_sharded_strategy and not self.needs_unshard():
             # Do not prepare the sharded flattened parameter for an all-gather
             # if the handle does not need to be unsharded
             return
@@ -638,7 +638,7 @@ class FlatParamHandle:
         mixed precision, then the parameter is forced to full precision.
         """
         if not self.needs_unshard():
-            if self._uses_sharded_strategy:
+            if self.uses_sharded_strategy:
                 # The handle may have been resharded without freeing the padded
                 # unsharded flattened parameter, in which case we need to
                 # switch to using the unsharded parameter
@@ -650,7 +650,7 @@ class FlatParamHandle:
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flattened parameter needs to be unsharded."""
-        if not self._uses_sharded_strategy:
+        if not self.uses_sharded_strategy:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
@@ -739,7 +739,7 @@ class FlatParamHandle:
         shard if needed and preparing the gradient for the pre-backward if
         ``prepare_gradient`` and a gradient exists.
         """
-        if self._uses_param_mixed_precision and self._uses_sharded_strategy:
+        if self._uses_param_mixed_precision and self.uses_sharded_strategy:
             self._free_low_precision_sharded_param()
         if prepare_gradient:
             p_assert(
@@ -863,7 +863,7 @@ class FlatParamHandle:
         # we delay the free until the reshard.
         if (
             self._uses_param_mixed_precision
-            and not self._uses_sharded_strategy
+            and not self.uses_sharded_strategy
             and not self._force_full_precision  # did not use the low precision shard
         ):
             self._free_low_precision_sharded_param()
@@ -1010,7 +1010,7 @@ class FlatParamHandle:
     # CHECKS & INVARIANTS #
     #######################
     def _check_sharded_strategy(self):
-        p_assert(self._uses_sharded_strategy, "Expects sharded strategy")
+        p_assert(self.uses_sharded_strategy, "Expects sharded strategy")
 
     def _check_on_compute_device(self, tensor: Tensor):
         p_assert(
@@ -1050,7 +1050,7 @@ class FlatParamHandle:
     # PROPERTIES #
     ##############
     @property
-    def _uses_sharded_strategy(self) -> bool:
+    def uses_sharded_strategy(self) -> bool:
         return self._config.sharding_strategy != HandleShardingStrategy.NO_SHARD
 
     @property
