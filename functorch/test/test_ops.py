@@ -1053,40 +1053,40 @@ class TestOperators(TestCase):
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
-        xfail('_masked.log_softmax', ''),
-        xfail('_masked.softmax', ''),
-        xfail('_masked.softmin', ''),
-        xfail('cdist', ''),
-        xfail('cholesky', ''),
-        xfail('eig', ''),
-        xfail('logcumsumexp', ''),
-        xfail('nn.functional.embedding_bag', ''),
-        xfail('nn.functional.grid_sample', ''),
-        xfail('nn.functional.hardsigmoid', ''),
-        xfail('nn.functional.huber_loss', ''),
-        xfail('nn.functional.instance_norm', ''),
-        xfail('nn.functional.logsigmoid', ''),
-        xfail('nn.functional.softmin', ''),
-        xfail('nn.functional.softmin', 'with_dtype'),
-        xfail('renorm', ''),
-        xfail('symeig', ''),
-        xfail('nn.functional.multilabel_margin_loss', ''),
-        xfail('nn.functional.multilabel_soft_margin_loss', ''),
-        xfail('scatter_reduce', 'amax'),
-        xfail('scatter_reduce', 'amin'),
-        xfail('nn.functional.soft_margin_loss', ''),
-        xfail('nn.functional.pdist', ''),
-        xfail('scatter_reduce', 'sum'),
-        xfail('nn.functional.multi_margin_loss', ''),
-        xfail('scatter_reduce', 'mean'),
-        xfail('scatter_reduce', 'prod'),
+        xfail('_masked.log_softmax', ''),  # NYI: forward-AD for _log_softmax_backward_data
+        xfail('_masked.softmax', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
+        xfail('cholesky', ''),  # NYI: forward-AD for cholesky
+        xfail('eig', ''),  # NYI: forward-AD for eig
+        xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
+        xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
+        xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
+        xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
+        xfail('nn.functional.instance_norm', ''),  # NYI: forward AD for native_batch_norm_backward
+        xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
+        xfail('nn.functional.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('nn.functional.softmin', 'with_dtype'),  # NYI: forward-AD for _softmax_backward_data
+        xfail('renorm', ''),  # NYI: forward AD for renorm
+        xfail('symeig', ''),  # NYI: forward AD for symeig
+        xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
+        xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
+        xfail('scatter_reduce', 'amax'),  # NYI: forward-AD for scatter_reduce
+        xfail('scatter_reduce', 'amin'),  # NYI: forward-AD for scatter_reduce
+        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
+        xfail('scatter_reduce', 'sum'),  # NYI: forward-AD for scatter_reduce
+        xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
+        xfail('scatter_reduce', 'mean'),  # NYI: forward-AD for scatter_reduce
+        xfail('scatter_reduce', 'prod'),  # NYI: forward-AD for scatter_reduce
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
-        xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', ''),
+        xfail('native_layer_norm', ''),  # NYI: forward-AD for native_layer_norm_backward
+        xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         skip('as_strided_scatter', ''),  # seems flaky
-        xfail('segment_reduce', 'offsets'),
-        xfail('index_reduce', ''),
-        xfail('segment_reduce', 'lengths'),
+        xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
+        xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
+        xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
