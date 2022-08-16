@@ -50,6 +50,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to GitHub Container Registry
         if: ${{ env.WITH_PUSH == 'true' }}
         uses: docker/login-action@v2
