@@ -664,7 +664,7 @@ class DeviceCachingAllocator {
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
       TORCH_CHECK_WITH(
-          CUDAOutOfMemoryError,
+          OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
@@ -1407,9 +1407,12 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     // because of std::unique_ptr, block cannot be trivially copied
-    Block key(0, 0, 0);
-    std::memcpy(&key, &p.search_key, sizeof(Block));
-    key.history.release();
+    Block key(
+        p.search_key.device,
+        p.search_key.stream,
+        p.search_key.size,
+        p.search_key.pool,
+        p.search_key.ptr);
     key.size = (key.size < CachingAllocatorConfig::max_split_size())
         ? CachingAllocatorConfig::max_split_size()
         : key.size;
@@ -1796,7 +1799,7 @@ struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
-        CUDAOutOfMemoryError,
+        OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;

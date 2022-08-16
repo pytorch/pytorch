@@ -16,8 +16,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
+from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
@@ -292,9 +292,12 @@ vjp_fail = {
 
 
 class TestOperators(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
+        xfail('chalf', '', device_type='cpu'),
+        skip('as_strided_scatter', ''),  # seems flaky
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -339,7 +342,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
         skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
@@ -429,10 +432,12 @@ class TestOperators(TestCase):
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
+        xfail('as_strided_scatter', ''),
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -472,10 +477,12 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
+        xfail('native_layer_norm', ''),
+        xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -517,7 +524,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapvjpvjp(self, device, dtype, op):
         self.skipTest("Skipped; these tests take too long")
@@ -609,9 +616,15 @@ class TestOperators(TestCase):
         # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
+
+        xfail('chalf', ''),
+        xfail('sparse.sampled_addmm', ''),
+        xfail('as_strided_scatter', ''),
+        xfail('index_reduce', ''),
+        xfail('nn.functional.dropout3d', ''),
     })
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
         tol1('linalg.svd',
@@ -647,6 +660,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.dropout2d', ''),
+        skip('nn.functional.dropout3d', ''),
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -690,7 +704,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
     }
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
@@ -723,7 +737,7 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
@@ -776,6 +790,13 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('logdet'),  # _linalg_slogdet doesn't have batching rule
         xfail('linalg.slogdet'),  # _linalg_slogdet doesn't have batching rule
+        xfail('linalg.lu', ''),
+        xfail('linalg.lu_solve', ''),
+        xfail('linalg.solve_ex', ''),
+        xfail('nn.functional.dropout3d', ''),
+        xfail('as_strided_scatter', ''),
+        xfail('_masked.cumprod', ''),
+        xfail('linalg.vecdot', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -802,7 +823,7 @@ class TestOperators(TestCase):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
@@ -888,6 +909,19 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'amin'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
+        xfail('linalg.lu', ''),
+        xfail('linalg.lu_solve', ''),
+        xfail('chalf', ''),
+        xfail('index_reduce', ''),
+        xfail('linalg.vander', ''),
+        xfail('linalg.solve_ex', ''),
+        xfail('nn.functional.dropout3d', ''),
+        xfail('as_strided_scatter', ''),
+        xfail('segment_reduce', 'offsets'),
+        xfail('_masked.cumprod', ''),
+        xfail('linalg.vecdot', ''),
+        xfail('segment_reduce', 'lengths'),
+        xfail('sparse.sampled_addmm', ''),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -917,7 +951,7 @@ class TestOperators(TestCase):
 
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         skip('bernoulli', ''),  # vjpvmap testing can't handle randomness
         skip('normal', ''),  # vjpvmap testing can't handle randomness
@@ -947,6 +981,9 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('nn.functional.dropout3d', ''),
+        xfail('as_strided_scatter', ''),
+        xfail('sparse.sampled_addmm', ''),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1014,7 +1051,7 @@ class TestOperators(TestCase):
         else:
             self.assertEqual(jacobian_jvp, jacobian_vjp)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
@@ -1049,6 +1086,12 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
+        xfail('native_layer_norm', ''),
+        xfail('sparse.sampled_addmm', ''),
+        skip('as_strided_scatter', ''),  # seems flaky
+        xfail('segment_reduce', 'offsets'),
+        xfail('index_reduce', ''),
+        xfail('segment_reduce', 'lengths'),
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1292,7 +1335,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
@@ -1315,6 +1358,10 @@ class TestOperators(TestCase):
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
+        skip('linalg.multi_dot', '', device_type='cpu'),
+        skip('sparse.sampled_addmm', ''),
+        skip('native_layer_norm', '', device_type='cpu'),
+        xfail('as_strided_scatter', ''),
     })
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
