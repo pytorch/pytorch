@@ -314,9 +314,10 @@ def match_differentiability_info(
 
     # use the basename for matching in case the SymInt overload
     # is based on some other overload
-    int_overload_info_by_opname = {
-        info.func.func.name.name : info for info in differentiability_infos if "generated" not in info.func.tags and "symint_ver_needed" in info.func.tags
-    }
+
+    # int_overload_info_by_opname = {
+    #     info.func.func.name.name : info for info in differentiability_infos if "generated" not in info.func.tags and "symint_ver_needed" in info.func.tags
+    # }
 
 
     def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:

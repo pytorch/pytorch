@@ -4599,7 +4599,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO_t,
     const Tensor& save_mean_t,
     const Tensor& save_invstd_t,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input_t.sizes();
@@ -4730,6 +4730,21 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
+}
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
+    const Tensor& input_t,
+    const c10::optional<Tensor>& gamma,
+    const Tensor& ggI,
+    const Tensor& ggG,
+    const Tensor& ggB,
+    const Tensor& gO_t,
+    const Tensor& save_mean_t,
+    const Tensor& save_invstd_t,
+    c10::IntArrayRef normalized_shape,
+    std::array<bool, 3> output_mask) {
+    
+  return layer_norm_double_backward(input_t, gamma, ggI, ggG, ggB, gO_t, save_mean_t, save_invstd_t, c10::SymIntArrayRef::fromIntArrayRef(normalized_shape), output_mask);
 }
 
 std::tuple<Tensor, Tensor, Tensor>

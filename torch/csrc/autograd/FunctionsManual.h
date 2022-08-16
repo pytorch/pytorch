@@ -768,6 +768,17 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& save_invstd,
     IntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
+std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
+    const Tensor& input,
+    const c10::optional<Tensor>& gamma,
+    const Tensor& ggI,
+    const Tensor& ggG,
+    const Tensor& ggB,
+    const Tensor& gO,
+    const Tensor& save_mean,
+    const Tensor& save_invstd,
+    c10::SymIntArrayRef normalized_shape,
+    std::array<bool, 3> output_mask);
 
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,

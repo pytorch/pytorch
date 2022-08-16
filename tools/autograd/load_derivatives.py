@@ -2,6 +2,8 @@
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
+from copy import deepcopy
+import copy
 import re
 import dataclasses
 from collections import defaultdict
@@ -38,6 +40,8 @@ from torchgen.api.types import (
 from torchgen.context import with_native_function
 from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
 from torchgen.model import (
+    BaseTy,
+    BaseType,
     FunctionSchema,
     NativeFunction,
     NativeFunctionsViewGroup,
@@ -83,10 +87,54 @@ def load_derivatives(
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
 
+
+        funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
+
+
+        print ("load_derivatives")
+        #symint_overloads = []
+        for f in funcs:
+            if "symint_ver_needed" in f.tags:
+                #new_func = ints_to_symints_nativefunction(f)
+                #symint_overloads.append(new_func)
+                print("=======")
+                print(f.func.view_signature())
+                # print("%%%%%%%%%%%%%%")
+                # print(new_func.func.view_signature())
+
+
+
+
+
+        # TODO: move this to parse_native_yaml
+        #funcs.extend(symint_overloads)
+
+        sig_to_schema = {str(f.func) : f.func for f in funcs if "symint_ver_needed" in f.tags and not "generated" in f.tags }
+
         with open(derivatives_yaml_path, "r") as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
+
+            new_defns = []
+            for defn in definitions:
+                if defn['name'] in sig_to_schema:
+                    new_defn = copy.deepcopy(defn)
+                    new_schema = sig_to_schema[defn['name']].replace_with_base_type(BaseType(BaseTy.int), BaseType(BaseTy.SymInt))
+                    new_op = dataclasses.replace(new_schema.name, overload_name='SymInt')
+                    new_schema = dataclasses.replace(new_schema, name=new_op)
+                    new_defn['name'] = str(new_schema)
+                    for (k, v) in defn.items():
+                        if k != 'name':
+                            new_defn[k] = v.replace('sizes()', 'sym_sizes()')
+                            new_defn[k]
+                        if "result" in k:
+                            del(new_defn[k]) # = f'not_implemented("native_layer_norm_symint {k}")'
+                    new_defns.append(new_defn)
+       
+
+            definitions.extend(new_defns)
+
+
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
@@ -129,17 +177,17 @@ def load_derivatives(
         infos += add_view_copy_derivatives(infos, view_groups)
 
 
-        symint_overloads = []
-        for info in infos:
-            f = info.func
-            if f.tags and "symint_ver_needed" in f.tags:
-                new_func = ints_to_symints_nativefunction(f)
-                new_derivatives = tuple([dataclasses.replace(d, formula = d.formula.replace('sizes()', 'sym_sizes()')) for d in info.derivatives])
-                new_info = dataclasses.replace(info, derivatives=new_derivatives)
-                new_info = dataclasses.replace(new_info, func=new_func)
-                symint_overloads.append(new_info)
+        # symint_overloads = []
+        # for info in infos:
+        #     f = info.func
+        #     if f.tags and "symint_ver_needed" in f.tags:
+        #         new_func = ints_to_symints_nativefunction(f)
+        #         new_derivatives = tuple([dataclasses.replace(d, formula = d.formula.replace('sizes()', 'sym_sizes()')) for d in info.derivatives])
+        #         new_info = dataclasses.replace(info, derivatives=new_derivatives)
+        #         new_info = dataclasses.replace(new_info, func=new_func)
+        #         symint_overloads.append(new_info)
 
-        infos.extend(symint_overloads)
+        # infos.extend(symint_overloads)
         #raise RuntimeError("Boom Boom!")
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos

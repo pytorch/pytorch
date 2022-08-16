@@ -314,7 +314,7 @@ def add_generated_native_functions(
             #print(f"In symint_ver_needed {f.symint_args}")
             new_func = ints_to_symints_nativefunction(f)
             symint_overloads.append(new_func)
-            #print(f"{f.func.signature()} {new_func.func.signature()}")
+            print(f"2222 {f.func.signature()} {new_func.func.signature()}")
             #raise RuntimeError("Boo!")
     rs.extend(symint_overloads)
 
