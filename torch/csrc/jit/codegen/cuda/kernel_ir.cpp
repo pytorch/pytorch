@@ -93,8 +93,15 @@ GridSync::GridSync(
       sync_dims_(sync_dims),
       sync_buffer_(sync_buffer) {}
 
-CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::CpAsyncWait) {
+CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
+    : Expr(passkey, ExprType::CpAsyncWait), keep_stages_(keep_stages) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey)
+    : Expr(passkey, ExprType::CpAsyncCommit) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

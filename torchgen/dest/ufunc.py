@@ -25,6 +25,7 @@ from torchgen.model import (
     ScalarType,
     UfuncKey,
 )
+from torchgen.utils import OrderedSet
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -169,7 +170,7 @@ def compute_ufunc_cuda_functors(
         # functors per dtype, which is awful, so we're not going to do it unless
         # someone really forces us to)
         ufunc_name = None
-        supported_dtypes = set()
+        supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for lk in [UfuncKey.ScalarOnly, UfuncKey.Generic]:
             if lk not in loops:
                 continue
@@ -286,14 +287,13 @@ def compute_ufunc_cuda(g: NativeFunctionsGroup) -> str:
 
     # Next, build the conditionals
     sig = StructuredImplSignature(g, ufunc.kernel_name(g, DispatchKey.CUDA))
-    supported_dtypes = sorted(ufunctor_sigs.keys(), key=lambda x: str(x))
     dtype_cases = []
-    for dtype in supported_dtypes:
+    for dtype, inner_ufunc_sigs in ufunctor_sigs.items():
         dtype_cases.append(
             f"""
 AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
-    {compute_ufunc_cuda_dtype_body(g, dtype, ufunctor_sigs[dtype], sig.arguments())}
+    {compute_ufunc_cuda_dtype_body(g, dtype, inner_ufunc_sigs, sig.arguments())}
   }}
 )
 """
@@ -515,14 +515,13 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
                     )
 
     # Build the conditionals
-    supported_dtypes = sorted(ufunc_sigs.keys(), key=lambda x: str(x))
     dtype_cases = []
-    for dtype in supported_dtypes:
+    for dtype, inner_ufunc_sigs in ufunc_sigs.items():
         dtype_cases.append(
             f"""
 AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
-    {compute_ufunc_cpu_dtype_body(g, dtype, ufunc_sigs[dtype], stub_sig.arguments())}
+    {compute_ufunc_cpu_dtype_body(g, dtype, inner_ufunc_sigs, stub_sig.arguments())}
   }}
 )
 """
