@@ -477,7 +477,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
-        xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None (or an undefined Tensor in C++) for argument #1 'other'
+        xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
