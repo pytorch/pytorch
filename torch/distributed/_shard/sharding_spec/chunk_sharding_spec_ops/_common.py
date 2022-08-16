@@ -13,7 +13,6 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 from torch.distributed.nn.functional import (
     _all_gather_base,
-    all_gather,
     all_reduce,
     all_to_all_single,
 )
