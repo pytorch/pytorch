@@ -147,7 +147,7 @@ def _unary_helper(fn, args, kwargs, inplace):
         return _wrap_result(result_data, mask_args[0])
 
 
-def torch_unary(fn_name):
+def _torch_unary(fn_name):
     fn = getattr(torch.ops.aten, fn_name)
 
     def unary_fn(*args, **kwargs):
@@ -156,7 +156,7 @@ def torch_unary(fn_name):
     return unary_fn
 
 
-def torch_inplace_unary(fn_name):
+def _torch_inplace_unary(fn_name):
     fn = getattr(torch.ops.aten, fn_name)
 
     def unary_fn(*args, **kwargs):
@@ -166,10 +166,10 @@ def torch_inplace_unary(fn_name):
 
 
 NATIVE_UNARY_MAP = {
-    getattr(torch.ops.aten, name): torch_unary(name) for name in UNARY_NAMES
+    getattr(torch.ops.aten, name): _torch_unary(name) for name in UNARY_NAMES
 }
 NATIVE_INPLACE_UNARY_MAP = {
-    getattr(torch.ops.aten, name): torch_inplace_unary(name)
+    getattr(torch.ops.aten, name): _torch_inplace_unary(name)
     for name in INPLACE_UNARY_NAMES
 }
 
@@ -177,11 +177,11 @@ NATIVE_UNARY_FNS = list(NATIVE_UNARY_MAP.keys())
 NATIVE_INPLACE_UNARY_FNS = list(NATIVE_INPLACE_UNARY_MAP.keys())
 
 
-def is_native_unary(fn):
+def _is_native_unary(fn):
     return fn in NATIVE_UNARY_FNS or fn in NATIVE_INPLACE_UNARY_FNS
 
 
-def apply_native_unary(fn, *args, **kwargs):
+def _apply_native_unary(fn, *args, **kwargs):
     if fn in NATIVE_UNARY_FNS:
         return NATIVE_UNARY_MAP[fn](*args, **kwargs)
     if fn in NATIVE_INPLACE_UNARY_FNS:

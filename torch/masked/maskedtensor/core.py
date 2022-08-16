@@ -353,20 +353,20 @@ class MaskedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
 
-        from .passthrough import apply_pass_through_fn, is_pass_through_fn
+        from .passthrough import _apply_pass_through_fn, _is_pass_through_fn
 
-        if is_pass_through_fn(func):
-            return apply_pass_through_fn(func, *args, **kwargs)
+        if _is_pass_through_fn(func):
+            return _apply_pass_through_fn(func, *args, **kwargs)
 
-        from .unary import apply_native_unary, is_native_unary
+        from .unary import _apply_native_unary, _is_native_unary
 
-        if is_native_unary(func):
-            return apply_native_unary(func, *args, **kwargs)
+        if _is_native_unary(func):
+            return _apply_native_unary(func, *args, **kwargs)
 
-        from .binary import apply_native_binary, is_native_binary
+        from .binary import _apply_native_binary, _is_native_binary
 
-        if is_native_binary(func):
-            return apply_native_binary(func, *args, **kwargs)
+        if _is_native_binary(func):
+            return _apply_native_binary(func, *args, **kwargs)
 
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
