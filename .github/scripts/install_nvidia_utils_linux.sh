@@ -2,8 +2,9 @@
 
 set -eou pipefail
 
+
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID) \
-DRIVER_FN="NVIDIA-Linux-x86_64-510.60.02.run"
+DRIVER_FN="NVIDIA-Linux-x86_64-515.57.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
 install_nvidia_docker2_amzn2() {
@@ -24,6 +25,7 @@ install_nvidia_driver_amzn2() {
         # ensure our kernel install is the same as our underlying kernel,
         # groupinstall "Development Tools" has a habit of mismatching kernel headers
         sudo yum install -y "kernel-devel-uname-r == $(uname -r)"
+        sudo modprobe backlight
         sudo curl -fsL -o /tmp/nvidia_driver "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
         sudo /bin/bash /tmp/nvidia_driver -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
         sudo rm -fv /tmp/nvidia_driver

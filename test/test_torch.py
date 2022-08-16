@@ -1422,6 +1422,25 @@ else:
 
         backward_func(self, device)
 
+    @dtypes(*all_types_and_complex_and(torch.bool))
+    def test_nondeterministic_alert_cumsum(self, device, dtype):
+
+        def test_func(op_call):
+            input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
+
+            @expectedAlertNondeterministic('cumsum_cuda_kernel', ['cuda'])
+            def forward_func_alert(slf, device):
+                op_call(input, 0)
+
+            if dtype.is_floating_point or dtype.is_complex:
+                forward_func_alert(self, device)
+            else:
+                with DeterministicGuard(True):
+                    op_call(input, 0)
+
+        test_func(torch.Tensor.cumsum)
+        test_func(torch.cumsum)
+
     def test_nondeterministic_alert_scatter_add(self, device):
         def test_func(op_call):
             input = torch.randn(5, 4, device=device)
@@ -5869,7 +5888,7 @@ class TestTorch(TestCase):
             torch.tensor([1]).unflatten(0, [])
         with self.assertRaisesRegex(RuntimeError, r"Provided sizes \[2, 2\] don't multiply up to the size of dim 0 \(1\)"):
             torch.tensor([1]).unflatten(0, [2, 2])
-        with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
+        with self.assertRaisesRegex(IndexError, r"Dimension specified as 0 but tensor has no dimensions"):
             torch.tensor(1).unflatten(0, [0])
         with self.assertRaisesRegex(RuntimeError, r"only one dimension can be inferred"):
             torch.randn(5, 10).unflatten(1, (-1, -1))
