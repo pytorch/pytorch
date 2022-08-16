@@ -1443,7 +1443,7 @@ class FullyShardedDataParallel(nn.Module):
     def _unshard(
         self,
         handles: List[FlatParamHandle],
-        prepare_gradient: bool = False,
+        prepare_gradient: bool,
     ) -> None:
         """
         Unshards the handles in ``handles``. If ``prepare_gradient``, then
@@ -2702,7 +2702,7 @@ class FullyShardedDataParallel(nn.Module):
         handles_key = tuple(handles)
         params_prefetched = self._handles_prefetched.get(handles_key, False)
         if not params_prefetched:
-            self._unshard(handles)
+            self._unshard(handles, False)
         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         # TODO (awgu): This is not necessarily the best place to reset the
@@ -2923,7 +2923,7 @@ class FullyShardedDataParallel(nn.Module):
             handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
-        self._unshard(self._handles)
+        self._unshard(self._handles, False)
         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         if rank0_only and self.rank != 0:
