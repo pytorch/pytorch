@@ -55,7 +55,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: pytorch
           password: ${{ secrets.GHCR_PAT }}
       # Setup multi-arch image builds
       - name: Set up QEMU
