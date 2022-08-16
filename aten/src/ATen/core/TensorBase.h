@@ -48,6 +48,7 @@ inline bool variable_excluded_from_dispatch() {
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
+
 }
 
 // NOTE: [Tensor vs. TensorBase]
@@ -284,6 +285,10 @@ class TORCH_API TensorBase {
 
   int64_t numel() const {
     return impl_->numel();
+  }
+
+  c10::SymInt sym_numel() const {
+    return impl_->sym_numel();
   }
 
   // Length of one array element in bytes.  This is the traditional
