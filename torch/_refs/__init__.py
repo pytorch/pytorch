@@ -121,6 +121,7 @@ __all__ = [
     "hypot",
     "igamma",
     "igammac",
+    "imag",
     "isclose",
     "lcm",
     # 'ldexp',
@@ -139,8 +140,12 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
+    "real",
+    "rpow",
     "remainder",
     "rsub",
+    "rtruediv",
+    "rfloordiv",
     # # special.xlog1py
     # # special.zeta
     "sub",
@@ -1060,6 +1065,28 @@ def _floor_divide(
         else:
             b = prims.device_put(b, device=a.device)
 
+    assert isinstance(a, Tensor) and isinstance(b, Tensor)
+    dtype = a.dtype
+    if utils.is_float_dtype(dtype):
+        return _floor_divide_float(a, b)
+    elif utils.is_integer_dtype(dtype):
+        return _floor_divide_integer(a, b)
+    else:
+        check(False, lambda: f"{dtype} not supported for floor_divide")
+
+
+def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
+    a, b = _maybe_broadcast(a, b)
+
+    if not a.dtype.is_signed:
+        return prims.div(a, b)
+
+    # Convert truncation to flooring:
+    offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
+    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+
+
+def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
     mod = fmod(a, b)
     div = true_divide(sub(a, mod), b)
 
@@ -1443,7 +1470,11 @@ true_divide = _make_elementwise_binary_reference(
 def _trunc_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
-    return trunc(true_divide(a, b))
+    dtype = utils.get_dtype(a)
+    if utils.is_integer_dtype(dtype):
+        return prims.div(a, b)
+
+    return trunc(prims.div(a, b))
 
 
 # TODO: add docstring
@@ -3630,6 +3661,20 @@ def trace(self: TensorLikeType) -> TensorLikeType:
     )
     return torch.sum(torch.diag(self, 0))
 
+
+def _make_r_binary_op(base_op):
+    def rop(
+        a: Union[TensorLikeType, NumberType],
+        b: Union[TensorLikeType, NumberType],
+    ) -> TensorLikeType:
+        return base_op(b, a)
+
+    return rop
+
+
+rtruediv = _make_r_binary_op(true_divide)
+rfloordiv = _make_r_binary_op(floor_divide)
+rpow = _make_r_binary_op(pow)
 
 import torch._refs.fft
 import torch._refs.linalg
