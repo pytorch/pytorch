@@ -28,7 +28,7 @@ from torch.distributed._shard.checkpoint.default_planner import (
     create_default_global_save_plan,
     create_default_local_save_plan,
     create_default_local_load_plan,
-    create_default_local_metadata
+    _create_default_local_metadata
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -149,7 +149,7 @@ class TestSavePlan(TestCase):
                 }
 
         state_dict = create_state_dict(1)
-        metadata = create_default_local_metadata(state_dict)
+        metadata = _create_default_local_metadata(state_dict)
 
         load_plan = create_default_local_load_plan(state_dict, metadata)
         # This will create 3 entries
@@ -191,11 +191,11 @@ class TestSavePlan(TestCase):
 
         # Rank 1 has a 16 bytes shard from [16, 32[
         world8_state_dict = create_state_dict(rank=1, world_size=8)
-        world8_metadata = create_default_local_metadata(world8_state_dict)
+        world8_metadata = _create_default_local_metadata(world8_state_dict)
 
         # Rank 1 has a 32 bytes shard from [32, 64[
         world4_state_dict = create_state_dict(rank=1, world_size=4)
-        world4_metadata = create_default_local_metadata(world4_state_dict)
+        world4_metadata = _create_default_local_metadata(world4_state_dict)
 
         # First scenario, going from world=8 to world=4, need to load 2 shards
         # Each 4-world shard has 32 elements, so it needs to load 2 shards
@@ -240,7 +240,7 @@ class TestSavePlan(TestCase):
                 }
         # rank 1 has a 30 bytes shard from [30, 60[
         world4_state_dict = create_state_dict(rank=1, world_size=4)
-        world4_metadata = create_default_local_metadata(world4_state_dict)
+        world4_metadata = _create_default_local_metadata(world4_state_dict)
 
         # rank 1 has a 40 bytes shard from [40, 80[
         world3_state_dict = create_state_dict(rank=1, world_size=3)

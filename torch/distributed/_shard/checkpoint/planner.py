@@ -71,12 +71,93 @@ class LoadPlan:
 class SavePlanner(abc.ABC):
     """
     Abstract class defining the protocol used by save_state_dict to plan the save process.
-    """
 
+    SavePlanners are stateful objects that can be used to customize the whole save process.
+
+    SavePlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    will be visible to the whole process.
+
+    A planner subclass can expect the following sequence of calls during save_state_dict:
+
+    1) init - called on all ranks.
+        Signals the start of a checkpoint save.
+
+    2) create_local_plan - called on all ranks.
+        Process the state_dict and produces a `SavePlan` that will be sent for global planning.
+
+    3) create_global_plan - called on the coordinator rank only.
+        Takes the SavePlan from all ranks and make any global decision.
+
+    4) finish_plan - called on all ranks.
+        This gives each rank a chance to adjust to global planning decisions.
+
+    5) resolve_data - called multiple times on each rank
+        Lookups a value on the `state_dict` for the storage layer to write.
+
+    Users are recomended to extend DefaultSavePlanner instead of this interface directly as
+    most changes can be expressed by changes in a single method.
+
+    There are 3 usual patterns of extension:
+
+    Rewriting state_dict. This is the simplest way to extend the save process as it
+    doesn't requite understanding the intrincacies of how SavePlan works:
+
+    >>> class RenamePlanner(DefaultSavePlanner)
+    >>>     def init(self, state_dict, is_coordinator):
+    >>>         # prefix all keys with `foo_``
+    >>>         super().init(self, {"foo_" + k, v for k, v in state_dict.items()}, is_coordinator)
+
+    Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
+
+    >>> class FP16Planner(DefaultSavePlanner):
+    >>>     def create_local_plan(self):
+    >>>         plan = super().create_local_plan()
+    >>>         for p in plan:
+    >>>             if p.tensor_data is not None:
+    >>>                 p.tensor_data.properties.dtype = torch.float16
+    >>>
+    >>>     def resolve_data(self, write_item):
+    >>>         item = super().resolve_data(write_item)
+    >>>         return item if write_item.type == WriteItemType.BYTE_IO else item.to(torch.float16)
+
+    Using the global planning step to make central decisions that can't be made individually by each rank
+
+    >>> from itertools import islice
+    >>> from dataclasses import replace
+    >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
+    >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
+    >>>     # This sample doesn't handle ShardedTensors
+    >>>     def create_global_plan(self, all_plans):
+    >>>         def chunk(it, size):
+    >>>             it = iter(it)
+    >>>         return list(iter(lambda: tuple(islice(it, size)), ()))
+    >>>         all_plans = [
+    >>>             replace(plan, items=items) for plan, items in
+    >>>                 zip(all_plans, chunk(all_plans[0].items, len(all_plans)))
+    >>>         ]
+    >>>         return super().create_global_plan(all_plans)
+
+    Finally, some planners need to save additional metadata in the checkpoint, this is
+    accomplished by having each rank contribute their data items in the local plan and
+    the global planner aggregate them:
+
+    >>> class SaveExtraDataPlanner(DefaultSavePlanner):
+    >>>     def create_local_plan(self) -> SavePlan:
+    >>>         plan = super().create_local_plan()
+    >>>         return replace(plan, planner_data="per-rank-data")
+    >>>
+    >>>     def create_global_plan(self, all_plans: List[SavePlan]) -> Tuple[List[SavePlan], Metadata]:
+    >>>         global_plan, metadata = super().create_global_plan(all_plans)
+    >>>         merged_data = [p.planner_data for p in global_plan]
+    >>>         metadata = replace(metadata, planner_data=merged_data)
+    >>>         return global_plan, metadata
+    """
     @abc.abstractmethod
     def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         """
         Intialize this planner to save ``state_dict``.
+
+        Implementations should save those values as they won't be provided lated in the save process.
 
         This is called on all ranks.
         """
@@ -134,6 +215,57 @@ class LoadPlanner:
     """
     Abstract class defining the protocol used by load_state_dict to plan the load process.
 
+    LoadPlanner are stateful objects that can be used to customize the whole load process.
+
+    LoadPlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    will be visible to the whole process.
+
+    A planner subclass can expect the following sequence of calls during load_state_dict:
+
+    1) init - called on all ranks.
+        Signals the start of loading a checkpoint.
+
+    2) create_local_plan - called on all ranks.
+        Process the state_dict and produces a `LoadPlan` that will be sent for global planning.
+
+    3) create_global_plan - called on the coordinator rank only.
+        Takes the LoadPlan from all ranks and make any global decision.
+
+    4) load_bytes - called multiple times on each rank
+        This is called once per non-tensor value in state_dict.
+
+    5) resolve_tensor and commit_tensor - called multiple times on each rank
+        They are called in pair for each Tensor value in state_dict.
+
+    Users are recomended to extend DefaultLoadPlanner instead of this interface directly as
+    most changes can be expressed by changes in a single method.
+
+    There are two usual patterns of extension:
+
+    Rewriting state_dict. This is the simplest way to extend the load process as it
+    doesn't requite understanding the intrincacies of how LoadPlan works. We need
+    to keep a reference to the original state_dict as load happens in place so
+    we need to be able to perform it in place
+
+    >>> class RenamePlanner(DefaultLoadPlanner)
+    >>>     def init(self, state_dict, metadata, is_coordinator):
+    >>>         self.original_state_dict = state_dict
+    >>>         super().init(self, {"foo_" + k, v for k, v in state_dict.items()}, is_coordinator)
+    >>>
+    >>>     def load_bytes(self, read_item, value);
+    >>>         # Remove the "foo_" prefix
+    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value)
+
+
+    Modifying resolve_tensor and commit_tensor to handle load time transformation.
+
+    >>> class MetaModelMaterialize(DefaultSavePlanner):
+    >>>     def resolve_tensor(self, read_item):
+    >>>         tensor = super().resolve_tensor(read_item)
+    >>>         return torch.empty_like(tensor, device="cpu")
+    >>>
+    >>>     def commit_tensor(self, read_item, tensor):
+    >>>         self.state_dict[read_item.dest_index.fqn] = tensor
     """
     @abc.abstractmethod
     def init(self, state_dict: STATE_DICT_TYPE, metadata: Metadata, is_coordinator: bool) -> None:
@@ -154,7 +286,7 @@ class LoadPlanner:
         pass
 
     @abc.abstractmethod
-    def create_global_plan(self, globla_plan: List[LoadPlan]) -> List[LoadPlan]:
+    def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         """
         Compute the global load plan and return plans for each rank.
 

@@ -5,17 +5,10 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
-from torch.distributed._shard.sharded_tensor.shard import Shard
 
-from torch.distributed._shard.sharding_spec._internals import (
-    _check_shard_metadata_pair_overlap,
-)
 
 from .planner import (
-    LoadItemType,
     SavePlanner,
     LoadPlanner,
     SavePlan,
@@ -23,12 +16,10 @@ from .planner import (
     ReadItem,
     WriteItem,
     WriteItemType,
-    TensorWriteData,
 )
 
 from .metadata import (
     BytesStorageMetadata,
-    ChunkStorageMetadata,
     TensorStorageMetadata,
     MetadataIndex,
     Metadata,
@@ -36,13 +27,15 @@ from .metadata import (
     STORAGE_TYPES
 )
 
-from .resharding import (
-    _shards_get_overlap_region_wrt_saved_tensor
+from .planner_helpers import (
+    _create_read_items,
+    _create_write_items,
+    _create_default_metadata_only_plan
 )
+
 from .utils import (
     find_state_dict_object
 )
-
 
 class DefaultSavePlanner(SavePlanner):
     def init(self, state_dict: Dict[str, Any], is_coordinator: bool) -> None:
@@ -120,201 +113,58 @@ class DefaultLoadPlanner(LoadPlanner):
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
 
 
-def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
-    return ShardMetadata(
-        shard_offsets=[0] * len(size),
-        shard_sizes=list(size),
-    )
-
-def _create_shard_from_tensor(tensor: torch.Tensor) -> Shard:
-    return Shard(
-        tensor=tensor,
-        metadata=_create_shard_metadata(tensor.size())
-    )
-
-def _chunk_for_sharmd(shard_md: ShardMetadata) -> ChunkStorageMetadata:
-    return ChunkStorageMetadata(
-        offsets=torch.Size(shard_md.shard_offsets),
-        sizes=torch.Size(shard_md.shard_sizes)
-    )
-
-def _sharded_tensor_metadata(sharded_tensor: ShardedTensor, shard_md: ShardMetadata) -> TensorWriteData:
-    return TensorWriteData(
-        chunk=_chunk_for_sharmd(shard_md),
-        properties=sharded_tensor.metadata().tensor_properties,
-        size=sharded_tensor.metadata().size,
-    )
-
-def _create_write_item_for_shard(fqn: str, sharded_tensor: ShardedTensor, shard_md: ShardMetadata) -> WriteItem:
-    offsets = torch.Size(shard_md.shard_offsets)
-    return WriteItem(
-        index=MetadataIndex(fqn, offsets),
-        type=WriteItemType.SHARD,
-        tensor_data=_sharded_tensor_metadata(sharded_tensor, shard_md),
-    )
-
-def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
-    offsets = torch.Size([0] * len(tensor.size()))
-    return WriteItem(
-        index=MetadataIndex(fqn, offsets),
-        type=WriteItemType.TENSOR,
-        tensor_data=TensorWriteData(
-            chunk=ChunkStorageMetadata(
-                offsets=offsets,
-                sizes=tensor.size()
-            ),
-            properties=TensorProperties.create_from_tensor(tensor),
-            size=tensor.size(),
-        )
-    )
-
-def _create_write_item_for_bytesio(fqn: str, bytes: Any):
-    return WriteItem(
-        index=MetadataIndex(fqn),
-        type=WriteItemType.BYTE_IO,
-    )
-
-def _create_read_item_for_byteio(dest_index, dest_offset, storage_index, storage_offset, length):
-    return ReadItem(
-        type=LoadItemType.BYTE_IO,
-        dest_index=dest_index,
-        dest_offsets=torch.Size((dest_offset,)),
-        storage_index=storage_index,
-        storage_offsets=torch.Size((storage_offset,)),
-        lengths=torch.Size((length,)),
-    )
-
-def _create_read_item_for_tensor(dest_index, dest_offsets, storage_index, storage_offsets, lengths):
-    return ReadItem(
-        type=LoadItemType.TENSOR,
-        dest_index=dest_index,
-        dest_offsets=torch.Size(dest_offsets),
-        storage_index=storage_index,
-        storage_offsets=torch.Size(storage_offsets),
-        lengths=torch.Size(lengths),
-    )
-
-def _create_sharded_read_items(
-    fqn: str,
-    checkpoint_md: TensorStorageMetadata,
-    local_shards: List[Shard],
-) -> List[ReadItem]:
-
-    read_items = []
-    # this is a naive quadratic algo that can be optimized later
-    for idx, shard in enumerate(local_shards):
-        for storage_idx, storage_md in enumerate(checkpoint_md.chunks):
-            shard_md_from_storage = ShardMetadata(
-                shard_sizes=list(storage_md.sizes),
-                shard_offsets=list(storage_md.offsets),
-            )
-
-            if not _check_shard_metadata_pair_overlap(
-                shard.metadata, shard_md_from_storage
-            ):
-                continue
-
-            storage_offsets = []
-            dest_offsets = []
-            lengths = []
-            for (
-                dim,
-                offset_for_saved_tensor,
-                offset_for_current_tensor,
-                length,
-            ) in _shards_get_overlap_region_wrt_saved_tensor(
-                saved_shard=shard_md_from_storage, current_shard=shard.metadata
-            ):
-                storage_offsets.append(offset_for_saved_tensor)
-                dest_offsets.append(offset_for_current_tensor)
-                lengths.append(length)
-
-            read_items.append(
-                _create_read_item_for_tensor(
-                    dest_index=MetadataIndex(fqn, shard.metadata.shard_offsets, idx),
-                    dest_offsets=dest_offsets,
-                    storage_index=MetadataIndex(fqn, storage_md.offsets, storage_idx),
-                    storage_offsets=storage_offsets,
-                    lengths=lengths,
-                )
-            )
-    return read_items
-
-def create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
-    requests = []
-    for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor):
-            for shard_md in obj.metadata().shards_metadata:
-                requests.append(_create_write_item_for_shard(fqn, obj, shard_md))
-        elif isinstance(obj, torch.Tensor):
-            requests.append(_create_write_item_for_tensor(fqn, obj))
-        else:
-            requests.append(_create_write_item_for_bytesio(fqn, obj))
-    return SavePlan(requests)
-
-def create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
-    plan = create_default_metadata_only_plan(state_dict)
-    _, md = create_default_global_save_plan([plan])
-    return md
-
-def create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, ShardedTensor):
-        return [_create_write_item_for_shard(fqn, object, shard.metadata) for shard in object.local_shards()]
-    elif isinstance(object, torch.Tensor):
-        return [_create_write_item_for_tensor(fqn, object)]
-    else:
-        return [_create_write_item_for_bytesio(fqn, object)]
-
-def create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
-    if isinstance(md, BytesStorageMetadata):
-        return [_create_read_item_for_byteio(
-            dest_index=MetadataIndex(fqn),
-            dest_offset=0,
-            storage_index=MetadataIndex(fqn),
-            storage_offset=0,
-            length=0
-        )]
-    elif isinstance(obj, ShardedTensor):
-        local_shards = obj.local_shards()
-    elif isinstance(obj, torch.Tensor):
-        local_shards = [_create_shard_from_tensor(obj)]
-    else:
-        raise ValueError(
-            f"Invalid checkpoint metadata for {fqn}, " +
-            f"expected BytesStorageMetadata but found {type(md)}"
-        )
-
-    return _create_sharded_read_items(
-        fqn,
-        md,
-        local_shards)
-
 def create_default_local_load_plan(
     state_dict: Dict[str, Any],
     metadata: Metadata,
 ) -> LoadPlan:
     requests = []
-
     """
-    Use the loaded metadata and the current state dict to map the saved tensors to current tensor
+    Create the ``LoadPlan`` used by DefaultLoadPlanner.
+
+    It produces one read item per value in ``state_dict`` using the metadata in ``metadata``.
+
+    The default behavior is to match key exactly between state_dict and metadata.
+    It handles resharding by issuing multiple read requests against storage in order to match
+    load requirements.
     """
     for fqn, obj in state_dict.items():
         md = metadata.state_dict_metadata[fqn]
-        requests += create_read_items(fqn, md, obj)
+        requests += _create_read_items(fqn, md, obj)
 
     return LoadPlan(requests)
 
 def create_default_global_load_plan(all_plans: List[LoadPlan]) -> List[LoadPlan]:
+    """
+    Create global load plan used by DefaultLoadPlanner.
+
+    The default load behavior involved no global coordination and this function
+    currently doesn't change the local plans.
+    """
     return all_plans
 
-def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: bool):
+def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: bool) -> SavePlan:
+    """
+    Create the ``SavePlan`` used by DefaultSavePlanner.
+
+    On non-coordinator ranks, this function ignores tensors and non-tensor objects,
+    only producing writes for ShardedTensor objects.
+
+    On the coordinator rank, produce writes for all values.
+    """
     requests = []
     for fqn, obj in state_dict.items():
         if isinstance(obj, ShardedTensor) or is_coordinator:
-            requests += create_write_items(fqn, obj)
+            requests += _create_write_items(fqn, obj)
     return SavePlan(requests)
 
 def create_default_global_save_plan(all_plans: List[SavePlan]) -> Tuple[List[SavePlan], Metadata]:
+    """
+    Create the global plan and metadata used by DefaultSavePlanner.
+
+    Metadata is produced by concatenating the metadata of all ``WriteItem`` from the supplied plans.
+
+    The only global planning change is to update index hints in all ``MetadataIndex`` objects.
+    """
     md: Dict[str, STORAGE_TYPES] = dict()
     new_plans = []
     for plan in all_plans:
@@ -344,3 +194,11 @@ def create_default_global_save_plan(all_plans: List[SavePlan]) -> Tuple[List[Sav
                 tensor_md.chunks.append(item.tensor_data.chunk)
         new_plans.append(dataclasses.replace(plan, items=new_items))
     return (new_plans, Metadata(md))
+
+def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
+    """
+    Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``.
+    """
+    plan = _create_default_metadata_only_plan(state_dict)
+    _, md = create_default_global_save_plan([plan])
+    return md
