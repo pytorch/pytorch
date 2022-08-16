@@ -24,7 +24,6 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx.symbolic_helper import (
-    _set_onnx_shape_inference,
     _set_operator_export_type,
     _set_opset_version,
     _unpack_list,
@@ -56,8 +55,6 @@ class _BaseTestCase(common_utils.TestCase):
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
             model.eval()
-        # Need disable onnx_shape_inference for this test because it puts const node to initializers.
-        _set_onnx_shape_inference(False)
         utils._validate_dynamic_axes(dynamic_axes, model, None, None)
         graph, params_dict, torch_out = utils._model_to_graph(
             model,
@@ -69,7 +66,6 @@ class _BaseTestCase(common_utils.TestCase):
             input_names=input_names,
             dynamic_axes=dynamic_axes,
         )
-        _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
 
 
@@ -627,10 +623,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, __ = self._model_to_graph(
             ShapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
-
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Shape")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_upsample_scale_fold_as_constant(self):
         # upsample scale is a constant, not a model parameter,
@@ -1233,7 +1228,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         batch = torch.FloatTensor(1, 3)
 
         graph, _, _ = self._model_to_graph(
-            model, batch, input_names=["batch"], dynamic_axes={"batch": [0, 1]}
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]},
         )
         iter = graph.nodes()
         autograd1 = next(iter)
@@ -1378,8 +1377,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, x, y):
                 return f(x, y)
 
-        input_1 = torch.tensor(11)
-        input_2 = torch.tensor(12)
+        input_1 = torch.tensor([11])
+        input_2 = torch.tensor([12])
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = self._model_to_graph(
