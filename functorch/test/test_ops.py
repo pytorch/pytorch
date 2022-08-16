@@ -1088,7 +1088,7 @@ class TestOperators(TestCase):
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('native_layer_norm', ''),
         xfail('sparse.sampled_addmm', ''),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),
         xfail('index_reduce', ''),
         xfail('segment_reduce', 'lengths'),
