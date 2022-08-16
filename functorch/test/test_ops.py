@@ -904,7 +904,6 @@ class TestOperators(TestCase):
         xfail('chalf', ''),
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
-        xfail('linalg.solve_ex', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
