@@ -135,6 +135,7 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
   if (path_.empty()) {
     compute_spanning_tree();
   }
+  propagator->setUp();
   for (const auto& next_hop : path_) {
     switch (next_hop.type) {
       case NextHopType::SIBLING:
@@ -148,6 +149,7 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
         break;
     }
   }
+  propagator->tearDown();
 }
 
 MaxRootDomainInfoSpanningTree::RootDomainInfo::operator bool() const {
@@ -420,6 +422,18 @@ void SpanningTreePrinter::propagateSibling(TensorView* from, TensorView* to) {
   stream_ << "propagateSibling" << std::endl;
   stream_ << "  from: " << from->toString() << std::endl;
   stream_ << "  to: " << to->toString() << std::endl;
+}
+
+bool SetSelector::allowC2P(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowP2C(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowSibling(TensorView* from, TensorView* to) {
+  return true;
 }
 
 } // namespace cuda
