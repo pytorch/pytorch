@@ -203,7 +203,7 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     AT_DISPATCH_INDEX_TYPES(source_arange.scalar_type(), NAME, [&]() {
         const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
-        const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
+        auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
         const auto sorted_hash_len = sorted_hash.numel();
         auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
