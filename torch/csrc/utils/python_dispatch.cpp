@@ -292,12 +292,30 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def(
+      // Returns whether or not a direct kernel registration exists
+      // for this <op_name, dispatch_key> pair.
       "_dispatch_has_kernel_for_dispatch_key",
       [](const char* name, const char* dispatch) -> bool {
         auto op =
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
         TORCH_CHECK(op, "operator ", name, " does not exist");
         return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
+      });
+
+  m.def(
+      // Returns whether or not there is an entry in the runtime computed
+      // dispatch table, for this <op_name, dispatch_key> pair. For example, if
+      // "op" has a `CompositeImplicitAutograd` kernel, Then
+      // _dispatch_has_computed_kernel_for_dispatch_key(op, backend) will return
+      // true for all backends that are part of the alias set for
+      // CompositeImplicitAutograd.
+      "_dispatch_has_computed_kernel_for_dispatch_key",
+      [](const char* name, const char* dispatch) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->hasComputedKernelForDispatchKey(
+            c10::parseDispatchKey(dispatch));
       });
 
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {

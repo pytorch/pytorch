@@ -336,6 +336,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -462,6 +464,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
+
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
@@ -701,10 +705,10 @@ static PyObject* python_exit_dual_level(
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
   } else {
     Py_INCREF(arg);
-    at::impl::TorchDispatchModeTLS::set_state(
+    c10::impl::TorchDispatchModeTLS::set_state(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -715,7 +719,7 @@ static PyObject* get_torch_dispatch_mode(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
   if (!mode) {
     Py_RETURN_NONE;
   } else {
