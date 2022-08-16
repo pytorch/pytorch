@@ -332,7 +332,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(USE_ROCM)
+#if defined(__ANDROID__) || defined(__APPLE__) ||  \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
+    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -361,22 +363,32 @@ extern SYCL_EXTERNAL void __assert_fail(
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+// CUDA supports __assert_fail function which are common for both device
+// and host side code.
 __host__ __device__
-#endif // __CUDA_ARCH__
+#endif
+
+    // This forward declaration matching the declaration of __assert_fail
+    // exactly how it is in glibc in case parts of the program are compiled with
+    // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
+    // error. Note: On ROCm - this declaration serves for host side compilation.
     void
     __assert_fail(
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw()
-// We match the declaration of __assert_fail exactly how it is in glibc in case
-// parts of the program are compiled with different NDEBUG settings. Otherwise
-// we might get 'ambiguous declaration' error.
-#ifdef __GNUC__
-        __attribute__((__noreturn__))
-#endif
-        ;
-#endif
+        const char* function) throw() __attribute__((__noreturn__));
+
+#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
+    !defined(ROCM_DISABLE_GPU_ASSERTS)
+// ROCm supports __assert_fail only as a device side function.
+__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
+    const char* assertion,
+    const char* file,
+    unsigned int line,
+    const char* function);
+#endif // defined(__HIP_ARCH__) || defined(__HIP__)
+#endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
