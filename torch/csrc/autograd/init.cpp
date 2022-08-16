@@ -681,7 +681,7 @@ static PyObject* is_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* should_anomaly_check_nan(PyObject* _unused, PyObject* arg) {
+static PyObject* is_anomaly_check_nan_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::should_check_nan()) {
     Py_RETURN_TRUE;
@@ -808,8 +808,8 @@ static PyMethodDef methods[] = { // NOLINT
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
-    {"should_anomaly_check_nan",
-     should_anomaly_check_nan,
+    {"is_anomaly_check_nan_enabled",
+     is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
