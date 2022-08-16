@@ -218,11 +218,11 @@ def _create_chunk_sharded_tensor(
 
     # Create a ShardedTensor without invoking communnication.
     chunk_sizes = [list(chunk.size()) for chunk in chunks]
-    _dim0_offsets = list(itertools.accumulate([chunk_size[0] for chunk_size in chunk_sizes]))
-    _dim0_offsets = [0] + _dim0_offsets
-    _dim0_offsets.pop()
-    _offsets = [0] * (len(chunk_sizes[0]) - 1)
-    chunk_offsets = [[d0] + _offsets for d0 in _dim0_offsets]
+    dim0_offsets = [0] + list(
+        itertools.accumulate([chunk_size[0] for chunk_size in chunk_sizes])
+    )[:-1]
+    offsets = [0] * (len(chunk_sizes[0]) - 1)
+    chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
     placements = [
         f"rank:{r}/cuda:{r % device_per_node}" for r in range(len(chunk_sizes))
     ]
