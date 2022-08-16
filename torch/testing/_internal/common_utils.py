@@ -629,11 +629,16 @@ def run_tests(argv=UNITTEST_ARGS):
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
-        if os.path.exists(IMPORT_DISABLED_TESTS):
+        # This is unsafe to store the list of disabled tests on Windows in a single env
+        # variable because it has an upper limit of 32767 characters in length. We will
+        # need to think of a better way to handle this in Windows if the test time there
+        # is impact by this
+        if os.path.exists(IMPORT_DISABLED_TESTS) and not IS_WINDOWS:
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
-            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
+                  f' or we are on Windows whose env variable has an upper limit of 32767 chars')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -983,20 +988,18 @@ def skipIfMps(fn):
             fn(*args, **kwargs)
     return wrapper
 
-# Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
+# Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if not TEST_WITH_ROCM:
-                reason = "ROCm not available"
-                raise unittest.SkipTest(reason)
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-")[0]    # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-            if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
-                raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM:
+                rocm_version = str(torch.version.hip)
+                rocm_version = rocm_version.split("-")[0]    # ignore git sha
+                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
@@ -1570,8 +1573,19 @@ def check_if_enable(test: unittest.TestCase):
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
-        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
+
+    if not IS_SANDCASTLE:
+        disabled_tests_dict = {}
+
+        if "DISABLED_TESTS_DICT" in os.environ:
+            disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
+        elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
+            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+                disabled_tests_dict = json.loads(fp.read())
+        else:
+            # IMPORT_DISABLED_TESTS can be None here
+            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -2843,6 +2857,7 @@ def random_symmetric_psd_matrix(l, *batches, **kwargs):
     Returns a batch of random symmetric positive-semi-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> # xdoctest: +SKIP("undefined variables")
     >>> matrices = random_symmetric_psd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     dtype = kwargs.get('dtype', torch.double)
@@ -2856,6 +2871,7 @@ def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, de
     Returns a batch of random Hermitian positive-semi-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> # xdoctest: +SKIP("undefined variables")
     >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
@@ -2885,6 +2901,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     Returns a batch of random Hermitian positive-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> # xdoctest: +SKIP("undefined variables")
     >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
