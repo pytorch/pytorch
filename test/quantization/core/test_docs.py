@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
+import contextlib
 from pathlib import Path
 
 import torch
@@ -10,6 +11,8 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import IS_ARM64
 
 
 class TestQuantizationDocs(QuantizationTestCase):
@@ -19,6 +22,10 @@ class TestQuantizationDocs(QuantizationTestCase):
     they must be provided in the test. The imports seem to behave a bit inconsistently,
     they can be imported either in the test file or passed as a global input
     """
+
+    def run(self, result=None):
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+            super(TestQuantizationDocs, self).run(result)
 
     def _get_code(
         self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
@@ -127,7 +134,6 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         input_fp32 = torch.randn(1, 1, 1, 1)
         global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
-
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)
 
