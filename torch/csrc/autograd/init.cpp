@@ -681,7 +681,9 @@ static PyObject* is_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_anomaly_check_nan_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* is_anomaly_check_nan_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::should_check_nan()) {
     Py_RETURN_TRUE;
