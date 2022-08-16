@@ -508,6 +508,9 @@ def add_workflow_conclusions(
             has_failing_check = False
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
+                    if not isinstance(checkrun_node, dict):
+                        warn(f"Expected dictionary, but got {type(checkrun_node)}")
+                        continue
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
                     conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
@@ -1148,7 +1151,7 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
 
 def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     checks = get_land_checkrun_conclusions(org, project, commit)
-    if(len(checks) == 0):
+    if len(checks) == 0:
         raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
 
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
@@ -1258,7 +1261,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f" due to {e}"
+        msg += f"\nReason: {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"

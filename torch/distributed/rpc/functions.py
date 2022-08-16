@@ -56,6 +56,7 @@ def async_execution(fn):
         >>>     )
         >>>
         >>> # On worker0
+        >>> # xdoctest: +SKIP
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
         >>>     async_add_chained,
