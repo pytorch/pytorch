@@ -322,47 +322,49 @@ struct SymbolicShapeOpAnalyzer {
 
     bool seen_tensor_list = false;
 
-    for (size_t op_in_index = 0;
-         op_in_index < shape_compute_graph_->inputs().size();
-         op_in_index++) {
+    size_t op_in_index = 0;
+    while (op_in_index < shape_compute_graph_->inputs().size()) {
       Value* graph_in_var = shape_compute_graph_->inputs().at(op_in_index);
-      if (isListOfListOfInts(graph_in_var->type())) {
-        // Modifying the graph where _node is part of to not use the tensor
-        // construct
-
-        // When we have partially evaluate a list of Tensors like cat(tensor[])
-        // We have a few problems:
-        // - optimizing out calls to the length of the list: len(tensors)
-        // - resolving accesses of the list to the tensor symbolic sizes the
-        // corresponding list element We can solve both of these problems by
-        // replacing the partial evaluation of cat([x, y]) def cat(tensors:
-        // List[List[int]], dim: int)
-        //    body
-        // with
-        // def cat(x, y, dim: int)
-        //     tensors = [x, y]
-        //     body
-        TORCH_INTERNAL_ASSERT(
-            !seen_tensor_list,
-            "SSA doesn't handle case with multiple tensor lists")
-        seen_tensor_list = true;
-
-        uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);
-        std::vector<Value*> li_inputs;
-
-        TypePtr element_type =
-            graph_in_var->type()->cast<ListType>()->getElementType();
-        for (size_t j = op_in_index; j < op_in_index + li_length; ++j) {
-          auto new_inp = shape_compute_graph_->insertInput(op_in_index + j);
-          new_inp->setType(element_type);
-          li_inputs.push_back(new_inp);
-        }
-        WithInsertPoint guard(*shape_compute_graph_->block()->nodes().begin());
-        auto new_li = shape_compute_graph_->insertNode(
-            shape_compute_graph_->createList(element_type, li_inputs));
-        graph_in_var->replaceAllUsesWith(new_li->output());
-        shape_compute_graph_->eraseInput(op_in_index + li_length);
+      if (!isListOfListOfInts(graph_in_var->type())) {
+        op_in_index++;
+        continue;
       }
+
+      // Modifying the graph where _node is part of to not use the tensor
+      // construct
+
+      // When we have partially evaluate a list of Tensors like cat(tensor[])
+      // We have a few problems:
+      // - optimizing out calls to the length of the list: len(tensors)
+      // - resolving accesses of the list to the tensor symbolic sizes the
+      // corresponding list element We can solve both of these problems by
+      // replacing the partial evaluation of cat([x, y]) def cat(tensors:
+      // List[List[int]], dim: int)
+      //    body
+      // with
+      // def cat(x, y, dim: int)
+      //     tensors = [x, y]
+      //     body
+      TORCH_INTERNAL_ASSERT(
+          !seen_tensor_list,
+          "SSA doesn't handle case with multiple tensor lists")
+      seen_tensor_list = true;
+
+      uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);
+      std::vector<Value*> li_inputs;
+
+      TypePtr element_type =
+          graph_in_var->type()->cast<ListType>()->getElementType();
+      for (size_t j = op_in_index; j < op_in_index + li_length; ++j) {
+        auto new_inp = shape_compute_graph_->insertInput(op_in_index + j);
+        new_inp->setType(element_type);
+        li_inputs.push_back(new_inp);
+      }
+      WithInsertPoint guard(*shape_compute_graph_->block()->nodes().begin());
+      auto new_li = shape_compute_graph_->insertNode(
+          shape_compute_graph_->createList(element_type, li_inputs));
+      graph_in_var->replaceAllUsesWith(new_li->output());
+      shape_compute_graph_->eraseInput(op_in_index + li_length);
     }
 
     TORCH_INTERNAL_ASSERT(
