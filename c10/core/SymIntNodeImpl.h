@@ -33,7 +33,10 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode mul(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode div(const SymIntNode& other) {
+  virtual SymIntNode truediv(const SymIntNode& other) {
+    TORCH_CHECK(false, "FP division isn't support for SymInts");
+  };
+  virtual SymIntNode floordiv(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode mod(const SymIntNode& other) {

@@ -41,7 +41,6 @@ const std::string& GetSerializedShapeFunctions() {
 """
 
 DECOMP_END = r"""
-
 // clang-format on
 
 } // namespace jit

@@ -94,10 +94,10 @@ work for exploring the contents. Some common ways to interact with ZIP files:
 Use the ``file_structure()`` API
 """"""""""""""""""""""""""""""""
 :class:`PackageImporter` provides a ``file_structure()`` method, which will return a printable
-and queryable ``Folder`` object. The ``Folder`` object is a simple directory structure that you can use to explore the
+and queryable :class:`Directory` object. The :class:`Directory` object is a simple directory structure that you can use to explore the
 current contents of a ``torch.package``.
 
-The ``Folder`` object itself is directly printable and will print out a file tree representation. To filter what is returned,
+The :class:`Directory` object itself is directly printable and will print out a file tree representation. To filter what is returned,
 use the glob-style ``include`` and ``exclude`` filtering arguments.
 
 
@@ -108,7 +108,7 @@ use the glob-style ``include`` and ``exclude`` filtering arguments.
 
     importer = PackageImporter('my_package.pt')
     # can limit printed items with include/exclude args
-    print(importer.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
+    print(importer.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storage"))
     print(importer.file_structure()) # will print out all files
 
 
@@ -118,7 +118,7 @@ Output:
 ::
 
     # filtered with glob pattern:
-    #    include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"
+    #    include=["**/utils.py", "**/*.pkl"], exclude="**/*.storage"
     ─── my_package.pt
         ├── models
         │   └── model_1.pkl
@@ -141,7 +141,7 @@ Output:
                 └── utils.py
 
 
-You can also query ``Folder`` objects with the ``has_file()`` method.
+You can also query :class:`Directory` objects with the ``has_file()`` method.
 
 
 ::
@@ -171,7 +171,7 @@ Python objects, text, and binary data to a package.
 ::
 
     with torch.PackageExporter("package.pt") as exporter:
-        # Pickles the object and saves to `my_resources/tens.pkl` in the archive.
+        # Pickles the object and saves to `my_resources/tensor.pkl` in the archive.
         exporter.save_pickle("my_resources", "tensor.pkl", torch.randn(4))
         exporter.save_text("config_stuff", "words.txt", "a sample string")
         exporter.save_binary("raw_data", "binary", my_bytes)
@@ -329,7 +329,7 @@ Now, the code will behave differently depending on whether it’s imported norma
 
     print(is_in_package())  # False
 
-    loaded_module = PackageImporter(my_pacakge).import_module("foo.bar")
+    loaded_module = PackageImporter(my_package).import_module("foo.bar")
     loaded_module.is_in_package()  # True
 
 
@@ -413,7 +413,7 @@ packaged code.
     # bar.py:
     import torch_package_importer # this is the PackageImporter that imported this module.
 
-    # Prints "hello world!", equivalient to importlib.resources.read_text
+    # Prints "hello world!", equivalent to importlib.resources.read_text
     def get_my_resource():
         return torch_package_importer.load_text("my_resource", "a.txt")
 
@@ -596,12 +596,12 @@ Finally, there is one more important action that is not technically part of ``to
 
 * Refactoring: remove or change the dependencies in your code.
 
-Note that actions are only defined on entire Python modules. There is no way to package “just” a function or class from module and leave the rest out.
+Note that actions are only defined on entire Python modules. There is no way to package “just” a function or class from a module and leave the rest out.
 This is by design. Python does not offer clean boundaries between objects defined in a module. The only defined unit of dependency organization is a
 module, so that’s what ``torch.package`` uses.
 
 Actions are applied to modules using patterns. Patterns can either be module names (``"foo.bar"``) or globs (like ``"foo.**"``). You associate a pattern
-with an action using methods on :class:`PackageImporter`, e.g.
+with an action using methods on :class:`PackageExporter`, e.g.
 
 
 ::
@@ -635,7 +635,7 @@ you attempt to ``intern`` them. These kinds of modules need to be ``mock``-ed or
 If a module is ``extern``-ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
 list on ``package_exporter.extern_modules``.
 
-On package import, when time packaged code tries to import an ``extern``-ed module, :class:`PackageImporter` will use the default Python importer to find
+On package import, when the packaged code tries to import an ``extern``-ed module, :class:`PackageImporter` will use the default Python importer to find
 that module, as if you did ``importlib.import_module("my_externed_module")``. If it can’t find that module, an error will be raised.
 
 In this way, you can depend on third-party libraries like ``numpy`` and ``scipy`` from within your package without having to package them too.
@@ -649,7 +649,7 @@ for your package, try to limit your use of ``extern``.
 If a module is ``mock``-ed, it will not be packaged. Instead a stub module will be packaged in its place. The stub module will allow you to retrieve
 objects from it (so that ``from my_mocked_module import foo`` will not error), but any use of that object will raise a ``NotImplementedError``.
 
-``mock`` should be used for code that you “know” will not be needed in the loaded package, but you still want to available for use in non-packaged contents.
+``mock`` should be used for code that you “know” will not be needed in the loaded package, but you still want available for use in non-packaged contents.
 For example, initialization/configuration code, or code only used for debugging/training.
 
 **Warning**: In general, ``mock`` should be used as a last resort. It introduces behavioral differences between packaged code and non-packaged code,
@@ -661,7 +661,7 @@ Refactoring
 The best way to manage dependencies is to not have dependencies at all! Often, code can be refactored to remove unnecessary dependencies. Here are some
 guidelines for writing code with clean dependencies (which are also generally good practices!):
 
-**Include only what you use**. Do not leave unused imports in our code. The dependency resolver is not smart enough to tell that they are indeed unused,
+**Include only what you use**. Do not leave unused imports in your code. The dependency resolver is not smart enough to tell that they are indeed unused,
 and will try to process them.
 
 **Qualify your imports**. For example, instead of writing import foo and later using ``foo.bar.baz``, prefer to write ``from foo.bar import baz``. This more
@@ -752,8 +752,8 @@ Any class that you import from a :class:`PackageImporter` will be a version of t
     assert isinstance(my_class_instance, imported_MyClass)  # ERROR!
 
 
-In this example, ``MyClass`` and ``import_MyClass`` are *not the same type*. In this specific example, ``MyClass`` and ``import_MyClass`` have exactly the
-same implementation, so you might thing it’s okay to consider them the same class. But consider the situation where ``import_MyClass`` is coming from an
+In this example, ``MyClass`` and ``imported_MyClass`` are *not the same type*. In this specific example, ``MyClass`` and ``imported_MyClass`` have exactly the
+same implementation, so you might think it’s okay to consider them the same class. But consider the situation where ``imported_MyClass`` is coming from an
 older package with an entirely different implementation of ``MyClass`` — in that case, it’s unsafe to consider them the same class.
 
 Under the hood, each importer has a prefix that allows it to uniquely identify classes:
@@ -765,7 +765,7 @@ Under the hood, each importer has a prefix that allows it to uniquely identify c
     print(imported_MyClass.__name__)  # prints <torch_package_0>.foo.MyClass
 
 
-That means you should not expect ``isinstance`` checks to work when one of the arguments if from a package and the other is not. If you need this
+That means you should not expect ``isinstance`` checks to work when one of the arguments is from a package and the other is not. If you need this
 functionality, consider the following options:
 
 * Doing duck typing (just using the class instead of explicitly checking that it is of a given type).
