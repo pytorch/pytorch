@@ -72,7 +72,7 @@ ScopePtr ForwardCallScope(Graph& graph, Node* call_node) {
     const auto class_name = TidyClassNameFromTorchScript(type->name());
     const auto variable_name = GetCallNodeVariableName(call_node);
     const auto scope_name =
-        onnx::ONNXScopeName::CreateFullScopeName(class_name, variable_name);
+        onnx::ONNXScopeName::createFullScopeName(class_name, variable_name);
     return graph.current_scope()->push(Symbol::scope(scope_name));
   }
   return graph.current_scope();
@@ -171,7 +171,7 @@ ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
     return graph.current_scope();
   }
   if (auto top_module_type = graph.inputs().at(0)->type()->cast<ClassType>()) {
-    auto scope_name = ::torch::jit::onnx::ONNXScopeName::CreateFullScopeName(
+    auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
         TidyClassNameFromTorchScript(top_module_type->name()),
         top_module_variable_name);
     return graph.current_scope()->push(Symbol::scope(scope_name));

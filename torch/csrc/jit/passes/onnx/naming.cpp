@@ -13,7 +13,7 @@ const std::string name_separator = "::";
 
 namespace {
 
-std::string NameFromRoot(
+std::string nameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator,
     NameFunc name_func) {
@@ -29,7 +29,7 @@ std::string NameFromRoot(
   return out;
 }
 
-std::pair<std::string, std::string> ParseNameFromScope(
+std::pair<std::string, std::string> parseNameFromScope(
     torch::jit::ScopePtr scope) {
   std::string full_name = scope->name().toUnqualString();
   auto pos = full_name.find(name_separator);
@@ -42,33 +42,33 @@ std::pair<std::string, std::string> ParseNameFromScope(
 
 } // namespace
 
-std::string CreateFullScopeName(
+std::string createFullScopeName(
     const std::string& class_name,
     const std::string& variable_name) {
   return std::string(class_name).append(name_separator).append(variable_name);
 }
 
-std::string VariableName(torch::jit::ScopePtr scope) {
-  return ParseNameFromScope(scope).second;
+std::string variableName(torch::jit::ScopePtr scope) {
+  return parseNameFromScope(scope).second;
 }
 
-std::string VariableNameFromRoot(
+std::string variableNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return NameFromRoot(scope, layer_separator, &VariableName);
+  return nameFromRoot(scope, layer_separator, &variableName);
 }
 
-std::string ClassName(torch::jit::ScopePtr scope) {
-  return ParseNameFromScope(scope).first;
+std::string className(torch::jit::ScopePtr scope) {
+  return parseNameFromScope(scope).first;
 }
 
-std::string ClassNameFromRoot(
+std::string classNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return NameFromRoot(scope, layer_separator, &ClassName);
+  return nameFromRoot(scope, layer_separator, &className);
 }
 
-bool IsCompatibleScope(torch::jit::ScopePtr scope) {
+bool isCompatibleScope(torch::jit::ScopePtr scope) {
   return !scope->isRoot() && !scope->isBlank() &&
       (std::string(scope->name().toUnqualString()).find(name_separator) !=
        std::string::npos);
