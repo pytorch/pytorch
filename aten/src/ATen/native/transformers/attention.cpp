@@ -43,7 +43,8 @@ void transform_bias_rescale_qkv_inner_loop(
     scalar_t* q_k_v_data,
     scalar_t inv_sqrt_dim_per_head,
     int64_t begin,
-    int64_t end) {
+    int64_t end,
+    bool do_rescale) {
   for (auto i : c10::irange(begin, end)) {
     auto t = i % T;
     i /= T;
@@ -67,7 +68,9 @@ void transform_bias_rescale_qkv_inner_loop(
       auto v_data = Vec::loadu(&qkv_data[b * _3D * T + t * _3D + d + 2 * D]) +
           v_bias_data;
 
-      q_data = q_data * Vec(inv_sqrt_dim_per_head);
+      if (do_rescale) {
+          q_data = q_data * Vec(inv_sqrt_dim_per_head);
+      }
 
       q_data.store(&q_k_v_data
                        [0 * B * num_head * T * dim_per_head +
@@ -90,7 +93,9 @@ void transform_bias_rescale_qkv_inner_loop(
       auto q_data = qkv_data[b * _3D * T + t * _3D + d + 0 * D] + q_bias;
       auto k_data = qkv_data[b * _3D * T + t * _3D + d + 1 * D] + k_bias;
       auto v_data = qkv_data[b * _3D * T + t * _3D + d + 2 * D] + v_bias;
-      q_data = q_data * inv_sqrt_dim_per_head;
+      if (do_rescale) {
+          q_data = q_data * inv_sqrt_dim_per_head;
+      }
       q_k_v_data
           [0 * B * num_head * T * dim_per_head +
            b * num_head * T * dim_per_head + nh * T * dim_per_head +
@@ -267,7 +272,8 @@ Tensor qkv_projection(
 std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv,
     const Tensor& qkv_bias,
-    const int64_t num_head) {
+    const int64_t num_head,
+    const bool do_rescale) {
   auto qkv_ = qkv.is_nested()
     ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
@@ -310,7 +316,8 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
                   q_k_v_data,
                   inv_sqrt_dim_per_head,
                   begin,
-                  end);
+                  end,
+                  /*do_rescale=*/ do_rescale);
             });
       });
   auto q_k_v_s =
@@ -319,6 +326,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
 
+// Note: mask is a key_padding_mask; expected shape (B, T)
 std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& query,
     const Tensor& key,
@@ -419,11 +427,12 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head, false);
   qkv = Tensor(); // Not used any more, allow free
   auto& q = std::get<0>(q_k_v);
   const auto& k = std::get<1>(q_k_v);
   const auto& v = std::get<2>(q_k_v);
+
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
@@ -435,42 +444,21 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   std::cerr << "v: " << v << std::endl;
 #endif
 
-  // shape: [B, num_head, T, T]
-  auto qkt = bmm_nt(q, k);
-  // q & k are dead but cannot be freed because they were packed with v
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, qkt, {B, num_head, T, T});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, T]
-  // TODO: long-term, have a kernel that works with
-  // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query, mask_type);
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt after softmax: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, dim_per_head]
-  // reuse storage for q; we're done with it
-  auto attn_ctx = bmm_nn(q, qkt, v);
-  // qkv is not dead; we just reused storage for q!
-  if (!need_weights) {
-    qkt = Tensor();
+  Tensor attn_output, attn_weights;
+  // convert key_padding_mask -> general attn_mask
+  c10::optional<Tensor> attn_mask;
+  if (mask.has_value()) {
+      // take mask from (B, T) -> (B, 1, 1, T) to match 4D inputs in (B, num_head, T, T) format
+      // Note: SDP has opposite masking semantics
+      attn_mask = (mask->dim() == 2 ? mask->unsqueeze(1).unsqueeze(1) : *mask).logical_not();
   }
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
-#endif
+  std::tie(attn_output, attn_weights) = at::_scaled_dot_product_attention(
+          q, k, v, attn_mask, /*dropout=*/ 0.0, /*need_attn_weights=*/ need_weights);
 
   // shape: [B, T, D]
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
+      attn_output, proj_weight, proj_bias, query);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
@@ -478,10 +466,10 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
     // weights are not needed for full transformer, so don't worry too
     // much about performance -- we implement this just to make use
     // cases that don't disable need_weights still get some speedup.
-    qkt = qkt.sum(1);
-    qkt /= num_head;
+    attn_weights = attn_weights.sum(1);
+    attn_weights /= num_head;
   }
-  return std::make_tuple(std::move(proj), std::move(qkt));
+  return std::make_tuple(std::move(proj), std::move(attn_weights));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attention(
@@ -586,7 +574,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head, false);
   qkv = Tensor(); // Not used any more, allow free
   auto& q = std::get<0>(q_k_v);
   const auto& _k = std::get<1>(q_k_v);
@@ -612,42 +600,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
     k = _k;
     v = _v;
   }
-  // shape: [B, num_head, T, T]
-  auto qkt = bmm_nt(q, k);
-  // q & k are dead but cannot be freed because they were packed with v
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, qkt, {B, num_head, T, T});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt: " << qkt << std::endl;
-#endif
 
-  // shape: [B, num_head, T, T]
-  // TODO: long-term, have a kernel that works with
-  // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query);
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt after softmax: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, dim_per_head]
-  // reuse storage for q; we're done with it
-  auto attn_ctx = bmm_nn(q, qkt, v);
-  // qkv is not dead; we just reused storage for q!
-  if (!need_weights) {
-    qkt = Tensor();
+  Tensor attn_output, attn_weights;
+  // convert key_padding_mask -> general attn_mask
+  c10::optional<Tensor> attn_mask;
+  if (mask.has_value()) {
+      // take mask from (B, T) -> (B, 1, 1, T) to match 4D inputs in (B, num_head, T, T) format
+      // Note: SDP has opposite masking semantics
+      attn_mask = (mask->dim() == 2 ? mask->unsqueeze(1).unsqueeze(1) : *mask).logical_not();
   }
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
-#endif
+  std::tie(attn_output, attn_weights) = at::_scaled_dot_product_attention(
+          q, k, v, attn_mask, /*dropout=*/ 0.0, /*need_attn_weights=*/ need_weights);
 
   // shape: [B, T, D]
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
+      attn_output, proj_weight, proj_bias, query);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
@@ -655,10 +623,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
     // weights are not needed for full transformer, so don't worry too
     // much about performance -- we implement this just to make use
     // cases that don't disable need_weights still get some speedup.
-    qkt = qkt.sum(1);
-    qkt /= num_head;
+    attn_weights = attn_weights.sum(1);
+    attn_weights /= num_head;
   }
-  return std::make_tuple(std::move(proj), std::move(qkt), std::move(k), std::move(v));
+  return std::make_tuple(std::move(proj), std::move(attn_weights), std::move(k), std::move(v));
 }
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -794,7 +762,7 @@ Tensor triton_multi_head_attention(
   auto qkv = qkv_projection(query, key, value, embed_dim, qkv_weight);
 
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head, true);
   qkv = Tensor(); // Not used any more, allow free
   auto& q = std::get<0>(q_k_v);
   const auto& k = std::get<1>(q_k_v);
@@ -810,19 +778,19 @@ Tensor triton_multi_head_attention(
   std::cerr << "v: " << v << std::endl;
 #endif
 
-  auto attn_ctx = at::_triton_scaled_dot_attention(q, k, v);
+  auto attn_output = at::_triton_scaled_dot_attention(q, k, v);
 
 #ifndef NDEBUG
-  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
+  debug_assert_shape(__LINE__, attn_output, {B, num_head, T, dim_per_head});
 #endif
 #ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
+  std::cerr << "attn_output: " << attn_output << std::endl;
 #endif
 
   // shape: [B, T, D]
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
+      attn_output, proj_weight, proj_bias, query);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif

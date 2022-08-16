@@ -5098,7 +5098,7 @@
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
 
 # Fused implementation detail for transformers. Adds in-projection bias to QKV and divides Q by sqrt(D/num_heads).
-- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_heads) -> (Tensor, Tensor, Tensor)
+- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_heads, bool do_rescale) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
