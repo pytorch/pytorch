@@ -463,6 +463,7 @@ def orthogonal_(tensor, gain=1):
         gain: optional scaling factor
 
     Examples:
+        >>> # xdoctest: +REQUIRES(--lapack)
         >>> w = torch.empty(3, 5)
         >>> nn.init.orthogonal_(w)
     """
