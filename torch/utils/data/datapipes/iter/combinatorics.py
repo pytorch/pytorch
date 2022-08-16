@@ -3,6 +3,7 @@ import torch
 
 from torch.utils.data import Sampler, SequentialSampler
 from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
 
@@ -77,6 +78,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             applying the shuffle
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> shuffle_dp = dp.shuffle()
@@ -109,6 +111,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._enabled = True
         self._seed = None
         self._rng = random.Random()
+        self._rng_state = self._rng.getstate()
 
     def set_shuffle(self, shuffle=True):
         self._enabled = shuffle
@@ -116,6 +119,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def set_seed(self, seed: int):
         self._seed = seed
+        self._snapshot_state = _SnapshotState.NotStarted
         return self
 
     def __iter__(self) -> Iterator[T_co]:
@@ -123,9 +127,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             for x in self.datapipe:
                 yield x
         else:
-            if self._seed is None:
-                self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            self._rng.seed(self._seed)
             for x in self.datapipe:
                 if len(self._buffer) == self.buffer_size:
                     idx = self._rng.randint(0, len(self._buffer) - 1)
@@ -146,6 +147,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._buffer = []
         if self._enabled and self._seed is None:
             self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        self._rng.seed(self._seed)
+        self._rng_state = self._rng.getstate()
+        self._seed = None
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -157,7 +161,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._seed,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            self._rng.getstate(),
+            self._rng_state,
         )
         return state
 
@@ -169,11 +173,12 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._seed,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            rng_state,
+            self._rng_state,
         ) = state
         self._rng = random.Random()
-        self._rng.setstate(rng_state)
+        self._rng.setstate(self._rng_state)
         self._buffer = []
+        self._snapshot_state = _SnapshotState.Restored
 
     def __del__(self):
         self._buffer.clear()
