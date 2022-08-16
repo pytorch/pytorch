@@ -1623,10 +1623,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
-    _inner_length = a.shape[dim] / outer_length
-    inner_length: int = int(_inner_length)
+    inner_length = a.shape[dim] // outer_length
 
-    if inner_length != _inner_length:
+    if (a.shape[dim] % outer_length) != 0:
         msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
             a.shape[dim], outer_length
         )
