@@ -1,0 +1,53 @@
+name: Validate Clean Linux Images
+
+on:
+  push:
+    branches:
+      main
+    paths:
+      - .github/workflows/validate-clean-linux-binaries.yml
+  pull_request:
+    paths:
+      - .github/workflows/validate-clean-linux-binaries.yml
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  DOCKER_ID: ${{ secrets.DOCKER_ID }}
+  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+  WITH_PUSH: ${{ github.event_name == 'push' }}
+
+jobs:
+  validate-clean-linux-binaries:
+    runs-on: ubuntu-20.04-m60
+    strategy:
+      matrix:
+        cuda_version: ["11.7", "11.6", "11.3", "10.2"]
+        python_version: ["3.7", "3.8", "3.9", "3.10"]
+    env:
+      GPU_ARCH_TYPE: cuda
+      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Checkout PyTorch builder
+        uses: actions/checkout@v2
+      - name: Install conda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          python-version: ${{ matrix.python_version }}
+          auto-update-conda: true
+          miniconda-version: "latest"
+          activate-environment: testenv
+      - name: Check nvidia smi
+        run: |
+          nvidia-smi
+      - name: Conda Install pytorch and smoke test
+        env:
+          ENV_NAME: conda-env-${{ github.run_id }}
+          CUDA_VER: ${{ matrix.cuda_version }}
+        run: |
+          set -ex
+          conda create -yp ${ENV_NAME} python=${{ matrix.python_version }} numpy
+          conda install -p ${ENV_NAME}  pytorch pytorch-cuda=${{ matrix.cuda_version }} -c pytorch-nightly -c nvidia
+          # Test torch is importable, by changing cwd and running import commands
+          conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
+          conda env remove -p ${ENV_NAME}
