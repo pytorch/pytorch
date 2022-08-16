@@ -2448,12 +2448,9 @@ def gen_source_files(
                 )
 
     symint_overloads = defaultdict(list)
-    #print("==================================")
     for f in native_functions:
         if "symint_ver_needed" in f.tags:
-            # original int kernel will come first
             symint_overloads[f.func.name.name].append(f)
-            #assert len(symint_overloads[f.func.name]) <= 2
 
     symint_overloads_pairs = [ (v[0], v[1]) for v in symint_overloads.values()]
 
