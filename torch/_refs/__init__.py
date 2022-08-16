@@ -781,6 +781,7 @@ def tanh(a):
     return prims.tanh(a)
 
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
 
