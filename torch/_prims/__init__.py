@@ -1602,8 +1602,9 @@ _slice_in_dim_doc = """
     Convenience wrapper for slicing just one dimension using slice.
     """
 
+# TODO: make stride SymInt
 slice_in_dim = _make_prim(
-    schema="slice_in_dim(Tensor(a) a, SymInt start_index, SymInt limit_index, SymInt stride=1, int axis=0) -> Tensor(a)",
+    schema="slice_in_dim(Tensor(a) a, SymInt start_index, SymInt limit_index, int stride=1, int axis=0) -> Tensor(a)",
     meta=_slice_in_dim_meta,
     impl_aten=_slice_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
