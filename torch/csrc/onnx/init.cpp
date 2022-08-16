@@ -235,7 +235,7 @@ void initONNXBindings(PyObject* module) {
       .def(
           "_jit_onnx_create_full_scope_name",
           ::torch::wrap_pybind_function(
-              ::torch::jit::onnx::ONNXScopeName::CreateFullScopeName),
+              ::torch::jit::onnx::ONNXScopeName::createFullScopeName),
           "Create a full scope name from class name and variable name.");
 
   m.def(

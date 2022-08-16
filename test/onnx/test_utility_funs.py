@@ -1046,8 +1046,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.0",
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.1",
             "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.M::/test_utility_funs.N::relu/"
-            "torch.nn.modules.activation.ReLU::relu",
+            "test_utility_funs.M::/test_utility_funs.N::relu/torch.nn.modules.activation.ReLU::relu",
             "test_utility_funs.M::",
         }
 
