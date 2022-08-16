@@ -281,9 +281,9 @@ class profile(_KinetoProfile):
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
             ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
-        schedule (callable): callable that takes step (int) as a single parameter and returns
+        schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (callable): callable that is called at each step when ``schedule``
+        on_trace_ready (Callable): callable that is called at each step when ``schedule``
             returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
