@@ -1270,15 +1270,34 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertEqual(out, ["layer2", "layer1"])
 
-    def test_error_using_same_mode(self):
+    def test_with_calls_restore_same_mode(self):
+        out = []
+
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
+
+        with A("A") as x:
+            with x:
+                torch.empty([])
+
+        self.assertEqual(out, ["A"])  # only added once because same mode was activated, only one mode in stack
+
+    def test_with_calls_restore_ancestor(self):
         class A(TorchFunctionMode):
             pass
 
-        x = A()
+        with A() as x:
+            pass
+
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-                with x:
-                    pass
+            pass
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchFunctionMode):
@@ -1290,17 +1309,6 @@ class TestTorchFunctionMode(TestCase):
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
-
-    def test_error_with_ancestor(self):
-        class A(TorchFunctionMode):
-            pass
-
-        with A() as x:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-            with x:
-                pass
 
     def test_restore_errors(self):
         class A(TorchFunctionMode):

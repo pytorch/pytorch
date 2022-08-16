@@ -1172,15 +1172,23 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
-    def test_error_using_same_mode(self):
-        class A(TorchDispatchMode):
+    def test_with_calls_restore_same_mode(self):
+        with capture_logs(is_mode=True) as logs:
+            with LoggingTensorMode() as x:
+                with x:
+                    torch.empty([])
+
+        # only one call because same mode was activated, only one mode in stack
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+
+    def test_with_calls_restore_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
             pass
 
-        x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-                with x:
-                    pass
+            pass
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
@@ -1192,15 +1200,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
-
-    def test_error_with_ancestor(self):
-        x = LoggingTensorMode()
-        with x:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-            with x:
-                pass
 
     def test_restore_errors(self):
         with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
