@@ -231,22 +231,23 @@ LstmPackedContext::LstmPackedContext(
 
 LstmPackedContext LstmPackedContext::pack(c10::impl::GenericList unpacked) {
   return LstmPackedContext(
-      unpacked.get(0).toTensorVector(),
-      unpacked.get(1).toBool(),
-      unpacked.get(2).toInt(),
-      unpacked.get(3).toDouble(),
-      unpacked.get(4).toBool(),
-      unpacked.get(5).toBool(),
-      unpacked.get(6).toBool());
+      unpacked.get(Unpacked::Params).toTensorVector(),
+      unpacked.get(Unpacked::hasBiases).toBool(),
+      unpacked.get(Unpacked::NumLayers).toInt(),
+      unpacked.get(Unpacked::Dropout).toDouble(),
+      unpacked.get(Unpacked::Train).toBool(),
+      unpacked.get(Unpacked::Bidirectional).toBool(),
+      unpacked.get(Unpacked::BatchFirst).toBool());
 }
 
 const c10::impl::GenericList LstmPackedContext::unpack() const {
   c10::impl::GenericList unpacked_lstm_context{c10::AnyType::get()};
   unpacked_lstm_context.reserve(7);
 
-  const c10::List<c10::IValue> packed_linear_contexts = get_val(0).toList();
+  const c10::List<c10::IValue> packed_linear_contexts =
+      get_val(Packed::LinearContexts).toList();
 
-  const int64_t num_layers = get_val(2).toInt();
+  const int64_t num_layers = get_val(Packed::NumLayers).toInt();
   const int64_t linear_contexts_per_layer = 8;
 
   std::vector<Tensor> params_cpu;
@@ -255,8 +256,13 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
   for (c10::IValue packed_linear_context : packed_linear_contexts) {
     const c10::impl::GenericList unpacked_linear_context =
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
-    params_cpu.emplace_back(unpacked_linear_context.get(0).toTensor().t());
-    params_cpu.emplace_back(unpacked_linear_context.get(1).toTensor());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
+            .toTensor()
+            .t());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Bias)
+            .toTensor());
   }
   unpacked_lstm_context.emplace_back(params_cpu);
   for (int64_t i = 1; i < 7; ++i) {
@@ -299,8 +305,9 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
       "Vulkan LSTM expects cell state dims to be 3.");
 
   const c10::List<c10::IValue> packed_linear_op_contexts =
-      lstm_context->get_val(0).toList();
-  const int64_t packed_num_layers = lstm_context->get_val(2).toInt();
+      lstm_context->get_val(LstmPackedContext::Packed::LinearContexts).toList();
+  const int64_t packed_num_layers =
+      lstm_context->get_val(LstmPackedContext::Packed::NumLayers).toInt();
 
   const int64_t linear_op_contexts_per_layer =
       8; // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf), (b_ig,

@@ -209,12 +209,16 @@ Tensor run_addmm_context(
       input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
   const vTensor& v_input = convert(input);
 
-  const vTensor& packed_v_weight =
-      convert(linear_context->get_val(0).toTensor());
-  const vTensor& packed_v_bias = convert(linear_context->get_val(1).toTensor());
+  const vTensor& packed_v_weight = convert(
+      linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
+  const vTensor& packed_v_bias = convert(
+      linear_context->get_val(LinearPackedContext::Packed::Bias).toTensor());
   const std::vector<int64_t> unpacked_weight_sizes =
-      linear_context->get_val(2).toIntVector();
-  const bool bias_defined = linear_context->get_val(3).toBool();
+      linear_context->get_val(LinearPackedContext::Packed::WeightSizes)
+          .toIntVector();
+  const bool bias_defined =
+      linear_context->get_val(LinearPackedContext::Packed::BiasDefined)
+          .toBool();
 
   TORCH_CHECK(
       usable(input, unpacked_weight_sizes),
@@ -388,9 +392,8 @@ LinearPackedContext::LinearPackedContext(
 
 LinearPackedContext LinearPackedContext::pack(c10::impl::GenericList unpacked) {
   return LinearPackedContext(
-      unpacked.get(0).toTensor(),
-      unpacked.get(1).isTensor() ? unpacked.get(1).toTensor()
-                                 : c10::optional<Tensor>());
+      unpacked.get(Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::Bias));
 }
 
 c10::intrusive_ptr<LinearPackedContext> create_linear_context(

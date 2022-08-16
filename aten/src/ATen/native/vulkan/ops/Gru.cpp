@@ -188,22 +188,23 @@ GruPackedContext::GruPackedContext(
 
 GruPackedContext GruPackedContext::pack(c10::impl::GenericList unpacked) {
   return GruPackedContext(
-      unpacked.get(0).toTensorVector(),
-      unpacked.get(1).toBool(),
-      unpacked.get(2).toInt(),
-      unpacked.get(3).toDouble(),
-      unpacked.get(4).toBool(),
-      unpacked.get(5).toBool(),
-      unpacked.get(6).toBool());
+      unpacked.get(Unpacked::Params).toTensorVector(),
+      unpacked.get(Unpacked::hasBiases).toBool(),
+      unpacked.get(Unpacked::NumLayers).toInt(),
+      unpacked.get(Unpacked::Dropout).toDouble(),
+      unpacked.get(Unpacked::Train).toBool(),
+      unpacked.get(Unpacked::Bidirectional).toBool(),
+      unpacked.get(Unpacked::BatchFirst).toBool());
 }
 
 const c10::impl::GenericList GruPackedContext::unpack() const {
   c10::impl::GenericList unpacked_gru_context{c10::AnyType::get()};
   unpacked_gru_context.reserve(7);
 
-  const c10::List<c10::IValue> packed_linear_contexts = get_val(0).toList();
+  const c10::List<c10::IValue> packed_linear_contexts =
+      get_val(Packed::LinearContexts).toList();
 
-  const int64_t num_layers = get_val(2).toInt();
+  const int64_t num_layers = get_val(Packed::NumLayers).toInt();
   const int64_t linear_contexts_per_layer = 6;
 
   std::vector<Tensor> params_cpu;
@@ -212,8 +213,13 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
   for (c10::IValue packed_linear_context : packed_linear_contexts) {
     const c10::impl::GenericList unpacked_linear_context =
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
-    params_cpu.emplace_back(unpacked_linear_context.get(0).toTensor().t());
-    params_cpu.emplace_back(unpacked_linear_context.get(1).toTensor());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
+            .toTensor()
+            .t());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Bias)
+            .toTensor());
   }
   unpacked_gru_context.emplace_back(params_cpu);
   for (int64_t i = 1; i < 7; ++i) {
@@ -252,8 +258,9 @@ std::tuple<Tensor, Tensor> run_gru_context(
       hx_vk.sizes().size() == 3, "Vulkan gru expects 'hx_vk' dims to be 3.");
 
   const c10::List<c10::IValue> packed_linear_contexts =
-      gru_context->get_val(0).toList();
-  const int64_t num_layers = gru_context->get_val(2).toInt();
+      gru_context->get_val(GruPackedContext::Packed::LinearContexts).toList();
+  const int64_t num_layers =
+      gru_context->get_val(GruPackedContext::Packed::NumLayers).toInt();
 
   const int64_t linear_contexts_per_layer = 6;
   // (b_ir, w_ir), (b_hr, w_hr), (b_iz, w_iz),
