@@ -1582,9 +1582,9 @@ def check_if_enable(test: unittest.TestCase):
         elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 disabled_tests_dict = json.loads(fp.read())
-        else:
-            # IMPORT_DISABLED_TESTS can be None here
-            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
+        elif IS_CI:
+            # Only print out this warning when running in the CI where this matters
+            print(f'[WARNING] Fail to load the disabled tests file {IMPORT_DISABLED_TESTS}, all tests will be run')
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
