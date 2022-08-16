@@ -6,11 +6,11 @@ from torch.distributed import distributed_c10d
 
 class DefaultState(object):
     r"""
-    Stores state needed to perform the default ``all_reduce`` algorithm
+    Stores state needed to perform the default communication algorithm
     within a communication hook.
 
     Args:
-        process_group (ProcessGroup): The process group to be used for all-reduce.
+        process_group (ProcessGroup): The process group to be used.
     """
 
     __slots__ = [
@@ -26,13 +26,13 @@ class DefaultState(object):
     ):
         self.process_group = process_group if process_group is not None else distributed_c10d._get_default_group()
         self.world_size = dist.get_world_size(process_group)
+        # Setting two factors `self.gradient_predivide_factor`
+        # and `self.gradient_postdivide_factor` to avoid underflow and overflow
         self.gradient_predivide_factor = self._get_gradient_predivide_factor(
             self.world_size
         )
         self.gradient_postdivide_factor = self.world_size / self.gradient_predivide_factor
 
-    # setting two factors `self.gradient_predivide_factor`
-    # and `self.gradient_postdivide_factor` to avoid underflow and overflow
     def _get_gradient_predivide_factor(self, world_size: int) -> float:
         factor: int = 1
         while world_size % factor == 0 and world_size / factor > factor:
@@ -114,7 +114,7 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
     if state.gradient_postdivide_factor > 1:
         output.div_(state.gradient_postdivide_factor)
 
-def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor):
     grad.data = grad.data.to(prec)
     if output is not None:
         output.data = output.data.to(prec)

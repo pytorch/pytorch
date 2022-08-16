@@ -951,8 +951,8 @@ class FullyShardedDataParallel(nn.Module):
         # Setting communication hook to a default:
         # ``reduce_scatter`` for shareded strategies and
         # ``all_reduce`` for ``NO_SHARD``
-        self.communication_hook = self._get_default_comm_hook()
-        self.communication_hook_state = self._get_default_comm_hook_state()
+        self._communication_hook = self._get_default_comm_hook()
+        self._communication_hook_state = self._get_default_comm_hook_state()
         self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
@@ -1352,8 +1352,8 @@ class FullyShardedDataParallel(nn.Module):
         Wether a low precision hook is registered or not.
         """
         return (
-            self.communication_hook is not None
-            and self.communication_hook in LOW_PRECISION_HOOKS
+            self._communication_hook is not None
+            and self._communication_hook in LOW_PRECISION_HOOKS
         )
 
     def _cast_fp_inputs_to_precision(
@@ -2931,16 +2931,18 @@ class FullyShardedDataParallel(nn.Module):
                     param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
                 if self._exec_order_data.is_first_iter:
-                    # For all sharding strategies communication is performed through `communication_hook`:
+                    # For all sharding strategies communication is performed through `_communication_hook`:
                     # default comm hooks are: `reduce_scatter` for sharded strategies and
-                    # `all_reduce` for non-sharded strategies. This checks asserts that `communication_hook`
-                    # and `communication_hook_state`, required for communication not `None`.`
-                    assert (
-                        self.communication_hook is not None
-                    ), "Communication hook should not be None"
-                    assert (
-                        self.communication_hook_state is not None
-                    ), "Communication hook state should not be None"
+                    # `all_reduce` for non-sharded strategies. This checks asserts that `_communication_hook`
+                    # and `_communication_hook_state`, required for communication not `None`.`
+                    p_assert(
+                        self._communication_hook is not None,
+                        "Communication hook should not be None"
+                    )
+                    p_assert(
+                        self._communication_hook_state is not None,
+                        "Communication hook state should not be None"
+                    )
                 grad = param.grad.data
                 if param._is_sharded:  # type: ignore[attr-defined]
                     # We clear `param.grad` to permit repeated gradient
@@ -2961,7 +2963,7 @@ class FullyShardedDataParallel(nn.Module):
                     num_pad = self.world_size * chunks[0].numel() - grad.numel()
                     input_flattened = F.pad(grad_flatten, [0, num_pad])
                     output = torch.zeros_like(chunks[0])
-                    self.communication_hook(self.communication_hook_state, input_flattened, output)
+                    self._communication_hook(self._communication_hook_state, input_flattened, output)
 
                     self._cast_grad_to_param_dtype(output, param)
 
@@ -2996,7 +2998,7 @@ class FullyShardedDataParallel(nn.Module):
                     ), "Currently the way for _is_sharded to be False is \
                         world_size == 1 or sharding_stratagy is set to be NO_SHARD"
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
-                        self.communication_hook(self.communication_hook_state, param.grad)
+                        self._communication_hook(self._communication_hook_state, param.grad)
 
                     self._cast_grad_to_param_dtype(param.grad, param)
 
@@ -4139,10 +4141,10 @@ class FullyShardedDataParallel(nn.Module):
         for submodule in self.fsdp_modules(self):
             assert not submodule._hook_registered, "communication hook can be only registered once"
             submodule._hook_registered = True
-            assert submodule.communication_hook == self._get_default_comm_hook(),\
-                f"communication hook should be default, but it is {submodule.communication_hook.__name__} instead"
-            submodule.communication_hook_state = state
-            submodule.communication_hook = hook
+            assert submodule._communication_hook == self._get_default_comm_hook(),\
+                f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
+            submodule._communication_hook_state = state
+            submodule._communication_hook = hook
 
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:

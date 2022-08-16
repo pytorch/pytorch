@@ -157,7 +157,7 @@ class TestCommunicationHooks(FSDPTest):
             else default_hooks.allreduce_hook
 
         for entry in FSDP.fsdp_modules(net_default_hook):
-            self.assertEqual(entry.communication_hook, default_hook)
+            self.assertEqual(entry._communication_hook, default_hook)
 
         for _ in range(4):
 
@@ -230,7 +230,7 @@ class TestCommunicationHooks(FSDPTest):
             else default_hooks.allreduce_hook
 
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(entry.communication_hook, default_hook)
+            self.assertEqual(entry._communication_hook, default_hook)
 
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
@@ -252,28 +252,30 @@ class TestCommunicationHooks(FSDPTest):
         # Check dummy hook was registered for the root and all submodules if any
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
             self.assertEqual(
-                entry.communication_hook,
+                entry._communication_hook,
                 dummy_hook
             )
             self.assertEqual(
-                entry.communication_hook_state,
+                entry._communication_hook_state,
                 dummy_state
             )
 
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry.communication_hook = None
+            entry._communication_hook = None
 
         in_data = torch.rand(16, 8).cuda()
         loss = fsdp_model_with_hook(in_data).sum()
-        with self.assertRaisesRegex(AssertionError, 'Communication hook should not be None'):
+        # This Error is raised during backward pass and is checked with `p_assert`,
+        # i.e. it prints error string but AssertionError raises nothing
+        with self.assertRaisesRegex(AssertionError, ''):
             loss.backward()
 
         for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry.communication_hook = dummy_hook
-            entry.communication_hook_state = None
-
+            entry._communication_hook = dummy_hook
+            entry._communication_hook_state = None
+        # Same as above
         loss = fsdp_model_with_hook(in_data).sum()
-        with self.assertRaisesRegex(AssertionError, 'Communication hook state should not be None'):
+        with self.assertRaisesRegex(AssertionError, ''):
             loss.backward()
 
 
@@ -355,12 +357,12 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy
         )
         submodules = self._get_submodules(fsdp_model_with_hook)
-        submodules[1].communication_hook = dummy_hook
+        submodules[1]._communication_hook = dummy_hook
 
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(
             AssertionError,
-            f'^communication hook should be default, but it is {submodules[1].communication_hook.__name__} instead$'
+            f'^communication hook should be default, but it is {submodules[1]._communication_hook.__name__} instead$'
         ):
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
