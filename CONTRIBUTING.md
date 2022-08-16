@@ -448,7 +448,7 @@ If you're interested in adding new developer docs, please read this [page on the
 
 The rest of this section is about user-facing documentation.
 
-PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
 for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
 
 
