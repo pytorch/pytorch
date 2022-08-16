@@ -20,12 +20,12 @@ from torch._prims_common import (
     DimsType,
     Number,
     NumberType,
+    RETURN_TYPE,
     ShapeType,
     StrideType,
     TensorLike,
     TensorLikeType,
     type_to_dtype,
-    RETURN_TYPE,
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
