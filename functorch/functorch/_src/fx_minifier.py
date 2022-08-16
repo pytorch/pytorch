@@ -241,7 +241,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     def try_granularity(failing_state, granularity):
         print(f"Trying granularity {granularity}")
-        for strategy in [delta_debugging, eliminate_dead_code, remove_suffix, eliminate_dead_code, remove_unused_inputs]:
+        for strategy in [eliminate_dead_code, remove_suffix, delta_debugging]:
             new_state = strategy(failing_state, granularity)
             if new_state is not None:
                 return new_state
