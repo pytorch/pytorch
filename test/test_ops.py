@@ -1553,7 +1553,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
         '_refs.zeros',
-        '_refs.zeros_like'
+        '_refs.zeros_like',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
     }
 
     not_in_decomp_table = {
