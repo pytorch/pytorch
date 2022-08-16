@@ -1651,7 +1651,7 @@ class TestFunctionalMapDataPipe(TestCase):
         _ = next(it)
         self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
-        _ = list(it)
+        _ = list(dp)
         self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
@@ -1774,15 +1774,15 @@ class TestFunctionalMapDataPipe(TestCase):
         with self.assertRaisesRegex(IndexError, r"out of range"):
             input_dp1.zip(input_dp2, input_dp3)[5]
 
-        # Functional Test: Ensure `zip` can combine `Shuffler` with others
+        # Functional Test: Ensure `zip` can combine `Batcher` with others
         dp1 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp1 = dp1.shuffle()
+        shuffle_dp1 = dp1.batch(2)
         dp2 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp2 = dp2.shuffle()
-        zip_dp = shuffle_dp1.zip(shuffle_dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        shuffle_dp2 = dp2.batch(3)
+        zip_dp1 = shuffle_dp1.zip(shuffle_dp2)
+        self.assertEqual(4, len(list(zip_dp1)))
         zip_dp2 = shuffle_dp1.zip(dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        self.assertEqual(5, len(list(zip_dp2)))
 
         # __len__ Test: returns the length of the shortest DataPipe
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
@@ -3153,12 +3153,15 @@ class TestIterDataPipeGraphFastForward(TestCase):
         res2 = [10 * x for x in res1]
         self._snapshot_test_helper(graph2, expected_res=res2)
 
-        rng = torch.Generator()
-        graph3 = graph2.shuffle()
-        rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
-        res3 = list(graph3)
-        self._snapshot_test_helper(graph3, expected_res=res3)
+        # TODO: shuffle is not simple graph anymore
+        graph3 = graph2
+        res3 = res2
+        #  rng = torch.Generator()
+        #  graph3 = graph2.shuffle()
+        #  rng.manual_seed(0)
+        #  torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        #  res3 = list(graph3)
+        #  self._snapshot_test_helper(graph3, expected_res=res3)
 
         graph4 = graph3.map(_mul_10)
         res4 = [10 * x for x in res3]
