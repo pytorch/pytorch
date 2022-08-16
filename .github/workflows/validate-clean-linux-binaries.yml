@@ -22,8 +22,16 @@ jobs:
     runs-on: ubuntu-20.04-m60
     strategy:
       matrix:
-        cuda_version: ["11.7", "11.6", "11.3", "10.2"]
+        cuda_version: ["11.7", "11.6"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
+      variables:
+      - name: cuda_str
+        ${{ if eq( ${{ matrix.cuda_version }}, '11.7') }}:
+          value: "117"
+        ${{ elseif eq( ${{ matrix.cuda_version }}, '11.6' ) }}:
+          value: "116"
+        ${{ else }}:
+          value: "116"
     env:
       GPU_ARCH_TYPE: cuda
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -34,7 +42,7 @@ jobs:
       - name: Install conda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          python-version: ${{ matrix.python_version }}
+          python-version: 3.8
           auto-update-conda: true
           miniconda-version: "latest"
           activate-environment: testenv
@@ -58,8 +66,4 @@ jobs:
           CUDA_VER: ${{ matrix.cuda_version }}
         run: |
           set -ex
-          if [[ $CUDA_VER == "10.2"]]; than
-            pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu102
-          else
-            pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
-          fi
+          pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/${{ cuda_str }}
