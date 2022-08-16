@@ -994,7 +994,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   // mul_sparse_sparse_out
   // is faster if there is an uncoalesced input
   if (!t_.is_coalesced() || !src_.is_coalesced()) {
-    at::_mul_sparse_sparse_out(r, t_, src_);
+    return at::_mul_sparse_sparse_out(r, t_, src_);
   }
 
   if (!t_._nnz() || !src_._nnz()) {

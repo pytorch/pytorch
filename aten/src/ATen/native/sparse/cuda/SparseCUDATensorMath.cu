@@ -485,8 +485,7 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
 
   // mul(sparse, sparse)
-  at::_mul_sparse_sparse_out(r_, t_, src_);
-  return r_;
+  return at::_mul_sparse_sparse_out(r_, t_, src_);
 }
 
 // --------------------------------------------------------------------

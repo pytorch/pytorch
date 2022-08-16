@@ -8,7 +8,7 @@ namespace native {
 namespace {
 
 template <typename func_t>
-struct CPUKernel {
+struct CPUKernelLauncher {
   static void launch(TensorIteratorBase& iter, const func_t& f) {
     cpu_kernel(iter, f);
   }
@@ -23,11 +23,11 @@ struct MulOp {
 
 }
 
-Tensor _mul_sparse_sparse_out_cpu(
+Tensor& _mul_sparse_sparse_out_cpu(
     const Tensor& x,
     const Tensor& y,
     Tensor& result) {
-  return _sparse_binary_op_intersection_kernel_out<CPUKernel, MulOp>(
+  return _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, MulOp>(
       result, x, y
   );
 }

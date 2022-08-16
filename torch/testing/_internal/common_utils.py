@@ -639,7 +639,6 @@ def run_tests(argv=UNITTEST_ARGS):
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}'
                   f' or we are on Windows whose env variable has an upper limit of 32767 chars')
-
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -1580,11 +1579,12 @@ def check_if_enable(test: unittest.TestCase):
 
         if "DISABLED_TESTS_DICT" in os.environ:
             disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
-        elif os.path.exists(IMPORT_DISABLED_TESTS):
+        elif IMPORT_DISABLED_TESTS and os.path.exists(IMPORT_DISABLED_TESTS):
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
                 disabled_tests_dict = json.loads(fp.read())
         else:
-            print(f'Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
+            # IMPORT_DISABLED_TESTS can be None here
+            print(f'[WARNING] Fail to load {IMPORT_DISABLED_TESTS}, no test will be skipped')
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
