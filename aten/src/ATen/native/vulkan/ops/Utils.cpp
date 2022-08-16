@@ -235,17 +235,21 @@ void pack_vtensor_to_staging(
       },
   };
 
+  bool is_quantized = v_self.is_quantized();
+
+  api::utils::uvec3 pack_extents = extents;
+  if (is_quantized) {
+    pack_extents.data[0u] = 1;
+    pack_extents.data[1u] = 1;
+    pack_extents.data[2u] =
+        api::utils::safe_downcast<uint32_t>(v_self.numtexels());
+  }
+
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
-  bool is_quantized = v_self.is_quantized();
-  api::utils::uvec3 copy_extents;
-  copy_extents.data[0u] = 1;
-  copy_extents.data[1u] = 1;
-  copy_extents.data[2u] =
-      ((v_self.sizes()[1] * v_self.sizes()[2] * v_self.sizes()[3]) / 4);
+
   api::ShaderSource kernel = is_quantized ? VK_KERNEL(image_to_nchw_quantized)
                                           : VK_KERNEL(image_to_nchw);
-  api::utils::uvec3 extents_to_use = is_quantized ? copy_extents : extents;
 
   context->submit_compute_job(
       // shader descriptor
@@ -253,9 +257,9 @@ void pack_vtensor_to_staging(
       // pipeline barrier
       pipeline_barrier,
       // global work group size
-      extents_to_use,
+      pack_extents,
       // local work group size
-      adaptive_work_group_size(extents_to_use),
+      adaptive_work_group_size(pack_extents),
       // fence handle
       fence_handle,
       // shader arguments
