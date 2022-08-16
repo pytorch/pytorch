@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import operator
 import weakref
 
@@ -1421,3 +1422,24 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
 def prod(xs: Sequence[NumberType]) -> NumberType:
     """Product of elements in input sequence. Returns 1 for empty sequence"""
     return reduce(operator.mul, xs, 1)
+
+
+# In order to keep things like aliasing relationships and storage
+# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
+# which caches conversions to Meta Tensors. We would like to use
+# one consistent mode among along FakeTensors, which we store here.
+# We store a weakref, so that when all previous FakeTensors are
+# the present mode will also deallocate. FakeTensorMode holds onto
+# tensors that are converted to Meta so we don't want to persist it
+# longer than necessary.x
+prim_fake_mode_ref = None
+
+
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()

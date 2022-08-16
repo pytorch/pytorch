@@ -8,14 +8,13 @@ from torch._prims_common import (
 )
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
 from functools import wraps, reduce
 import operator
 import warnings
-import weakref
 from itertools import chain
 
 # TODO: implement ref.cast with an option to enforce safe casting
@@ -320,27 +319,6 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
     return _fn
 
 
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
-
-
 def wrap_tensor_meta(f):
     def wrap(t):
         if (
@@ -348,7 +326,7 @@ def wrap_tensor_meta(f):
             and not isinstance(t, FakeTensor)
             and not t.device.type == "meta"
         ):
-            return FakeTensor.from_tensor(t, get_prim_fake_mode())
+            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
         else:
             return t
 

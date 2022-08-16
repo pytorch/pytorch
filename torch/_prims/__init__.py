@@ -242,7 +242,7 @@ def TensorMeta(
     if isinstance(tensorlike, FakeTensor):
         mode = tensorlike.fake_mode
     else:
-        mode = utils.wrappers.get_prim_fake_mode()
+        mode = utils.get_prim_fake_mode()
 
     if device.type == "meta":
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
