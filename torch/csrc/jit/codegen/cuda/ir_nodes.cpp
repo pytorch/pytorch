@@ -1933,18 +1933,39 @@ TensorDomain* TensorDomain::view(const AnalyzeViewResult& view_analysis) {
 }
 
 TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
+  auto inp_domain = noReductions(getMaybeRFactorDomain());
+
   if (start_dim < 0) {
-    start_dim += nDims();
+    start_dim += inp_domain.size();
   }
   if (end_dim < 0) {
-    end_dim += nDims();
+    end_dim += inp_domain.size();
   }
+  TORCH_CHECK(
+      start_dim >= 0 && start_dim < inp_domain.size(),
+      "Invalid start_dim ",
+      start_dim);
+  TORCH_CHECK(
+      end_dim >= 0 && end_dim < inp_domain.size(), "Invalid end_dim ", end_dim);
+  TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
 
   std::vector<IterDomain*> new_root_domain;
-  auto inp_domain = noReductions(getMaybeRFactorDomain());
   new_root_domain.reserve(inp_domain.size());
-  for (auto id : inp_domain) {
-    new_root_domain.push_back(id->cloneWithoutRFactor());
+  for (auto i : c10::irange(inp_domain.size())) {
+    bool is_rfactor_dim = i >= start_dim && i <= end_dim;
+    auto inp_id = inp_domain[i];
+    auto out_id = IterDomainBuilder(inp_id)
+                      .is_rfactor_domain(is_rfactor_dim)
+                      .extent(
+                          (is_rfactor_dim && inp_id->hasExpandedExtent())
+                              ? inp_id->expandedExtent()
+                              : inp_id->extent())
+                      .iter_type(
+                          (is_rfactor_dim && inp_id->isBroadcast())
+                              ? IterType::Iteration
+                              : inp_id->getIterType())
+                      .build();
+    new_root_domain.push_back(out_id);
   }
 
   std::vector<IterDomain*> rfactor_domain;
@@ -1966,7 +1987,7 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
   }
   rfactor_domain.push_back(merged_id);
 
-  for (auto i : c10::irange(end_dim + 1, nDims())) {
+  for (auto i : c10::irange(end_dim + 1, inp_domain.size())) {
     rfactor_domain.push_back(new_root_domain[i]);
   }
 

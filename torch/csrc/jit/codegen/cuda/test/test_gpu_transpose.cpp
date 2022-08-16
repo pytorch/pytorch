@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
@@ -459,30 +460,35 @@ TEST_F(NVFuserTest, FusionScheduleTransposeNoReference_CUDA) {
 // x->broadcast--add->z
 // y->broadcast-/
 TEST_F(NVFuserTest, FusionScheduleBroadcastOnly_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
+  for (bool contig0 : {true, false}) {
+    for (bool contig1 : {true, false}) {
+      Fusion fusion;
+      FusionGuard fg(&fusion);
+      auto tv0 = contig0 ? makeContigConcreteTensor({-1, 1, -1})
+                         : makeConcreteTensor({-1, 1, -1});
+      auto tv1 = contig1 ? makeContigConcreteTensor({-1, -1, 1})
+                         : makeConcreteTensor({-1, -1, 1});
+      fusion.addInput(tv0);
+      fusion.addInput(tv1);
+      auto tv2 = add(tv0, tv1);
+      fusion.addOutput(tv2);
 
-  auto tv0 = makeConcreteTensor({1024, 1, 256});
-  auto tv1 = makeConcreteTensor({1024, 1024, 1});
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  auto tv2 = add(tv0, tv1);
-  fusion.addOutput(tv2);
+      auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+      at::Tensor input0 = at::randn({1024, 1, 256}, options);
+      at::Tensor input1 = at::randn({1024, 1024, 1}, options);
 
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input0 = at::randn({1024, 1, 256}, options);
-  at::Tensor input1 = at::randn({1024, 1024, 1}, options);
+      auto lparams = scheduleTranspose(&fusion, {input0, input1});
 
-  auto lparams = scheduleTranspose(&fusion, {input0, input1});
+      FusionExecutor fe;
+      fe.compileFusion(&fusion, {input0, input1}, lparams);
+      auto outputs = fe.runFusion({input0, input1}, lparams);
 
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {input0, input1}, lparams);
-  auto outputs = fe.runFusion({input0, input1}, lparams);
+      auto tv_ref = input0 + input1;
 
-  auto tv_ref = input0 + input1;
-
-  testValidate(
-      &fusion, outputs, {input0, input1}, {tv_ref}, __LINE__, __FILE__);
+      testValidate(
+          &fusion, outputs, {input0, input1}, {tv_ref}, __LINE__, __FILE__);
+    }
+  }
 }
 
 TEST_F(NVFuserTest, FusionScheduleTransposeComplexDAG1_CUDA) {
@@ -708,6 +714,19 @@ TEST_F(NVFuserTest, FusionManualScheduleTransposeComplexDAG1_CUDA) {
       {t9, t10, t12},
       __LINE__,
       __FILE__);
+}
+
+// x->view->y
+TEST_F(NVFuserTest, FusionViewNoTranspose_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = flatten(tv0, 1, 2);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(!hasAtLeastTwoValidGroups(&fusion));
 }
 
 } // namespace jit

@@ -157,7 +157,7 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
           data_cache, [&largest_out]() {
             return std::make_unique<std::vector<TensorView*>>(
                 scheduler_utils::getInputsOutputsWithInnerDim(
-                    largest_out, true));
+                    largest_out, true, true));
           });
 
   constexpr int64_t kSixteen = 16; // clang tidy
@@ -691,7 +691,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   if (params.vectorize) {
     // Grab all tensor views that should be vectorized
     auto inputs_outputs =
-        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
+        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true, true);
     std::vector<TensorView*> vectorized_tvs;
     bool should_vectorize_reference_tv = false;
     for (auto tv : inputs_outputs) {

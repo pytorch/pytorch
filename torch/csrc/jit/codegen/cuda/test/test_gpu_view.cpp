@@ -1,4 +1,5 @@
 #if defined(USE_CUDA)
+#include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -1157,6 +1158,123 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
       {{1, 3922 * 2, 1, 7}, {1, -1, 2}}, {{1, 3922, 1, 7}, {1, -1, 2}});
   assert_does_not_match(
       {{19, 3 * 4, 7, 99}, {19, -1, 3}}, {{19, 3 * 5, 7, 99}, {19, -1, 3}});
+}
+
+TEST_F(NVFuserTest, FusionViewVectorize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = flatten(tv0, 1, 2);
+  auto tv2 = flatten(tv0, 1, 2);
+  auto tv3 = sin(tv1);
+  auto tv4 = sin(tv2);
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({256, 1024, 1024}, options);
+
+  auto lparams = schedulePointwise(&fusion, {input});
+
+  auto hasVectorization = [](TensorView* tv) -> bool {
+    for (auto i : tv->domain()->domain()) {
+      if (i->getParallelType() == ParallelType::Vectorize) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (auto o : fusion.outputs()) {
+    TORCH_CHECK(hasVectorization(o->as<TensorView>()));
+  }
+  for (auto i : fusion.inputs()) {
+    for (auto c : ir_utils::consumerTvsOf(i->as<TensorView>())) {
+      TORCH_CHECK(hasVectorization(c));
+    }
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.flatten(1, 2).sin();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref, tv_ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandFlatten_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({-1, -1, 1});
+  fusion->addInput(tv0);
+  auto tv1 = expand(
+      tv0,
+      {tv0->axis(0)->extent(),
+       tv0->axis(1)->extent(),
+       IrBuilder::create<Int>(8)});
+  auto tv2 = flatten(tv1, 1, 2);
+  auto tv3 = sum(tv2, {1});
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({256, 1024, 1}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({input});
+
+  auto aten_out = input.expand({256, 1024, 8}).flatten(1, 2).sum(1);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {input},
+      {aten_out},
+      __LINE__,
+      __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionIllegalReductionFlatten_CUDA) {
+  EXPECT_THAT(
+      []() {
+        auto fusion = std::make_unique<Fusion>();
+        FusionGuard fg(fusion.get());
+
+        auto tv0 = makeConcreteTensor({2, 3});
+        fusion->addInput(tv0);
+
+        auto tv1 = sum(tv0, {1});
+        auto tv2 = flatten(tv1, 0, 1);
+        fusion->addOutput(tv2);
+      },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("Invalid end_dim")));
+}
+
+TEST_F(NVFuserTest, FusionReductionFlatten1_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({2, 3, 5});
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = flatten(tv1, 0, 1);
+  fusion->addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({2, 3, 5}, options);
+  auto ref = t0.sum({1}).flatten(0, 1);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

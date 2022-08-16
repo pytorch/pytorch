@@ -93,7 +93,7 @@ TORCH_CUDA_CU_API LaunchParams scheduleTranspose(
 
 //! Utility for canSchedule interface to check if this fusion has at least two
 //! groups, each with a fully broadcasted reference tensor.
-bool hasAtLeastTwoValidGroups(Fusion* fusion);
+TORCH_CUDA_CU_API bool hasAtLeastTwoValidGroups(Fusion* fusion);
 
 } // namespace cuda
 } // namespace fuser

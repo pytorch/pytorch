@@ -228,34 +228,32 @@ cacheAndForkOutputs(Fusion* fusion, bool unroll);
 // domain.
 IterDomain* innerMostRootDim(TensorView* tv);
 
-// Uses a lot of logic from TransformPropagator in the implementation
-class FindAllMappedDims {
- private:
-  FindAllMappedDims(
-      TensorView* from,
-      IterDomain* starting_id,
-      bool vectorize_pass);
-
- private:
-  std::unordered_map<TensorView*, IterDomain*> mapped_ids;
-  TensorView* starting_tv = nullptr;
-  IterDomain* starting_id = nullptr;
+// Looks through fusion and finds all dims that match to the one provided in
+// the tensorview provided. Iter domain must be a root domain. If inner_only,
+// will only map dimensions if they're the inner most position. This is
+// important when projecting a dimension between an rfactor position and its
+// root position when mapping from consumer to producer. If inner_only=true,
+// takes the rfactor/root dimensions that maps, projects it to the root/rfactor
+// domain, but only following the inner most pass when encounting split/merge.
+// When propagating backward, for split it will only propagate backwards if the
+// mapped dimension is the inner portion of the split. For merge, inner_only
+// doesn't make a dimension and will propagate through the inner portion of the
+// merge. When propagating forward, the logic is symmetric with the backward
+// case.
+class FindAllMappedDims : public MaxInfoSpanningTree::Propagator {
+  std::unordered_map<TensorView*, IterDomain*> mapped_root_ids_;
+  std::unordered_map<TensorView*, IterDomain*> mapped_rfactor_ids_;
+  TensorView* starting_tv_ = nullptr;
+  IterDomain* starting_id_ = nullptr;
+  bool inner_only_;
 
  public:
-  // Looks through fusion and finds all dims that match to the one provided in
-  // the tensorview provided. Iter domain must be a root domain. If vectorize
-  // pass, will only map dimensions if they're the inner most position. This is
-  // important when projecting a dimension from an rfactor position to its root
-  // position when mapping from consumer to producer. If vectorize_pass=true,
-  // takes the rfactor dimensions that maps, projects it to the root domain, but
-  // only following the inner most pass when encounting split/merge. For split
-  // it will only propagate backwards if the mapped dimension is the inner
-  // portion of the split. For merge, vectorize_pass doesn't make a dimension
-  // and will propagate through the inner portion of the merge.
-  static std::unordered_set<IterDomain*> from(
-      TensorView* tv,
-      IterDomain* id,
-      bool vectorize_pass);
+  FindAllMappedDims(TensorView* from, IterDomain* starting_id, bool inner_only);
+  virtual void setUp() override;
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
+  std::unordered_set<IterDomain*> get() const;
 };
 
 // Checks if tensor view has an iteration domain in vector dims in its inner
@@ -268,10 +266,13 @@ bool hasInnerDim(
 
 // Returns all inputs and outputs that share the inner most dimension of the
 // provided reference. If reference is an input it ignores reduction axes, will
-// ignore all broadcast axes. If can_vectorize, will check contiguity for
-// vectorization, otherwise it just checks it has that inner dim.
+// ignore all broadcast axes. If inner_only, will require inner->inner mapping
+// in view, otherwise, it allows all inner->any mapping. If vectorize_pass, will
+// check contiguity for vectorization, otherwise it just checks it has that
+// inner dim.
 std::vector<TensorView*> getInputsOutputsWithInnerDim(
     TensorView* reference_tv,
+    bool inner_only,
     bool vectorize_pass);
 
 // Structure to hold byte multiples for break points. I.e. if we have the
