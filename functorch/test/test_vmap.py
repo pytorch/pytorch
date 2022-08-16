@@ -16,6 +16,7 @@ import functools
 import itertools
 import warnings
 import unittest
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops
@@ -26,7 +27,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
@@ -3241,7 +3241,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('empty', ''),
     }
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3259,7 +3259,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
 
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3748,7 +3748,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         b = with_vmap(_fake_vmap)
         self.assertEqual(a, b)
 
-    @ops(filter(lambda op: "linalg" in op.name, functorch_lagging_op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test

@@ -575,8 +575,6 @@ def get_isolated_graphmodule(func, args, kwargs):
     """
     wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
-    unwrapped_all_args = all_args
-
     with disable_proxy_modes_tracing():
-        gm = make_fx(wrapped)(unwrapped_all_args)
+        gm = make_fx(wrapped)(all_args)
     return gm
