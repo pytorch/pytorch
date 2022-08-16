@@ -128,6 +128,14 @@ NVIDIA / CUDA
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
+NVFuser
+~~~~~~~
+
+-  Christian Sarofeen (`csarofeen <https://github.com/csarofeen>`__)
+-  Alex Jann (`jjsjann123 <https://github.com/jjsjann123>`__)
+-  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+
 Intel / MKLDNN
 ~~~~~~~~~~~~~~
 
@@ -182,8 +190,8 @@ C10 utils and operator dispatch
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 -  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
 
-PyTorch -> ONNX
-~~~~~~~~~~~~~~~
+ONNX exporter
+~~~~~~~~~~~~~
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 -  Aaron Bockover (`abock <https://github.com/abock>`__)
 -  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
@@ -221,6 +229,7 @@ Apple M1/MPS
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 -  Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
+-  Ramin Azarmehr (`razarmehr <https://github.com/razarmehr>`__)
 
 PowerPC
 ~~~~~~~

@@ -1,3 +1,8 @@
+# IMPORTANT:
+# This file is ONLY used to subscribe for the notifications for a
+# PRs related to a specific files. People in this file are
+# notrequire the approval for your changes.
+
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.

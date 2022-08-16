@@ -60,16 +60,6 @@ design docs, any disputes and dispute resolutions) so that
 contributors and other interested parties understand the
 future direction of the project and can participate in discussion.
 
-Within `pytorch/pytorch <https://github.com/pytorch/pytorch>`__,
-maintainer groups are defined in the
-`CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
-file in the GitHub repository. For other modules that correspond
-to repositories, membership is recorded on GitHub as access
-level to the repo (i.e. “write” permission). Module maintainers
-are given privileges to administrate the repository (except for
-`pytorch/pytorch <https://github.com/pytorch/pytorch>`__ where
-they are responsible for a folder).
-
 Responsibilities of the maintainer includes:
 * Triaging high priority issues of the module
 * Triaging and reviewing and landing high priority pull requests of the module
