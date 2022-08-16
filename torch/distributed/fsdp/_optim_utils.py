@@ -355,7 +355,9 @@ def _flatten_optim_state(
     # There may still be some unflattened parameters with state and some
     # without
     unflat_param_states = [
-        _gather_state_dict(unflat_osd_state[unflat_param_name])
+        _gather_state_dict(
+            unflat_osd_state[unflat_param_name], pg=fsdp_module.process_group
+        )
         if unflat_param_name in unflat_osd_state
         else None
         for unflat_param_name in unflat_param_names
