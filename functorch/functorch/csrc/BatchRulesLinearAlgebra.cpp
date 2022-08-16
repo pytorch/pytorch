@@ -323,10 +323,10 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
   A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
   B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
 
-  // A determines whether or not linalg_solve takes an optimized path. We the check on A_ to match the one run on the
+  // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
   // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
   // differs based on whether or not the optimized path was taken
-  const auto batched_A_was_contiguous = (!A_bdim.has_value() && A.is_contiguous()) || *A_bdim == 0;
+  const auto batched_A_was_contiguous = A_bdim.has_value() ? at::select(A, *A_bdim, 0).is_contiguous() : A.is_contiguous();
   if (batched_A_was_contiguous && !A.is_complex()) {
     A_ = A_.contiguous();
   }
