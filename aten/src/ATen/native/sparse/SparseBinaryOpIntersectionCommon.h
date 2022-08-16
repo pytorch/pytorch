@@ -138,7 +138,7 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
         indices.options().dtype(kHash));
 
     auto iter = TensorIteratorConfig()
-      // Hash hash hash_t type while probably_coalesced_nnz_arange is index_t.
+      // Hash has hash_t type while probably_coalesced_nnz_arange is index_t.
       .check_all_same_dtype(false)
       .add_output(hash)
       .add_input(probably_coalesced_nnz_arange)
@@ -221,13 +221,13 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
             }
 
             // Perform hash values intersection
-            const auto* RESTRICT lb = find_bound<const hash_t*, hash_t, /*is_lower=*/true>(
+            const auto* RESTRICT lb = find_bound<hash_t*, hash_t, /*is_lower=*/true>(
                 ptr_sorted_hash,
                 ptr_sorted_hash + sorted_hash_len,
                 hash
             );
 
-            const auto* RESTRICT ub = find_bound<const hash_t*, hash_t, /*is_lower=*/false>(
+            const auto* RESTRICT ub = find_bound<hash_t*, hash_t, /*is_lower=*/false>(
                 ptr_sorted_hash,
                 ptr_sorted_hash + sorted_hash_len,
                 hash
