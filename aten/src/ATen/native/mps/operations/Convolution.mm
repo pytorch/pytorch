@@ -47,7 +47,7 @@ Tensor _mps_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  TORCH_CHECK(input_t.dim() != 5, "Conv3D is not supported on MPS");
+  TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
 
   namespace native_mps = at::native::mps;
   CheckedFrom c = "mps_convolution";

@@ -5883,7 +5883,7 @@ class TestConvolutionMPS(TestCase):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
         a_cpu = torch.arange((128 * 176), dtype=torch.float32)
         a_cpu = a_cpu.view(128, 176, 1).permute(0, 2, 1)
-        out_cpu = model_cpu(a_cpu)  # pass
+        out_cpu = model_cpu(a_cpu)
 
         a_mps = a_cpu.detach().clone().to("mps")
         model_mps = model_cpu.to("mps")
@@ -5896,7 +5896,7 @@ class TestConvolutionMPS(TestCase):
         def helper(stride):
             y_cpu = torch.ones(1, 1, 2)
             deconv_cpu = nn.ConvTranspose1d(in_channels=1, out_channels=1, kernel_size=1, stride=stride, bias=False, padding=1)
-            deconv_cpu.weight.data = torch.ones(1,1,2)
+            deconv_cpu.weight.data = torch.ones(1, 1, 2)
             deconv_gpu = copy.deepcopy(deconv_cpu).to(device='mps')
             x_cpu = deconv_cpu(y_cpu)
 
