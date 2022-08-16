@@ -283,11 +283,9 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    xfail('tensor_split'),
+    xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
     xfail('to_sparse'),
-    xfail('nn.functional.ctc_loss'),
-    skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
-    skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
 }
 
 
@@ -295,9 +293,9 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
-        xfail('chalf', '', device_type='cpu'),
-        skip('as_strided_scatter', ''),  # seems flaky
-        xfail('sparse.sampled_addmm', ''),
+        xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+        skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
+        xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -434,9 +432,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
-        xfail('pca_lowrank', ''),
-        xfail('svd_lowrank', ''),
-        xfail('as_strided_scatter', ''),
+        skip('as_strided_scatter', ''),  # silent incorrectness; also might be flaky
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
@@ -479,10 +475,10 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
-        skip('nn.functional.max_unpool1d'),  # Flaky
-        skip('nn.functional.max_unpool2d'),  # Flaky
-        xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', ''),
+        skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
+        skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
+        xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
+        xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -590,6 +586,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('take'),  # dynamic
+        xfail('pca_lowrank', ''),  # randomness
+        xfail('svd_lowrank', ''),  # randomness
 
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
@@ -1073,8 +1071,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('renorm', ''),
         xfail('symeig', ''),
-        xfail('pca_lowrank', ''),
-        xfail('svd_lowrank', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.multilabel_soft_margin_loss', ''),
         xfail('scatter_reduce', 'amax'),
