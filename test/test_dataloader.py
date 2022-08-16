@@ -38,7 +38,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, IS_ARM64)
+                                                  IS_MACOS)
 
 
 try:
@@ -1463,7 +1463,6 @@ except RuntimeError as e:
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
     @skipIfNoNumpy
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
@@ -2224,6 +2223,9 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+# Define a global function for testing purposes since local functions cannot be pickled
+def identity(x):
+    return x
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2231,14 +2233,13 @@ except RuntimeError as e:
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader2(TestCase):
     @skipIfNoDill
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
         dp = IterableWrapper(list(range(1000))).sharding_filter()
-        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
+        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
@@ -2413,6 +2414,52 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
                 self.assertEqual(len(dl_res[0]), len(dl_res[2]))
                 self.assertNotEqual(dl_res[0], dl_res[2])
                 self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+
+
+    def test_shuffler_mapdatapipe(self):
+        exp = list(range(100))
+
+        input_ds = dp.map.SequenceWrapper(exp)
+        shuffle_dp = input_ds.shuffle().sharding_filter()
+
+        self.assertEqual(len(shuffle_dp), len(exp))
+
+        torch.manual_seed(123)
+        res = list(shuffle_dp)
+        self.assertEqual(sorted(res), exp)
+
+        # Test Deterministic
+        for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
+            if num_workers == 0 and pw:
+                continue
+
+            mp_ctx = "spawn" if num_workers > 0 else None
+            dl = DataLoader(
+                shuffle_dp,
+                num_workers=num_workers,
+                shuffle=True,
+                multiprocessing_context=mp_ctx,
+                persistent_workers=pw
+            )
+
+            # No seed
+            dl_res_ns = list(dl)
+            self.assertEqual(sorted(dl_res_ns), sorted(exp))
+
+            # Same seeds
+            dl_res = []
+            for epoch in range(2):
+                torch.manual_seed(123)
+                dl_res.append(list(dl))
+            self.assertEqual(dl_res[0], dl_res[1])
+
+            # Different seeds
+            torch.manual_seed(321)
+            dl_res.append(list(dl))
+
+            self.assertEqual(len(dl_res[0]), len(dl_res[2]))
+            self.assertNotEqual(dl_res[0], dl_res[2])
+            self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
 
 
 class StringDataset(Dataset):

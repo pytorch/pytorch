@@ -16,7 +16,6 @@ Tensor& uniform_mps_(Tensor& input, double from, double to, c10::optional<Genera
   }
   double delta = (to - from);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "check_uniform_bounds", [&] {
-    const auto dtype = input.dtype();
     const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
     const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
     TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
@@ -513,8 +512,6 @@ Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> g
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *outputTensor_ = nil;
   };
-
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSStream* stream = getCurrentMPSStream();
   uint64_t seed_ = c10::detail::getNonDeterministicRandom(true);

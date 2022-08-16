@@ -834,6 +834,11 @@ void IndexLowering::handle(const kir::CpAsyncWait* wait) {
   pushBack(const_cast<kir::CpAsyncWait*>(wait)); // NOLINT
 }
 
+void IndexLowering::handle(const kir::CpAsyncCommit* commit) {
+  // TODO(kir): remove the need for const_cast
+  pushBack(const_cast<kir::CpAsyncCommit*>(commit)); // NOLINT
+}
+
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   for (auto expr : exprs) {
     OptOutConstDispatch::handle(expr);
