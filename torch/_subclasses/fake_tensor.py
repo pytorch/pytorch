@@ -15,7 +15,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map, tree_any
+from torch.utils._pytree import tree_any, tree_flatten, tree_map
 
 
 aten = torch.ops.aten
@@ -566,9 +566,8 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
-        has_symbolic_sizes = (
-            any(i.has_sym_ints for i in flat_arg_tensors)
-            or tree_any(lambda a: isinstance(a, torch._C.SymIntNode), (args, kwargs))
+        has_symbolic_sizes = any(i.has_sym_ints for i in flat_arg_tensors) or tree_any(
+            lambda a: isinstance(a, torch._C.SymIntNode), (args, kwargs)
         )
         if has_symbolic_sizes:
             # TODO: Find better approach for this

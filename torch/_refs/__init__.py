@@ -2973,13 +2973,7 @@ def t(a: TensorLikeType):
         raise RuntimeError(
             f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
         )
-    if a.ndim < 2:
-        # force a fresh TensorImpl, otherwise you hit
-        # RuntimeError: backward_info_.value().base_.unsafeGetTensorImpl() !=
-        # self_impl INTERNAL ASSERT FAILED
-        # because t has an explicit autograd kernel that assumes it's a view
-        return a.view(a.shape)
-    return torch.transpose(a, 0, 1)
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:

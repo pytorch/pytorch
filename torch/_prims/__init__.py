@@ -206,13 +206,16 @@ __all__ = [
 # the present mode will also deallocate. FakeTensorMode holds onto
 # tensors that are converted to Meta so we don't want to persist it
 # longer than necessary.x
+#
+# TODO: This seems dodgy, figure out how to not do this
 prim_fake_mode_ref = None
 
 
 def get_prim_fake_mode():
     global prim_fake_mode_ref
     if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
+        with FakeTensorMode() as mode:
+            pass
         prim_fake_mode_ref = weakref.ref(mode)
         return mode
     else:

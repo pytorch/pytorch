@@ -283,8 +283,7 @@ class FakeTensorTest(TestCase):
                 None,
             )
 
-        mode = FakeTensorMode()
-        for i, context in enumerate([contextlib.nullcontext, lambda: enable_torch_dispatch_mode(mode)]):
+        for i, context in enumerate([contextlib.nullcontext, FakeTensorMode]):
             with context():
                 inps = (
                     torch.randn([92, 8, 2048]).cuda(),
@@ -326,7 +325,7 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.fake_tensor.FakeCopyMode(mode):
             mod_copied = copy.deepcopy(m)
 
-        with mode:
+        with mode.restore():
             input = torch.rand(20, 16, 50, 100, dtype=torch.half, device="cuda").to(memory_format=torch.channels_last)
             out = mod_copied(input)
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
