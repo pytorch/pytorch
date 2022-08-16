@@ -766,7 +766,6 @@ symbolic_tensor_failures = {
     xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
     xfail('_masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
-    xfail('addbmm', ''),  # aten.addbmm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
