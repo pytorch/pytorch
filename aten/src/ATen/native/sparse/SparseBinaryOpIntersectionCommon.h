@@ -129,8 +129,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   const auto sdim = static_cast<uint32_t>(sparse_dim);
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
-    const auto indices_dim_stride = indices.stride(0);
-    const auto indices_nnz_stride = indices.stride(1);
+    auto indices_dim_stride = indices.stride(0);
+    auto indices_nnz_stride = indices.stride(1);
 
     auto hash = at::empty({probably_coalesced._nnz()},
         indices.options().dtype(kHash));
@@ -188,8 +188,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     const auto source_indices = source._indices();
     const auto source_arange = nnz_arange.narrow(-1, 0, source_nnz);
-    const auto indices_dim_stride = source_indices.stride(0);
-    const auto indices_nnz_stride = source_indices.stride(1);
+    auto indices_dim_stride = source_indices.stride(0);
+    auto indices_nnz_stride = source_indices.stride(1);
     auto dummy = at::empty({1}, source_arange.options());
 
     auto iter = TensorIteratorConfig()
