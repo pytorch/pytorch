@@ -4,11 +4,22 @@ namespace cuda {
 const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
   #define C10_DEVICE __device__
+  #if defined(__clang__) && defined(__HIP__)
+  #ifndef __forceinline__
+  #define __forceinline__ inline __attribute__((always_inline))
+  #endif
+  // until ROCm support for kernel asserts is restored
+  #define assert(expr) (static_cast<void>(0))
+  #endif
 
   template <typename T>
   __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
   {
+  #if defined(__clang__) && defined(__HIP__)
+    return __shfl_down(value, delta, width);
+  #else
     return __shfl_down_sync(mask, value, delta, width);
+  #endif
   }
 
 
@@ -17,8 +28,13 @@ const std::string reduction_template_0 = R"ESCAPE(
   __device__ __forceinline__ std::complex<T> WARP_SHFL_DOWN(std::complex<T> value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
   {
     return std::complex<T>(
+  #if defined(__clang__) && defined(__HIP__)
+        __shfl_down(value.real(), delta, width),
+        __shfl_down(value.imag(), delta, width));
+  #else
         __shfl_down_sync(mask, value.real(), delta, width),
         __shfl_down_sync(mask, value.imag(), delta, width));
+  #endif
   }
   #endif
 

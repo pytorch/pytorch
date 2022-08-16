@@ -92,6 +92,7 @@ def define_targets(rules):
             ":LazyIr.h",
             ":LazyNonNativeIr.h",
             ":RegisterDispatchKey.cpp",
+            ":RegisterDispatchDefinitions.ini",
             ":native_functions.yaml",
             ":shape_inference.h",
             ":tags.yaml",
