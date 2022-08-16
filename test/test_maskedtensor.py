@@ -168,8 +168,8 @@ class TestBinary(TestCase):
             data0 = data0.mul(128).to(torch.int8)
             data1 = data1.mul(128).to(torch.int8)
         if fn_name in ["bitwise_left_shift", "bitwise_right_shift"]:
-            data0 = data0.to(torch.int64)
-            data1 = data1.to(torch.int64)
+            data0 = data0.abs().to(torch.int64)
+            data1 = data1.abs().to(torch.int64)
         return data0, data1, mask
 
     def _get_sample_kwargs(self, fn_name):
