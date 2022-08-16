@@ -390,13 +390,15 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
   } else {
     scope_list scopes;
     std::copy_if(
-        input_scopes.begin(), input_scopes.end(), scopes.begin(), IsValidScope);
+        input_scopes.begin(),
+        input_scopes.end(),
+        std::back_inserter(scopes),
+        IsValidScope);
     std::copy_if(
         output_scopes.begin(),
         output_scopes.end(),
-        scopes.begin(),
+        std::back_inserter(scopes),
         IsValidScope);
-
     if (scopes.size() > 0) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&

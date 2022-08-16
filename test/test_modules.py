@@ -533,6 +533,12 @@ class TestModule(TestCase):
             gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
             gpu_module.train(training)
 
+            # === Lazy modules need to see an input to initialize params ===
+            if issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin):
+                with torch.no_grad():
+                    cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+                    gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+
             for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
                 gpu_p.data.copy_(cpu_p)
 

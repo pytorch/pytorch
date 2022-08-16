@@ -9,6 +9,7 @@ from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
+import torch.fx.traceback as fx_traceback
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
 
@@ -75,7 +76,10 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if self.record_stack_traces:
+        if fx_traceback.is_stack_trace_overridden():
+            stacks = fx_traceback.format_stack()
+            proxy.node.stack_trace = '\n'.join(reversed(stacks))
+        elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
@@ -95,7 +99,7 @@ class TracerBase:
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
+        fx_files = ['torch/fx/proxy.py', 'torch/fx/_symbolic_trace.py']
         while frame:
             frame = frame.f_back
             if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):

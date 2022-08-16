@@ -38,7 +38,7 @@ try:
         prepare_fx,
         prepare_qat_fx,
         convert_fx,
-        convert_to_reference,
+        convert_to_reference_fx,
     )
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
@@ -801,7 +801,7 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
                 prepare_custom_config=None,
-                backend_config_dict=None):
+                backend_config=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -867,7 +867,7 @@ class QuantizationTestCase(TestCase):
                 model, qconfig_dict,
                 example_inputs=inputs,
                 prepare_custom_config=prepare_custom_config,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -884,7 +884,7 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(copy.deepcopy(prepared))
-            qgraph_reference = convert_to_reference(copy.deepcopy(prepared))
+            qgraph_reference = convert_to_reference_fx(copy.deepcopy(prepared))
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)

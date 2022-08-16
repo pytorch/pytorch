@@ -21,13 +21,38 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/execution_graph_observer.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
 #include <set>
 #include <unordered_set>
+
+namespace {
+
+struct DisableFuncTorch {
+  DisableFuncTorch()
+      : front_guard_(c10::DispatchKey::FuncTorchDynamicLayerFrontMode),
+        back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
+  c10::impl::ExcludeDispatchKeyGuard front_guard_;
+  c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+struct EnableTorchFunction {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+  }
+  ~EnableTorchFunction() {
+    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+  }
+  bool old_;
+};
+
+} // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
@@ -71,6 +96,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
+      .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
@@ -204,34 +230,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def(
-          "shapes",
-          [](const KinetoEvent& e) {
-            if (e.hasShapes()) {
-              return e.shapes();
-            } else {
-              return std::vector<std::vector<int64_t>>();
-            }
-          })
-      .def(
-          "dtypes",
-          [](const KinetoEvent& e) {
-            if (e.hasTypes()) {
-              return e.dtypes();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
-      .def(
-          "stack",
-          [](const KinetoEvent& e) {
-            if (e.hasStack()) {
-              return e.stack();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) { return e.scope(); })
@@ -255,16 +257,69 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   {
+    using torch::profiler::impl::PyFrameState;
     using torch::profiler::impl::Result;
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::enum_<EventType>(m, "_EventType")
+        .value("TorchOp", EventType::TorchOp)
+        .value("Backend", EventType::Backend)
+        .value("Allocation", EventType::Allocation)
+        .value("PyCall", EventType::PyCall)
+        .value("PyCCall", EventType::PyCCall)
+        .value("Kineto", EventType::Kineto);
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
+        .def_readonly(
+            "allow_tf32_cublas",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
+    py::class_<Inputs>(m, "_Inputs")
+        .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("dtypes", &Inputs::dtypes_)
+        .def_property_readonly(
+            "ivalues",
+            [](const Inputs& inputs) {
+              py::list list;
+              for (auto& v : inputs.ivalues_) {
+                list.append(torch::jit::toPyObject(v));
+              }
+              return list;
+            })
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
+
+    py::class_<TensorMetadata>(m, "_TensorMetadata")
+        .def_property_readonly(
+            "layout",
+            [](const TensorMetadata& metadata) {
+              PyObject* layout_obj =
+                  torch::autograd::utils::wrap(metadata.layout_);
+              return py::reinterpret_borrow<py::object>(layout_obj);
+            })
+        .def_property_readonly("device", [](const TensorMetadata& metadata) {
+          // Have to pull a copy of the existing Python Device object.
+          PyObject* thp_device = THPDevice_New(
+              c10::Device(metadata.device_type_, metadata.device_index_));
+          return py::reinterpret_borrow<py::object>(thp_device);
+        });
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
-    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall");
-    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall");
+    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+        .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<PyFrameState>(m, "_PyFrameState")
+        .def_readonly("line_number", &PyFrameState::line_no_)
+        .def_property_readonly(
+            "file_name",
+            [](const PyFrameState& s) { return s.filename_.str(); })
+        .def_property_readonly("function_name", [](const PyFrameState& s) {
+          return s.funcname_.str();
+        });
+    py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
+        .def_property_readonly("tag", &Result::tag)
         .def_readonly("extra_fields", &Result::extra_fields_)
         .def_property_readonly(
             "id",
@@ -275,11 +330,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             "parent", [](const Result& r) { return r.parent_.lock(); })
         .def_readonly("children", &Result::children_)
         .def_readonly("start_time_ns", &Result::start_time_ns_)
+        .def_readonly("start_tid", &Result::start_tid_)
         .def_property_readonly("correlation_id", &Result::correlationID)
         .def_property_readonly("end_time_ns", &Result::endTimeNS)
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -407,6 +465,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         registerPythonTensorClass(device, cls);
       });
 
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
+
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
   py::class_<at::impl::RestorePythonTLSSnapshot>(
@@ -416,6 +476,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
+      .def(py::init<>());
+  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
@@ -642,10 +705,10 @@ static PyObject* python_exit_dual_level(
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
   } else {
     Py_INCREF(arg);
-    at::impl::TorchDispatchModeTLS::set_state(
+    c10::impl::TorchDispatchModeTLS::set_state(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -656,7 +719,7 @@ static PyObject* get_torch_dispatch_mode(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
   if (!mode) {
     Py_RETURN_NONE;
   } else {

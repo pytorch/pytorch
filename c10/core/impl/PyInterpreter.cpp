@@ -5,6 +5,23 @@
 namespace c10 {
 namespace impl {
 
+template <typename... Ts>
+static void noop_trace_gpu_fn(const PyInterpreter*, Ts...) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call a GPU trace function after corresponding interpreter died");
+}
+
+void GPUTraceFunctionWrapper::disarm() {
+  event_creation_fn_ = &noop_trace_gpu_fn;
+  event_deletion_fn_ = &noop_trace_gpu_fn;
+  event_record_fn_ = &noop_trace_gpu_fn;
+  event_wait_fn_ = &noop_trace_gpu_fn;
+  memory_allocation_fn_ = &noop_trace_gpu_fn;
+  memory_deallocation_fn_ = &noop_trace_gpu_fn;
+  stream_creation_fn_ = &noop_trace_gpu_fn;
+}
+
 static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
@@ -24,8 +41,7 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<SafePyObject>& type) {
+    torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -71,6 +87,18 @@ static c10::SymIntArrayRef noop_sym_sizes_fn(
       "attempted to call `sym_sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::Layout noop_layout_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `layout` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static c10::SymInt noop_sym_numel_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `sym_numel` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -82,6 +110,15 @@ void PyInterpreter::disarm() noexcept {
   strides_fn_ = &noop_strides_fn;
   sizes_fn_ = &noop_sizes_fn;
   sym_sizes_fn_ = &noop_sym_sizes_fn;
+  layout_fn_ = &noop_layout_fn;
+  sym_numel_fn_ = &noop_sym_numel_fn;
+  trace_gpu_functions.disarm();
+}
+
+// Defined out-of-line because it needs access to the definition of TensorImpl.
+__ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> PyInterpreter::detach(
+    const TensorImpl* self) const {
+  return (*detach_fn_)(this, self);
 }
 
 } // namespace impl
