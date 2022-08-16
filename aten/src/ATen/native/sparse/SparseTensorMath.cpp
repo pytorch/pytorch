@@ -2,7 +2,6 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/SparseTensorMath.h>
-#include <ATen/native/sparse/SparseBinaryOpIntersectionStubs.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
@@ -31,6 +30,7 @@
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
+#include <ATen/ops/_mul_sparse_sparse.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -966,7 +966,6 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
-DEFINE_DISPATCH(mul_sparse_sparse_out_stub);
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -992,10 +991,10 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
       ", but ", t_.sizes(), " != ", src_.sizes());
 
-  // mul_sparse_sparse_out_stub
+  // mul_sparse_sparse_out
   // is faster if there is an uncoalesced input
   if (!t_.is_coalesced() || !src_.is_coalesced()) {
-    mul_sparse_sparse_out_stub(at::kCPU, r, t_, src_);
+    at::_mul_sparse_sparse_out(r, t_, src_);
   }
 
   if (!t_._nnz() || !src_._nnz()) {

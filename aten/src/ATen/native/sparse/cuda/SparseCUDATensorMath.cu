@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
-#include <ATen/native/sparse/SparseBinaryOpIntersectionStubs.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -23,6 +22,7 @@
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_mul_sparse_sparse.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/bmm_native.h>
@@ -460,8 +460,6 @@ struct TensorMulOp {
   }
 };
 
-DEFINE_DISPATCH(mul_sparse_sparse_out_stub);
-
 SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
 
@@ -487,7 +485,7 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
 
   // mul(sparse, sparse)
-  mul_sparse_sparse_out_stub(at::kCUDA, r_, t_, src_);
+  at::_mul_sparse_sparse_out(r_, t_, src_);
   return r_;
 }
 
