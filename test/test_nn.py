@@ -15706,6 +15706,11 @@ torch.cuda.synchronize()
         y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
         self.assertEqual(y.size(), (1, 1, 3, 4))
 
+    def test_max_pool1d_neg_idx(self, device):
+        x = torch.rand([0, 1, 49], dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "pad must be non-negative"):
+            torch.nn.MaxPool1d(2, padding=-1, stride=50, return_indices=True)(x)
+
     @onlyNativeDeviceTypes   # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
