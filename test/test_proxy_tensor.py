@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
@@ -131,6 +132,42 @@ def _create_new_input(x):
         return torch.rand_like(x, requires_grad=x.requires_grad)
     else:
         return torch.rand_like(x)
+
+"""
+Delays a cos being executed on the unwraptensor until its used. Simulates a CommTensor used
+"""
+class UnwrapTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor):
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            tensor.size(),
+            dtype=tensor.dtype,
+            device=tensor.device,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+        )
+        r._tensor = tensor
+        return r
+
+    def __repr__(self):
+        # TODO: consider all_gather the local tensors for better debugging
+        return f"UnwrapTensor({self._tensor})"
+
+    __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            ret = e
+            if isinstance(e, UnwrapTensor):
+                ret = e._tensor.cos()
+
+            return ret
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
     # WARNING: if any of your inputs are index tensors, DO NOT use this
@@ -253,6 +290,31 @@ class TestGenericProxyTensor(TestCase):
             self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
             self.assertTrue(is_any_digamma(traced))
 
+    def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
+        def f(x):
+            y = x.new_zeros(x.size())
+            y.copy_(x)
+            return y
+
+        def _new_zeros_decomp(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
+            return torch.zeros(size, dtype=inp.dtype, device=inp.device)
+
+        factory_func_decomp = {torch.ops.aten.new_zeros.default: _new_zeros_decomp}
+
+        # When new_zeros() decomposes into torch.zero(), we expect ProxyTensorMode
+        # to still be (re-entrantly) enabled, so that the `torch.zero()` call
+        # returns a ProxyTensor.
+        out = make_fx(f, decomposition_table=factory_func_decomp)(torch.ones(2))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, x_1):
+    zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy__default
+    """)
+
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
             return torch.ops.aten.norm.Scalar(x, 2.0)
@@ -291,6 +353,12 @@ class TestGenericProxyTensor(TestCase):
 
         inp = torch.randn(3, 3, 250, 250)
         self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
+
+    def test_varargs(self):
+        def f(*args):
+            return sum(args)
+
+        self._test(f, [torch.randn(2), torch.randn(2)])
 
     def test_proxy_tensor(self):
         def f_grad(x):
@@ -343,13 +411,16 @@ class TestGenericProxyTensor(TestCase):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-        g = make_fx(f, tracing_mode=self.tracing_mode)()
-        self.assertEqual(g(), f())
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -467,6 +538,15 @@ class TestGenericProxyTensor(TestCase):
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
 
+    def test_trace_subclasses(self):
+        def f(x):
+            x = UnwrapTensor(x)
+            y = x * 2
+            return y
+
+        inp = [torch.randn(5)]
+        self._test(f, [torch.randn(5)])
+
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -501,6 +581,7 @@ def xfail_inherited_tests(tests):
     "test_make_fx_model_fwd_bwd",
     "test_proxy_tensor",
     "test_resnet18_backward_trace",
+    "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
@@ -510,17 +591,7 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    def test_mode_tracing_factory_function_no_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-        # setting the flag to false should not trace factory functions
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
-        self.assertFalse(
-            any(
-                node.target == aten.randn.default
-                for node in traced.graph.nodes
-            )
-        )
+    pass
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -548,7 +619,7 @@ class TestFakeProxyTensor(TestCase):
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
-    def _test_dynamic(self, fn, trace_inputs, test_inputs):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
         Also returns shape env
@@ -557,7 +628,9 @@ class TestSymbolicTracing(TestCase):
         traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
-            self.assertEqual(traced_f(*input), fn(*input))
+            rx, ry = traced_f(*input), fn(*input)
+            if assert_eq:
+                self.assertEqual(rx, ry)
         return traced_f.shape_env
 
 
@@ -584,6 +657,19 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
         assert len(shape_env.guards) == 0
 
+    def test_multiply_shape(self):
+        def f(a):
+            return torch.empty(a.shape[0] * 2)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    size = a_1.size(0);  a_1 = None
+    mul = size * 2;  size = None
+    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    size_1 = empty.size(0)
+    return empty""")
+
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)
@@ -599,6 +685,24 @@ class TestSymbolicTracing(TestCase):
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
         assert len(shape_env.guards) == 1
+
+    def test_new_empty(self):
+        def f(a, b):
+            return a.new_empty(b.shape[0], b.shape[1] * 2)
+
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
+
+
+    def test_expand(self):
+        def f(a):
+            b = torch.mul(a, a)
+            c = b.expand(a.shape)
+            return c
+
+        self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
+        self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
+
+
 
 make_fx_failures = {
     # unknown
@@ -623,6 +727,8 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
