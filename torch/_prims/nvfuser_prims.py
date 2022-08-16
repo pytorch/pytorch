@@ -353,7 +353,13 @@ def register_var_mean():
             var_mean = (var, mean)
         return var_mean
 
-    nvprim_autograd_impl.impl(name, backwards_not_supported(_var_mean_ref))
+    def _var_mean_autograd(a, dim=None, unbiased=None, keepdim=False, *, correction=None):
+        # This wrapper is needed to convert prims calls inside
+        # elementwise_type_promotion_wrapper to nvprims calls
+        with torch._prims.context.NvfuserPrimsMode():
+            return backwards_not_supported(_var_mean_ref)(a, dim, unbiased, keepdim, correction=correction)
+
+    nvprim_autograd_impl.impl(name, _var_mean_autograd)
 
     for p in (prim_packet, prim):
         p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"
