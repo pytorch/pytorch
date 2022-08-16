@@ -25,7 +25,7 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
 // derive from _SupplementBase.
 
 struct ReduceOp {
-  enum Kind : uint8_t {
+  enum RedOpType : uint8_t {
     SUM = 0,
     AVG = 1,
     PRODUCT = 2,
@@ -40,12 +40,12 @@ struct ReduceOp {
 
   ReduceOp() {}
 
-  ReduceOp(Kind op) : op_(op) {
+  ReduceOp(RedOpType op) : op_(op) {
     TORCH_INTERNAL_ASSERT(
       op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
   }
 
-  ReduceOp(Kind op, std::shared_ptr<_SupplementBase> optional_supplement) {
+  ReduceOp(RedOpType op, std::shared_ptr<_SupplementBase> optional_supplement) {
     if (optional_supplement.get()) {
       op_ = op;
     } else {
@@ -64,14 +64,14 @@ struct ReduceOp {
     return *this;
   }
 
-  operator Kind() const { return op_; }
+  operator RedOpType() const { return op_; }
 
   bool operator==(const std::uint8_t other) {
     TORCH_INTERNAL_ASSERT(other < 9, "Invalid other op value");
     return other == op_;
   }
 
-  bool operator==(const ReduceOp::Kind other) {
+  bool operator==(const ReduceOp::RedOpType other) {
     return *this == static_cast<std::uint8_t>(other);
   }
 
@@ -79,7 +79,7 @@ struct ReduceOp {
     return *this == other.op_;
   }
 
-  Kind op_ = SUM;
+  RedOpType op_ = SUM;
   // supplement_ is "type-erased" storage for optional supplementary
   // data the op might need.
   // The point of use will know the derived type supplement_ really is,

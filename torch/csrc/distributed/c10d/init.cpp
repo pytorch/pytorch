@@ -537,7 +537,7 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
 
-  reduce_op.def(py::init<::c10d::ReduceOp::Kind>())
+  reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
   // The following are for some kind of backward compatibility.
   // Since c10d::ReduceOp had been an `enum class`, users can do comparison and
@@ -547,7 +547,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "__eq__",
           [](const ::c10d::ReduceOp& self,
-             const ::c10d::ReduceOp::Kind& other) { return self == other; })
+             const ::c10d::ReduceOp::RedOpType& other) {
+            return self == other;
+          })
       .def(
           "__eq__",
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
@@ -555,23 +557,23 @@ They are used in specifying strategies for reduction collectives, e.g.,
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
-  py::enum_<::c10d::ReduceOp::Kind>(reduce_op, "Kind")
-      .value("SUM", ::c10d::ReduceOp::Kind::SUM)
-      .value("AVG", ::c10d::ReduceOp::Kind::AVG)
-      .value("PRODUCT", ::c10d::ReduceOp::Kind::PRODUCT)
-      .value("MIN", ::c10d::ReduceOp::Kind::MIN)
-      .value("MAX", ::c10d::ReduceOp::Kind::MAX)
-      .value("BAND", ::c10d::ReduceOp::Kind::BAND)
-      .value("BOR", ::c10d::ReduceOp::Kind::BOR)
-      .value("BXOR", ::c10d::ReduceOp::Kind::BXOR)
-      .value("PREMUL_SUM", ::c10d::ReduceOp::Kind::PREMUL_SUM)
+  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "Kind")
+      .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
+      .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
+      .value("PRODUCT", ::c10d::ReduceOp::RedOpType::PRODUCT)
+      .value("MIN", ::c10d::ReduceOp::RedOpType::MIN)
+      .value("MAX", ::c10d::ReduceOp::RedOpType::MAX)
+      .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
+      .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
+      .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
       .export_values();
 
   // Ref: [Implicit
   // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   // Let us skip the explicit construction of `c10d::ReduceOp` from
-  // `c10d::ReduceOp::Kind` in Python.
-  py::implicitly_convertible<::c10d::ReduceOp::Kind, ::c10d::ReduceOp>();
+  // `c10d::ReduceOp::RedOpType` in Python.
+  py::implicitly_convertible<::c10d::ReduceOp::RedOpType, ::c10d::ReduceOp>();
 
   module
       .def(

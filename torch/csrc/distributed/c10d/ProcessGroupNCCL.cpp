@@ -39,7 +39,7 @@ namespace {
 #endif
 
 // NCCL op mapping
-const std::map<ReduceOp::Kind, ncclRedOp_t> ncclOp = {
+const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
