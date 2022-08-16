@@ -377,8 +377,8 @@ struct VarianceMeanOpRecord : RecordFunctor {
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
-    auto output =
-        torch::jit::fuser::cuda::variance_mean(arg, dims_, correction_, keepdim_);
+    auto output = torch::jit::fuser::cuda::variance_mean(
+        arg, dims_, correction_, keepdim_);
     fd.setFusionState(outputs.at(0), output.var);
     fd.setFusionState(outputs.at(1), output.mean);
   }

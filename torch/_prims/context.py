@@ -11,9 +11,9 @@ import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
 import torch.overrides
+from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 
 from torch._prims_common import torch_function_passthrough
-from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 
 

@@ -283,8 +283,7 @@ _nvfuser_impls["amin"] = _amin_nvfuser
 
 
 def register_var_mean():
-    """This function is used to register the var_mean function in torch.ops.nvprims module.
-    """
+    """This function is used to register the var_mean function in torch.ops.nvprims module."""
     name = "var_mean"
     # This signature tries to combine several overloads of the torch.var_mean function into one overload.
     nvprim.define(
@@ -353,11 +352,17 @@ def register_var_mean():
             var_mean = (var, mean)
         return var_mean
 
-    def _var_mean_autograd(a, dim=None, unbiased=None, keepdim=False, *, correction=None):
+    def _var_mean_autograd(
+        a, dim=None, unbiased=None, keepdim=False, *, correction=None
+    ):
         # This wrapper is needed to convert prims calls inside
         # elementwise_type_promotion_wrapper to nvprims calls
-        with torch._prims.context.NvfuserPrimsMode():
-            return backwards_not_supported(_var_mean_ref)(a, dim, unbiased, keepdim, correction=correction)
+        from torch._prims.context import NvfuserPrimsMode
+
+        with NvfuserPrimsMode():
+            return backwards_not_supported(_var_mean_ref)(
+                a, dim, unbiased, keepdim, correction=correction
+            )
 
     nvprim_autograd_impl.impl(name, _var_mean_autograd)
 

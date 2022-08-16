@@ -57,7 +57,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
-        if (node.op == "call_function" and "getitem" in node.name):
+        if node.op == "call_function" and "getitem" in node.name:
             continue
         if (
             node.op == "call_function"
