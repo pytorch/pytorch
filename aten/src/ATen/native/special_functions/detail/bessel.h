@@ -355,14 +355,16 @@ bessel(T1 x, T1 n) {
 
       if (i > 15000) { throw std::runtime_error("cyl_bessel_jn_steed: Lentz's method failed"); }
 
-      const auto[p, q] = reinterpret_cast<T1(&)[2]>(pq);
-      Jmu =
-          std::sqrt(T1(2) * (T1(1) / x) / c10::numbers::pi_v<T1> / ((p - Jpnul / Jnul) * ((p - Jpnul / Jnul) / q) + q));
+      const auto foo = reinterpret_cast<T1(&)[2]>(pq);
+
+      const auto p = foo[0];
+      const auto q = foo[1];
+
+      Jmu = std::sqrt(T1(2) * (T1(1) / x) / c10::numbers::pi_v<T1> / ((p - Jpnul / Jnul) * ((p - Jpnul / Jnul) / q) + q));
       Jmu = std::copysign(Jmu, Jnul);
       Nmu = (p - Jpnul / Jnul) / q * Jmu;
       Npmu = (p + q / ((p - Jpnul / Jnul) / q)) * Nmu;
-      Nnu1 = (n - T1((x < T1(2) ? nearby_integer_n : std::max(0, static_cast<int>(n - x + T1{1.5L}))))) * (T1(1) / x)
-          * Nmu - Npmu;
+      Nnu1 = (n - T1((x < T1(2) ? nearby_integer_n : std::max(0, static_cast<int>(n - x + T1{1.5L}))))) * (T1(1) / x) * Nmu - Npmu;
     }
 
     fact = Jmu / Jnul;
