@@ -189,8 +189,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         sample_args (tuple of Tensors, or tuple of tuples of Tensors): Samples args for each callable.
             If a single callable was passed, ``sample_args`` must be a single tuple of argument Tensors.
             If a tuple of callables was passed, ``sample_args`` must be tuple of tuples of argument Tensors.
-        num_warmup_iters (int): The number of warmup iterations. Currently, ``DataDistributedParallel`` needs
-            11 iterations for warm up. Default: ``3``.
+        num_warmup_iters (int): The number of warmup iterations. Default: ``3``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
