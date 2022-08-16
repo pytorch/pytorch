@@ -7,7 +7,8 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch._subclasses.fake_tensor import FakeTensor
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
