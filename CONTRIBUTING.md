@@ -453,7 +453,7 @@ for formatting docstrings. Each line inside a docstrings block must be limited t
 
 ### Docstring type formatting
 
-In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types:
+In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
 
 * The: "`Callable`", "`Any`", "`Iterable`", and "`Iterator`" types should have their first letter capitalized.
 
