@@ -336,7 +336,7 @@ public:
 
   DeleterFnPtr raw_deleter() const override { return &Delete; }
   bool is_shared(void* ptr) const { return _getAllocImpl().isSharedBuffer(ptr); }
-  bool is_shared_storge_supported() const { return m_has_unified_memory; }
+  bool is_shared_storage_supported() const { return m_has_unified_memory; }
 
 private:
   bool m_has_unified_memory;
@@ -375,7 +375,7 @@ MPSAllocator& _getPrivateAllocator() {
 at::Allocator* getMPSSharedAllocator()
 {
   auto& sa = _getSharedAllocator();
-  if (sa.is_shared_storge_supported()) {
+  if (sa.is_shared_storage_supported()) {
     return &sa;
   }
 
