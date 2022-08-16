@@ -355,7 +355,7 @@ struct DimList : public py::base<DimList> {
         } else {
             bound_ = true;
             dims_.resize(size);
-            for (ssize_t i = 0; i < size; ++i) {
+            for (Py_ssize_t i = 0; i < size; ++i) {
                 dims_[i] = Dim::create(py::unicode_from_format("%S%i", name_.ptr(), (int)i));
             }
         }
@@ -410,7 +410,7 @@ static PyObject* DimList_bind(DimList *self,
     py::sequence_view seq = sizes;
     auto size = seq.size();
     self->bind_len(size);
-    for (ssize_t i = 0; i < size; ++i) {
+    for (Py_ssize_t i = 0; i < size; ++i) {
         self->dims_[i]->set_size(py::to_int(seq[i]));
     }
     Py_RETURN_NONE;
