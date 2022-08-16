@@ -142,8 +142,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_inv);
   OP_DECOMPOSE(linalg_matmul);
-  OP_DECOMPOSE(linalg_matrix_norm);
-  OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_norm);
   OP_DECOMPOSE(linalg_solve);
@@ -167,7 +165,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(narrow);
   OP_DECOMPOSE(negative);
-  OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);
   OP_DECOMPOSE(nuclear_norm);
   OP_DECOMPOSE(nll_loss_nd);
