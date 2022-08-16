@@ -50,7 +50,7 @@ def dump_state(fx_g, inps):
     print(f"""
 # Working Repro with {len(fx_g.graph.nodes)} nodes
 inps = {[(i.shape, i.dtype, i.device.type) for i in inps]}
-inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype, device) in inps]
+inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device=device) for (shape, dtype, device) in inps]
 {fx_g.code}
 """)
 
