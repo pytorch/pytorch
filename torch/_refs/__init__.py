@@ -141,8 +141,11 @@ __all__ = [
     # 'polar',  # abs, cos, sin
     "pow",
     "real",
+    "rpow",
     "remainder",
     "rsub",
+    "rtruediv",
+    "rfloordiv",
     # # special.xlog1py
     # # special.zeta
     "sub",
@@ -3803,6 +3806,20 @@ def trace(self: TensorLikeType) -> TensorLikeType:
     )
     return torch.sum(torch.diag(self, 0))
 
+
+def _make_r_binary_op(base_op):
+    def rop(
+        a: Union[TensorLikeType, NumberType],
+        b: Union[TensorLikeType, NumberType],
+    ) -> TensorLikeType:
+        return base_op(b, a)
+
+    return rop
+
+
+rtruediv = _make_r_binary_op(true_divide)
+rfloordiv = _make_r_binary_op(floor_divide)
+rpow = _make_r_binary_op(pow)
 
 import torch._refs.fft
 import torch._refs.linalg
