@@ -3237,6 +3237,17 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index_tensor
     """)
 
+    def test_resize_program_inputs(self, device):
+        def f(x):
+            x.resize_(10)
+            x.fill_(2)
+
+        fn = make_fx(functionalize(f))
+        out = fn(torch.zeros(0, device=device))
+        out = normalize_devices(out)
+        self.assertExpectedInline((out.code), """\
+        """)
+
 
 
 only_for = ("cpu", "cuda")

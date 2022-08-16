@@ -7,6 +7,7 @@
 #include <torch/extension.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/native/Resize.h>
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
@@ -59,7 +60,10 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
   // but we can't do that unless we give BatchedTensorImpl a notion of storage.
   if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
   } else {
-      TORCH_INTERNAL_ASSERT(unwrapped.nbytes() == wrapped_inner.nbytes());
+    if (unwrapped.nbytes() != wrapped_inner.nbytes()) {
+      // Functions might resize zero-sized inputs, which we need to reflect ehre.
+      at::native::resize_output(unwrapped, wrapped_inner.sizes());
+    }
       TORCH_INTERNAL_ASSERT(unwrapped.sizes() == wrapped_inner.sizes(),
           "An inplace-mutation op (like transpose_() was called on an input to the functionalization pass."
           " Propagating those mutations to the input is currently not supported.");
