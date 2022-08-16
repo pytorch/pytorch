@@ -9,7 +9,7 @@ function install_ucx() {
   git checkout ${UCX_COMMIT}
   git submodule update --init --recursive
 
-  if [[ "$image" == *cuda* ]];  then
+  if [[ -d "/usr/local/cuda/" ]];  then
     with_cuda=/usr/local/cuda/
   else
     with_cuda=no
