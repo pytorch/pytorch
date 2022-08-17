@@ -2058,7 +2058,7 @@ class TestVmapJvpInplaceView(TestCase):
         def f(x, y):
             view = x[:, ::2]
             view.copy_(y)
-            return view
+            return view, x
 
         orig_x = torch.randn(2, 6, B, device=device)
         orig_xt = torch.randn(2, 6, B, device=device)
@@ -2068,8 +2068,15 @@ class TestVmapJvpInplaceView(TestCase):
         yt = torch.randn(2, B, 3, device=device)
         out, out_tangent = vmap(push_jvp(f), in_dims=(2, 2, 1, 1))(x, xt, y, yt)
 
-        self.assertEqual(out, y.movedim(1, 0))
-        self.assertEqual(out_tangent, yt.movedim(1, 0))
+        expected_out = vmap(f, in_dims=(2, 1))(orig_x.clone(), y)
+        self.assertEqual(out[0], expected_out[0])
+        self.assertEqual(out[1], expected_out[1])
+
+        self.assertEqual(out_tangent[0], yt.movedim(1, 0))
+
+        expected_x_tangent = orig_xt.movedim(-1, 0).clone()
+        expected_x_tangent[:, :, ::2].copy_(yt.movedim(1, 0))
+        self.assertEqual(out_tangent[1], expected_x_tangent)
 
         expected = orig_x.movedim(2, 0).clone()
         expected[:, :, ::2] = y.movedim(1, 0)
@@ -2088,16 +2095,20 @@ class TestVmapJvpInplaceView(TestCase):
         def f(x, y):
             view = x[0, ::2]
             x.copy_(y)
-            return x
+            return x, view
 
         x = torch.randn(2, B, 6, device=device)
         xt = torch.randn(2, 6, B, device=device)
         y = torch.randn(2, B, 6, device=device)
         yt = torch.randn(2, B, 6, device=device)
-        out, out_tangent = vmap(push_jvp(f), in_dims=(1, 2, 1, 1))(x, xt, y, yt)
+        out, out_tangent = vmap(push_jvp(f), in_dims=(1, 2, 1, 1))(x.clone(), xt, y, yt)
 
-        self.assertEqual(out, y.movedim(1, 0))
-        self.assertEqual(out_tangent, yt.movedim(1, 0))
+        expected_out = vmap(f, in_dims=(1, 1))(x.clone(), y)
+        self.assertEqual(out[0], expected_out[0])
+        self.assertEqual(out[1], expected_out[1])
+
+        self.assertEqual(out_tangent[0], yt.movedim(1, 0))
+        self.assertEqual(out_tangent[1], yt.movedim(1, 0)[:, 0, ::2])
 
     # Case 4 in [Forward Grad View/inplace]
     def test_right_dual_view_prop(self, device):
@@ -2120,7 +2131,10 @@ class TestVmapJvpInplaceView(TestCase):
         yt = torch.randn(6, B, device=device)
         outs, tangents = vmap(push_jvp, in_dims=(1, 1, 1))(x, y, yt)
 
-        self.assertEqual(outs[0], y.movedim(1, 0))
+        expected_out = vmap(f, in_dims=(1, 1))(x.clone(), y)
+        self.assertEqual(outs[0], expected_out[0])
+        self.assertEqual(outs[1], expected_out[1])
+
         self.assertEqual(tangents[0], yt.movedim(1, 0))
 
         expected_tangent_1 = torch.zeros_like(x).movedim(1, 0)
@@ -2148,7 +2162,9 @@ class TestVmapJvpInplaceView(TestCase):
         yt = torch.randn(2, 6, B)
         outs, tangents = vmap(push_jvp, in_dims=(1, 2, 2))(x, y, yt)
 
-        self.assertEqual(outs[1], y.movedim(2, 0))
+        expected_out = vmap(f, in_dims=(1, 2))(x, y)
+        self.assertEqual(outs[0], expected_out[0])
+        self.assertEqual(outs[1], expected_out[1])
 
         self.assertEqual(tangents[0], yt.movedim(2, 0)[:, 0])
         self.assertEqual(tangents[1], yt.movedim(2, 0))
