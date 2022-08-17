@@ -61,9 +61,10 @@ struct TensorMetadata {
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
   std::vector<std::string> dtypes_;
   std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
-  std::vector<c10::IValue> ivalues_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -347,7 +348,7 @@ class InputOutputEncoder final {
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
-  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
+  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
 };
 
