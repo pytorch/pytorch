@@ -154,8 +154,8 @@ class Adam(Optimizer):
 
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-                    if group['differentiable']:
-                        assert not state['step'].requires_grad
+                    if group['differentiable'] and state['step'].requires_grad:
+                        raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
                     state_steps.append(state['step'])
 
             adam(params_with_grad,
