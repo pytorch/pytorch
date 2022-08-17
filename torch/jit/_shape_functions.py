@@ -5,9 +5,17 @@ number = Union[int, float]
 
 ###
 # There are generated files that depend on this file
-# To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# To re-generate, please run from the root of the repo:
+# python torchgen/shape_functions/gen_jit_shape_functions.py
+
+# How to test:
+# After regenerating files, compile PyTorch.
+# Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
+# If you have enabled opinfo testing for the op, also run:
+# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# to reproduce errors from opinfo tests.
+
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
@@ -155,10 +163,11 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
 
 def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
-    if opt_dims is None:
-        dims: List[int] = []
+    if opt_dims is None or len(opt_dims) == 0:
+        dims: List[int] = list(range(len(self)))
     else:
         dims = opt_dims
+
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:

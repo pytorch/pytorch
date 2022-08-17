@@ -1354,6 +1354,49 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     return tuple(sample_inputs)
 
+def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_addcmul_addcdiv(
+        op_info, device, dtype, requires_grad, **kwargs)
+
+    # type promotion cases
+    supported_dtypes = op_info.supported_dtypes(device)
+    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
+
+    types = (
+        (torch.float64, torch.complex128),
+        (torch.bfloat16, torch.float32),
+    )
+
+    values = (
+        None,
+        True, False,
+        3.14, 3,
+        1.0, 1,
+        0.0, 0,
+        -3.14, -3,
+        3.14 + 2.71j,
+    )
+
+    for (type2, type3), value in product(types, values):
+        if (type2 not in supported_dtypes or
+                type3 not in supported_dtypes):
+            continue
+
+        # RuntimeError: value cannot be converted without overflow
+        if (type(value) is complex and
+                type2 is not torch.complex128):
+            continue
+
+        arg1 = make_arg([5, 5], dtype=dtype)
+        arg2 = make_arg([5, 5], dtype=type2)
+        arg3 = make_arg([1, 5], dtype=type3)
+
+        # TypeError: addcdiv(): argument 'value' must be Number, not NoneType
+        if value is not None:
+            yield SampleInput(arg1, args=(arg2, arg3), kwargs=dict(value=value))
+        else:
+            yield SampleInput(arg1, args=(arg2, arg3))
+
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
                   ((1,), (S, S, S), (S, S, M), 1, 1, True),
@@ -8967,7 +9010,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
-           sample_inputs_func=sample_inputs_addcmul_addcdiv),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv,
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -8979,7 +9024,9 @@ op_db: List[OpInfo] = [
                             'TestCommon',
                             'test_variant_consistency_eager'),
            ),
-           sample_inputs_func=sample_inputs_addcmul_addcdiv),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv,
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -10344,10 +10391,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
@@ -13620,6 +13663,10 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     dtypes=(torch.complex32,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
@@ -19072,13 +19119,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19260,13 +19307,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type='cuda'
             ),
         )
     ),
@@ -19294,13 +19341,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19363,13 +19410,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+                dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
     ),
@@ -19385,6 +19432,11 @@ python_ref_db = [
     #
     # Elementwise Ternary Reference OpInfos
     #
+    PythonRefInfo(
+        "_refs.addcdiv",
+        torch_opinfo_name="addcdiv",
+        supports_nvfuser=False,
+    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
