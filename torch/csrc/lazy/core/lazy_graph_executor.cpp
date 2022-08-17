@@ -530,13 +530,13 @@ Value LazyGraphExecutor::GetDeviceDataIrValue(
 }
 
 Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(
-    const at::Scalar& value) {
+    const at::Scalar& value,
+    const BackendDevice& device) {
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, value.type());
   }
-  auto cpu_device = getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
   BackendDataPtr data =
-      getBackend()->MakeComputationDataFromScalar(value, cpu_device);
+      getBackend()->MakeComputationDataFromScalar(value, device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return MakeDeviceData(std::move(data));
@@ -549,8 +549,7 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, type);
   }
-  return GetDeviceDataIrValue(
-      value, type, getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
+  return GetDeviceDataIrValue(value, type, device);
 }
 
 Value LazyGraphExecutor::GetIrValueForScalar(

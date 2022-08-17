@@ -96,6 +96,47 @@ class VectorOfUniqueEntries {
     return set_.find(entry) != set_.end();
   }
 
+  // Erase given entry from the containers if
+  //  there is a match.
+  void erase(T entry) {
+    vector_.erase(
+        std::remove_if(
+            vector_.begin(),
+            vector_.end(),
+            [entry](T val) { return val == entry; }),
+        vector_.end());
+
+    set_.erase(entry);
+  }
+
+  // Insert elements at the end of the container.
+  template <typename InputIt>
+  void insert(InputIt begin, InputIt end) {
+    for (auto it = begin; it != end; it++) {
+      pushBack(*it);
+    }
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() const {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() const {
+    return vector().end();
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() {
+    return vector().end();
+  }
+
   std::string toString() {
     std::stringstream ss;
     ss << "{ ";
