@@ -673,7 +673,7 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
-        xfail('as_strided'),  # as_strided too weird
+        skip('as_strided'),  # Test runner cannot handle this
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
@@ -689,8 +689,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
-
-        xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
@@ -963,7 +961,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         xfail('column_stack', ''),
         xfail('nn.functional.dropout2d', ''),
