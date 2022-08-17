@@ -115,7 +115,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 std::vector<c10::intrusive_ptr<LinearPackedContext>> pack_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
-    int64_t num_layers) {
+    int64_t num_layers,
+    const bool fill_unpacked) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
       "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
@@ -147,24 +148,31 @@ std::vector<c10::intrusive_ptr<LinearPackedContext>> pack_linear_op_contexts(
     const auto& b_hz = b_h_rzn[1];
     const auto& b_hn = b_h_rzn[2];
 
-    linear_op_contexts.emplace_back(create_linear_context(w_ir.t(), b_ir));
-    linear_op_contexts.emplace_back(create_linear_context(w_hr.t(), b_hr));
-    linear_op_contexts.emplace_back(create_linear_context(w_iz.t(), b_iz));
-    linear_op_contexts.emplace_back(create_linear_context(w_hz.t(), b_hz));
-    linear_op_contexts.emplace_back(create_linear_context(w_in.t(), b_in));
-    linear_op_contexts.emplace_back(create_linear_context(w_hn.t(), b_hn));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_ir.t(), b_ir, fill_unpacked));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_hr.t(), b_hr, fill_unpacked));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_iz.t(), b_iz, fill_unpacked));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_hz.t(), b_hz, fill_unpacked));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_in.t(), b_in, fill_unpacked));
+    linear_op_contexts.emplace_back(
+        create_packed_linear(w_hn.t(), b_hn, fill_unpacked));
   }
   return linear_op_contexts;
 }
 
 GruPackedContext::GruPackedContext(
     const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
-    bool has_biases,
-    int64_t num_layers,
-    double dropout,
-    bool train,
-    bool bidirectional,
-    bool batch_first) {
+    const bool has_biases,
+    const int64_t num_layers,
+    const double dropout,
+    const bool train,
+    const bool bidirectional,
+    const bool batch_first,
+    const bool fill_unpacked) {
   TORCH_INTERNAL_ASSERT(
       has_biases, "Vulkan gru expects 'has_biases' to be true.");
   TORCH_INTERNAL_ASSERT(!train, "Vulkan gru expects 'train' to be false.");
@@ -177,7 +185,8 @@ GruPackedContext::GruPackedContext(
       "Vulkan gru expects 'dropout' to be 0.0.");
 
   packed_.reserve(7);
-  packed_.emplace_back(pack_linear_op_contexts(params_cpu, num_layers));
+  packed_.emplace_back(
+      pack_linear_op_contexts(params_cpu, num_layers, fill_unpacked));
   packed_.emplace_back(has_biases);
   packed_.emplace_back(num_layers);
   packed_.emplace_back(dropout);
@@ -213,6 +222,16 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
   for (c10::IValue packed_linear_context : packed_linear_contexts) {
     const c10::impl::GenericList unpacked_linear_context =
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
+
+    TORCH_CHECK(
+        unpacked_linear_context.size() ==
+            LinearPackedContext::Unpacked::NumArgs,
+        "unpacked_linear_context must have ",
+        Unpacked::NumArgs,
+        " arguments, found ",
+        unpacked_linear_context.size(),
+        "!");
+
     params_cpu.emplace_back(
         unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
             .toTensor()
@@ -222,7 +241,7 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
             .toTensor());
   }
   unpacked_gru_context.emplace_back(params_cpu);
-  for (int64_t i = 1; i < 7; ++i) {
+  for (int64_t i = 1; i < Unpacked::NumArgs; ++i) {
     unpacked_gru_context.emplace_back(get_val(i));
   }
 

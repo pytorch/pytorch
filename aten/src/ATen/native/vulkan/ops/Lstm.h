@@ -16,12 +16,13 @@ class LstmPackedContext final : virtual public VulkanPackedContext,
  public:
   LstmPackedContext(
       const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
-      bool has_biases,
-      int64_t num_layers,
-      double dropout,
-      bool train,
-      bool bidirectional,
-      bool batch_first);
+      const bool has_biases,
+      const int64_t num_layers,
+      const double dropout,
+      const bool train,
+      const bool bidirectional,
+      const bool batch_first,
+      const bool fill_unpacked = true);
 
   /*
    * Assigns a name to each index in the unpacked list.
@@ -34,6 +35,8 @@ class LstmPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Train = 4u;
     static constexpr uint32_t Bidirectional = 5u;
     static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
   };
 
   /*
@@ -47,6 +50,8 @@ class LstmPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Train = 4u;
     static constexpr uint32_t Bidirectional = 5u;
     static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
   };
 
   static LstmPackedContext pack(c10::impl::GenericList);

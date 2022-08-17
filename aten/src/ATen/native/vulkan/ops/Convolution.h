@@ -26,7 +26,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
   c10::impl::GenericList unpacked_;
 
  public:
-  Conv2dPackedContext(
+  explicit Conv2dPackedContext(
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       const IntArrayRef stride_arg,
@@ -37,7 +37,8 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
       const IntArrayRef output_padding_arg,
       const int64_t groups,
       const c10::optional<Scalar>& output_min = c10::nullopt,
-      const c10::optional<Scalar>& output_max = c10::nullopt);
+      const c10::optional<Scalar>& output_max = c10::nullopt,
+      const bool fill_unpacked = true);
 
   /*
    * Assigns a name to each index in the unpacked list.
@@ -54,6 +55,8 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Groups = 8u;
     static constexpr uint32_t OutputMin = 9u;
     static constexpr uint32_t OutputMax = 10u;
+
+    static constexpr uint32_t NumArgs = 11u;
   };
 
   /*
@@ -74,11 +77,21 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t OutputMax = 11u;
     static constexpr uint32_t ConvMethod = 12u;
     static constexpr uint32_t WeightSizes = 13u;
+
+    static constexpr uint32_t NumArgs = 14u;
   };
 
   static Conv2dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
+    TORCH_CHECK(
+        unpacked_.size() == Unpacked::NumArgs,
+        "unpacked_ must have ",
+        Unpacked::NumArgs,
+        " arguments, found ",
+        unpacked_.size(),
+        "!");
+
     return unpacked_;
   }
 };

@@ -17,7 +17,10 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
   c10::impl::GenericList unpacked_;
 
  public:
-  LinearPackedContext(const Tensor& weight, const c10::optional<Tensor>& bias);
+  LinearPackedContext(
+      const Tensor& weight,
+      const c10::optional<Tensor>& bias,
+      const bool fill_unpacked = true);
 
   /*
    * Assigns a name to each index in the unpacked list.
@@ -25,6 +28,8 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
   struct Unpacked final {
     static constexpr uint32_t Weight = 0u;
     static constexpr uint32_t Bias = 1u;
+
+    static constexpr uint32_t NumArgs = 2u;
   };
 
   /*
@@ -35,14 +40,33 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Bias = 1u;
     static constexpr uint32_t WeightSizes = 2u;
     static constexpr uint32_t BiasDefined = 3u;
+
+    static constexpr uint32_t NumArgs = 4u;
   };
 
   static LinearPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
+    TORCH_CHECK(
+        unpacked_.size() == Unpacked::NumArgs,
+        "unpacked_ must have ",
+        Unpacked::NumArgs,
+        " arguments, found ",
+        unpacked_.size(),
+        "!");
+
     return unpacked_;
   }
 };
+
+/*
+ * This function is defined for use in other PackedContexts that store linear op
+ * contexts as part of its packed args.
+ */
+c10::intrusive_ptr<LinearPackedContext> create_packed_linear(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    const bool fill_unpacked);
 
 c10::intrusive_ptr<LinearPackedContext> create_linear_context(
     Tensor&& weight,

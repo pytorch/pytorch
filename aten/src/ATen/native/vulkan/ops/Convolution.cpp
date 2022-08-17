@@ -926,7 +926,8 @@ Conv2dPackedContext::Conv2dPackedContext(
     const IntArrayRef output_padding_arg,
     const int64_t groups,
     const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max)
+    const c10::optional<Scalar>& output_max,
+    const bool fill_unpacked)
     : unpacked_{c10::AnyType::get()} {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
@@ -955,7 +956,7 @@ Conv2dPackedContext::Conv2dPackedContext(
   const auto method = determine_method(
       weight.sizes(), stride, padding, dilation, groups, transposed, quantized);
 
-  packed_.reserve(14);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(
       convert(pack_weights(weight, transposed, quantized, method)));
   packed_.emplace_back(
@@ -977,20 +978,28 @@ Conv2dPackedContext::Conv2dPackedContext(
   packed_.emplace_back(method);
   packed_.emplace_back(weight.sizes().vec());
 
-  unpacked_.reserve(11);
-  unpacked_.emplace_back(weight);
-  unpacked_.emplace_back(bias);
-  unpacked_.emplace_back(stride_arg.vec());
-  unpacked_.emplace_back(padding_arg.vec());
-  unpacked_.emplace_back(dilation_arg.vec());
-  unpacked_.emplace_back(transposed);
-  unpacked_.emplace_back(quantized);
-  unpacked_.emplace_back(output_padding_arg.vec());
-  unpacked_.emplace_back(groups);
-  unpacked_.emplace_back(output_min);
-  unpacked_.emplace_back(output_max);
+  if (fill_unpacked) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+    unpacked_.emplace_back(stride_arg.vec());
+    unpacked_.emplace_back(padding_arg.vec());
+    unpacked_.emplace_back(dilation_arg.vec());
+    unpacked_.emplace_back(transposed);
+    unpacked_.emplace_back(quantized);
+    unpacked_.emplace_back(output_padding_arg.vec());
+    unpacked_.emplace_back(groups);
+    unpacked_.emplace_back(output_min);
+    unpacked_.emplace_back(output_max);
+  }
 }
 
+/*
+ * This function is used as the __setstate__ method of the PackContext class,
+ * which is used to deserialize the class. Note that fill_unpacked is set to
+ * false, since the unpacked list is not required to run inference - the
+ * original tensors are therefore released in order to save memory.
+ */
 Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
   return Conv2dPackedContext(
       unpacked.get(Unpacked::Weight).toTensor(),
@@ -1003,7 +1012,8 @@ Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
       unpacked.get(Unpacked::OutputPadding).toIntVector(),
       unpacked.get(Unpacked::Groups).toInt(),
       get_optional_scalar(unpacked, Unpacked::OutputMin),
-      get_optional_scalar(unpacked, Unpacked::OutputMax));
+      get_optional_scalar(unpacked, Unpacked::OutputMax),
+      /* fill_unpacked= */ false);
 }
 
 c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(

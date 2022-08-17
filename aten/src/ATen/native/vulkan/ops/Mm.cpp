@@ -371,7 +371,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 LinearPackedContext::LinearPackedContext(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias)
+    const c10::optional<Tensor>& bias,
+    const bool fill_unpacked)
     : unpacked_{c10::AnyType::get()} {
   TORCH_CHECK(
       available(weight, bias),
@@ -379,21 +380,37 @@ LinearPackedContext::LinearPackedContext(
       "Reason: The provided (weight, bias) parameters are either invalid "
       "individually or their combination is not supported by Vulkan Impl.");
 
-  packed_.reserve(4);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(convert(pack_weights(weight)));
   packed_.emplace_back(convert(pack_biases(weight, bias)));
   packed_.emplace_back(weight.sizes());
   packed_.emplace_back(bias && bias->defined());
 
-  unpacked_.reserve(2);
-  unpacked_.emplace_back(weight);
-  unpacked_.emplace_back(bias);
+  if (fill_unpacked) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+  }
 }
 
+/*
+ * This function is used as the __setstate__ method of the PackContext class,
+ * which is used to deserialize the class. See comments in
+ * Conv2dPackedContext::pack() for why fill_unpacked is set to false.
+ */
 LinearPackedContext LinearPackedContext::pack(c10::impl::GenericList unpacked) {
   return LinearPackedContext(
       unpacked.get(Unpacked::Weight).toTensor(),
-      get_optional_tensor(unpacked, Unpacked::Bias));
+      get_optional_tensor(unpacked, Unpacked::Bias),
+      /* fill_unpacked= */ false);
+}
+
+c10::intrusive_ptr<LinearPackedContext> create_packed_linear(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    const bool fill_unpacked) {
+  return c10::make_intrusive<LinearPackedContext>(
+      LinearPackedContext(weight, bias, fill_unpacked));
 }
 
 c10::intrusive_ptr<LinearPackedContext> create_linear_context(
