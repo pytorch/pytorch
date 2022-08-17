@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import importlib.util
 import os
+import sys
 from itertools import chain
 from pathlib import Path
 
@@ -7,8 +9,6 @@ from pathlib import Path
 # Manually importing the shape function module based on current directory
 # instead of torch imports to avoid needing to recompile Pytorch before
 # running the script
-import importlib.util
-import sys
 
 file_path = Path.cwd() / "torch" / "jit" / "_shape_functions.py"
 module_name = "torch.jit._shape_functions"
@@ -19,8 +19,11 @@ if not file_path.exists():
     raise Exception(err_msg)
 
 spec = importlib.util.spec_from_file_location(module_name, file_path)
+assert spec is not None
 module = importlib.util.module_from_spec(spec)
 sys.modules[module_name] = module
+assert spec.loader is not None
+assert module is not None
 spec.loader.exec_module(module)
 
 bounded_compute_graph_mapping = module.bounded_compute_graph_mapping
