@@ -1,7 +1,7 @@
 import itertools
 from functools import partial
 from itertools import product
-from typing import Iterable, List
+from typing import Iterable
 
 import numpy as np
 from numpy import inf
@@ -12,13 +12,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
 )
-from torch.testing._internal.opinfo.core import (
-    clone_sample,
-    ErrorInput,
-    OpInfo,
-    S,
-    SampleInput,
-)
+from torch.testing._internal.opinfo.core import clone_sample, ErrorInput, S, SampleInput
 
 
 def sample_kwargs_vector_norm(t, **kwargs):
@@ -86,7 +80,7 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
-    sample0 = SampleInput(
+    yield SampleInput(
         make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
         args=(
             make_tensor(
@@ -94,7 +88,7 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
             ),
         ),
     )
-    sample1 = SampleInput(
+    yield SampleInput(
         make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
         args=(
             make_tensor(
@@ -103,7 +97,7 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
         ),
         kwargs={"dim": 1},
     )
-    sample2 = SampleInput(
+    yield SampleInput(
         make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
         args=(
             make_tensor(
@@ -112,8 +106,6 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
         ),
         kwargs={"dim": -1},
     )
-
-    return (sample0, sample1, sample2)
 
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
@@ -1184,7 +1176,3 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(inp, kwargs=dict(ind=len(shape_lhs))))
 
     return samples
-
-
-op_db: List[OpInfo] = []  # TODO
-python_ref_db: List[OpInfo] = []  # TODO
