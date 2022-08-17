@@ -27,6 +27,9 @@ nvprim = torch.library.Library(nvprim_namespace, "DEF")
 nvprim_impl = torch.library.Library(
     nvprim_namespace, "IMPL", "CompositeExplicitAutograd"
 )
+nvprim_implicit_impl = torch.library.Library(
+    nvprim_namespace, "IMPL", "CompositeImplicitAutograd"
+)
 nvprim_autograd_impl = torch.library.Library(nvprim_namespace, "IMPL", "Autograd")
 nvprim_meta_impl = torch.library.Library(nvprim_namespace, "IMPL", "Meta")
 
@@ -284,7 +287,11 @@ _nvfuser_impls["amin"] = _amin_nvfuser
 
 def register_var_mean():
     """This function is used to register the var_mean function in torch.ops.nvprims module."""
-    name = "var_mean"
+    name = "var_mean.main"
+
+    # This overload must be default for correct dispatching of var_mean(Tensor, bool)
+    nvprim.define("var_mean(Tensor inp, bool unbiased) -> (Tensor, Tensor)")
+
     # This signature tries to combine several overloads of the torch.var_mean function into one overload.
     nvprim.define(
         f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
@@ -319,8 +326,13 @@ def register_var_mean():
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_impl)
 
-    prim_packet = getattr(torch.ops.nvprims, name)
-    prim = prim_packet.default
+    prim_packet = torch.ops.nvprims.var_mean
+    prim = prim_packet.main
+
+    def _unbiased_overload_impl(inp, unbiased):
+        return prim(inp, dim=None, unbiased=unbiased)
+
+    nvprim_implicit_impl.impl("var_mean", _unbiased_overload_impl)
 
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a",),
