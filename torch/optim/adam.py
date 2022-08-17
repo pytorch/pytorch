@@ -137,6 +137,8 @@ class Adam(Optimizer):
         super(Adam, self).__init__(params, defaults)
 
         if fused:
+            if differentiable:
+                raise RuntimeError("`fused` cannot be `differentiable`")
             self._step_supports_amp_scaling = True
             # TODO(crcrpar): [low prec params & their higher prec copy]
             # Suppor AMP with FP16/BF16 model params which would need
