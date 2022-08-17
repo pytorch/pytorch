@@ -374,8 +374,16 @@ void initDispatchBindings(PyObject* module) {
     .def(py::init<c10::DispatchKey>())
     .def("__or__", &c10::DispatchKeySet::operator|)
     .def("__sub__", &c10::DispatchKeySet::operator-)
+    .def("__and__", &c10::DispatchKeySet::operator&)
     .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
     .def("has", &c10::DispatchKeySet::has);
+
+  // py::enum_<c10::DispatchKeySet::FullAfter>(m, "DispatchKeySetFullAfter")
+  //   .value("FULL_AFTER", c10::DispatchKeySet::FullAfter::FULL_AFTER);
+
+  m.def("_dispatch_keyset_full_after", [](DispatchKey t) {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
+  });
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);

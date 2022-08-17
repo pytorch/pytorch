@@ -46,7 +46,9 @@ class TestControlFlowTraced(TestCase):
             return y + y
 
         def true_fn(x, pred2):
-            return cond(pred2, true_nested, false_nested, x)
+            z = cond(pred2, true_nested, false_nested, x)
+            print("Z is?", z)
+            return torch.add(x, z)
 
         def false_fn(x, _):
             return x.cos()
@@ -56,6 +58,11 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        print("TRACED OUT ---------------- \n \n \n \n \n ")
+        print(graph.code)
+        print(graph.true_graph.code)
+        print("TRACED OUT ---------------- \n \n \n \n \n ")
 
         result_true_true = graph.forward(x, torch.tensor(True), torch.tensor(True))  # True + True -> x * x
         result_true_false = graph.forward(x, torch.tensor(True), torch.tensor(False))  # True + True -> x + x

@@ -4,15 +4,6 @@ from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard  # typ
 from torch.utils._pytree import tree_flatten
 from torch.overrides import handle_torch_function, has_torch_function
 
-SUPPORTED_KEYS = {
-    DispatchKey.CPU,
-    DispatchKey.BackendSelect,
-    DispatchKey.ADInplaceOrView,
-    DispatchKey.AutogradCPU,
-    DispatchKey.Python,
-    DispatchKey.PythonTLSSnapshot,
-}
-
 """
 This is a dispatcher (in Python)
 - You can define new operations (in Python) without schemas
@@ -20,51 +11,25 @@ This is a dispatcher (in Python)
 """
 
 class PyDispatcher:
-    def __init__(self):
-        self.current_dispatching_op = None
-        self.already_dispatched_keys = None
-
     def call(self, operator, args, kwargs):
-        try:
-            key = compute_dispatch_key(operator, args, kwargs)
-            self.record_dispatch(key, operator)
-            return dispatch(key, operator, args, kwargs)
-        finally:
-            self.reset_dispatch_record()
+        dispatch_key_set = compute_keyset(args, kwargs)
+        kernel = operator.lookup(dispatch_key_set)
+        return call_kernel(kernel, args, kwargs)
 
-    def redispatch(self, operator, args, kwargs):
-        # Redispatch doesn't go to the top
-        assert operator == self.currently_dispatching_op
-        key = compute_dispatch_key(operator, args, kwargs, self.already_dispatched_keys)
-        self.record_dispatch(key, operator)
-        return dispatch(key, operator, args, kwargs)
-
-    def reset_dispatch_record(self):
-        self.current_dispatching_op = None
-        self.already_dispatched_keys = None
-
-    def record_dispatch(self, dispatch_key, operator):
-        self.currently_dispatching_op = operator
-        if self.already_dispatched_keys is None:
-            self.already_dispatched_keys = DispatchKeySet(dispatch_key)
-        else:
-            self.already_dispatched_keys = self.already_dispatched_keys | DispatchKeySet(dispatch_key)
+    def redispatch(self, operator, dispatch_key_set, args, kwargs):
+        kernel = operator.lookup(dispatch_key_set)
+        return call_kernel(kernel, args, kwargs)
 
 
 dispatcher_singleton = PyDispatcher()
 
 
-def compute_dispatch_key(operator, args, kwargs, additional_exclude=None):
+def compute_keyset(args, kwargs):
     tensors = get_tensors(args, kwargs)
-    dispatch_key = key_extractor(tensors, additional_exclude)
-    return dispatch_key
+    return key_extractor(tensors)
 
 
-def dispatch(dispatch_key, operator, args, kwargs):
-    if dispatch_key not in SUPPORTED_KEYS:
-        raise RuntimeError(f'NYI: {dispatch_key} {SUPPORTED_KEYS}')
-    assert dispatch_key in operator.table
-    kernel = operator.table[dispatch_key]
+def call_kernel(kernel, args, kwargs):
     return kernel(*args, **kwargs)
 
 
@@ -75,7 +40,7 @@ def key_extractor(tensors, additional_exclude=None):
     key_set = key_set - _C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
     if additional_exclude is not None:
         key_set = key_set - additional_exclude
-    return key_set.highestPriorityTypeId()
+    return key_set
 
 
 def to_flat_tuple(args, kwargs):
