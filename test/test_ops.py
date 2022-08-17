@@ -185,6 +185,8 @@ class TestCommon(TestCase):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
