@@ -158,8 +158,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         if len(output_args) == 1:
             return None
-        for idx in range(1, len(output_args)):
-            output.args = (output_args[:idx],)
+        for idx in range(0, len(output_args), granularity):
+            output.args = (output_args[:idx] + output_args[idx + granularity:],)
             if graph_fails(cur_graph, cur_inps):
                 return ReproState(cur_graph, cur_inps)
         return None
@@ -241,6 +241,14 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     def try_granularity(failing_state, granularity):
         print(f"Trying granularity {granularity}")
+
+        num_nodes = len(failing_state.graph.nodes)
+        num_outputs = len(get_outputs(failing_state.graph))
+        if num_outputs > num_nodes // 2:
+            new_state = remove_outputs(failing_state, max(granularity // 2, 1))
+            if new_state is not None:
+                return new_state
+
         for strategy in [eliminate_dead_code, remove_unused_inputs, remove_suffix, delta_debugging]:
             new_state = strategy(failing_state, granularity)
             if new_state is not None:
@@ -249,6 +257,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     while True:
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
+
         has_progress = False
         while granularity >= 1:
             new_state = try_granularity(failing_state, granularity)
