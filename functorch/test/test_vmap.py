@@ -3385,7 +3385,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('special.chebyshev_polynomial_u'),
         xfail('special.modified_bessel_k1'),
         xfail('segment_reduce', 'offsets'),
-        xfail('linalg.solve_ex', ''),
         xfail('special.bessel_j1'),
         xfail('logspace', ''),
         xfail('empty', ''),
