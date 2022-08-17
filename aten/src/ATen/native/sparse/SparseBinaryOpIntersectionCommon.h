@@ -133,7 +133,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       source._indices().options());
   const auto probably_coalesced_nnz_arange = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
 
-  const auto sparse_dim = probably_coalesced.sparse_dim();
+  // non-const because of gcc-5/clang-5 issues
+  auto sparse_dim = probably_coalesced.sparse_dim();
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
