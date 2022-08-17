@@ -153,7 +153,9 @@ void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
     AT_ASSERT(num_indices == iter.ntensors() - 2);
     const Tensor& inputTensor = iter.tensor(1);
 
-    TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true), 
+    TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true) ||
+                inputTensor.scalar_type() == ScalarType::Float ||
+                inputTensor.scalar_type() == ScalarType::Half,
                 getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for index.Tensor_out"));
     dispatchIndexSelectKernel(iter, index_size, index_stride);
   }
