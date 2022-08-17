@@ -442,8 +442,10 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
     tensor = convert_to_HWC(tensor, dataformats)
     # Do not assume that user passes in values in [0, 255], use data type to detect
     scale_factor = _calc_scale_factor(tensor)
-    tensor = tensor.astype(np.float32)
-    tensor = (tensor * scale_factor).astype(np.uint8)
+    needs_scale = not isinstance(tensor, np.ndarray) or (scale_factor != 1.0 or tensor.dtype != np.uint8)
+    if needs_scale: 
+        tensor = tensor.astype(np.float32)
+        tensor = (tensor * scale_factor).astype(np.uint8)
     image = make_image(tensor, rescale=rescale)
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
