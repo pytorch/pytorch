@@ -13,37 +13,43 @@ namespace {
 void check_inputs(const Tensor& input1, const Tensor& input2) {
   const std::string broadcast_error_msg =
       "Incompatible dimensions for broadcasting for binary elementwise op!";
-  if (batch_size(input1) != batch_size(input2)) {
+  if (get_dim<Dim4D::Batch>(input1) != get_dim<Dim4D::Batch>(input2)) {
     TORCH_CHECK(
-        batch_size(input1) == 1 || batch_size(input2), broadcast_error_msg);
+        get_dim<Dim4D::Batch>(input1) == 1 || get_dim<Dim4D::Batch>(input2),
+        broadcast_error_msg);
     TORCH_CHECK(
-        (channels_size(input1) == channels_size(input2) &&
-         channels_size(input1) % 4 == 0) ||
-            channels_size(input1) * batch_size(input1) == 1 ||
-            channels_size(input2) * batch_size(input2) == 1,
+        (get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) &&
+         get_dim<Dim4D::Channel>(input1) % 4 == 0) ||
+            get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) ==
+                1 ||
+            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
+                1,
         "Invalid broadcasting for Vulkan binary elementwise op! "
         "If batch dimensions aren't equal, then channel dimensions must be "
         "equal and multiple of 4 or one of the inputs must have "
         "channel and batch dimensions both equal to 1!");
   }
-  if (channels_size(input1) != channels_size(input2)) {
+  if (get_dim<Dim4D::Channel>(input1) != get_dim<Dim4D::Channel>(input2)) {
     TORCH_CHECK(
-        channels_size(input1) == 1 || channels_size(input2),
+        get_dim<Dim4D::Channel>(input1) == 1 || get_dim<Dim4D::Channel>(input2),
         broadcast_error_msg);
     TORCH_CHECK(
-        channels_size(input1) * batch_size(input1) == 1 ||
-            channels_size(input2) * batch_size(input2) == 1,
+        get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) == 1 ||
+            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
+                1,
         "Invalid broadcasting for Vulkan binary elementwise op! "
         "If channel dimensions aren't equal, then one of the inputs must have "
         "channel and batch dimensions both equal to 1!");
   }
-  if (height_size(input1) != height_size(input2)) {
+  if (get_dim<Dim4D::Height>(input1) != get_dim<Dim4D::Height>(input2)) {
     TORCH_CHECK(
-        height_size(input1) == 1 || height_size(input2), broadcast_error_msg);
+        get_dim<Dim4D::Height>(input1) == 1 || get_dim<Dim4D::Height>(input2),
+        broadcast_error_msg);
   }
-  if (width_size(input1) != width_size(input2)) {
+  if (get_dim<Dim4D::Width>(input1) != get_dim<Dim4D::Width>(input2)) {
     TORCH_CHECK(
-        width_size(input1) == 1 || width_size(input2), broadcast_error_msg);
+        get_dim<Dim4D::Width>(input1) == 1 || get_dim<Dim4D::Width>(input2),
+        broadcast_error_msg);
   }
 }
 
@@ -63,16 +69,20 @@ std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
   }
 
   if (out.size() > 0) {
-    out[out.size() - 1] = std::max(width_size(t1), width_size(t2));
+    out[out.size() - 1] =
+        std::max(get_dim<Dim4D::Width>(t1), get_dim<Dim4D::Width>(t2));
   }
   if (out.size() > 1) {
-    out[out.size() - 2] = std::max(height_size(t1), height_size(t2));
+    out[out.size() - 2] =
+        std::max(get_dim<Dim4D::Height>(t1), get_dim<Dim4D::Height>(t2));
   }
   if (out.size() > 2) {
-    out[out.size() - 3] = std::max(channels_size(t1), channels_size(t2));
+    out[out.size() - 3] =
+        std::max(get_dim<Dim4D::Channel>(t1), get_dim<Dim4D::Channel>(t2));
   }
   if (out.size() > 3) {
-    out[out.size() - 4] = std::max(batch_size(t1), batch_size(t2));
+    out[out.size() - 4] =
+        std::max(get_dim<Dim4D::Batch>(t1), get_dim<Dim4D::Batch>(t2));
   }
 
   return out;
@@ -214,9 +224,9 @@ Tensor arithmetic_tensor(
       v_output.extents(),
       0u,
       v_self.extents(),
-      channels_size(self) * batch_size(self),
+      get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
-      channels_size(other) * batch_size(other),
+      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       alpha,
   };
 
@@ -340,10 +350,12 @@ Tensor& arithmetic_tensor_(
     const c10::optional<Scalar>& alpha_arg,
     const api::ShaderSource& shader_descriptor) {
   TORCH_CHECK(
-      batch_size(self_arg) >= batch_size(other_arg) &&
-          channels_size(self_arg) >= channels_size(other_arg) &&
-          height_size(self_arg) >= height_size(other_arg) &&
-          width_size(self_arg) >= width_size(other_arg),
+      get_dim<Dim4D::Batch>(self_arg) >= get_dim<Dim4D::Batch>(other_arg) &&
+          get_dim<Dim4D::Channel>(self_arg) >=
+              get_dim<Dim4D::Channel>(other_arg) &&
+          get_dim<Dim4D::Height>(self_arg) >=
+              get_dim<Dim4D::Height>(other_arg) &&
+          get_dim<Dim4D::Width>(self_arg) >= get_dim<Dim4D::Width>(other_arg),
       "Dimensions of input tensor to Vulkan in-place binary elementwise op "
       "must be less than or equal the dimensions of the underlying tensor.");
 
@@ -371,7 +383,7 @@ Tensor& arithmetic_tensor_(
       v_self.extents(),
       0u,
       v_other.extents(),
-      channels_size(other) * batch_size(other),
+      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       alpha,
   };
 
