@@ -517,7 +517,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
     and replace them with the dynamically quantized version of the ref module.
     """
     named_modules = dict(model.named_modules(remove_duplicate=False))
-    dynamic_remove_set = set()
     for n in model.graph.nodes:
         if n.op != "call_module" or \
            type(named_modules[str(n.target)]) not in \
@@ -563,11 +562,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
         # remove q - dq node
         dq_node.replace_all_uses_with(input_dynamic_q_node)
         model.graph.erase_node(dq_node)
-        dynamic_remove_set.add(input_dynamic_q_node)
-
-    for node in dynamic_remove_set:
-        node.replace_all_uses_with(node.args[0])
-        model.graph.erase_node(node)
+        ref_node.replace_input_with(input_dynamic_q_node, input_dynamic_q_node.args[0])
 
 def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
     """
@@ -671,7 +666,6 @@ def _lower_dynamic_weighted_ref_functional(
     """
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
-    dynamic_remove_set = set()
     # we want to search in reserved order so that we can match the larger patterns first
     # e.g. we want to match linear - relu before linear.
     for n in reversed(model.graph.nodes):
@@ -764,12 +758,8 @@ def _lower_dynamic_weighted_ref_functional(
             dqn_input = dqn.args[0]
             dqn.replace_all_uses_with(dqn_input)
             model.graph.erase_node(dqn)
-        dynamic_remove_set.add(input_dynamic_q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
-
-    for node in dynamic_remove_set:
-        model.graph.erase_node(node)
 
 def _lower_quantized_binary_op(
         model: QuantizedGraphModule,
