@@ -128,7 +128,8 @@ struct AddTensorboardFields : public MetadataBase {
     }
   }
 
-  void operator()(const auto&) {}
+  template <typename T>
+  void operator()(const T&) {}
 };
 
 struct AddGenericMetadata : public MetadataBase {
@@ -189,7 +190,8 @@ struct AddGenericMetadata : public MetadataBase {
     }
   }
 
-  void operator()(const auto&) {}
+  template <typename T>
+  void operator()(const T&) {}
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
