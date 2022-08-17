@@ -127,7 +127,6 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       .to(kHash);
     return hash_coeffs_cpu.to(probably_coalesced.device());
   }();
-  const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
 
   const auto nnz_arange = at::arange(
       std::max(probably_coalesced._nnz(), source._nnz()),
@@ -135,8 +134,6 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   const auto probably_coalesced_nnz_arange = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
 
   const auto sparse_dim = probably_coalesced.sparse_dim();
-  // non-const because of gcc-5/clang-5 issues
-  auto sdim = static_cast<uint32_t>(sparse_dim);
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
@@ -155,6 +152,10 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME, [&]() {
         const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
+        const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
+        // non-const because of gcc-5/clang-5 issues
+        auto sdim = static_cast<uint32_t>(sparse_dim);
+
         KernelLauncher::launch(iter, [=] FUNCAPI (index_t nnz_idx) -> hash_t {
             const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
             auto hash = hash_t {0};
@@ -214,8 +215,11 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
         const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
         const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
         const auto sorted_hash_len = sorted_hash.numel();
+        const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
+        // non-const because of gcc-5/clang-5 issues
+        auto sdim = static_cast<uint32_t>(sparse_dim);
 
         // Fusing hash computation with hash intersection.
         KernelLauncher::launch(iter, [=] FUNCAPI (index_t nnz_idx) -> index_t {
