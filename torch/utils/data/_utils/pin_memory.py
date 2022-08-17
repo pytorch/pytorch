@@ -30,7 +30,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
             try:
                 r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
-                continue
+                return
             idx, data = r
             if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
                 try:
