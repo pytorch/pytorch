@@ -49,7 +49,7 @@ class _TestJITIRToONNX:
     ort_providers = ["CPUExecutionProvider"]
     check_shape = True
     check_dtype = True
-    flatten = True  # True for tracing, and Flase for scripting
+    ignoreNone = True  # True for tracing, and Flase for scripting
 
     def run_test(self, graph_ir, example_inputs):
         graph = torch._C.parse_ir(graph_ir)
@@ -70,7 +70,7 @@ class _TestJITIRToONNX:
             atol=1e-7,
             check_shape=self.check_shape,
             check_dtype=self.check_dtype,
-            flatten=self.flatten,
+            ignoreNone=self.ignoreNone,
             acceptable_error_percentage=None,
         )
 

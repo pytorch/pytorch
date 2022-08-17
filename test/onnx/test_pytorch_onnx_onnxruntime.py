@@ -7,9 +7,10 @@ import itertools
 import os
 import unittest
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+import onnx
 import onnx_test_common
 import parameterized
 
@@ -12198,6 +12199,81 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             GridSampleModule(mode, padding_mode, align_corners),
             (input, grid),
             **atol_rtol,
+        )
+
+    class IfNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            if x.size(0) > 1:
+                y = x
+            return y
+
+    class IfNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            if x.size(0) > 1:
+                y = None
+            return y
+
+    #  Skip now to wait more insight on https://github.com/onnx/onnx/issues/4424
+    #  Model fails on type inference, as it's input/output type mismatch.
+    class LoopNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            for _ in range(x.size(0)):
+                y = x
+            return y
+
+    class LoopNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            for _ in range(x.size(0)):
+                y = None
+            return y
+
+    @common_utils.parametrize(
+        "module_class",
+        (IfNoneOutput, IfNoneInput, LoopNoneOutput),
+        name_fn=lambda module_class: module_class.__name__,
+    )
+    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
+    @skipTraceTest()
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
+        # Need scripting to preserve control flow for this test to be
+        # meaningful.
+        model = torch.jit.script(module_class())
+        f = io.BytesIO()
+        x = torch.ones(x_size)
+        dynamic_axis_name = "condition"
+        torch.onnx.export(
+            model,
+            x,
+            f,
+            opset_version=self.opset_version,
+            # Ensure condition is not constant
+            dynamic_axes={"x": {0: dynamic_axis_name}},
+            input_names=["x"],
+        )
+        exported = onnx.load_from_string(f.getvalue())
+        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
+        expected_output_type = onnx.helper.make_optional_type_proto(
+            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
+        )
+        self.assertEqual(expected_output_type, exported.graph.output[0].type)
+        for node in exported.graph.node:
+            # Both branches output types should match.
+            if node.op_type == "If":
+                for attr in node.attribute:
+                    if attr.name in ("then_branch", "else_branch"):
+                        self.assertEqual(expected_output_type, attr.g.output[0].type)
+
+        self.run_test(
+            module_class(),
+            x,
+            # Ensure condition is not constant
+            dynamic_axes={"x": {0: dynamic_axis_name}},
+            input_names=["x"],
         )
 
     @skipTraceTest()
