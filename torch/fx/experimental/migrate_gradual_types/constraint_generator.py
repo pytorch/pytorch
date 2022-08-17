@@ -1175,11 +1175,6 @@ class ConstraintGenerator:
 
         all_constraints = []
 
-        # Annotate with Dyn if no type exists
-        for n in graph.nodes:
-            if n.type is None:
-                n.type = Dyn
-
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
@@ -1199,16 +1194,17 @@ class ConstraintGenerator:
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
 
-            if n.type != Dyn and (not isinstance(n.type, TensorType)):
+            my_type = n.type
 
+            if n.type != Dyn and (not isinstance(n.type, TensorType)):
                 if n.type == torch.nn.parameter.Parameter:
                     # since we have a parameter, the shape must be static
                     assert 'example_value' in n.meta
-                    n.type = TensorType(n.meta['example_value'].size())
+                    my_type = TensorType(n.meta['example_value'].size())
                 else:
-                    n.type = Dyn
+                    my_type = Dyn
 
-            c1 = BinConstraintT(n.type, x, op_precision)
+            c1 = BinConstraintT(my_type, x, op_precision)
             c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
 
