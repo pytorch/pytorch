@@ -556,7 +556,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
+        report(f"Checking if libiomp() should be included {IS_DARWIN} and {package_type}")
         if IS_DARWIN and package_type != 'conda':
+            report(f"Including libiomp")
             self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
