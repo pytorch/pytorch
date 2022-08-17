@@ -3083,9 +3083,10 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    result = torch.where(cond, t, False)
-
-    return result
+    if t.dtype is torch.bool:
+        return cond.logical_and(t)
+    else:
+        return torch.where(cond, t, 0)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3708,12 +3709,13 @@ def eye(
     cond = range_n.unsqueeze(-1) == range_m
     # TODO: pin_memory=pin_memory, layout=layout
     one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
-    result = torch.where(cond, one, False)
+    if one.dtype is torch.bool:
+        return cond.logical_and(one)
+    else:
+        return torch.where(cond, one, 0)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
     # result.requires_grad_(requires_grad)
-
-    return result
 
 
 # TODO: missing kwargs (e.g. layout)
