@@ -446,7 +446,7 @@ static inline Tensor sum_to(
   }
 
   auto sizes = tensor.sym_sizes();
-  c10::SmallVector<c10::SymInt, 8> reduce_dims;
+  c10::SmallVector<int64_t, 8> reduce_dims;
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
@@ -458,7 +458,7 @@ static inline Tensor sum_to(
   }
 
   if (!reduce_dims.empty()) {
-    tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
+    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
 
   if (always_return_non_view) {

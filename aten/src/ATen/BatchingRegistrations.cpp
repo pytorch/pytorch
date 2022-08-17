@@ -189,10 +189,6 @@ Tensor expand_symint_batching_rule(const Tensor& self, SymIntArrayRef psize, boo
   return self.expand(asIntArrayRefSlow(psize), implicit);
 }
 
-Tensor sum_symint_batching_rule(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return input_t.sum(c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -1100,7 +1096,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
-  m.impl("sum.SymInt", sum_symint_batching_rule);
   m.impl("is_complex", native::is_complex);
 
   // inplace operations
