@@ -229,9 +229,9 @@ void initONNXBindings(PyObject* module) {
 
   m.def(
       "_check_onnx_proto",
-      [](const std::string& proto_string, bool full_check) {
+      ::torch::wrap_pybind_function([](const std::string& proto_string, bool full_check) {
         check_onnx_proto(proto_string, full_check);
-      },
+      }),
       py::arg("proto_string"),
       py::arg("full_check") = false);
 
