@@ -610,6 +610,11 @@ def _is_in_type_group(value, scalar_types: Set[_type_utils.JitScalarType]) -> bo
         return False
     if isinstance(value, torch.Tensor):
         return _type_utils.JitScalarType.from_dtype(value.dtype) in scalar_types
+    elif isinstance(value.type(), torch.ListType):
+        return (
+            _type_utils.JitScalarType.from_dtype(value.type().getElementType().dtype())
+            in scalar_types
+        )
     scalar_type = value.type().scalarType()
     if scalar_type is None:
         warnings.warn(
@@ -1497,7 +1502,7 @@ def _set_operator_export_type(operator_export_type):
 
 
 # This function is for debug use only.
-# onnx_shape_inference = False by default.
+# onnx_shape_inference = True by default.
 def _set_onnx_shape_inference(onnx_shape_inference: bool):
     GLOBALS.onnx_shape_inference = onnx_shape_inference
 

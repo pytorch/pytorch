@@ -968,11 +968,19 @@ _qtype_vtype_map = {
 }
 
 
-def unpack_quantized_tensor(value):
+def unpack_quantized_tensor(value, cast_onnx_accepted=True):
     if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
         q_value_dequantize = value.dequantize()
-        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
-        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_scale = (
+            torch.tensor(value.q_scale(), dtype=torch.double)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_scale(), dtype=torch.float32)
+        )
+        q_zero_point = (
+            torch.tensor(value.q_zero_point(), dtype=torch.int64)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_zero_point(), dtype=_qtype_vtype_map[value.dtype])
+        )
         q_value = q_value_dequantize / q_scale + q_zero_point
         q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
         return q_value, q_scale, q_zero_point
@@ -1176,7 +1184,6 @@ def export_to_pretty_string(
     symbolic_helper._set_opset_version(opset_version)
     symbolic_helper._set_operator_export_type(operator_export_type)
 
-    symbolic_helper._set_onnx_shape_inference(True)
     with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(
             keep_initializers_as_inputs, operator_export_type, opset_version
