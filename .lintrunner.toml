@@ -720,6 +720,8 @@ include_patterns = [
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
     'torchgen/**/*.py',
+    'functorch/functorch/_src/aot_autograd.py',
+    'functorch/functorch/_src/compilers.py',
 ]
 command = [
     'python3',
