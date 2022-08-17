@@ -90,7 +90,7 @@ def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
 
 def prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name='forward', inplace=False):
-    torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_dynamic_jit")
+    torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_ondevice_dynamic_jit")
     return _prepare_ondevice_jit(model, qconfig_dict, method_name, inplace, quant_type=QuantType.DYNAMIC)
 
 def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
