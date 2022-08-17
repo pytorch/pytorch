@@ -47,6 +47,8 @@ Tensor _mps_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
+
   namespace native_mps = at::native::mps;
   CheckedFrom c = "mps_convolution";
   TensorArg input  { input_t,  "input",  1 },
@@ -147,8 +149,8 @@ Tensor _mps_convolution(
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[0], stride[1],
-                                      dilation[0], dilation[1],
+          fill_conv_desc(descriptor_, stride[1], stride[0],
+                                      dilation[1], dilation[0],
                                       padding[1], padding[0],
                                       memory_format, groups);
 
@@ -229,7 +231,7 @@ Tensor mps_convolution_backward_input(
                     c10::nullopt,
                     kMPS,
                     c10::nullopt,
-                    memory_format);
+                    c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -264,9 +266,7 @@ Tensor mps_convolution_backward_input(
     }
 
     MPSShape* mps_input_shape = getMPSShape(input_size);
-
     NSString* ns_shape_key = [[mps_input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
     string key = "mps_convolution_backward_input:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":"
                                                    + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":"
                                                    + to_string(padding[0]) + ":" + to_string(padding[1]) + ":"
@@ -285,8 +285,8 @@ Tensor mps_convolution_backward_input(
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[0], stride[1],
-                                      dilation[0], dilation[1],
+          fill_conv_desc(descriptor_, stride[1], stride[0],
+                                      dilation[1], dilation[0],
                                       padding[1], padding[0],
                                       memory_format, groups);
 
@@ -342,7 +342,7 @@ Tensor mps_convolution_backward_weights(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = at::empty(weight_size, grad_output_t.options(), memory_format);
+  auto grad_weight_t = at::empty(weight_size, grad_output_t.options(), c10::nullopt);
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -375,9 +375,7 @@ Tensor mps_convolution_backward_weights(
     }
 
     MPSShape* mps_weight_shape = getMPSShape(weight_size);
-
     NSString* ns_shape_key = [[mps_weight_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
     string key = "mps_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":"
                                                      + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":"
                                                      + to_string(padding[0]) + ":" + to_string(padding[1]) + ":"
@@ -396,8 +394,8 @@ Tensor mps_convolution_backward_weights(
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[0], stride[1],
-                                      dilation[0], dilation[1],
+          fill_conv_desc(descriptor_, stride[1], stride[0],
+                                      dilation[1], dilation[0],
                                       padding[1], padding[0],
                                       memory_format, groups);
 
