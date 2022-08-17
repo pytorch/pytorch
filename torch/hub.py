@@ -525,6 +525,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
         >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
         >>> # from a local directory
         >>> path = '/some/local/path/pytorch/vision'
+        >>> # xdoctest: +SKIP
         >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
     source = source.lower()
@@ -558,6 +559,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 
     Example:
         >>> path = '/some/local/path/pytorch/vision'
+        >>> # xdoctest: +SKIP
         >>> model = _load_local(path, 'resnet50', pretrained=True)
     """
     sys.path.insert(0, hubconf_dir)

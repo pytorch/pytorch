@@ -393,13 +393,14 @@ class GenLazyNativeFuncDefinition:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} = {arg.name} ?
-                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})):
+                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->
+                    GetIrValueForScalarFromCodegen(*{arg.name}, *common_device)):
                 c10::nullopt;"""
                     )
                 else:
                     lazy_tensor_decls.append(
-                        f"""auto node_{arg.name} =
-                torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});"""
+                        f"""auto node_{arg.name} = torch::lazy::LazyGraphExecutor::Get()->
+                            GetIrValueForScalarFromCodegen({arg.name}, *common_device);"""
                     )
             elif arg.is_symint_or_list:
                 continue  # values are extracted in isValueType

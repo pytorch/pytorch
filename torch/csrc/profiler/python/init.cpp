@@ -95,6 +95,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<Inputs>(m, "_Inputs")
       .def_readonly("shapes", &Inputs::shapes_)
       .def_readonly("dtypes", &Inputs::dtypes_)
+      .def_readonly("strides", &Inputs::strides_)
       .def_property_readonly(
           "ivalues",
           [](const Inputs& inputs) {
