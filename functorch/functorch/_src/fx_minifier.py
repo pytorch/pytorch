@@ -244,8 +244,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
         num_nodes = len(failing_state.graph.nodes)
         num_outputs = len(get_outputs(failing_state.graph))
-        if num_outputs > num_nodes//2:
-            new_state = remove_outputs(failing_state, max(granularity//2, 1))
+        if num_outputs > num_nodes // 2:
+            new_state = remove_outputs(failing_state, max(granularity // 2, 1))
             if new_state is not None:
                 return new_state
 
