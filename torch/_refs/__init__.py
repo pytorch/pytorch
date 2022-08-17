@@ -1914,6 +1914,7 @@ def std(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
@@ -1988,6 +1989,7 @@ def std_mean(
     keepdim: bool = False,
     correction: Optional[int] = None,
 ):
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     s = std(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return s, m
