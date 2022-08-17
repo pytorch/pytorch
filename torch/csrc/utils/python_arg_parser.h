@@ -94,7 +94,7 @@ namespace detail {
 template <>
 struct type_caster<c10::SymInt> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymInt, const_name("SymInt"));
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
   bool load(py::handle src, bool) {
     if (torch::is_symint_node(src)) {
       value = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
