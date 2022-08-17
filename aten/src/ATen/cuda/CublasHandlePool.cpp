@@ -29,7 +29,7 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 
 } // namespace
 
-static std::map<cublasHandle_t, at::DataPtr> handle_to_workspace;
+static std::map<std::tuple<void *, void *>, at::DataPtr> handle_stream_to_workspace;
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
@@ -45,7 +45,7 @@ size_t parseChosenWorkspaceSize() {
     }
     while (next != end) {
       std::smatch match = *next;
-      TORCH_INTERNAL_ASSERT(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
+      TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
       size_t curr_size = (size_t) std::stoi(match.str(1));
       total_size += curr_size * 1024;
       next++;
@@ -88,11 +88,13 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 #ifndef USE_ROCM
-  if (handle_to_workspace.find(handle) == handle_to_workspace.end()) {
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+  if (handle_stream_to_workspace.find(key) == handle_stream_to_workspace.end()) {
       auto workspace_ptr = getNewWorkspace();
-      handle_to_workspace[handle] = std::move(workspace_ptr);
+      handle_stream_to_workspace[key] = std::move(workspace_ptr);
   }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, handle_to_workspace[handle].get(), getChosenWorkspaceSize()));
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, handle_stream_to_workspace[key].get(), getChosenWorkspaceSize()));
 #endif
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
