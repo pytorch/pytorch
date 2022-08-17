@@ -492,31 +492,55 @@ class TransformerEncoderLayer(Module):
                                               "input/output projection weights or biases requires_grad")
 
             if not why_not_sparsity_fast_path:
-                return torch._transformer_encoder_layer_fwd(
-                    src,
-                    self.self_attn.embed_dim,
-                    self.self_attn.num_heads,
-                    self.self_attn.in_proj_weight,
-                    self.self_attn.in_proj_bias,
-                    self.self_attn.out_proj.weight,
-                    self.self_attn.out_proj.bias,
-                    self.activation_relu_or_gelu == 2,
-                    self.norm_first,
-                    self.norm1.eps,
-                    self.norm1.weight,
-                    self.norm1.bias,
-                    self.norm2.weight,
-                    self.norm2.bias,
-                    self.linear1.weight,
-                    self.linear1.bias,
-                    self.linear2.weight,
-                    self.linear2.bias,
-                    # TODO: if src_mask and src_key_padding_mask merge to single 4-dim mask
-                    src_mask if src_mask is not None else src_key_padding_mask,
-                    1 if src_key_padding_mask is not None else
-                    0 if src_mask is not None else
-                    None,
-                )
+                if not torch.jit.is_scripting():
+                    return torch._transformer_encoder_layer_fwd(
+                        src,
+                        self.self_attn.embed_dim,
+                        self.self_attn.num_heads,
+                        self.self_attn.in_proj_weight,
+                        self.self_attn.in_proj_bias,
+                        self.self_attn.out_proj.weight,
+                        self.self_attn.out_proj.bias,
+                        self.activation_relu_or_gelu == 2,
+                        self.norm_first,
+                        self.norm1.eps,
+                        self.norm1.weight,
+                        self.norm1.bias,
+                        self.norm2.weight,
+                        self.norm2.bias,
+                        self.linear1.weight,
+                        self.linear1.bias,
+                        self.linear2.weight,
+                        self.linear2.bias,
+                        # TODO: if src_mask and src_key_padding_mask merge to single 4-dim mask
+                        src_mask if src_mask is not None else src_key_padding_mask,
+                        1 if src_key_padding_mask is not None else
+                        0 if src_mask is not None else
+                        None,
+                    )
+                elif src_mask is None:
+                    # hack until 9/26/2022 for TS jit compatibility window
+                    return torch._transformer_encoder_layer_fwd(
+                        src,
+                        self.self_attn.embed_dim,
+                        self.self_attn.num_heads,
+                        self.self_attn.in_proj_weight,
+                        self.self_attn.in_proj_bias,
+                        self.self_attn.out_proj.weight,
+                        self.self_attn.out_proj.bias,
+                        self.activation_relu_or_gelu == 2,
+                        self.norm_first,
+                        self.norm1.eps,
+                        self.norm1.weight,
+                        self.norm1.bias,
+                        self.norm2.weight,
+                        self.norm2.bias,
+                        self.linear1.weight,
+                        self.linear1.bias,
+                        self.linear2.weight,
+                        self.linear2.bias,
+                        src_mask if src_mask is not None else src_key_padding_mask,
+                    )
 
         x = src
         if self.norm_first:
