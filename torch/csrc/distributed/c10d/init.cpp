@@ -1376,6 +1376,25 @@ Arguments:
               "_end_coalescing",
               &::c10d::ProcessGroup::endCoalescing,
               py::arg("reqs"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device,
+                 const c10::intrusive_ptr<::c10d::Backend>& backend
+              ) {
+                self->setBackend(device.type(), backend);
+              },
+              py::arg("device"),
+              py::arg("backend"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device) {
+                return self->getBackend(device.type());
+              },
+              py::arg("device"),
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1389,6 +1408,21 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
+
+  auto backend = intrusive_ptr_class_<::c10d::Backend>(module, "Backend");
+
+  auto dummyProcessGroup =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::DummyProcessGroupBackend>(
+          module, "DummyProcessGroupBackend", backend)
+          .def(py::init<int, int>(), py::call_guard<py::gil_scoped_release>())
+          .def(
+              py::init([](int rank, int size) {
+                return c10::make_intrusive<::c10d::DummyProcessGroupBackend>(
+                    rank, size);
+              }),
+              py::arg("rank"),
+              py::arg("size"),
+              py::call_guard<py::gil_scoped_release>());
 
 #ifndef _WIN32
   module.def(

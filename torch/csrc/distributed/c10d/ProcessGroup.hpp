@@ -83,6 +83,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType device_type) const {
+    TORCH_CHECK(
+        backends_.find(device_type) != backends_.end(),
+        "Backend for device type ",
+        device_type,
+        " is not registered");
     return backends_.at(device_type);
   }
 
