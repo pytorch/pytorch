@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
-    IS_ARM64
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -1229,7 +1228,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
 
-@unittest.skipIf(IS_ARM64, "Not working on arm")
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1555,7 +1553,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
         '_refs.zeros',
-        '_refs.zeros_like'
+        '_refs.zeros_like',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
     }
 
     not_in_decomp_table = {
@@ -1570,6 +1571,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
         # CompositeImplicitAutograd
         '_refs.allclose',
         '_refs.atleast_1d',
@@ -1590,6 +1594,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.movedim',
         '_refs.narrow',
         '_refs.positive',
         '_refs.ravel',
@@ -1624,6 +1629,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
+        '_refs.real',
+        '_refs.imag',
     }
 
     @parametrize("op", ref_ops_names)
