@@ -2476,7 +2476,7 @@ def gen_source_files(
             + [
                 "\n".join(
                     f"#include <ATen/ops/{f.root_name}_ops.h>"
-                    for f in [g.inplace, g.mutable]
+                    for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions
