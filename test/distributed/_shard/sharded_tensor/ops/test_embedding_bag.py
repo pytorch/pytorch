@@ -42,7 +42,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         num_embeddings,
         embedding_dim,
         mode,
-        sharded_dim=None,
         include_last_offset=False,
         offset_size=None,
         max_norm=None,
@@ -127,6 +126,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         # Compare local weight and shared one to ensure the renorm
         # as expected.
         if max_norm is not None:
+            sharded_dim = spec.dim
             sharded_weight = sharded_embedding_bag.weight.local_shards()[0].tensor
             (start_pos, chunk_size) = generate_local_weight_sharding_params_for_test(
                 local_embedding_bag.weight, sharded_dim, TEST_GPU_NUM, spec, self.rank
@@ -184,7 +184,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self._run_sharded_embedding_bag(spec, [5, 4], 17, 12, "mean")
         self._run_sharded_embedding_bag(spec, [6, 7], 21, 11, "max")
         self._run_sharded_embedding_bag(
-            spec, [5, 5], 17, 14, "sum", max_norm=2.5, sharded_dim=sharded_dim
+            spec, [5, 5], 17, 14, "sum", max_norm=2.5,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -194,7 +194,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             "mean",
             max_norm=2.0,
             norm_type=1.0,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -204,7 +203,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             "max",
             max_norm=1.5,
             norm_type=1.0,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum", padding_idx=6)
         self._run_sharded_embedding_bag(spec, [8, 6], 24, 13, "sum")
@@ -226,7 +224,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             "sum",
             offset_size=3,
             max_norm=1.25,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -236,7 +233,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             "mean",
             offset_size=2,
             max_norm=1.25,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -246,7 +242,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             "max",
             offset_size=2,
             max_norm=1.15,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "sum", padding_idx=12)
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "mean", padding_idx=12)
@@ -260,7 +255,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             offset_size=3,
             max_norm=1.25,
             padding_idx=10,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -271,7 +265,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             offset_size=2,
             max_norm=1.25,
             padding_idx=10,
-            sharded_dim=sharded_dim,
         )
         self._run_sharded_embedding_bag(
             spec,
@@ -282,7 +275,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             offset_size=2,
             max_norm=1.15,
             padding_idx=10,
-            sharded_dim=sharded_dim,
         )
 
 

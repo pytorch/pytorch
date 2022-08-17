@@ -27,7 +27,6 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     skipDtypeChecking,
-    skipForAllOpsetVersions,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
@@ -12201,9 +12200,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             **atol_rtol,
         )
 
-    # TODO: The fix of OptionalHasElement is still in master branch, not in release
-    #       Enable the test after it's been released.
-    @skipForAllOpsetVersions()
     @skipTraceTest()
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):
