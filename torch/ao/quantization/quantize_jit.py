@@ -71,10 +71,10 @@ def _prepare_ondevice_jit(model, qconfig_dict, method_name='forward', inplace=Fa
     torch._C._jit_pass_inline(method_graph)
     model = fuse_conv_bn_jit(model, inplace)
     model_c = torch._C._jit_pass_insert_observer_method_for_ondevice_ptq(model._c,
-                                                  method_name,
-                                                  scripted_qconfig_dict,
-                                                  inplace,
-                                                  quant_type)
+                                                                         method_name,
+                                                                         scripted_qconfig_dict,
+                                                                         inplace,
+                                                                         quant_type)
     if inplace:
         model._reconstruct(model_c)
     else:
@@ -88,6 +88,7 @@ def prepare_jit(model, qconfig_dict, inplace=False):
 def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_dynamic_jit")
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
+
 
 def prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name='forward', inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_ondevice_dynamic_jit")
