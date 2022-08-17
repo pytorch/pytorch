@@ -1100,6 +1100,26 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
+    def test_transpose_inference_mode_interaction(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # Construct in default mode and transpose while in inference mode
+        with torch.inference_mode():
+            ntT = nt.transpose(-1, -2)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.transpose(-1, -2)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+        # Construct and transpose while in inference mode
+        with torch.inference_mode():
+            nt = self.random_nt(device, dtype, 4, (4, 4))
+            ntT = nt.transpose(-1, -2)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.transpose(-1, -2)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+    @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_reshape(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
