@@ -443,6 +443,10 @@ class TORCH_API Tensor final {
     return impl_->sym_numel();
   }
 
+  inline c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
+  }
+
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }
