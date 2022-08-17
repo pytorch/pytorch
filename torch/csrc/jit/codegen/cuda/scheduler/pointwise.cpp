@@ -181,12 +181,6 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
         ceilDiv(n_elems, device_multiprocessor_count * kThreadX));
   }
 
-  // If we use RNG don't unroll so we can do correctness testing
-  if (fusion->isStochastic() &&
-      isOptionDisabled(DisableOption::UnrollWithRng)) {
-    max_unroll_factor = 1;
-  }
-
   auto params = std::make_shared<PointwiseParams>("Pointwise heuristics");
 
   /*

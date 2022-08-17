@@ -66,8 +66,7 @@ enum class DisableOption {
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
   Nvtx, //! Disable NVTX instrumentation
-  PredicateElimination, //! Disable predicate elimination
-  UnrollWithRng //! Disable unrolling for kernels with RNG in them
+  PredicateElimination //! Disable predicate elimination
 };
 
 TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);

@@ -2149,12 +2149,6 @@ size_t expandVectorizationToContigMergedDomains(
     TensorView* reference_tv,
     int break_point,
     size_t default_word_size) {
-  // Don't vectorize when RNG is used
-  if (fusion->isStochastic() &&
-      isOptionDisabled(DisableOption::UnrollWithRng)) {
-    return default_word_size;
-  }
-
   size_t max_expand_size = SchedulerRuntimeInfo::max_alignment_size_in_byte;
   size_t common_alignment_size =
       SchedulerRuntimeInfo::max_alignment_size_in_byte;
