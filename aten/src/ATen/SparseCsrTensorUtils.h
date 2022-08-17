@@ -235,5 +235,25 @@ inline int plainDimension(
   return size.size() - dense_ndim - (isCompressedRow(layout) ? 1 : 2);
 }
 
+inline int64_t numBatchDimensions(Tensor const& self) {
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "numBatchDimensions",
+      [&self] { return self.crow_indices().dim() - 1; },
+      [&self] { return self.ccol_indices().dim() - 1; });
+}
+
+inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "getCompressedPlainIndices",
+      [&self] {
+        return std::make_pair(self.crow_indices(), self.col_indices());
+      },
+      [&self] {
+        return std::make_pair(self.ccol_indices(), self.row_indices());
+      });
+}
+
 } // namespace sparse_csr
 } // namespace at

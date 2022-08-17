@@ -38,6 +38,7 @@ TensorView* makeContigConcreteTensor(
 
 std::string toString(ReductionParams rparams);
 std::string toString(PointwiseParams params);
+std::string toString(const std::shared_ptr<HeuristicParams>& params);
 std::string toString(LaunchParams lparams);
 
 // Run benchmark iterations with provided inputs. If not segmented, report
