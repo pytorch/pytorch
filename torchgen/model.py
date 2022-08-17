@@ -52,6 +52,12 @@ DEFAULT_KERNEL_NAMESPACE = "at::native"
 BACKEND_COMPONENTS = "CPU CUDA HIP XLA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
 FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 
+# This list guards dispatches that can be used in derivatives.yaml
+# For now we omit AutogradFunctionality and AutogradOther
+AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
+    "Autograd" + component for component in BACKEND_COMPONENTS
+]
+
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen
 class DispatchKey(Enum):
@@ -895,7 +901,7 @@ class NativeFunction:
             "inplace_view" in self.tags and str(self.func.name) != "resize_"
         )
         is_wildcard_view = any(
-            inp.annotation is not None and inp.annotation.alias_set_after != ""
+            inp.annotation is not None and "*" in inp.annotation.alias_set_after
             for inp in self.func.schema_order_arguments()
         )
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -968,12 +974,16 @@ class NativeFunctionsGroup:
             if self.inplace is not None:
                 assert self.inplace.structured_delegate == self.out.func.name
 
-        generated_fns = [
-            str(f.func.name) for f in self.functions() if "generated" in f.tags
-        ]
+        generated_fns = sorted(
+            [str(f.func.name) for f in self.functions() if "generated" in f.tags]
+        )
         generated_fns_str = ", ".join(str(x) for x in generated_fns)
-        expected_generated_fns = f.autogen
-        expected_generated_fns_str = ", ".join(str(x) for x in expected_generated_fns)
+        expected_generated_fns: Set[str] = set()
+        for f in self.functions():
+            expected_generated_fns.update(str(op) for op in f.autogen)
+        expected_generated_fns_str = ", ".join(
+            str(x) for x in sorted(list(expected_generated_fns))
+        )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
@@ -1320,7 +1330,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional, but has tensor options arguments."
+                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
@@ -1567,26 +1577,37 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
-    alias_set_after: str
+    alias_set_after: Tuple[str, ...]
 
     @staticmethod
     def parse(ann: str) -> "Annotation":
-        # Only handling afterSet == Wildcard for now
-        becomes_wildcard_index = ann.find(" -> *")
-        if becomes_wildcard_index != -1:
-            after_set = "*"
-            # TODO: im not good enough with regexes to ignore -> *
-            m = re.match(
-                r"^([a-z])(!?)(!?)$",
-                ann[:becomes_wildcard_index]
-                + ann[becomes_wildcard_index + len(" -> *") :],
-            )
-        else:
-            after_set = ""
-            m = re.match(r"^([a-z])(!?)(!?)$", ann)
+        # TODO: implement a proper parser if this gets more ugly
+        # Regex Explanation:
+        # Example: "a! -> a|b"
+        # Group #1: alias before optional '|', required. Matches the first
+        #   character 'a' in the example
+        # Group #2: optional alias set after optional '|', matches empty string
+        #   in the example
+        # Group #3: optional "is write" flag, matches '!' in the example.
+        # Group #4: optional section containing arrow, matches " -> a|b" in the
+        #   example.
+        # Group #5: optional alias after set, supports wildcard, matches "a|b"
+        #   in the example.
+        # Group #6: optional sub-section of alias after set, matches "|b" in the
+        #   example.
+        m = re.match(r"^([a-z])(\|[a-z])*(!?)( -> (\*|[a-z](\|[a-z])*))?$", ann)
+
         assert m is not None, f"unrecognized alias annotation {ann}"
-        alias_set = (m.group(1),)
-        is_write = m.group(2) == "!"
+        before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
+        alias_set = tuple(before_alias.split("|"))
+        is_write = m.group(3) == "!"
+        assert not (
+            is_write and len(alias_set) > 1
+        ), f"alias set larger than 1 is not mutable, got {ann} instead."
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        assert not (
+            len(before_alias) > 1 and len(after_set) > 1
+        ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
@@ -1595,10 +1616,12 @@ class Annotation:
 
     def __str__(self) -> str:
         alias_set = "|".join(self.alias_set)
-        if self.alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
-        is_write = "!" if self.is_write else ""
-        return f"{alias_set}{is_write}"
+        if self.is_write:
+            alias_set = f"{alias_set}!"
+        alias_set_after = "|".join(self.alias_set_after)
+        if alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+        return alias_set
 
 
 # The base class for the type system.  This is also loosely modeled
@@ -1624,6 +1647,11 @@ class Type:
         if m is not None:
             size = int(m.group(2)) if m.group(2) is not None else None
             return ListType(elem=Type.parse(m.group(1)), size=size)
+
+        # '__torch__.torch.classes.' is the prefix for custom class
+        m = re.match(r"^__torch__\.torch\.classes\.([a-zA-Z0-9_.]+)$", t)
+        if m is not None:
+            return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
         except KeyError:
@@ -1717,6 +1745,36 @@ class OptionalType(Type):
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
+
+
+# A type representing a PyTorch custom class
+@dataclass(frozen=True)
+class CustomClassType(Type):
+    class_name: str
+
+    def __str__(self) -> str:
+        """
+        Return the class name will prefix __torch__.torch.classes
+        """
+        return f"__torch__.torch.classes.{self.class_name}"
+
+    def is_tensor_like(self) -> bool:
+        """
+        Assume a custom class is not a tensor.
+        """
+        return False
+
+    def is_nullable(self) -> bool:
+        """
+        Assume a custom class is not nullable.
+        """
+        return False
+
+    def symint_to_int(self) -> "Type":
+        return self
+
+    def is_list_like(self) -> Optional["ListType"]:
+        return None
 
 
 # List types specify that we may have multiples of an element.  We
@@ -2015,27 +2073,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple(
                     x.symint_to_int() for x in arguments.pre_self_positional
-                ],
+                ),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple(
                     x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple(
                 x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ),
+            pre_tensor_options_kwarg_only=tuple(
                 x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ),
         )
 
         return arguments

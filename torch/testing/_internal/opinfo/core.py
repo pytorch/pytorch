@@ -98,7 +98,9 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         self.input = input
         self.args = args
+        assert isinstance(self.args, tuple)
         self.kwargs = kwargs if kwargs is not None else {}
+        assert isinstance(self.kwargs, dict)
         self.output_process_fn_grad = output_process_fn_grad
         self.name = name
 
@@ -530,7 +532,7 @@ class OpInfo(object):
 
     # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
     # If given, the op will be compared with its reference on each of its sample inputs.
-    ref: Callable = None
+    ref: Optional[Callable] = None
 
     # the following metadata describes the operator, its variants, and its aliases, if any
 
@@ -1095,11 +1097,16 @@ class OpInfo(object):
 #   by adding kwargs to the constructor.
 
 
-def _find_referenced_opinfo(referenced_name, variant_name):
+def _find_referenced_opinfo(referenced_name, variant_name, *, op_db=None):
     '''
     Finds the OpInfo with the given name that has no variant name.
     '''
-    from torch.testing._internal.common_methods_invocations import op_db
+    # NOTE: searching the global op_db doesn't work when OpInfos are split into
+    # different modules, as otherwise the op_db will not be fully constructed
+    # yet. So, instead the local op_db must be passed in explicitly.
+    if op_db is None:
+        from torch.testing._internal.common_methods_invocations import op_db
+
     for opinfo in op_db:
         if opinfo.name == referenced_name and opinfo.variant_test_name == variant_name:
             return opinfo
@@ -1156,6 +1163,7 @@ class PythonRefInfo(OpInfo):
             name,  # the stringname of the callable Python reference
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
+            op_db=None,  # The database of opinfos to search for the parent opinfo
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             validate_view_consistency=True,
@@ -1164,7 +1172,8 @@ class PythonRefInfo(OpInfo):
 
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
+        self.torch_opinfo = _find_referenced_opinfo(
+            torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db)
         self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
@@ -2146,10 +2155,7 @@ class UnaryUfuncInfo(OpInfo):
         self,
         name,  # the string name of the function
         *,
-        ref,  # a reference function
         dtypes=floating_types(),
-        dtypesIfCUDA=None,
-        dtypesIfROCM=None,
         domain=(None, None),  # the [low, high) domain of the function
         handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
@@ -2157,23 +2163,18 @@ class UnaryUfuncInfo(OpInfo):
         sample_inputs_func=sample_inputs_elementwise_unary,
         reference_inputs_func=reference_inputs_elementwise_unary,
         sample_kwargs=lambda device, dtype, input: ({}, {}),
-        supports_sparse=False,
         reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
         **kwargs,
     ):
         self._original_unary_ufunc_args = locals().copy()
 
-        super(UnaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
-            supports_sparse=supports_sparse,
             **kwargs,
         )
-        self.ref = ref
         self.domain = domain
         self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
