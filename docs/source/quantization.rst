@@ -1144,3 +1144,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.sparsity
 .. py:module:: torch.ao.sparsity.scheduler
 .. py:module:: torch.ao.sparsity.sparsifier
+
+.. torch.nn.quantized is being migrated, but still needs entries
+.. py:module:: torch.nn.quantized
+   :noindex:
