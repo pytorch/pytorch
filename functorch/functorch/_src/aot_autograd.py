@@ -61,14 +61,19 @@ def preserve_rng_state():
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
+callback_set = False
+
+
 def setup_stacktrace_preservation_hooks(roots: List):
     def iter_graph(roots):
         if not roots:
             return
-        seen = set(roots)
+        seen = set()
         q = collections.deque()
         for node in roots:
-            q.append(node)
+            if node is not None:
+                seen.add(node)
+                q.append(node)
 
         while q:
             node = q.popleft()
@@ -80,15 +85,43 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
             yield node
 
-    def get_prehook(metadata_):
+    def get_callback(saved_stack_):
+        def callback():
+            global callback_set
+            fx_traceback.set_stack_trace(saved_stack_)
+            callback_set = False
+
+        return callback
+
+    def get_prehook(stack_):
         def prehook(grad_output):
-            stack = metadata_.get("traceback_", None)
-            fx_traceback.set_stack_trace(stack)
+            global callback_set
+
+            if not callback_set:
+                torch.autograd.variable.Variable._execution_engine.queue_callback(
+                    get_callback(fx_traceback.format_stack())
+                )
+                callback_set = True
+
+            fx_traceback.set_stack_trace(stack_)
 
         return prehook
 
+    def get_posthook(special_stack_):
+        def posthook(grad_input, grad_output):
+            fx_traceback.set_stack_trace(special_stack_)
+
+        return posthook
+
     for node in iter_graph(roots):
-        node.register_prehook(get_prehook(node.metadata))
+        forward_node_stack = node.metadata.get("traceback_", [])
+        node.register_prehook(get_prehook(forward_node_stack))
+
+        special_stack = forward_node_stack.copy()
+        special_stack.append(
+            "Gradient addition node due to mulitple use of tensor around:"
+        )
+        node.register_hook(get_posthook(special_stack))
 
 
 def create_joint_forward_backward(fn):
