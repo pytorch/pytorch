@@ -219,7 +219,7 @@ LstmPackedContext::LstmPackedContext(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
 
-  packed_.reserve(7);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(pack_lstm_linear_op_contexts(params_cpu, num_layers));
   packed_.emplace_back(has_biases);
   packed_.emplace_back(num_layers);
@@ -242,7 +242,7 @@ LstmPackedContext LstmPackedContext::pack(c10::impl::GenericList unpacked) {
 
 const c10::impl::GenericList LstmPackedContext::unpack() const {
   c10::impl::GenericList unpacked_lstm_context{c10::AnyType::get()};
-  unpacked_lstm_context.reserve(7);
+  unpacked_lstm_context.reserve(Unpacked::NumArgs);
 
   const c10::List<c10::IValue> packed_linear_contexts =
       get_val(Packed::LinearContexts).toList();
@@ -256,6 +256,11 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
   for (c10::IValue packed_linear_context : packed_linear_contexts) {
     const c10::impl::GenericList unpacked_linear_context =
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
+
+    TORCH_CHECK(
+        unpacked_linear_context.size() > 0u,
+        "unpacked_linear_context does not have any elements!");
+
     params_cpu.emplace_back(
         unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
             .toTensor()
