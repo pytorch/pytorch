@@ -336,6 +336,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("duration_time_ns", [](const Result& r) {
           return r.endTimeNS() - r.start_time_ns_;
         });
+
+    m.def("_soft_assert_raises", &setSoftAssertRaises);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -462,6 +464,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
+
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
@@ -652,12 +656,17 @@ static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_anomaly_mode_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  AnomalyMode::set_enabled(arg == Py_True);
+  static PythonArgParser parser({
+      "set_anomaly_enabled(bool enabled, bool check_nan=True)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  AnomalyMode::set_enabled(r.toBool(0), r.toBool(1));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -665,6 +674,18 @@ static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_anomaly_check_nan_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::should_check_nan()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -701,10 +722,10 @@ static PyObject* python_exit_dual_level(
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
   } else {
     Py_INCREF(arg);
-    at::impl::TorchDispatchModeTLS::set_state(
+    c10::impl::TorchDispatchModeTLS::set_state(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -715,7 +736,7 @@ static PyObject* get_torch_dispatch_mode(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
   if (!mode) {
     Py_RETURN_NONE;
   } else {
@@ -784,8 +805,15 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
+    {"set_anomaly_enabled",
+     castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+    {"is_anomaly_check_nan_enabled",
+     is_anomaly_check_nan_enabled,
+     METH_NOARGS,
+     nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),

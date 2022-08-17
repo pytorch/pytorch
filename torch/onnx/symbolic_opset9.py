@@ -891,6 +891,7 @@ def size(g, self, dim=None):
     return symbolic_helper._size_helper(g, self, dim)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "i")
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
@@ -1208,11 +1209,11 @@ def threshold(g, self, threshold, value):
     return g.op("Relu", self)
 
 
-def leaky_relu(g, input, negative_slope, inplace=False):
-    negative_slope = symbolic_helper._get_const(negative_slope, "t", "negative_slope")
+@symbolic_helper.quantized_args(True)
+@symbolic_helper.parse_args("v", "f", "b")
+def leaky_relu(g, input: _C.Value, negative_slope: float, inplace: bool = False):
     # See Note [Export inplace]
-    # TODO: Talk to ONNX about unconditional cast of scalar to float
-    return g.op("LeakyRelu", input, alpha_f=symbolic_helper._scalar(negative_slope))
+    return g.op("LeakyRelu", input, alpha_f=negative_slope)
 
 
 def glu(g, input, dim):
@@ -3198,7 +3199,7 @@ def slice(g, self, *args):
 
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
-def hardtanh(g, self, min_val, max_val):
+def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     return op_with_optional_float_cast(
         g, "Clip", self, min_f=min_val, max_f=max_val, opset_before=12
     )
@@ -4625,9 +4626,9 @@ def index(g, self, index):
             rank = symbolic_helper._get_tensor_rank(self)
             if rank is None:
                 raise NotImplementedError(
-                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank, "
-                    + "try turning on shape and type propagate during export: "
-                    + "torch.onnx._export(..., propagate=True)."
+                    "Unsupported aten::index operator of advanced indexing on tensor of unknown rank. "
+                    + "Try turning on shape inference during export: "
+                    + "torch.onnx._export(..., onnx_shape_inference=True)."
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,
             #       update the warning to recommend exporting with higher opset version.

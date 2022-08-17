@@ -618,7 +618,36 @@ class Quantized:
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    # TODO(justinchuby): Support kwargs in leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point)
+    @staticmethod
+    def leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.leaky_relu(g, x, negative_slope, inplace)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def layer_norm(g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        weight, _, _, _ = symbolic_helper.dequantize_helper(g, weight)
+        bias, _, _, _ = symbolic_helper.dequantize_helper(g, bias)
+
+        output = opset9.layer_norm(
+            g, x, normalized_shape, weight, bias, eps, cudnn_enable=False
+        )
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    def group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        weight, _, _, _ = symbolic_helper.dequantize_helper(g, weight)
+        bias, _, _, _ = symbolic_helper.dequantize_helper(g, bias)
+
+        output = opset9.group_norm(
+            g, x, num_groups, weight, bias, eps, cudnn_enabled=False
+        )
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
     @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")

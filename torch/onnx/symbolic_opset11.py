@@ -91,8 +91,9 @@ __all__ = [
 ]
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
-def hardtanh(g, self, min_val, max_val):
+def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     dtype = self.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT

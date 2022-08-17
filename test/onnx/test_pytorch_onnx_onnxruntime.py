@@ -26,11 +26,12 @@ from pytorch_test_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
-    skipForAllOpsetVersions,
+    skipDtypeChecking,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
+    skipShapeChecking,
     skipTraceTest,
 )
 from torch import Tensor
@@ -827,6 +828,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(Model(), (x, y))
 
+    @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1531,6 +1533,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_float(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: float):
@@ -1553,6 +1556,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_bool(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: int, z: bool, t: float):
@@ -1720,6 +1724,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
 
+    @skipDtypeChecking
     def test_div_rounding_mode(self):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2940,6 +2945,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
         )
 
+    @skipDtypeChecking
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2986,6 +2992,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # add to(dtype=torch.long) to avoid ORT output type does not match expected type.
     # will be fixed in ONNX version 14.
     @skipIfUnsupportedMaxOpsetVersion(13)
+    @skipDtypeChecking
     def test_arithmeticOps_with_low_precision(self):
         class AddModule(torch.nn.Module):
             def forward(self, x, y):
@@ -5279,6 +5286,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @skipDtypeChecking
     def test_item(self):
         class M(torch.nn.Module):
             def forward(self, x, y, i: int):
@@ -6085,6 +6093,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(ZeroAndOnes(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipShapeChecking
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -6626,6 +6635,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(FullLikeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipDtypeChecking
     def test_full_like_value(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x, y):
@@ -7892,6 +7902,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M(), (dummy_inputs,), input_names=["x"], dynamic_axes={"x": [0]})
 
     @skipIfUnsupportedMinOpsetVersion(12)
+    @skipDtypeChecking
     def test_outer(self):
         class Outer(torch.nn.Module):
             def forward(self, x, y):
@@ -11060,6 +11071,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (boxes, scores))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipDtypeChecking
     def test_symbolic_shape_inference_arange_2(self):
         # test Range
         class ArangeModel(torch.nn.Module):
@@ -11516,6 +11528,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(12, 3)
         self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0]})
 
+    @skipShapeChecking
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -11755,10 +11768,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 torch.nn.ReLU(),
                 name="relu",
             ),
-            # common_utils.subtest(
-            #     torch.nn.LeakyReLU(),
-            #     name="leaky_relu",
-            # ),
+            common_utils.subtest(
+                torch.nn.LeakyReLU(),
+                name="leaky_relu",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.LeakyReLU(2.0, 1),
+                name="quantized_leaky_relu",
+            ),
             common_utils.subtest(
                 torch.nn.quantized.Hardswish(2.0, 1),
                 name="quantized_hardswish",
@@ -11801,9 +11818,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ),
             common_utils.subtest(
                 torch.nn.quantized.LayerNorm(
-                    2,
-                    torch.nn.Parameter(torch.zeros(3)),
-                    torch.nn.Parameter(torch.zeros(3)),
+                    [4, 2, 3],
+                    torch.nn.Parameter(torch.ones([4, 2, 3])),
+                    torch.nn.Parameter(torch.zeros([4, 2, 3])),
                     2.0,
                     1,
                 ),
@@ -11812,19 +11829,24 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             common_utils.subtest(
                 torch.nn.quantized.InstanceNorm1d(
                     2,
-                    torch.nn.Parameter(torch.zeros(4)),
+                    torch.nn.Parameter(torch.ones(4)),
                     torch.nn.Parameter(torch.zeros(4)),
                     2.0,
                     1,
                 ),
                 name="instance_norm",
             ),
-            # common_utils.subtest(
-            #     torch.nn.quantized.GroupNorm(
-            #         2, 2, torch.nn.Parameter(torch.zeros(2)), torch.nn.Parameter(torch.zeros(2)), 2.0, 1
-            #     ),
-            #     name="group_norm",
-            # ),
+            common_utils.subtest(
+                torch.nn.quantized.GroupNorm(
+                    2,
+                    4,
+                    torch.nn.Parameter(torch.zeros(4)),
+                    torch.nn.Parameter(torch.zeros(4)),
+                    2.0,
+                    1,
+                ),
+                name="group_norm",
+            ),
             common_utils.subtest(
                 lambda x: torch.as_strided(x, (2, 2), (1, 2)),
                 name="as_strided",
@@ -12265,9 +12287,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             **atol_rtol,
         )
 
-    # TODO: The fix of OptionalHasElement is still in master branch, not in release
-    #       Enable the test after it's been released.
-    @skipForAllOpsetVersions()
     @skipTraceTest()
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):
