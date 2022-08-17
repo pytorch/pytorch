@@ -1189,13 +1189,18 @@ inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    const py::kwargs& kwargs) {
+    const py::kwargs& kwargs,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
   auto opWithStack = getOpWithStack(operations, args, kwargs);
   std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(stack);
+    if (dk) {
+      found_op->getOperationForDispatchKey (*dk)(stack);
+    } else {
+      found_op->getOperation()(stack);
+    }
   }
 
   return createPyObjectForStack(std::move(stack));
@@ -1206,7 +1211,8 @@ inline py::object _get_operation_for_overload_or_packet(
     Symbol symbol,
     py::args args,
     const py::kwargs& kwargs,
-    bool is_overload) {
+    bool is_overload,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
@@ -1259,7 +1265,7 @@ inline py::object _get_operation_for_overload_or_packet(
             self_func.ptr(),
             module_name.c_str()));
   }
-  return invokeOperatorFromPython(operations, args, kwargs);
+  return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
 } // namespace jit
