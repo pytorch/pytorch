@@ -690,12 +690,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return shifted - shifted_logsumexp
 
 
-@register_decomposition(aten.addcdiv)
-@pw_cast_for_opmath
-def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    return self + value * (tensor1 / tensor2)
-
-
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
 @register_decomposition(aten.addcmul)
 @pw_cast_for_opmath
