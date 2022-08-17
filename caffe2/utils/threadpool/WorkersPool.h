@@ -164,7 +164,7 @@ T WaitForVariableChange(std::atomic<T>* var,
       new_value = var->load(std::memory_order_relaxed);
       return new_value != initial_value;
     });
-    DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
+    TORCH_DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
     return new_value;
   }
 }
@@ -178,7 +178,7 @@ class BlockingCounter {
   // decrementing events that the Wait() call will be waiting for.
   void Reset(std::size_t initial_count) {
     std::lock_guard<std::mutex> g(mutex_);
-    DCHECK_EQ(count_, 0);
+    TORCH_DCHECK_EQ(count_, 0);
     count_ = initial_count;
   }
 
@@ -188,7 +188,7 @@ class BlockingCounter {
   // returns false.
   bool DecrementCount() {
     const auto count_value = count_.fetch_sub(1, std::memory_order_relaxed) - 1;
-    DCHECK_GE(count_value, 0);
+    TORCH_DCHECK_GE(count_value, 0);
     if (count_value == 0) {
       std::lock_guard<std::mutex> g(mutex_);
       cond_.notify_one();
@@ -338,7 +338,7 @@ class WorkersPool {
     // One of the tasks will be run on the current thread.
     int workers_count = tasks.size() - 1;
     CreateWorkers(workers_count);
-    DCHECK_LE(workers_count, (int)workers_.size());
+    TORCH_DCHECK_LE(workers_count, (int)workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
     for (const auto task : c10::irange(1, tasks.size())) {
       workers_[task - 1]->StartWork(tasks[task].get());

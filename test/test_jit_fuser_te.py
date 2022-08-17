@@ -1387,6 +1387,7 @@ class TestTEFuser(JitTestCase):
                 F.hardsigmoid,
                 F.hardswish,
                 F.softplus,
+                F.silu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
@@ -2394,6 +2395,42 @@ class TestTEFuser(JitTestCase):
 
         f = FileCheck().check("Found multiple fusions")
         f.run(str(error_out.exception))
+
+    def test_constant_chunk_shapes(self):
+        # We had an issue where buildShapeExpressions would fail as show below:
+        #
+        # %1 : Tensor = Constant[..]  # not supported, we don't build this shape
+        # %2 : Tensor = Constant[..]  # not supported
+        # %3 : Tensor = aten::add(%1, %2)  # inputs not supported, we don't build shape
+        # ... = prim::ConstantChunk[..](%3)  # it forgets to check whether input shapes exist, and fails
+        if self.dynamic_shapes:
+            self.skipTest("TODO: chunk dynamic shapes")
+
+        for device in self.devices:
+            def f(x, y):
+                r = torch.tensor(4)
+                z1, z2 = (x + y + r).chunk(2, dim=1)
+                return z1 * z2
+
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
+
+            ge = self.checkTrace(f, (x, y))
+            graph = ge.graph_for(x, y)
+
+            # make sure that we are actually testing the right scenario
+            FileCheck().check("with " + FUSION_GROUP + "_").check_count(
+                "ConstantChunk", 1, exactly=True
+            ).run(str(graph))
+
+            f_traced = torch.jit.trace(f, (x, y))
+
+            for i in range(4):
+                # make sure this doesn't error out
+                res = f_traced(x, y)
+
+            self.assertEqual(res, f(x, y))
+
 
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False

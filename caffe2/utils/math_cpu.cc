@@ -1514,7 +1514,7 @@ C10_EXPORT void Select<float, CPUContext>(
     float* y,
     CPUContext* /*context*/) {
   for (int i = 0; i < N; ++i) {
-    DCHECK_LT(idx[i], D);
+    TORCH_DCHECK_LT(idx[i], D);
     y[i] = x[i * D + idx[i]];
   }
 }

@@ -1,5 +1,11 @@
+# IMPORTANT:
+# This file is ONLY used to subscribe for the notifications for a
+# PRs related to a specific files. People in this file are
+# notrequire the approval for your changes.
+
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
+# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
 /torch/utils/cpp_extension.py @fmassa @soumith @ezyang
 
@@ -8,12 +14,11 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser
+/torch/nn/ @albanD @jbschlosser @saketh-are
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/native_functions.yaml @bdhirsh
 /aten/src/ATen/native/tags.yaml @anjali411
 
 # Tensorpipe RPC Agent.
@@ -78,3 +83,9 @@ test/test_type_promotion.py @mruberry @ngimel
 test/test_mps.py @kulinseth
 aten/src/ATen/mps/ @kulinseth
 aten/src/ATen/native/mps/ @kulinseth
+
+# Profiler
+torch/csrc/autograd/profiler* @robieta
+torch/autograd/profiler* @robieta
+torch/csrc/profiler/ @robieta
+torch/profiler/ @robieta

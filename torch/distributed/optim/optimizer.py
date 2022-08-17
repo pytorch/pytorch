@@ -14,6 +14,8 @@ import torch.distributed.autograd as dist_autograd
 from collections import defaultdict
 from threading import Lock
 
+__all__ = ['DistributedOptimizer']
+
 logger = logging.getLogger(__name__)
 
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
@@ -166,6 +168,7 @@ class DistributedOptimizer:
         >>> from torch import optim
         >>> from torch.distributed.optim import DistributedOptimizer
         >>>
+        >>> # xdoctest: +SKIP
         >>> with dist_autograd.context() as context_id:
         >>>   # Forward pass.
         >>>   rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))

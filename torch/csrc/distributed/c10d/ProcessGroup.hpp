@@ -149,6 +149,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
     OpType retrieveOpType();
 
+    static c10::intrusive_ptr<Work> create_from_future(c10::intrusive_ptr<c10::ivalue::Future>);
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -206,6 +208,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
   };
+
+  virtual void startCoalescing() {
+    // no-op for backends that have not implemented startCoalescing
+  }
+
+  virtual void endCoalescing(
+      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& /* reqs */) {
+    // no-op for backends that have not implemented endCoalescing
+  }
 
   // Consider using ops in Ops.hpp instead of the below, which route things
   // to the dispatcher.

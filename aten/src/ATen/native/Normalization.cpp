@@ -489,7 +489,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
           ||(input.size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && input.numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      );
 
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
@@ -521,7 +523,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled
                );
 
-  if (use_miopen) {
+  if (use_miopen && input.suggest_memory_format() != MemoryFormat::ChannelsLast && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),
