@@ -94,7 +94,7 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
       MTLFunctionConstantValues* constantValues = [[MTLFunctionConstantValues new] autorelease];
       [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, false);
+      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), true, false);
       id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalIndexingFunction(indexFunction, constantValues);
       id<MTLArgumentEncoder> argumentEncoder = [[indexKernelFunction newArgumentEncoderWithBufferIndex:0] autorelease];
       NSUInteger argumentBufferLength = argumentEncoder.encodedLength;
