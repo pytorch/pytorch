@@ -23,7 +23,7 @@ binomial_coefficient(unsigned int n, unsigned int k) {
   } else {
     const auto m = n - k;
 
-    const auto size = c10::numbers::factorials_size<T3>;
+    const auto size = c10::numbers::factorials_size<T3>();
 
     if (k < size && m < size && n < size) {
       const auto factorial_k = at::native::special_functions::detail::factorial<T1>(k);
@@ -54,7 +54,7 @@ binomial_coefficient(T1 n, unsigned int k) {
   } else {
     const auto nearbyint_n = int(std::nearbyint(n));
 
-    const auto size = c10::numbers::factorials_size<T3>;
+    const auto size = c10::numbers::factorials_size<T3>();
 
     if (nearbyint_n == n && nearbyint_n >= 0 && nearbyint_n < size) {
       return at::native::special_functions::detail::binomial_coefficient<T1>(static_cast<unsigned int>(nearbyint_n),

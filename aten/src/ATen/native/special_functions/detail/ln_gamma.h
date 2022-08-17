@@ -143,7 +143,7 @@ ln_gamma(T1 a) {
       return c10::numbers::lnpi_v<T1> - std::log(std::abs(at::native::special_functions::sin_pi(a)))
           - ln_gamma(T2(1) - a);
     }
-  } else if (std::real(a) > T3(1) && std::abs(a) < c10::numbers::factorials_size<T1>) {
+  } else if (std::real(a) > T3(1) && std::abs(a) < c10::numbers::factorials_size<T1>()) {
     auto fact = T1(1);
     auto arg = a;
 
@@ -167,7 +167,7 @@ log_gamma(std::complex<T1> a) {
   if (is_integer(a)) {
     if (is_integer(a)() <= 0)
       return std::numeric_limits<T3>::quiet_NaN();
-    else if (is_integer(a)() < static_cast<int>(c10::numbers::factorials_size<T3>))
+    else if (is_integer(a)() < static_cast<int>(c10::numbers::factorials_size<T3>()))
       return T3((c10::numbers::log_factorials_v[is_integer(a)() - 1]));
     else
       return ln_gamma(T3(is_integer(a)()));

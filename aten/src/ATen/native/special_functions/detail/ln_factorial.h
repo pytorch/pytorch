@@ -10,9 +10,9 @@ namespace detail {
 template<typename T1>
 constexpr T1
 ln_factorial(unsigned int n) {
-  if (n < c10::numbers::factorials_size<T1>) {
+  if (n < c10::numbers::factorials_size<T1>()) {
     return c10::numbers::log_factorials_v[n];
-  } else if (n < c10::numbers::DOUBLE_FACTORIALS_SIZE < T1 >) {
+  } else if (n < c10::numbers::double_factorials_size<T1>()) {
     return c10::numbers::log_double_factorials_v[n] + c10::numbers::log_double_factorials_v[n - 1];
   } else {
     return ln_gamma(T1(n + 1));

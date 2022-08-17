@@ -18,7 +18,7 @@ log_rising_factorial(T1 a, T1 n) {
     return std::numeric_limits<T1>::quiet_NaN();
   } else if (n == T1(0)) {
     return T1(0);
-  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a + n) < c10::numbers::factorials_size<T3>) {
+  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a + n) < c10::numbers::factorials_size<T3>()) {
     return std::log(rising_factorial(a, n));
   } else {
     return ln_gamma(a + n) - ln_gamma(a);

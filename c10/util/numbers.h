@@ -77,16 +77,32 @@ constexpr double two_div_pi = two_div_pi_v<double>;
 constexpr double two_div_sqrtpi = two_div_sqrtpi_v<double>;
 
 template<typename T1>
-constexpr std::size_t factorials_size = 0;
+constexpr
+std::size_t
+factorials_size() {
+  return 0;
+};
 
 template<>
-constexpr std::size_t factorials_size<float> = 35;
+constexpr
+std::size_t
+factorials_size<float>() {
+  return 35;
+};
 
 template<>
-constexpr std::size_t factorials_size<double> = 171;
+constexpr
+std::size_t
+factorials_size<double>() {
+  return 171;
+};
 
 template<>
-constexpr std::size_t factorials_size<long double> = 171;
+constexpr
+std::size_t
+factorials_size<long double>() {
+  return 171;
+};
 
 constexpr std::array<long double, 171> factorials_v = {
     1.0L,
@@ -437,16 +453,32 @@ constexpr std::array<long double, 171> log_factorials_v = {
 };
 
 template<typename T1>
-constexpr std::size_t DOUBLE_FACTORIALS_SIZE = 0;
+constexpr
+std::size_t
+double_factorials_size() {
+  return 0;
+}
 
 template<>
-constexpr std::size_t DOUBLE_FACTORIALS_SIZE<float> = 57;
+constexpr
+std::size_t
+double_factorials_size<float>() {
+  return 57;
+}
 
 template<>
-constexpr std::size_t DOUBLE_FACTORIALS_SIZE<double> = 301;
+constexpr
+std::size_t
+double_factorials_size<double>() {
+  return 301;
+}
 
 template<>
-constexpr std::size_t DOUBLE_FACTORIALS_SIZE<long double> = 301;
+constexpr
+std::size_t
+double_factorials_size<long double>() {
+  return 301;
+};
 
 constexpr std::array<long double, 301> double_factorials_v = {
     1.0L,

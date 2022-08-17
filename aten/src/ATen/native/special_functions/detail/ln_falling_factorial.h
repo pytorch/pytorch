@@ -31,7 +31,7 @@ ln_falling_factorial(T1 a, T1 n) {
     } else {
       return std::log(std::abs(falling_factorial(a, is_integer(n)())));
     }
-  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a - n) < c10::numbers::factorials_size<T3>) {
+  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a - n) < c10::numbers::factorials_size<T3>()) {
     return std::log(std::abs(falling_factorial(a, n)));
   } else {
     return ln_gamma(a + T1(1)) - ln_gamma(a - n + T1(1));

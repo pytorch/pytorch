@@ -22,14 +22,14 @@ rising_factorial(T1 a, int n) {
   } else if (n == 0) {
     return T1(1);
   } else if (std::abs(a - std::nearbyint(a)) < std::numeric_limits<T3>::epsilon()) {
-    if (int(std::nearbyint(a)) < static_cast<int>(c10::numbers::factorials_size<T3>)
-        && a + n < static_cast<int>(c10::numbers::factorials_size<T3>)) {
+    if (int(std::nearbyint(a)) < static_cast<int>(c10::numbers::factorials_size<T3>())
+        && a + n < static_cast<int>(c10::numbers::factorials_size<T3>())) {
       return factorial<T3>(int(std::nearbyint(a)) + n - T3(1)) / factorial<T3>(int(std::nearbyint(a)) - T3(1));
     } else {
       return std::exp(
           ln_factorial<T3>(int(std::nearbyint(a)) + n - T3(1)) - ln_factorial<T3>(int(std::nearbyint(a))) - T3(1));
     }
-  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a + n) < c10::numbers::factorials_size<T3>) {
+  } else if (std::abs(a) < c10::numbers::factorials_size<T3> && std::abs(a + n) < c10::numbers::factorials_size<T3>()) {
     auto product = a;
 
     for (int k = 1; k < n; k++) {

@@ -18,7 +18,7 @@ ln_binomial_coefficient(unsigned int n, unsigned int k) {
     return -T2(std::numeric_limits<T3>::infinity());
   } else if (k == 0 || k == n) {
     return T2(0);
-  } else if (n < c10::numbers::factorials_size<T3> && k < c10::numbers::factorials_size<T3>) {
+  } else if (n < c10::numbers::factorials_size<T3> && k < c10::numbers::factorials_size<T3>()) {
     return ln_factorial<T2>(n) - ln_factorial<T2>(k) - ln_factorial<T2>(n - k);
   } else {
     return ln_gamma(T2(1 + n)) - ln_gamma(T2(1 + k)) - ln_gamma(T2(1 + n - k));

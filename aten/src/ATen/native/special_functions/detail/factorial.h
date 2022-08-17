@@ -11,7 +11,7 @@ inline constexpr
 T1
 factorial(unsigned int n)
 noexcept {
-  if (n < c10::numbers::factorials_size<T1>) {
+  if (n < c10::numbers::factorials_size<T1>()) {
     return c10::numbers::factorials_v[n];
   } else {
     return std::numeric_limits<T1>::infinity();

@@ -15,7 +15,7 @@ debye_d(unsigned int n, T1 x) {
   else if (n < 1) { throw std::domain_error("debye_d: Degree n must be positive."); }
   else if (x >= T1(3)) {
     auto sum = T1(0);
-    if (n < c10::numbers::factorials_size<T1>)
+    if (n < c10::numbers::factorials_size<T1>())
       sum += factorial<T1>(n) * riemann_zeta<T1>(n + 1);
     else
       return std::numeric_limits<T1>::infinity();

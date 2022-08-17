@@ -27,14 +27,14 @@ falling_factorial(T1 a, int n) {
     auto na = is_integer_a();
     if (na < n)
       return T1{0};
-    else if (na < static_cast<int>(c10::numbers::factorials_size<T3>)
-        && na - n < static_cast<int>(c10::numbers::factorials_size<T3>))
+    else if (na < static_cast<int>(c10::numbers::factorials_size<T3>())
+        && na - n < static_cast<int>(c10::numbers::factorials_size<T3>()))
       return factorial<T3>(na) / factorial<T3>(na - n);
     else
       return std::exp(ln_factorial<T3>(na)
                           - ln_factorial<T3>(na - n));
-  } else if (std::abs(a) < c10::numbers::factorials_size<T3>
-      && std::abs(a - n) < c10::numbers::factorials_size<T3>) {
+  } else if (std::abs(a) < c10::numbers::factorials_size<T3>()
+      && std::abs(a - n) < c10::numbers::factorials_size<T3>()) {
     auto prod = a;
     for (int k = 1; k < n; ++k)
       prod *= (a - k);

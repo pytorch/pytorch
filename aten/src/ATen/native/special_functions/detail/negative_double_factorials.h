@@ -7,16 +7,32 @@ namespace native {
 namespace special_functions {
 namespace detail {
 template<typename T1>
-constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE = 0;
+constexpr
+std::size_t
+negative_double_factorials_size() {
+  return 0;
+};
 
 template<>
-constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<float> = 27;
+constexpr
+std::size_t
+negative_double_factorials_size<float>() {
+  return 27;
+};
 
 template<>
-constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<double> = 150;
+constexpr
+std::size_t
+negative_double_factorials_size<double>() {
+  return 150;
+};
 
 template<>
-constexpr std::size_t NEGATIVE_DOUBLE_FACTORIALS_SIZE<long double> = 999;
+constexpr
+std::size_t
+negative_double_factorials_size<long double>() {
+  return 999;
+};
 
 static constexpr factorial_t<long double> NEGATIVE_DOUBLE_FACTORIALS[999] = {
     {-1, 1.000000000000000000000000000000000e+00L, 0.000000000000000000000000000000000e+00L},

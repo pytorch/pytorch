@@ -21,10 +21,10 @@ reciprocal_gamma(T1 a) {
   } else if (is_integer(a)) {
     if (is_integer(a)() <= 0) {
       return T1(0);
-    } else if (is_integer(a)() < int(c10::numbers::factorials_size<T2>)) {
+    } else if (is_integer(a)() < int(c10::numbers::factorials_size<T2>())) {
       return T1(1) / T2(c10::numbers::factorials_v[is_integer(a)() - 1]);
     } else {
-      auto k = int(c10::numbers::factorials_size<T2>);
+      auto k = int(c10::numbers::factorials_size<T2>());
 
       auto g = T1(1) / T2(c10::numbers::factorials_v[is_integer(a)() - 1]);
 

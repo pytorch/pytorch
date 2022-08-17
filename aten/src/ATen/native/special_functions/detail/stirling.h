@@ -12,7 +12,7 @@ namespace detail {
 template<typename Tp>
 Tp
 stirling_2_series(unsigned int n, unsigned int m) {
-  if (m > c10::numbers::factorials_size<Tp>) {
+  if (m > c10::numbers::factorials_size<Tp>()) {
     auto S2 = Tp{0};
     for (auto k = 0u; k <= m; ++k) {
       auto lf1 = ln_factorial<Tp>(k);

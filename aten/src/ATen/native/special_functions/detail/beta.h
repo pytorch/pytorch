@@ -22,7 +22,7 @@ beta(T1 a, T1 b) {
     const auto abs_b = std::abs(b);
     const auto abs_c = std::abs(c);
 
-    const auto size = c10::numbers::factorials_size<T1>;
+    const auto size = c10::numbers::factorials_size<T1>();
 
     const auto nearbyint_a = std::nearbyint(a);
     const auto nearbyint_b = std::nearbyint(b);

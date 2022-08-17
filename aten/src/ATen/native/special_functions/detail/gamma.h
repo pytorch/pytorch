@@ -206,12 +206,12 @@ gamma(T1 a) {
   if (is_integer(a)) {
     if (is_integer(a)() <= 0) {
       return std::numeric_limits<T3>::quiet_NaN();
-    } else if (is_integer(a)() < static_cast<int>(c10::numbers::factorials_size<T3>)) {
+    } else if (is_integer(a)() < static_cast<int>(c10::numbers::factorials_size<T3>())) {
       return static_cast<T3>(c10::numbers::factorials_v[is_integer(a)() - 1]);
     } else {
       return std::numeric_limits<T3>::infinity();
     }
-  } else if (std::real(a) > T3(1) && std::abs(a) < c10::numbers::factorials_size<T1>) {
+  } else if (std::real(a) > T3(1) && std::abs(a) < c10::numbers::factorials_size<T1>()) {
     auto p = T1(1);
     auto q = a;
 
