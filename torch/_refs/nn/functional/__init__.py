@@ -43,6 +43,7 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
+    "glu",
 ]
 
 Tensor = torch.Tensor
@@ -559,3 +560,20 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
     return refs.nn.functional.hardtanh(a, 0, 6)
+
+
+@register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)

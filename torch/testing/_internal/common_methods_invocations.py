@@ -19173,6 +19173,12 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
+        "_refs.nn.functional.glu",
+        torch_opinfo_name="nn.functional.glu",
+        supports_nvfuser=False,
+        supports_out=True,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
     ),
