@@ -91,6 +91,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
+        torch.is_anomaly_check_nan_enabled,
         torch.is_grad_enabled,
         torch.merge_type_from_type_comment,
         torch.parse_ir,
