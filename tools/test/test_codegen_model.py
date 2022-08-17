@@ -194,6 +194,12 @@ class TestAnnotation(expecttest.TestCase):
         self.assertTrue(a.is_write)
         self.assertEqual(a.alias_set_after, ("a", "b"))
 
+    def test_before_and_after_alias_set_larger_than_1_raises_exception(self) -> None:
+        with self.assertRaisesRegex(
+                AssertionError, r"before alias set and after alias set cannot be larger than 1 at the same time"
+        ):
+            Annotation.parse("a|b -> c|d")
+
 
 if __name__ == "__main__":
     unittest.main()

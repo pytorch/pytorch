@@ -1605,6 +1605,9 @@ class Annotation:
             is_write and len(alias_set) > 1
         ), f"alias set larger than 1 is not mutable, got {ann} instead."
         after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        assert not (
+            len(before_alias) > 1 and len(after_set) > 1
+        ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
