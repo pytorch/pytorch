@@ -27,6 +27,7 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
         fn: Function being applied to each item
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> def add_one(x):
         ...     return x + 1

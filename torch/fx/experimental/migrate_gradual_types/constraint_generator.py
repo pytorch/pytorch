@@ -167,6 +167,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     return constraints, counter
 
+
 @register_inference_rule(torch.nn.functional.gelu)
 @register_inference_rule(torch.nn.functional.dropout)
 @register_inference_rule(torch.nn.functional.softmax)
@@ -176,20 +177,25 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule("long")
 @register_inference_rule("contiguous")
 @register_inference_rule(torch.ones)
+@register_inference_rule(torch.zeros)
 def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
-    assert isinstance(n.args[0], Node)
     output, counter = gen_tvar(counter)
     symbols[n] = output
-    input = symbols[n.args[0]]
-    assert isinstance(input, TVar)
-    return [BinConstraintT(input, output, op_eq)], counter
-
-
-
-
+    if isinstance(n.args[0], Node):
+        input = symbols[n.args[0]]
+        assert isinstance(input, TVar)
+        return [BinConstraintT(input, output, op_eq)], counter
+    elif isinstance(n.args[0], tuple):
+        # then the tuple is the size
+        assert len(n.args[0]) <= 4
+        my_size = [symbols[arg] for arg in n.args[0]]
+        print([BinConstraintT(output, TensorType(my_size), op_eq)])
+        return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
+    else:
+        raise NotImplementedError('Method not yet implemented')
 
 
 @register_inference_rule("transpose")
@@ -740,7 +746,8 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
 
     assert isinstance(n.args[0], Iterable)
     for arg in n.args[0]:
-        res.append(symbols[arg])
+        dim = arg if isinstance(arg, int) else symbols[arg]
+        res.append(dim)
     c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
     return [c], counter
 
@@ -978,7 +985,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
-    equality_constraint = BinConstraintT(n.args[1], TensorType(weight_dims), op_eq)
+    equality_constraint = BinConstraintT(symbols[n.args[1]], TensorType(weight_dims), op_eq)
     constraints, counter = linear_constraints(n, weight_dims[0], weight_dims[1], symbols, counter)
     return [equality_constraint] + constraints, counter
 
