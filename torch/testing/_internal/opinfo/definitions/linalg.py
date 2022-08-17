@@ -9,6 +9,8 @@ from numpy import inf
 import torch
 
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import _get_magma_version
+from torch.testing._internal.common_device_type import has_cusolver
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
 )
