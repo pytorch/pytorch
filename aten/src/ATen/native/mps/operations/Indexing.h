@@ -9,10 +9,6 @@
 #include <torch/library.h>
 #include <unordered_map>
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 using namespace at::mps;
 
 namespace at {

@@ -13,15 +13,8 @@ static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  MTLLanguageVersion languageVersion;
-
-#if defined(__MAC_13_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_13_0
-  languageVersion = MTLLanguageVersion3_0;
-#elif defined(__MAC_12_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_12_0
-  languageVersion = MTLLanguageVersion2_4;
-#elif
-  #error "Metal is not available on the current platform."
-#endif
+  // host_name attribute needs at least Metal 2.2
+  MTLLanguageVersion languageVersion = MTLLanguageVersion2_2;
 
   TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
   return languageVersion;
@@ -35,7 +28,7 @@ MPSDevice* MPSDevice::getInstance() {
 }
 
 id<MTLFunction> MPSDevice::metalIndexingFunction(const std::string& kernel, MTLFunctionConstantValues* constantValues) {
-  assert(_mtl_device);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
   NSError* error = nil;
   if (!_mtl_indexing_library) {
     MTLCompileOptions *options = [MTLCompileOptions new];
@@ -91,7 +84,7 @@ MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
       break;
     }
   }
-  assert(_mtl_device);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
 }
 
 at::Allocator* getMPSSharedAllocator();
