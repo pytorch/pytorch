@@ -991,6 +991,12 @@ std::vector<Shape> compute_shape_glu_jvp(
   return {Shape(glu.scalar_type(), glu.sizes().vec())};
 }
 
+std::vector<torch::lazy::Shape> compute_shape_celu(
+    const at::Tensor & self, 
+    const at::Scalar & alpha) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_clamp_min(
     const at::Tensor& self,
     const at::Scalar& min) {
