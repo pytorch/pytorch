@@ -2770,9 +2770,9 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     p.grad = grad
     opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
     opt = opt_class([p], **kwargs)
-    opt.state.update(opt_differentiable_state)
+    opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(opt_differentiable_state.values())
+    return (p,) + tuple(v for v in opt_differentiable_state.values() if v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2783,6 +2783,23 @@ class TestDifferentiableOptimizer(TestCase):
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
         gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
+    def test_adam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adam,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
 
 
 if __name__ == '__main__':
