@@ -1022,8 +1022,6 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   // Add line info to generated kernels
   if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
     args.push_back("-lineinfo");
-    args.push_back("-G");
-    args.push_back("--dopt=on");
   }
 #ifdef NDEBUG
   // Avoid excessive register usage from assertion
