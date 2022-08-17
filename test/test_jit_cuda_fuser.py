@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, slowTest, \
-    is_iterable_of_tensors, freeze_rng_state
+    is_iterable_of_tensors, freeze_rng_state, TEST_WITH_ROCM
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -3313,9 +3313,14 @@ class TestCudaFuser(JitTestCase):
             .execution_plans.values())[0].graph
         self.assertGraphContainsExactly(bwd_graph, FUSION_GUARD, 1, consider_subgraphs=True)
 
-        e0 = 1e-5 if dtype is not torch.half else 1e-3
-        e1 = 1e-4 if dtype is not torch.half else 1e-3
-        e2 = 1e-3 if dtype is not torch.half else 1e-2
+        if TEST_WITH_ROCM:
+            e0 = 1e-3
+            e1 = 1e-2
+            e2 = 1e-2
+        else:
+            e0 = 1e-5 if dtype is not torch.half else 1e-3
+            e1 = 1e-4 if dtype is not torch.half else 1e-3
+            e2 = 1e-3 if dtype is not torch.half else 1e-2
 
         self.assertTrue(self._compare("comparing output failed", jit_o, o, e0))
         self.assertTrue(self._compare("comparing input grad failed", x.grad, ref_x.grad, e1))
