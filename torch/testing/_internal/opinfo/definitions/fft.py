@@ -14,14 +14,16 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
 from torch.testing._internal.opinfo.core import (
-    _find_referenced_opinfo,
-    _inherit_constructor_args,
     DecorateInfo,
     OpInfo,
-    PythonRefInfo,
     SampleInput,
     SpectralFuncInfo,
     SpectralFuncType,
+)
+from torch.testing._internal.opinfo.refs import (
+    _find_referenced_opinfo,
+    _inherit_constructor_args,
+    PythonRefInfo,
 )
 
 has_scipy_fft = False
