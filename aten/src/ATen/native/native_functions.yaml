@@ -3568,6 +3568,14 @@
     CUDA: miopen_depthwise_convolution
   autogen: miopen_depthwise_convolution.out
 
+- func: miopen_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: miopen_convolution_relu
+
+- func: miopen_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: miopen_convolution_add_relu
+
 - func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_rnn
@@ -13134,6 +13142,11 @@
     NestedTensorCPU: NestedTensor_to_padded_tensor_generic
     NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
   autogen: to_padded_tensor.out
+
+- func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
+  dispatch:
+    NestedTensorCPU: NestedTensor_softmax_dropout
+    NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
 
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
