@@ -97,6 +97,7 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     gradcheck_wrapper_triangular_input_real_positive_diagonal,
     gradcheck_wrapper_masked_operation,
     gradcheck_wrapper_masked_pointwise_operation,
+    clone_sample,
 )
 from torch.testing._internal import opinfo
 
