@@ -2510,14 +2510,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
             y.backward()
 
-    def test_detach_disallows_metadata_change(self):
-        x = torch.randn([], requires_grad=True)
-        detached = x.detach()
-
-        with self.assertRaisesRegex(
-                RuntimeError, "not allowed on a Tensor created from .data or .detach()"):
-            detached.resize_(3, 3)
-
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -3717,6 +3709,32 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(ref())
         del t
         self.assertIsNone(ref())
+
+    def test_anomaly_mode_no_check_nan(self):
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                return torch.tensor(float("nan")).expand(10, 10)
+
+        def run_fn(a):
+            out = MyFunc.apply(a)
+            return out.sum()
+
+        with warnings.catch_warnings(record=True) as w:
+            with torch.autograd.detect_anomaly(check_nan=False):
+                inp = torch.rand(10, 10, requires_grad=True)
+                out = run_fn(inp)
+                out.backward(retain_graph=True)
+
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+                        out.backward(retain_graph=True)
+
+                out.backward()
 
     # TODO: update these tests to use the linalg module and move to test_linalg.py
     @skipIfNoLapack
