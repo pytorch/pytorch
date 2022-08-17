@@ -47,7 +47,7 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
         operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
     else:
         operands = operands
- 
+
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
     true_name = "true_graph"
@@ -59,7 +59,7 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
     for node in true_graph.graph.nodes:
         if node.op == 'output':
             true_args.extend(*node.args)
-    
+
     false_args = []
     for node in false_graph.graph.nodes:
         if node.op == 'output':
@@ -69,7 +69,7 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
     for i in range(len(true_args)):
         t_arg_meta = true_args[i]
         f_arg_meta = false_args[i]
-        # WIP don't look at this yet 
+        # WIP don't look at this yet
         # print(t_arg_meta.meta)
         # print(f_arg_meta.meta)
         # assert(t_arg_meta.meta == f_arg_meta.meta)
