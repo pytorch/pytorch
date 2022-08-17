@@ -5,6 +5,7 @@ on:
     workflows: [pull, trunk, periodic]
     types:
       - completed
+  pull_request:
 
 jobs:
   # the conclusion field in the github context is sometimes null
@@ -66,5 +67,9 @@ jobs:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
+          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN}}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $MERGEBOT_TOKEN" https://api.github.com/rate_limit
