@@ -34,8 +34,10 @@ try:
     rocm_path = subprocess.check_output(["hipconfig", "--rocmpath"]).decode("utf-8")
 except subprocess.CalledProcessError:
     print(f"Warning: hipconfig --rocmpath failed, assuming {rocm_path}")
-except FileNotFoundError:
+except (FileNotFoundError, PermissionError):
     # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
+    pass
+except PermissionError:
     pass
 
 rocm_version = (0, 0, 0)

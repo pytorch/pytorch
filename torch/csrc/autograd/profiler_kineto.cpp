@@ -68,7 +68,21 @@ using torch::profiler::impl::stacksToStr;
 
 struct MetadataBase {
   MetadataBase(const std::shared_ptr<Result>& result)
-      : kineto_activity_{result->kineto_activity_} {}
+      : kineto_activity_{result->kineto_activity_} {
+    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+            result->extra_fields_)) {
+      // In order to add metadata we have to downcast from
+      // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
+      // know that all activities provided by PyTorch are of the correct type,
+      // however Kineto profilers can (and do) add events that inherit directly
+      // from ITraceActivity. As a result, any Result which was constructed from
+      // an event that Kineto provided is unsafe to cast.
+      if (!(SOFT_ASSERT(!hasKinetoActivity()))) {
+        result->kineto_activity_ = nullptr;
+      }
+      kineto_activity_ = result->kineto_activity_;
+    }
+  }
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty()) {
@@ -81,7 +95,7 @@ struct MetadataBase {
   }
 
  private:
-  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 };
 
 struct AddTensorboardFields : public MetadataBase {
@@ -102,6 +116,7 @@ struct AddTensorboardFields : public MetadataBase {
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
             [&](const auto& j) { parent_id = std::to_string(j.id_); });
+        parent = parent->parent_.lock();
       }
       this->addMetadata("Python parent id", parent_id.value_or("null"));
     });
@@ -172,10 +187,6 @@ struct AddGenericMetadata : public MetadataBase {
     if (alloc.total_reserved_ >= 0) {
       addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
     }
-  }
-
-  void operator()(const ExtraFields<EventType::Kineto>& e) {
-    TORCH_INTERNAL_ASSERT(hasKinetoActivity());
   }
 
   void operator()(const auto&) {}
