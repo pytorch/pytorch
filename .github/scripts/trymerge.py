@@ -1261,7 +1261,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f" due to {e}"
+        msg += f"\nReason: {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"

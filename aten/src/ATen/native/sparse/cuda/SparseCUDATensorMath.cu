@@ -485,6 +485,14 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
 
   // mul(sparse, sparse)
+
+  // Short circuit when there is zero nnz.
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
+  if (t_.sizes().equals(src_.sizes()) && (!t_._nnz() || !src_._nnz())) {
+    r_.resize_as_(t_);
+    return r_.zero_();
+  }
   return at::_mul_sparse_sparse_out(r_, t_, src_);
 }
 

@@ -998,7 +998,9 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   TORCH_CHECK(is_equal_size_inputs, "mul: expected 'self' and 'other' to have same sizes when both are sparse"
       ", but ", t_.sizes(), " != ", src_.sizes());
 
-  // Shirt-circuit when there is zero nnz
+  // Short circuit when there is zero nnz
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
   if (!t_._nnz() || !src_._nnz()) {
     r.resize_as_(t_);
     return r.zero_();
