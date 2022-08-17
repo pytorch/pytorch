@@ -25,8 +25,8 @@
 // These `,`s confuse the preprocessor into thinking we are passing
 // multiple arguments to the macro.
 #define jiterator_code(...) __VA_ARGS__
-#if defined(__CUDACC__)
-// CPU and CUDA case
+#if defined(__CUDACC__) || defined(__HIPCC__)
+// CPU and CUDA and ROCm case
 #define stringify_code(...) #__VA_ARGS__
 #define jiterator_also_stringify_as(code, str_name) \
   code /* define the function */                    \
