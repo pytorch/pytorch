@@ -207,7 +207,7 @@ def _create_chunk_sharded_tensor(
     Shard a tensor to chunks along the first dimension. The local rank will gets its
     corresponding chunk as the local shard to create a ShardedTensor.
     """
-    chunks = tensor.chunk(world_size)
+    chunks = tensor.chunk(world_size, dim=0)
     if len(chunks) > rank:
         local_shard = chunks[rank].clone()
         offsets = [0 for _ in tensor.size()]
@@ -216,7 +216,7 @@ def _create_chunk_sharded_tensor(
     else:
         local_shards = []
 
-    # Create a ShardedTensor without invoking communnication.
+    # Create a ShardedTensor without invoking communication.
     chunk_sizes = [list(chunk.size()) for chunk in chunks]
     dim0_offsets = [0] + list(
         itertools.accumulate([chunk_size[0] for chunk_size in chunk_sizes])
