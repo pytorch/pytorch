@@ -2,7 +2,7 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from functorch.experimental.ops import PyOperator
 from torch.utils._pytree import tree_flatten
-from torch.fx.experimental.proxy_tensor import ProxyTensor, get_isolated_graphmodule, disable_proxy_modes_tracing
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, disable_proxy_modes_tracing
 import torch.utils._pytree as pytree
 from torch.dispatch.dispatcher import dispatcher_singleton
 
@@ -37,16 +37,17 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
     pred, true_fn, false_fn, operands = args
 
     def _unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
+        if hasattr(e, "__dict__") and proxy_mode.tracer in e.__dict__:
+            proxy_out = e.__dict__[proxy_mode.tracer]
+            return proxy_out.proxy
+        return e
 
-    def _extract_elements(e):
-        return e.elem if isinstance(e, ProxyTensor) else e
 
-    if isinstance(operands, ProxyTensor):
+    if isinstance(operands, torch.Tensor):
         operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
     else:
         operands = operands
-
+ 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
     true_name = "true_graph"
@@ -69,16 +70,13 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
         t_arg_meta = true_args[i]
         f_arg_meta = false_args[i]
         # WIP don't look at this yet 
+        # print(t_arg_meta.meta)
+        # print(f_arg_meta.meta)
         # assert(t_arg_meta.meta == f_arg_meta.meta)
-
-    if isinstance(operands, ProxyTensor):
-        operands = [operands]  # Prevent unwanted unpacking
 
     args = (pred, true_graph, false_graph, operands)
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
-
-    elements = pytree.tree_map(_extract_elements, args)
 
     # Does this need random slug appended so as not to collide?
     proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
