@@ -151,7 +151,9 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "sigmoid_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return scalar_t{1} / (scalar_t{1} + std::exp(-a));
+        using opmath_t = at::opmath_type<scalar_t>;
+        const auto one = opmath_t{1};
+        return static_cast<scalar_t>(one/(one + std::exp(-opmath_t{a})));
       });
     });
   }
@@ -179,8 +181,9 @@ void sinc_kernel_cuda(TensorIteratorBase& iter) {
               return scalar_t(1);
             } else {
               // NVCC says constexpr var is not accessible from device
-              scalar_t product = c10::detail::pi<scalar_t>() * a;
-              return std::sin(product) / product;
+              using opmath_t = at::opmath_type<scalar_t>;
+              opmath_t product = c10::detail::pi<opmath_t>() * opmath_t{a};
+              return static_cast<scalar_t>(std::sin(product) / product);
             }
           });
         });

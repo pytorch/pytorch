@@ -1594,6 +1594,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.movedim',
         '_refs.narrow',
         '_refs.positive',
         '_refs.ravel',
