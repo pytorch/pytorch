@@ -7,10 +7,13 @@ int64_t maybe_wrap_dim_slow(
     int64_t dim,
     int64_t dim_post_expr,
     bool wrap_scalar) {
-  if (dim_post_expr <= 0) {
+  TORCH_CHECK_INDEX(
+      dim_post_expr >= 0, "Rank cannot be negative but got ", dim_post_expr);
+
+  if (dim_post_expr == 0) {
     TORCH_CHECK_INDEX(
         wrap_scalar,
-        "dimension specified as ",
+        "Dimension specified as ",
         dim,
         " but tensor has no dimensions");
     return c10::maybe_wrap_dim(dim, /*dim_post_expr=*/1, /*wrap_scalar=*/false);
