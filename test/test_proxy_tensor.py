@@ -1101,7 +1101,6 @@ symbolic_tensor_failures = {
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('stack', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode a...
     xfail('std', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('std_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
