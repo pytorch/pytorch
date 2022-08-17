@@ -183,6 +183,15 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             prims_mode_cls=NvfuserPrimsMode,
         )
 
+    def _is_var_mean(self, func):
+        return "torch.var_mean" == torch.overrides.resolve_name(func) or (
+            (
+                isinstance(func, torch._ops.OpOverload)
+                or isinstance(func, torch._ops.OpOverloadPacket)
+            )
+            and "aten.var_mean" in str(func)
+        )
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -193,7 +202,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         if kwargs is None:
             kwargs = {}
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
-        if "var_mean" in str(orig_func):
+        if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
