@@ -64,6 +64,9 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
+from ._shard_utils import (
+    _create_chunk_sharded_tensor
+)
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -75,9 +78,6 @@ from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
     FlattenParamsWrapper,
-)
-from .shard_utils import (
-    _create_chunk_sharded_tensor
 )
 from .wrap import (
     ParamExecOrderWrapPolicy,
