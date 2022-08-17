@@ -61,7 +61,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def set_seed(self, seed: int):
         self._seed = seed
-        self._snapshot_state = _SnapshotState.NotStarted
         return self
 
     def __iter__(self) -> Iterator[T_co]:
@@ -95,6 +94,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._shuffled_indices,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
+            self._snapshot_state,
         )
         return state
 
@@ -108,10 +108,12 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._shuffled_indices,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
+            self._snapshot_state,
         ) = state
         self._rng = random.Random()
         self._rng.setstate(self._rng_state)
-        self._snapshot_state = _SnapshotState.Restored
+        if self._snapshot_state == _SnapshotState.Iterating:
+            self._snapshot_state = _SnapshotState.Restored
 
 
 MapDataPipe.register_datapipe_as_function("shuffle", ShufflerIterDataPipe)
