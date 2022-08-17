@@ -206,6 +206,10 @@ def _outs_and_grads(fn, inps):
 
 
 class TestAOTAutograd(TestCase):
+    def setUp(self):
+        super().setUp()
+        clear_compile_cache()
+
     def verify_aot_autograd(self, f, inp):
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
