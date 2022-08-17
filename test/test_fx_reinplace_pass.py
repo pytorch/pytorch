@@ -63,6 +63,32 @@ def forward(self, x_1):
     return view_default
     """)
 
+    def test_reinplace_different_metadata(self):
+        def f(a_):
+            a = a_.clone()
+            b = a + 1
+            # Naively, we shouldn't try to inplace the .ge() call,
+            # because that would require resizing "b" (from a float to a bool tensor).
+            c = torch.ge(b, a)
+            return c
+        inpt = torch.ones(4)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        # The .ge() should not be reinplaced.
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    add_tensor = torch.ops.aten.add.Tensor(clone_default, 1)
+    ge_tensor = torch.ops.aten.ge.Tensor(add_tensor, clone_default);  add_tensor = clone_default = None
+    return ge_tensor
+    """)
+
+
     # This test won't actually run in CI, because it requires functionalize() from functorch.
     # I'm planning on testing more comprehensively with torchbench models,
     # but we can make this testing better once functorch moves into pytorch/pytorch.
