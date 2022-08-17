@@ -76,7 +76,7 @@ class TestSchemaCheck(JitTestCase):
         with enable_torch_dispatch_mode(schema_check):
             x = torch.rand((3, 3), requires_grad=True)
             x.relu().sin()
-        self.assertEqual(["aten::rand", "aten::relu", "aten::sin"], schema_check.ops)
+        self.assertEqual(["aten::rand", "aten::relu", "aten::detach", "aten::sin"], schema_check.ops)
 
     # Tests that SchemaCheckMode records operator order without grad
     def test_schema_check_mode_operator_order_without_grad(self):
@@ -88,7 +88,9 @@ class TestSchemaCheck(JitTestCase):
 
     # Tests that SchemaCheckMode records mutations and aliases with none expected
     def test_schema_check_mode_mutated_aliasing_none(self):
-        x = torch.rand((3, 3), requires_grad=True)
+        # NB: previously requires_grad=True, but this induces a detach for
+        # saved variable
+        x = torch.rand((3, 3))
         schema_check = SchemaCheckMode()
         with enable_torch_dispatch_mode(schema_check):
             actual = x.relu().sin()
