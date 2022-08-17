@@ -3741,7 +3741,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         The API is similar to :meth:``full_optim_state_dict`` but this API
         chunks all non-zero-dimension states to ShardedTensor to save memory.
-        This API should only be used when the state_dict is sharded_state_dict.
+        This API should only be used when the model state_dict is derived with
+        the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
 
         For the detail usages, refer to the :meth:``full_optim_state_dict`` doc.
 
