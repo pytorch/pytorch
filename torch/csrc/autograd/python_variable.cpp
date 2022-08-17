@@ -609,6 +609,7 @@ static int THPVariable_clear(THPVariable* self) {
     }
   }
   TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
+  pybind11::gil_scoped_release no_gil;
   self->cdata = MaybeOwned<Variable>();
   return 0;
 }
