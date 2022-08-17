@@ -974,12 +974,16 @@ class NativeFunctionsGroup:
             if self.inplace is not None:
                 assert self.inplace.structured_delegate == self.out.func.name
 
-        generated_fns = [
-            str(f.func.name) for f in self.functions() if "generated" in f.tags
-        ]
+        generated_fns = sorted(
+            [str(f.func.name) for f in self.functions() if "generated" in f.tags]
+        )
         generated_fns_str = ", ".join(str(x) for x in generated_fns)
-        expected_generated_fns = f.autogen
-        expected_generated_fns_str = ", ".join(str(x) for x in expected_generated_fns)
+        expected_generated_fns: Set[str] = set()
+        for f in self.functions():
+            expected_generated_fns.update(str(op) for op in f.autogen)
+        expected_generated_fns_str = ", ".join(
+            str(x) for x in sorted(list(expected_generated_fns))
+        )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
@@ -1326,7 +1330,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional, but has tensor options arguments."
+                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
@@ -2056,27 +2060,27 @@ class Arguments:
         if arguments.self_arg:
             arguments = dataclasses.replace(
                 arguments,
-                pre_self_positional=[
+                pre_self_positional=tuple(
                     x.symint_to_int() for x in arguments.pre_self_positional
-                ],
+                ),
             )
 
         if self.tensor_options:
             arguments = dataclasses.replace(
                 arguments,
-                post_tensor_options_kwarg_only=[
+                post_tensor_options_kwarg_only=tuple(
                     x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
+                ),
             )
 
         arguments = dataclasses.replace(
             arguments,
-            post_self_positional=[
+            post_self_positional=tuple(
                 x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
+            ),
+            pre_tensor_options_kwarg_only=tuple(
                 x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
+            ),
         )
 
         return arguments
