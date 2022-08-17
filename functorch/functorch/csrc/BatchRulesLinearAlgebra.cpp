@@ -323,6 +323,7 @@ fourOutputs solve_ex_batch_rule(
   A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
   B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
 
+  // NOTE [ solve_ex Batch Rule Contiguity ]
   // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
   // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
   // differs based on whether or not the optimized path was taken
