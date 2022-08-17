@@ -319,6 +319,14 @@ class AutocastCPUTestLists(object):
             ("conv_transpose1d", conv_args_bf16[0]),
             ("conv_transpose2d", conv_args_bf16[1]),
             ("conv_transpose3d", conv_args_bf16[2]),
+            ("poisson_nll_loss", mat0_bf16 + mat1_bf16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),
+            ("cosine_embedding_loss", (torch.tensor([[1, 2, 3]], device=dev, dtype=torch.bfloat16),
+                                       torch.tensor([[1, 3, 4]], device=dev, dtype=torch.bfloat16),
+                                       torch.tensor([1], device=dev, dtype=torch.int))),
+            ("hinge_embedding_loss", mat0_bf16 + (torch.ones(n, device=dev, dtype=torch.int),)),
+            ("margin_ranking_loss", mat0_bf16 + mat1_bf16 + (torch.ones((n,), device=dev, dtype=torch.bfloat16),)),
+            ("triplet_margin_loss", mat0_bf16 + mat1_bf16 + mat2_bf16),
+            ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
         ]
         self.nn_bf16 = [
             ("linear", mat0_fp32 + mat1_fp32, {}),
@@ -328,6 +336,17 @@ class AutocastCPUTestLists(object):
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
+            ("nll_loss", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),
+                          torch.zeros((n,), device=dev, dtype=torch.long))),
+            ("nll_loss2d", (torch.rand((n, n, n, n), device=dev, dtype=torch.bfloat16),
+                            torch.zeros((n, n, n), device=dev, dtype=torch.long))),
+            ("l1_loss", mat0_bf16 + mat1_bf16),
+            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
+            ("mse_loss", mat0_bf16 + mat1_bf16),
+            ("multilabel_margin_loss", mat0_bf16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
+            ("soft_margin_loss", mat0_bf16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
+            ("multi_margin_loss", mat0_bf16 + (torch.ones((n,), device=dev, dtype=torch.long),)),
+            ("huber_loss", mat0_bf16 + mat1_bf16),
         ]
         self.torch_need_autocast_promote = [
             ("cat", (pointwise0_bf16 + pointwise1_fp32,)),
