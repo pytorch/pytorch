@@ -3082,9 +3082,10 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    result = torch.where(cond, t, False)
-
-    return result
+    if t.dtype is torch.bool:
+        return cond.logical_and(t)
+    else:
+        return torch.where(cond, t, 0)
 
 
 # CompositeImplicitAutograd - don't register decomp
