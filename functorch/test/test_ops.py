@@ -594,7 +594,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
-        xfail('stft'),  # calls as_strided
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
 
         # required rank 4 tensor to use channels_last format
@@ -683,8 +682,6 @@ class TestOperators(TestCase):
 
         skip('pca_lowrank', ''),  # randomness
         skip('svd_lowrank', ''),  # randomness
-
-        xfail('stft'),  # transpose_ fallback
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
 
