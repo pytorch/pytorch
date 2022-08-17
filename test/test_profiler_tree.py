@@ -609,6 +609,7 @@ class TestProfilerTree(TestCase):
                     ..."""
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda(self):
@@ -706,6 +707,7 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_with_stream(self):
@@ -762,6 +764,7 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
