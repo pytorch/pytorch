@@ -17,6 +17,8 @@ pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
   pytest \
   pytest-xdist \
   pytest-rerunfailures
+  # TODO: enable xdoctest later
+  # xdoctest
 
 if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
