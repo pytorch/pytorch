@@ -675,6 +675,10 @@ static void bindGetAllocFreeEvents(PyObject* module) {
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,
       "Get allocation/free sequence");
+  m.def(
+      "_set_mem_plan",
+      &c10::cuda::CUDACachingAllocator::set_mem_plan,
+      "Set memory plan");
 }
 
 // Callback for python part. Used for additional initialization of python

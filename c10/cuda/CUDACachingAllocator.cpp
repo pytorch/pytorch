@@ -20,6 +20,7 @@
 #include <regex>
 #include <set>
 #include <vector>
+#include <iostream>
 
 namespace c10 {
 
@@ -489,6 +490,7 @@ class MemoryEventTracker {
 
  public:
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
+  std::vector<std::vector<AllocFreeEvent>> mem_plan;
   void append_alloc_free_event(intptr_t ptr, int size, int device) {
     std::lock_guard<std::mutex> lock(mutex);
     // if event is created by initialization or raw_alloc, do not create a new
@@ -1976,6 +1978,13 @@ void raw_delete(void* ptr) {
 
 std::vector<std::vector<AllocFreeEvent>> getAllocFreeEvents() {
   return memory_tracker.get_alloc_free_events();
+}
+
+void set_mem_plan(std::vector<std::vector<AllocFreeEvent>> plan, std::vector<size_t> planned_memory_sizes) {
+  memory_tracker.mem_plan = plan;
+  void* r = nullptr;
+  Block* =  caching_allocator.malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+  std::cout << ".............. inside mem plan ............... "<<memory_tracker.mem_plan[0].size()<<" "<<memory_tracker.mem_plan[0][0].size<<" "<<memory_tracker.mem_plan[0][0].ptr;
 }
 
 } // namespace CUDACachingAllocator
