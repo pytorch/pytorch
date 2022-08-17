@@ -61,8 +61,12 @@ if TEST_WITH_DEV_DBG_ASAN:
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = (
     torch.cuda.is_available()
-    and torch.version.cuda is not None
-    and int(torch.version.cuda.split('.')[0]) >= 11)
+    and
+    (
+        (torch.version.cuda is not None and int(torch.version.cuda.split('.')[0]) >= 11)
+        or torch.version.hip is not None
+    )
+)
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -2096,7 +2100,6 @@ class DistributedDataParallelTest(
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_bf16_compress_wrapper_nccl(self):
         self._test_bf16_compress_wrapper()
 
@@ -2137,7 +2140,6 @@ class DistributedDataParallelTest(
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_bf16_compress_wrapper_is_view(self):
         self._test_bf16_compress_wrapper(gradient_as_bucket_view=True)
 

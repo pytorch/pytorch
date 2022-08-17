@@ -1384,12 +1384,18 @@ conj = _make_prim(
 )
 
 
-def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
+def expand_dims(
+    a: TensorLikeType, dimensions: DimsSequenceType, ndim=None
+) -> TensorLikeType:
     """
     Creates a view of a with a.ndim + len(dimensions) dimensions, with new
     dimensions of length one at the dimensions specified by dimensions.
     """
-    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
+    if ndim is not None:
+        # TODO: this is only here to support the unsqueeze ref
+        dims = sorted(utils.canonicalize_dims(ndim, dimensions))  # type: ignore[arg-type]
+    else:
+        dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
     if len(set(dims)) != len(dims):
         msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
         raise ValueError(msg)
@@ -1617,10 +1623,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
-    _inner_length = a.shape[dim] / outer_length
-    inner_length: int = int(_inner_length)
+    inner_length = a.shape[dim] // outer_length
 
-    if inner_length != _inner_length:
+    if (a.shape[dim] % outer_length) != 0:
         msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
             a.shape[dim], outer_length
         )
@@ -1640,7 +1645,7 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
 
 
 def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
-    inner_length = int(a.shape[dim] / outer_length)
+    inner_length = a.shape[dim] // outer_length
     new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
     return a.view(new_shape)
