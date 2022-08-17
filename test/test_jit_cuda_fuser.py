@@ -1768,7 +1768,7 @@ class TestCudaFuser(JitTestCase):
         channel_sizes = [67, 457, 1024, 4096]
 
         with torch.backends.cudnn.flags(enabled=False):
-            for is_batch_norm_else_instance_norm in [False, True]:
+            for is_batch_norm_else_instance_norm in [True] if TEST_WITH_ROCM else [False, True]:
                 for dims in range(3, 6):
                     output_size = int(pow(output_elements, 1. / (dims - 1)))
                     for C in channel_sizes:
@@ -1786,7 +1786,7 @@ class TestCudaFuser(JitTestCase):
         channel_sizes = [67, 457, 1024, 4096]
 
         with torch.backends.cudnn.flags(enabled=False):
-            for is_batch_norm_else_instance_norm in [False, True]:
+            for is_batch_norm_else_instance_norm in [True] if TEST_WITH_ROCM else [False, True]:
                 for dims in range(3, 6):
                     output_size = int(pow(output_elements, 1. / (dims - 1)))
                     for C in channel_sizes:
