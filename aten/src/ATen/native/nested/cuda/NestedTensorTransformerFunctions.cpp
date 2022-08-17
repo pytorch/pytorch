@@ -204,6 +204,5 @@ Tensor NestedTensor_to_padded_tensor_cuda(
   }
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
 }
-
 } // namespace native
 } // namespace at
