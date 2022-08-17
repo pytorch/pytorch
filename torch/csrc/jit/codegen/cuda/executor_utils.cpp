@@ -943,6 +943,34 @@ void initializeCudaContext() {
   }
 }
 
+namespace {
+
+// Dump PTX or CUBIN to a file
+void dumpCompiledCodeToFile(
+    const nvrtcProgram& program,
+    int fusion_id,
+    bool dump_cubin) {
+  const auto getSize = dump_cubin
+      ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+      : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getCode = dump_cubin ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+                                  : at::globalContext().getNVRTC().nvrtcGetPTX;
+  size_t size = 0;
+  AT_CUDA_NVRTC_CHECK(getSize(program, &size));
+  std::vector<char> code(size);
+  AT_CUDA_NVRTC_CHECK(getCode(program, code.data()));
+  std::stringstream file_name;
+  file_name << "__tmp_kernel" << fusion_id << "."
+            << (dump_cubin ? "cubin" : "ptx");
+  std::cout << "PRINTING: " << file_name.str() << std::endl;
+  std::ofstream out(file_name.str());
+  TORCH_INTERNAL_ASSERT(out.is_open());
+  out.write(code.data(), size);
+  out.close();
+}
+
+} // namespace
+
 std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
@@ -1183,92 +1211,24 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
   }
 
+  if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
+    dumpCompiledCodeToFile(program, id, false);
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::Cubin)) {
+    TORCH_INTERNAL_ASSERT(
+        compile_to_sass,
+        "CUBIN not available as the kernel was compiled only to PTX");
+    dumpCompiledCodeToFile(program, id, true);
+  }
+
   NvrtcFunction compiled_kernel_;
 
-  // TODO: We do go through different code path, should investigate whether this
-  // has an impact on generated binary.
 #ifndef __HIP_PLATFORM_HCC__
-  const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
-  if (prefix_env) {
-    FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
-
-    // Output ptx file
-    std::stringstream output_file_name;
-    output_file_name << prefix_env << "_" << id
-                     << (compile_to_sass ? ".cubin" : ".ptx");
-    std::ofstream outputFile(output_file_name.str().c_str(), std::ios::out);
-    if (outputFile.is_open()) {
-      outputFile.write(ptx.data(), ptx.size());
-      outputFile.close();
-    }
-
-    if (compile_to_sass) {
-      FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
-
-      // load sass directly
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
-          &(compiled_kernel_.module),
-          ptx.data(),
-          options.size(),
-          options.data(),
-          option_vals.data()));
-    } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      CUlinkState linkState;
-
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
-          // 0, nullptr, nullptr, &linkState));
-          options.size(),
-          options.data(),
-          option_vals.data(),
-          &linkState));
-
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkAddData(
-          linkState,
-          CU_JIT_INPUT_PTX,
-          ptx.data(),
-          ptx_size,
-          "compiling PTX",
-          0,
-          nullptr,
-          nullptr));
-
-      if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-        std::cout << info_log.data() << std::endl;
-      }
-
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t cubinSize;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      void* cubin;
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkComplete(
-          linkState, &cubin, &cubinSize));
-
-      // Output binary file
-      std::stringstream cubin_file_name;
-      cubin_file_name << prefix_env << "_" << id << ".cubin";
-
-      std::ofstream myCubinFile(
-          cubin_file_name.str().c_str(), std::ios::out | std::ios::binary);
-
-      if (myCubinFile.is_open()) {
-        myCubinFile.write(static_cast<const char*>(cubin), cubinSize);
-        myCubinFile.close();
-      }
-      // load compiled cubin
-      // AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-      //     &(compiled_kernel_.module), cubin));
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
-          &(compiled_kernel_.module),
-          cubin,
-          options.size(),
-          options.data(),
-          option_vals.data()));
-    }
-  } else {
+  {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
-    // load ptx directly
+    // load ptx or cubin directly
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
         &(compiled_kernel_.module),
         ptx.data(),

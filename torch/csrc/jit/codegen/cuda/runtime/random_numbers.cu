@@ -56,10 +56,12 @@ __device__ double uniform(unsigned int x, unsigned int y) {
   return z * kRan2Pow53Inv + (kRan2Pow53Inv / 2.0);
 }
 
-__device__ double randLike(const uint4 &rng_result, int rng_component) {
-  return uniform((&rng_result.x)[rng_component * 2], (&rng_result.x)[rng_component * 2 + 1]);
+__device__ double randLike(const uint4& rng_result, int rng_component) {
+  return uniform(
+      (&rng_result.x)[rng_component * 2],
+      (&rng_result.x)[rng_component * 2 + 1]);
 }
 
-__device__ float randLikef(const uint4 &rng_result, int rng_component) {
+__device__ float randLikef(const uint4& rng_result, int rng_component) {
   return uniformf((&rng_result.x)[rng_component]);
 }
