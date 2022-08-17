@@ -173,10 +173,12 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override;
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     std::vector<at::Tensor> result() override;
+    int sourceRank() const override;
 #ifdef USE_CUDA
     std::unique_ptr<at::cuda::CUDAEvent> fence = nullptr;
     event_pool_t* ep = nullptr;
 #endif
+    int sourceRank_;
    protected:
     std::shared_ptr<ProgressEntry> entry_;
     c10::intrusive_ptr<ProcessGroupUCCLogger> logger_;

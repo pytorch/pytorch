@@ -1,5 +1,7 @@
 #ifdef USE_C10D_UCC
 
+#define USE_ACTIVE_SETS 1
+
 #include <c10d/ProcessGroupUCC.hpp>
 #include <c10d/UCCTracing.hpp>
 #include <c10d/UCCUtils.hpp>
@@ -95,7 +97,6 @@ ucc_reduction_op_t to_ucc_reduceOp(
 struct torch_ucc_config_t {
   c10::once_flag flag;
   std::array<bool, 32> blocking_wait;
-  bool enable_profiling;
   bool enable_comms_logger;
   bool use_future;
   // Sharing UCC communicator among multiple PGs to save resource.
@@ -133,7 +134,6 @@ std::map<std::string, std::string> torch_ucc_envs_map = {
 void read_confg() {
   // default configuration
   torch_ucc_config.blocking_wait.fill(true);
-  torch_ucc_config.enable_profiling = false;
   torch_ucc_config.use_future = true;
   torch_ucc_config.shared_comm = false;
   torch_ucc_config.use_allgatherv = false;
@@ -170,8 +170,6 @@ void read_confg() {
 
   torch_ucc_config.use_future =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_USE_FUTURE"));
-  torch_ucc_config.enable_profiling =
-      std::stoi(torch_ucc_envs_map.at("TORCH_UCC_PROFILING_ENABLE"));
   torch_ucc_config.shared_comm =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_SHARED_COMM"));
   torch_ucc_config.use_allgatherv =
@@ -276,6 +274,14 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupUCC::WorkUCC::getFuture() {
   return future_;
+}
+
+int ProcessGroupUCC::WorkUCC::sourceRank() const {
+  if (opType_ != OpType::RECV && opType_ != OpType::RECVANYSOURCE) {
+    // Throw an error
+    return ProcessGroup::Work::sourceRank();
+  }
+  return sourceRank_;
 }
 
 std::vector<at::Tensor> ProcessGroupUCC::WorkUCC::result() {
@@ -577,7 +583,7 @@ c10::intrusive_ptr<ProcessGroup::Work> Comm::enqueue_p2p(
         c10::ListType::create(c10::TensorType::get()));
   }
   if (request == nullptr) {
-    // p2p2 request completed immediately don't save it to progress queue
+    // p2p request completed immediately don't save it to progress queue
     // and mark future completed immediately
     if (torch_ucc_config.use_future) {
       work->future_->markCompleted(c10::IValue(std::vector<at::Tensor>()));
@@ -932,8 +938,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
   set_timeout(coll);
-  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, torch_ucc_config.enable_profiling ? prof_title : nullptr, logger);
+  auto work =
+      c10::make_intrusive<ProcessGroupUCC::WorkUCC>(opType, prof_title, logger);
+
+  if (opType == OpType::RECV) {
+    work->sourceRank_ = coll.root;
+  }
 
   RECORD_COMMS_TRACE(
       logger->trace_generator,

@@ -73,9 +73,9 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
     skip_collective["cpu barrier"] = {"nccl"}
 
     # Sets showing that something is implemented
