@@ -15,6 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -23,11 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
 )
 
 from torch.testing._internal.common_device_type import ops
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
@@ -257,16 +257,16 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         graph_size = None
 
-        def assert_graph_empty(fx_g, _):
+        def get_graph_size(fx_g, _):
             nonlocal graph_size
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
         start_recompilations = num_of_recompilations()
-        f = aot_function(foo, nop, assert_graph_empty)
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertIsNone(graph_size)
         with torch.set_grad_enabled(True):
             f(*inps)
         self.assertTrue(graph_size > 2)
@@ -308,9 +308,23 @@ class TestAOTAutograd(TestCase):
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
 
+    def test_list_codegen(self):
+        def list_nop(f, _):
+            def g(inps):
+                return f(*inps)
+            g._boxed_call = True
+            return g
+
+        def f(a, b, c):
+            return a.sin() * b.cos() * c.sin()
+        f = aot_function(f, list_nop)
+        inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
+        f(*inp).sum().backward()
+
+
 
 class TestEagerFusionOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
@@ -328,9 +342,11 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapz'),
         xfail('corrcoef'),
         xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
+    @unittest.skip("Currently flaky on master for unclear reasons. Skipping for now")
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
             return op.op(*args, **kwargs)
@@ -357,6 +373,10 @@ class TestEagerFusionOpInfo(TestCase):
 
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
+
+            # NB: We cache on function id, which is unreliable
+            # Can fix by using weakrefs, but not sure if it matters
+            clear_compile_cache()
 
             compiled_f = compiled_function(f, nop, nop)
 
@@ -548,14 +568,16 @@ class TestAOTModuleSimplified(TestCase):
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
     def test_aot_module_simplified_preserves_stack_trace(self):
-
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
             def forward(self, x, y):
-                return (self.linear(x) + y, )
+                z = self.linear(x)
+                z = z + y
+                z = z.relu()
+                return (z, )
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
@@ -576,7 +598,7 @@ class TestAOTModuleSimplified(TestCase):
                 assert 'test_pythonkey.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
 
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)

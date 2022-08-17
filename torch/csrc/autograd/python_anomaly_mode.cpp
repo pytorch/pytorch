@@ -31,23 +31,6 @@ void PyAnomalyMetadata::store_stack() {
   }
 }
 
-void PyAnomalyMetadata::override_stack() {
-  pybind11::gil_scoped_acquire gil;
-
-  PyObject* stack = PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY);
-
-  THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
-  if (!mod) {
-    throw python_error();
-  }
-
-  PyObject *result = PyObject_CallMethod(mod.get(), "set_stack_trace", "O", stack);
-
-  if (!result) {
-    throw python_error();
-  }
-}
-
 void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
