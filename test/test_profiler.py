@@ -1275,6 +1275,7 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._autograd._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
 
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
