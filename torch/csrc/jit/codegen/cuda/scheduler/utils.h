@@ -155,15 +155,6 @@ TvProperties getProperties(
     SchedulerRuntimeInfo& runtime_info,
     TensorView* tv);
 
-// Will call computeAt once on each producer, with the first consumer found that
-// is a consumer of the individual producer
-void computeAtBetween(
-    const std::vector<TensorView*>& producers,
-    const std::vector<TensorView*>& consumers,
-    int pos,
-    ComputeAtMode mode,
-    std::unordered_set<IterDomain*> mapped_to_trivial_reduction = {});
-
 // Struct to store persistent buffer sizes. also holds the persistent buffer
 // size of the buffers are projected to the inputs.
 struct PersistentBufferSizeReturn {

@@ -600,51 +600,6 @@ TvProperties getProperties(
   return properties;
 }
 
-void computeAtBetween(
-    const std::vector<TensorView*>& producers,
-    const std::vector<TensorView*>& overall_consumers,
-    int pos,
-    ComputeAtMode mode,
-    std::unordered_set<IterDomain*> mapped_to_trivial_reduction) {
-  for (auto producer : producers) {
-    // Figure out what's between producer and overall_consumers, will not give
-    // back any consumers that are not downstream from producer
-    auto all_vals_between = DependencyCheck::getAllValsBetween(
-        {producer}, {overall_consumers.begin(), overall_consumers.end()});
-
-    std::unordered_set<Val*> all_vals_between_set(
-        all_vals_between.begin(), all_vals_between.end());
-
-    for (auto consumer : overall_consumers) {
-      if (all_vals_between_set.count(consumer)) {
-        // The way we generate producers and consumers is that we inch away from
-        // inputs/outputs. There's a chance we could meet in the middle.
-        if (producer == consumer) {
-          continue;
-        }
-
-        auto pos_it = std::find_if(
-            consumer->domain()->domain().begin(),
-            consumer->domain()->domain().end(),
-            [&mapped_to_trivial_reduction](IterDomain* id) {
-              return mapped_to_trivial_reduction.count(id);
-            });
-
-        auto consumer_pos = pos_it == consumer->domain()->domain().end()
-            ? pos
-            : std::min(
-                  (int)std::distance(
-                      consumer->domain()->domain().begin(), pos_it) +
-                      1,
-                  (pos < 0 ? pos + (int)consumer->nDims() : pos));
-        // Assume we don't want to reset computeAt on tensors that have already
-        // performed it.
-        producer->computeAt(consumer, consumer_pos, mode);
-      }
-    }
-  }
-}
-
 namespace {
 
 // Figure out which persistent buffers are active at the generation of values in
