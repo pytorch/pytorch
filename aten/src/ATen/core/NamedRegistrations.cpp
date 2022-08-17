@@ -467,7 +467,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("sum.IntList_out", CppFunction::makeFallthrough());
   m.impl("sum.dim_DimnameList", CppFunction::makeFallthrough());
   m.impl("sum.dim_IntList", CppFunction::makeFallthrough());
-  m.impl("sum.SymInt", CppFunction::makeFallthrough());
   m.impl("t", CppFunction::makeFallthrough());
   m.impl("tan", CppFunction::makeFallthrough());
   m.impl("tan.out", CppFunction::makeFallthrough());
