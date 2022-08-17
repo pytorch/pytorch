@@ -16401,7 +16401,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu_indices',
-           dtypes=integral_types_and(),
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
            sample_inputs_func=sample_inputs_trilu_indices,
            ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
            supports_out=False,
@@ -16412,18 +16412,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-               # test_dtypes will find this works for float dtypes, but it doesn't really
-               # make sense to call this with floats
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-               # for some small dtypes, the torch cpu implementation gives the wrong results
-               # when you run it for large input, so we skip those tests
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
-                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_quick',
-                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
            )),
     OpInfo('tril_indices',
-           dtypes=integral_types_and(),
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
            sample_inputs_func=sample_inputs_trilu_indices,
            ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
            supports_out=False,
@@ -16434,15 +16425,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-               # test_dtypes will find this works for float dtypes, but it doesn't really
-               # make sense to use this with floats
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-               # for some small dtypes, the torch cpu implementation gives the wrong results
-               # when you run it for large input, so we skip those tests
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
-                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_quick',
-                            device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
            )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18945,12 +18927,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-            # for some small dtypes, the torch cpu implementation gives the wrong results
-            # when you run it for large input, so we skip those tests
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
-                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
-                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
         )),
     PythonRefInfo(
         "_refs.tril_indices",
@@ -18964,12 +18940,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
-            # for some small dtypes, the torch cpu implementation gives the wrong results
-            # when you run it for large input, so we skip those tests
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
-                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
-                         device_type="cpu", dtypes=(torch.uint8, torch.int8, torch.int16)),
         )),
     PythonRefInfo(
         "_refs.meshgrid",
