@@ -2667,3 +2667,99 @@ class ForeachFuncInfo(OpInfo):
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+
+
+def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
+    """Gradcheck wrapper for functions that take Hermitian matrices as input.
+
+    They require a modified function because the finite-difference algorithm
+    for calculating derivatives does not preserve the Hermitian property of the input.
+    """
+    return op(input + input.mH, *args, **kwargs)
+
+
+def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
+    """Gradcheck wrapper for functions that take lower or upper triangular matrices as input.
+
+    They require a modified function because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input.
+    `idx` is used to specific which `args[idx]` is to be triangularized.
+    """
+    triangular_arg = args[idx].triu() if upper else args[idx].tril()
+    return op(*args[:idx], triangular_arg, *args[idx + 1 :], upper, **kwargs)
+
+
+def gradcheck_wrapper_triangular_input_real_positive_diagonal(
+    op, *args, upper=False, idx=0, **kwargs
+):
+    """Gradcheck wrapper for functions that take lower/upper triangular matrices
+    with real and positive diagonals, for example, cholesky-like operations.
+    """
+    arg = args[idx]
+    arg_diag = arg.diagonal(0, -2, -1)
+    arg_diag_embed = torch.diag_embed(arg_diag)
+    id_diag_tensor = torch.ones_like(arg_diag)
+    id_tensor = torch.diag_embed(id_diag_tensor)
+    # new_arg = arg - diag(arg) + I
+    new_arg = arg - arg_diag_embed + id_tensor
+    return gradcheck_wrapper_triangular_input(
+        op, *args[:idx], new_arg, *args[idx + 1 :], upper=upper, idx=idx, **kwargs
+    )
+
+
+def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
+    """Gradcheck wrapper for masked operations.
+
+    When mask is specified, replaces masked-out elements with zeros.
+
+    Use for operations that produce non-finite masked-out elements,
+    for instance, for minimum and maximum reductions.
+    """
+    output = op(input, *args, **kwargs)
+    mask = kwargs.get("mask")
+    if mask is not None:
+        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
+        output = torch.where(output_mask, output, output.new_zeros([]))
+    return output
+
+
+def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
+    """Gradcheck wrapper for masked pointwise operations. Assumes that the result
+    will be masked iff both tensors are masked at a specific index
+
+    When mask is specified, replaces masked-out elements with zeros.
+
+    Use for operations that produce non-finite masked-out elements,
+    for instance, for minimum and maximum reductions.
+    """
+    output = op(input, *args, **kwargs)
+    input_mask = kwargs.get("input_mask")
+    other_mask = kwargs.get("other_mask")
+    if input_mask is not None and other_mask is not None:
+        combined_mask = torch.logical_and(input_mask, other_mask)
+        new_kwargs = dict(mask=combined_mask, **kwargs)
+        output_mask = torch._masked._input_mask(input, *args, **new_kwargs)
+        output = torch.where(output_mask, output, output.new_zeros([]))
+    return output
+
+
+def clone_sample(sample, **kwargs):
+    """
+    Given a SampleInput, this function analyzes its input, args and kwargs,
+    and produces a copy with each non-Tensor entry being copied by reference,
+    and with each Tensor entry cloned with `t.clone().requires_grad_(t.requires_grad)`
+    """
+
+    def clone_tensor(t):
+        if isinstance(t, torch.Tensor):
+            return t.detach().clone().requires_grad_(t.requires_grad)
+        else:
+            return t
+
+    sample_kwargs = kwargs if kwargs else sample.kwargs
+
+    return SampleInput(
+        clone_tensor(sample.input),
+        args=tuple(map(clone_tensor, sample.args)),
+        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+    )
