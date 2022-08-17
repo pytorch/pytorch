@@ -282,22 +282,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
         if config.debug_joint:
             print(fx_g.code)
-            print("====== joint graph =======")
-            for node in fx_g.graph.nodes:
-                print(node, node.stack_trace)
 
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
         if config.debug_graphs:
             print(fw_module.code, bw_module.code)
-            print("====== forward graph =======")
-            for node in fw_module.graph.nodes:
-                print(node, node.stack_trace)
-
-            print("====== backward graph =======")
-            for node in bw_module.graph.nodes:
-                print(node, node.stack_trace)
 
         with torch.no_grad():
             with track_graph_compiling("forward"):

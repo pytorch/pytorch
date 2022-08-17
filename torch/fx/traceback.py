@@ -25,7 +25,6 @@ def override_stack_trace():
 
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack : List[str]):
-    # print(f'In Python, fx_traceback.set_stack(), with value {stack}')
     global current_stack
 
     if is_overridden and stack:
