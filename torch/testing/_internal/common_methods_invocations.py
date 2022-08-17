@@ -18096,177 +18096,308 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'special.airy_ai',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_large',
-            ),
-        ),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.airy_bi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bernoulli_number',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.bessel_j_0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j0 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.bessel_j_1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j1 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.bessel_y_0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y0 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.bessel_y_1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y1 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_i_0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
+        'special.complete_elliptic_integral_e',
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i0 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_i_1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
+        'special.complete_elliptic_integral_k',
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i1 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_k_0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
+        'special.complete_legendre_elliptic_integral_d',
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.modified_bessel_k_1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
+        'special.cos_pi',
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1 if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.cosh_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.cosine_integral_ci',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.digamma',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.dilogarithm_li_2',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.dirichlet_beta',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.dirichlet_eta',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.dirichlet_lambda',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.double_factorial',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.exp_airy_ai',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.exp_airy_bi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.exp_modified_bessel_k_0',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0e if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.exp_modified_bessel_k_1',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1e if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.exponential_integral_ei',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.factorial',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.fresnel_integral_c',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.fresnel_integral_s',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.harmonic_number',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.hyperbolic_cosine_integral_chi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.hyperbolic_sine_integral_shi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.ln_double_factorial',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.ln_factorial',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.ln_gamma_sign',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.ln_gamma',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.logarithmic_integral_li',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i_0',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i_1',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k_0',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k_1',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.nome_q',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.prime_number',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.reciprocal_gamma',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.riemann_zeta',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sin_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sinc_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sinh_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sinhc_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sinhc',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.spherical_bessel_j_0',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.tan_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.tanh_pi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: x if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
