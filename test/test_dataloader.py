@@ -1774,8 +1774,8 @@ except RuntimeError as e:
 
     def test_batch_sampler(self):
         for _ in range(100):
-            self._test_batch_sampler()
-            self._test_batch_sampler(num_workers=4)
+            self._test_batch_sampler(multiprocessing_context='spawn')
+            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
             if not NO_MULTIPROCESSING_SPAWN:
                 self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
