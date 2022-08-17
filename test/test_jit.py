@@ -1201,7 +1201,7 @@ class TestJit(JitTestCase):
 
         @torch.jit.compile(nderivs=0)
         def fn(*args):
-            in_vars, _ = torch._C._jit_flatten(args)
+            in_vars, _ = torch.jit._flatten(args)
             return in_vars[0] + 1
 
         for i, config in enumerate(configurations):
