@@ -141,11 +141,10 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero
-  - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
   - diagonal_copy
-  - expand_copy
+  # - expand_copy
   - permute_copy
   - _reshape_alias_copy
   - select_copy.int
@@ -161,7 +160,7 @@ full_codegen:
   - t_copy
   - transpose_copy.int
   - unsqueeze_copy
-  - view_copy
+  # - view_copy
   - view_copy.dtype
   - unfold_copy
   - select_scatter
@@ -175,7 +174,6 @@ supported:
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
-  - empty.SymInt
   - empty_strided
   - fill_.Scalar
   - normal_

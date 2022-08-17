@@ -396,7 +396,7 @@ Tensor new_empty(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt
     ) {
-  return self.new_empty_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  return native::new_empty_symint(self, c10::SymIntArrayRef::fromIntArrayRef(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor new_empty_symint(
@@ -411,7 +411,7 @@ Tensor new_empty_symint(
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
   auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return at::_ops::empty_memory_format::call(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor new_empty_strided(
@@ -1095,7 +1095,7 @@ Tensor zeros(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return at::zeros_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
+  return at::_ops::zeros::call(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
 }
 
 Tensor zeros_symint(SymIntArrayRef size,

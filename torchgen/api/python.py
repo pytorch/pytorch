@@ -1051,6 +1051,7 @@ def dispatch_lambda_args(
     cpp_args = cpp.arguments(
         arguments=schema.arguments,
         faithful=False,
+        symint=True,
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
@@ -1133,7 +1134,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     returns_without_annotation = tuple(
         map(lambda r: Return(r.name, r.type, None), f.func.returns)
     )
-    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
+    return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f"{f.func.name} returns unsupported type {return_str}")
     return return_str
