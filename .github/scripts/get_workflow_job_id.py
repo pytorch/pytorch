@@ -40,6 +40,11 @@ REQUEST_HEADERS = {
     "Authorization": "token " + GITHUB_TOKEN,
 }
 
+print(f"=== HEADERS {REQUEST_HEADERS}")
+
+debug = requests.get(https://api.github.com/rate_limit, headers=REQUEST_HEADERS)
+print(f"==== RESPONSE {debug.json()}")
+
 response = requests.get(
     f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100",
     headers=REQUEST_HEADERS,
