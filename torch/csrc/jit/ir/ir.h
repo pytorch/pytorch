@@ -251,6 +251,7 @@ struct Value {
   }
 
   TORCH_API void replaceFirstUseWith(Value* newValue);
+  TORCH_API void replaceLastUseWith(Value* newValue);
 
   // Replaces all uses of this value with 'newValue'.
   //

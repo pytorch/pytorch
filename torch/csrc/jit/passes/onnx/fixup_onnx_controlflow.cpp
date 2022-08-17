@@ -206,7 +206,9 @@ void ReplaceBlockOutputWithOptional(
   Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
   opt_node->insertBefore(block->return_node());
   Value* block_output = block->outputs().at(i);
-  block_output->replaceAllUsesWith(opt_node->output());
+  // replace only the last node as Optional Node only affects
+  // the node right before output
+  block_output->replaceLastUseWith(opt_node->output());
   if (!block_output->type()->cast<NoneType>()) {
     opt_node->addInput(block_output);
     opt_node->copyMetadata(block_output->node());
