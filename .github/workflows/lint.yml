@@ -22,13 +22,6 @@ jobs:
           curl -I https://api.github.com/users/pytorchbot
           curl -I https://api.github.com/user
 
-      - name: DEBUG API rate limit (part 2)
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -39,6 +32,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+
+      - name: DEBUG API rate limit (part 2)
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install lintrunner
         run: pip install lintrunner==0.9.*
