@@ -52,6 +52,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from functorch.compile import clear_compile_cache
 from unittest.mock import MagicMock
 
 import expecttest
@@ -2037,6 +2038,9 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+        # NB: We cache on function id, which is unreliable
+        # Can fix by using weakrefs, but not sure if it matters
+        clear_compile_cache()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
