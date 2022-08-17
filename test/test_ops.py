@@ -1709,6 +1709,13 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+data_dependent_op_tests = (
+    "equal",
+    "corrcoef",
+    "nn.functional.gaussian_nll_loss",
+    "allclose",
+)
+
 aliasing_failures = (
     "histogramdd",
     "nn.functional.pixel_shuffle",
@@ -1808,12 +1815,14 @@ class TestFakeTensorNonErroring(TestCase):
                         real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
                         self.assertEqual(fake_aliasing, real_aliasing)
 
-                self.assertTrue(name not in dynamic_output_op_tests)
+                self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
+                self.assertTrue(name in data_dependent_op_tests)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):

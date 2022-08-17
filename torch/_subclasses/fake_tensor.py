@@ -31,6 +31,11 @@ class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
 
 
+@dataclass
+class DataDependentOutputException(RuntimeError):
+    func: OpOverload
+
+
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
     aten.nested_tensor.default,
@@ -275,8 +280,15 @@ def clone(fake_mode, func, input, memory_format=None):
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
     and func != aten.index.Tensor
 )
-def data_dep_op(fake_mode, func, *args, **kwargs):
+def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+
+@register_op_impl(
+    lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
+)
+def data_dep(fake_mode, func, *args, **kwargs):
+    raise DataDependentOutputException(func)
 
 
 # Bool Indices get Expanded as Masks
