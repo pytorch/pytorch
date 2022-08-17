@@ -442,13 +442,15 @@ uint64_t Result::correlationID() const {
 }
 
 int64_t Result::endTimeNS() const {
-  return visit(c10::overloaded(
+  auto out = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
+  SOFT_ASSERT(out >= start_time_ns_, out, " ", start_time_ns_, " ", name());
+  return out;
 }
 
 uint64_t Result::endTID() const {

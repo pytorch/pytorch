@@ -667,7 +667,8 @@ class PostProcess {
       std::function<time_t(approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
       const ValueCache& value_cache)
-      : time_converter_{time_converter} {
+      : end_time_{time_converter(getApproximateTime())},
+        time_converter_{time_converter} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);
@@ -714,6 +715,12 @@ class PostProcess {
       std::vector<python_tracer::CompressedEvent>& enters,
       std::vector<std::shared_ptr<Result>>& out) {
     using stack_t = std::vector<std::shared_ptr<Result>>;
+    auto pop = [](stack_t& stack, time_t t) {
+      TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
+      c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      stack.pop_back();
+    };
+
     ska::flat_hash_map<size_t, stack_t> stacks;
     auto& state = get_state<E>();
     for (const auto& enter : enters) {
@@ -721,12 +728,9 @@ class PostProcess {
       if (fields_it != state.fields_.end()) {
         while (!state.exits_.empty() &&
                state.exits_.top().t_ < enter.enter_t_) {
-          auto& stack = stacks[state.exits_.top().python_tid_];
-          TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
-          c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ =
-              state.exits_.top().t_;
+          auto& exit = state.exits_.top();
+          pop(stacks[exit.python_tid_], exit.t_);
           state.exits_.pop();
-          stack.pop_back();
         }
         out.push_back(Result::create(
             enter.enter_t_,
@@ -735,6 +739,13 @@ class PostProcess {
             fields_it->second));
 
         stacks[fields_it->second.python_tid_].push_back(out.back());
+      }
+    }
+
+    // Handle events which were still running when profiling ended.
+    for (auto& i : stacks) {
+      while (!i.second.empty()) {
+        pop(i.second, end_time_);
       }
     }
   }
@@ -750,6 +761,7 @@ class PostProcess {
     return std::get < E == EventType::PyCall ? 0 : 1 > (state_);
   }
 
+  time_t end_time_;
   std::function<time_t(approx_time_t)> time_converter_;
   std::tuple<State<EventType::PyCall>, State<EventType::PyCCall>> state_;
 };
