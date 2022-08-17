@@ -1381,8 +1381,7 @@ Arguments:
               "_set_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
-                 const c10::intrusive_ptr<::c10d::Backend>& backend
-              ) {
+                 const c10::intrusive_ptr<::c10d::Backend>& backend) {
                 self->setBackend(device.type(), backend);
               },
               py::arg("device"),
