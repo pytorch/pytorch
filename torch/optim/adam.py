@@ -244,7 +244,7 @@ class Adam(Optimizer):
                  maximize=group['maximize'],
                  foreach=group['foreach'],
                  capturable=group['capturable'],
-                 differentiable=group['differentiable'])
+                 differentiable=group['differentiable'],
                  fused=group['fused'],
                  grad_scale=grad_scale,
                  found_inf=found_inf)
@@ -331,10 +331,7 @@ def _single_tensor_adam(params: List[Tensor],
                         eps: float,
                         maximize: bool,
                         capturable: bool,
-                        differentiable: bool,
-                        grad_scale: Optional[_MultiDeviceReplicator],
-                        found_inf: Optional[_MultiDeviceReplicator]):
-                        capturable: bool):
+                        differentiable: bool):
 
     assert grad_scale is None and found_inf is None
 
@@ -430,10 +427,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        eps: float,
                        maximize: bool,
                        capturable: bool,
-                       differentiable: bool,
-                       grad_scale: Optional[_MultiDeviceReplicator],
-                       found_inf: Optional[_MultiDeviceReplicator]):
-                       capturable: bool):
+                       differentiable: bool):
     if len(params) == 0:
         return
 
@@ -570,6 +564,7 @@ def _fused_adam(
     eps: float,
     maximize: bool,
     capturable: bool,  # Needed for consistency.
+    differentiable: bool,
 ) -> None:
     grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
     for (device, dtype) in grouped_tensors:
