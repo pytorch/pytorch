@@ -118,10 +118,22 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// This function unfolds the compressed indices of a compressed sparse matrix
+// into a batched compressed sparse tensor.
+// This is analogous to an unflatten-like operation:
+// unflatten(0, {b, r}) for csr/bsr with input shape (r*b, c)
+//          (output shape (b, r, c))
+// unflatten(1, {b, c}).transpose(0,1) for csc/bsc with input shape (r, c*b)
+//          (output shape (r, b, c) unflatten, (b, r, c) unflatten + transpose)
+// This only operates on the compressed indices as the plain indices and values
+// can be manipulated as described above without special handling.
+// It is a prerequisite for the conversion that the sparsity pattern is sane for
+// the batched shape. That is each batch has the same number of nonzero
+// elements.
 template <typename input_t, typename output_t>
 __global__ void compressed_to_batched_compressed_indices_cuda_kernel(
-    output_t* batched_out,
-    const input_t* compressed_in,
+    output_t* __restrict__ batched_out,
+    const input_t* __restrict__ compressed_in,
     const int64_t n_batch,
     const int64_t ncomp_per_batch) {
   int64_t b = blockDim.x * blockIdx.x + threadIdx.x;
