@@ -165,7 +165,7 @@ at::Tensor sum_backward(
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
