@@ -325,7 +325,7 @@ PyTypeObject Dim::Type = {
     0,                              /* tp_descr_get */
     0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
-    (initproc) Dim_init,            /* tp_init */
+    (initproc)(void*) Dim_init,     /* tp_init */
     0,                              /* tp_alloc */
     Dim::new_stub,                      /* tp_new */
 };
@@ -355,7 +355,7 @@ struct DimList : public py::base<DimList> {
         } else {
             bound_ = true;
             dims_.resize(size);
-            for (ssize_t i = 0; i < size; ++i) {
+            for (Py_ssize_t i = 0; i < size; ++i) {
                 dims_[i] = Dim::create(py::unicode_from_format("%S%i", name_.ptr(), (int)i));
             }
         }
@@ -410,7 +410,7 @@ static PyObject* DimList_bind(DimList *self,
     py::sequence_view seq = sizes;
     auto size = seq.size();
     self->bind_len(size);
-    for (ssize_t i = 0; i < size; ++i) {
+    for (Py_ssize_t i = 0; i < size; ++i) {
         self->dims_[i]->set_size(py::to_int(seq[i]));
     }
     Py_RETURN_NONE;
@@ -434,8 +434,8 @@ static PyObject* DimList_bind_len(DimList *self,
 }
 
 static PyMethodDef DimList_methods[] = {
-    {"bind", (PyCFunction) DimList_bind, METH_FASTCALL | METH_KEYWORDS},
-    {"bind_len", (PyCFunction) DimList_bind_len, METH_FASTCALL | METH_KEYWORDS},
+    {"bind", (PyCFunction)(void*) DimList_bind, METH_FASTCALL | METH_KEYWORDS},
+    {"bind_len", (PyCFunction)(void*) DimList_bind_len, METH_FASTCALL | METH_KEYWORDS},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
@@ -451,7 +451,7 @@ PyObject * DimList_item(DimList* self, Py_ssize_t idx) {
     if (!self->is_bound()) {
         py::raise_error(DimensionBindError(), "DimList not bound");
     }
-    if (idx >= self->dims_.size()) {
+    if (idx < 0 || (size_t) idx >= self->dims_.size()) {
         py::raise_error(PyExc_IndexError, "index out of bounds");
     }
     py::object r = self->dims_[idx];
@@ -506,7 +506,7 @@ static PyObject* DimList_subscript(DimList* self, py::handle idx) {
 
 PyMappingMethods DimList_mapping = {
     0, //lenfunc mp_length;
-    (binaryfunc) DimList_subscript, //binaryfunc mp_subscript;
+    (binaryfunc)(void*) DimList_subscript, //binaryfunc mp_subscript;
     0, //objobjargproc mp_ass_subscript;
 };
 
@@ -570,7 +570,7 @@ static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
             std::vector<py::obj<Dim>> dims;
             size_t size = s.size();
             dims.reserve(size);
-            for (ssize_t i = 0; i < size; ++i) {
+            for (size_t i = 0; i < size; ++i) {
                 auto r = s[i];
                 if (py::is_int(r)) {
                     dims.emplace_back(Dim::create(py::unicode_from_format("%S%i", self->name_.ptr(), (int)i),  py::to_int(r)));
@@ -1024,7 +1024,7 @@ static PyObject* py_unflatten(PyObject *self,
     PY_END(nullptr)
 }
 
-PyMethodDef py_unflatten_def = {"unflatten", (PyCFunction) py_unflatten, METH_FASTCALL | METH_KEYWORDS};
+PyMethodDef py_unflatten_def = {"unflatten", (PyCFunction)(void*) py_unflatten, METH_FASTCALL | METH_KEYWORDS};
 
 void free_unflatten_arena(PyObject * pc) {
     delete (UnflattenArena*) PyCapsule_GetPointer(pc, "arena");
@@ -1456,7 +1456,7 @@ py::object create_dim(py::object name, py::handle size) {
     if (!py::is_none(size)) {
         d->set_size(py::to_int(size));
     }
-    return d;
+    return std::move(d);
 }
 
 py::object create_dimlist(py::object name, py::handle size) {
@@ -1472,7 +1472,7 @@ py::object create_dimlist(py::object name, py::handle size) {
             }
         }
     }
-    return d;
+    return std::move(d);
 }
 
 template<py::object (*create_object)(py::object, py::handle)>
@@ -2036,7 +2036,7 @@ static py::object index(Arena& A, py::handle self, py::handle dims, py::handle i
     if (lhs_list && rhs_list) {
         py::sequence_view dv(dims);
         py::sequence_view ind(indices);
-        size_t N = dv.size();
+        Py_ssize_t N = dv.size();
         if (N != ind.size()) {
             py::raise_error(PyExc_TypeError, "dims (%d) and indices (%d) must have the same length", int(N), int(ind.size()));
         }
@@ -2992,7 +2992,7 @@ static PyObject* _wrap(PyObject * self_,
     } else {
         dim_name_str = "dim";
     }
-    auto info = WrappedOperator::create(py::object::borrow(orig), (PyCFunction) patched_dim_method, std::move(dim_name_str));
+    auto info = WrappedOperator::create(py::object::borrow(orig), (PyCFunction)(void*) patched_dim_method, std::move(dim_name_str));
     if (dim_offset.ptr()) {
         info->dim_offset = py::to_int(dim_offset);
     }
@@ -3036,7 +3036,7 @@ static PyObject* _wrap_method(PyObject *self,
         auto dim = py::import("functorch.dim");
         pointwise = dim.attr("pointwise");
     }
-    auto info = WrappedOperator::create(py::object::borrow(orig), (PyCFunction) call_torch_function);
+    auto info = WrappedOperator::create(py::object::borrow(orig), (PyCFunction)(void*) call_torch_function);
     info->is_pointwise = pointwise.contains(orig);
     return PyInstanceMethod_New(info->function().release());
     PY_END(nullptr);
@@ -3141,25 +3141,25 @@ Example::
 )""";
 
 static PyMethodDef methods[] = {
-    {"dims", (PyCFunction) _dims<create_dim>, METH_FASTCALL | METH_KEYWORDS, dims_doc},
-    {"dimlists", (PyCFunction) _dims<create_dimlist>, METH_FASTCALL | METH_KEYWORDS},
-    {"_test_c", (PyCFunction) test_c, METH_FASTCALL | METH_KEYWORDS},
-    {"_wrap_method", (PyCFunction) _wrap_method, METH_FASTCALL | METH_KEYWORDS},
-    {"Tensor_from_positional", (PyCFunction) py_Tensor_from_positional, METH_FASTCALL | METH_KEYWORDS},
-    {"__torch_function__", (PyCFunction) py___torch_function__, METH_FASTCALL | METH_KEYWORDS},
-    {"tree_flatten", (PyCFunction) py_tree_flatten, METH_FASTCALL | METH_KEYWORDS},
-    {"order", (PyCFunction) order, METH_FASTCALL | METH_KEYWORDS},
-    {"index", (PyCFunction) py_index, METH_FASTCALL | METH_KEYWORDS},
-    {"stack", (PyCFunction) py_stack, METH_FASTCALL | METH_KEYWORDS},
-    {"split", (PyCFunction) py_split, METH_FASTCALL | METH_KEYWORDS},
-    {"expand", (PyCFunction) expand, METH_FASTCALL | METH_KEYWORDS},
-    {"__getitem__", (PyCFunction) py___getitem__, METH_FASTCALL | METH_KEYWORDS},
-    {"__setitem__", (PyCFunction) py___setitem__, METH_FASTCALL | METH_KEYWORDS},
-    {"_wrap", (PyCFunction) _wrap, METH_FASTCALL | METH_KEYWORDS},
-    {"Tensor_sum", (PyCFunction) Tensor_sum, METH_FASTCALL | METH_KEYWORDS},
-    {"_parse_test", (PyCFunction) _parse_test, METH_FASTCALL | METH_KEYWORDS},
-    {"_set_pointwise_optimize", (PyCFunction) _set_pointwise_optimize, METH_FASTCALL | METH_KEYWORDS},
-    {"_patch_tensor_class", (PyCFunction) _patch_tensor_class, METH_FASTCALL | METH_KEYWORDS},
+    {"dims", (PyCFunction)(void*) _dims<create_dim>, METH_FASTCALL | METH_KEYWORDS, dims_doc},
+    {"dimlists", (PyCFunction)(void*) _dims<create_dimlist>, METH_FASTCALL | METH_KEYWORDS},
+    {"_test_c", (PyCFunction)(void*) test_c, METH_FASTCALL | METH_KEYWORDS},
+    {"_wrap_method", (PyCFunction)(void*) _wrap_method, METH_FASTCALL | METH_KEYWORDS},
+    {"Tensor_from_positional", (PyCFunction)(void*) py_Tensor_from_positional, METH_FASTCALL | METH_KEYWORDS},
+    {"__torch_function__", (PyCFunction)(void*) py___torch_function__, METH_FASTCALL | METH_KEYWORDS},
+    {"tree_flatten", (PyCFunction)(void*) py_tree_flatten, METH_FASTCALL | METH_KEYWORDS},
+    {"order", (PyCFunction)(void*) order, METH_FASTCALL | METH_KEYWORDS},
+    {"index", (PyCFunction)(void*) py_index, METH_FASTCALL | METH_KEYWORDS},
+    {"stack", (PyCFunction)(void*) py_stack, METH_FASTCALL | METH_KEYWORDS},
+    {"split", (PyCFunction)(void*) py_split, METH_FASTCALL | METH_KEYWORDS},
+    {"expand", (PyCFunction)(void*) expand, METH_FASTCALL | METH_KEYWORDS},
+    {"__getitem__", (PyCFunction)(void*) py___getitem__, METH_FASTCALL | METH_KEYWORDS},
+    {"__setitem__", (PyCFunction)(void*) py___setitem__, METH_FASTCALL | METH_KEYWORDS},
+    {"_wrap", (PyCFunction)(void*) _wrap, METH_FASTCALL | METH_KEYWORDS},
+    {"Tensor_sum", (PyCFunction)(void*) Tensor_sum, METH_FASTCALL | METH_KEYWORDS},
+    {"_parse_test", (PyCFunction)(void*) _parse_test, METH_FASTCALL | METH_KEYWORDS},
+    {"_set_pointwise_optimize", (PyCFunction)(void*) _set_pointwise_optimize, METH_FASTCALL | METH_KEYWORDS},
+    {"_patch_tensor_class", (PyCFunction)(void*) _patch_tensor_class, METH_FASTCALL | METH_KEYWORDS},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

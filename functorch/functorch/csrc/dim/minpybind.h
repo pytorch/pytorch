@@ -610,7 +610,7 @@ struct vector_args {
                 if (i == required) {
                     *format_it++ = '|';
                 }
-                if (i == names.size() - kwonly) {
+                if (i == (int)names.size() - kwonly) {
                     *format_it++ = '$';
                 }
                 *format_it++ = 'O';
@@ -621,7 +621,7 @@ struct vector_args {
 #else
             _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
-            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, values.size() - kwonly, 0, &buf[0]);
+            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
             throw exception_set();
         };
@@ -630,7 +630,7 @@ struct vector_args {
         auto names_it = names.begin();
         auto npositional = values.size() - kwonly;
 
-        if (nargs > npositional) {
+        if (nargs > (Py_ssize_t)npositional) {
             // TOO MANY ARGUMENTS
             error();
         }
