@@ -1977,9 +1977,6 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   at::NoNamesGuard guard;
   TORCH_CHECK(self.device() == other.device(), "Cannot compare two tensors on "
               "different devices. Got: ", self.device(), " and ", other.device());
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   if (!self.is_same_size(other)) {
     return false;
   }
