@@ -6035,6 +6035,13 @@ class TestTorch(TestCase):
         self.assertTrue(torch.equal(s1, s3))
         self.assertFalse(torch.equal(s1, s4))
 
+        # Different dtypes
+        x = torch.tensor((1, 2, 3), dtype=torch.float)
+        y = torch.tensor((1, 2, 3), dtype=torch.int)
+        z = torch.tensor((1, -1), dtype=torch.int)
+        self.assertTrue(torch.equal(x, y))
+        self.assertFalse(torch.equal(z, x))
+
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
         char = torch.CharStorage().element_size()
