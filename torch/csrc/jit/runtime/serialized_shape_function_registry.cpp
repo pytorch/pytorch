@@ -1740,8 +1740,12 @@ def conv_forwards(input: List[int],
   has_dilation = torch.gt(torch.len(dilation), 0)
   dim = torch.len(input)
   output_size = annotate(List[int], [])
+  if transposed:
+    weight_output_channels_dim = 1
+  else:
+    weight_output_channels_dim = 0
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[0])
+  _1 = torch.append(output_size, weight[weight_output_channels_dim])
   for _2 in range(torch.__range_length(2, dim, 1)):
     d = torch.__derive_index(_2, 2, 1)
     if has_dilation:
@@ -1789,7 +1793,7 @@ def conv_forwards(input: List[int],
   dim = torch.len(input)
   output_size = annotate(List[int], [])
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[0])
+  _1 = torch.append(output_size, weight[1])
   for _2 in range(torch.__range_length(2, dim, 1)):
     d = torch.__derive_index(_2, 2, 1)
     if has_dilation:
