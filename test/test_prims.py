@@ -236,6 +236,28 @@ class TestPrims(TestCase):
         self.assertFalse(includes_prims_digamma)
         self.assertTrue(includes_nvprims_exp)
 
+
+    def test_aten_overload_to_prims(self, device):
+        # This test is to ensure that the torch.ops.aten calls are replaced with refs
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.ops.aten.sigmoid.default(torch.ops.aten.digamma.default(a))
+
+        with TorchRefsMode():
+            gm = make_fx(func)(a)
+
+        # Check that all call_function nodes are prims
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        all_prims_namespace = all(
+            node.target.name.startswith("prims") for node in call_function_nodes
+        )
+        self.assertTrue(all_prims_namespace)
+
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned(self, device):
