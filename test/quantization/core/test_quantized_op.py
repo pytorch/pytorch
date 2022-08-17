@@ -4389,6 +4389,11 @@ class TestQuantizedConv(TestCase):
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=output_dtype)
 
+        print("W_q", W_q)
+        print("bias_float", bias_float)
+        print("X_q", X_q)
+        W_q[:] = 0
+        # bias_float[:] = 1
         if qconv_prepack_fn is not None:
             if use_transpose:
                 W_prepack = qconv_prepack_fn(
@@ -4418,6 +4423,10 @@ class TestQuantizedConv(TestCase):
         # For example, the result of round(2.5) + 1 is 3 while
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
+        print("reference answer:")
+        print(result_ref_q.int_repr().cpu().numpy())
+        print("y_q:")
+        print(Y_q.int_repr().cpu().numpy())
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(), Y_q.int_repr().cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
@@ -4515,65 +4524,88 @@ class TestQuantizedConv(TestCase):
 
     # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
     """Tests the correctness of quantized 2D convolution cudnn op."""
-    @given(batch_size=st.integers(1, 3),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           input_channels_per_group=st.integers(1, 32),
-           height=st.integers(10, 16),
-           width=st.integers(7, 14),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1),  # currently padding only supports groups=1
-           kernel_h=st.integers(1, 7),
-           kernel_w=st.integers(1, 7),
-           stride_h=st.integers(1, 2),
-           stride_w=st.integers(1, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
-           # result for dilation == 2 is not correct
-           # dilation=st.integers(1, 2),
-           # currently cudnn has only been verified to work for dilation = 1
-           # TODO: check backend works for dilation > 1
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           Y_zero_point=st.sampled_from([0]),
-           use_bias=st.booleans(),
-           use_relu=st.booleans(),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @given(batch_size=st.integers(1, 3),
+    #        # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+    #        input_channels_per_group=st.integers(1, 32),
+    #        height=st.integers(10, 16),
+    #        width=st.integers(7, 14),
+    #        # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+    #        output_channels_per_group=st.integers(1, 32),
+    #        groups=st.integers(1, 1),  # currently padding only supports groups=1
+    #        kernel_h=st.integers(1, 7),
+    #        kernel_w=st.integers(1, 7),
+    #        stride_h=st.integers(1, 2),
+    #        stride_w=st.integers(1, 2),
+    #        pad_h=st.integers(0, 2),
+    #        pad_w=st.integers(0, 2),
+    #        # result for dilation == 2 is not correct
+    #        # dilation=st.integers(1, 2),
+    #        # currently cudnn has only been verified to work for dilation = 1
+    #        # TODO: check backend works for dilation > 1
+    #        dilation=st.integers(1, 1),
+    #        X_scale=st.floats(1.2, 1.6),
+    #        X_zero_point=st.sampled_from([0]),
+    #        W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+    #        W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+    #        Y_scale=st.floats(4.2, 5.6),
+    #        Y_zero_point=st.sampled_from([0]),
+    #        use_bias=st.booleans(),
+    #        use_relu=st.booleans(),
+        #    # TODO: enable channelwise
+        #    use_channelwise=st.sampled_from([False]))
+    # @skipIfNoFBGEMM
+    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     def test_qconv2d_cudnn(
             self,
-            batch_size,
-            input_channels_per_group,
-            height,
-            width,
-            output_channels_per_group,
-            groups,
-            kernel_h,
-            kernel_w,
-            stride_h,
-            stride_w,
-            pad_h,
-            pad_w,
-            dilation,
-            X_scale,
-            X_zero_point,
-            W_scale,
-            W_zero_point,
-            Y_scale,
-            Y_zero_point,
-            use_bias,
-            use_relu,
-            use_channelwise,
+            # batch_size,
+            # input_channels_per_group,
+            # height,
+            # width,
+            # output_channels_per_group,
+            # groups,
+            # kernel_h,
+            # kernel_w,
+            # stride_h,
+            # stride_w,
+            # pad_h,
+            # pad_w,
+            # dilation,
+            # X_scale,
+            # X_zero_point,
+            # W_scale,
+            # W_zero_point,
+            # Y_scale,
+            # Y_zero_point,
+            # use_bias,
+            # use_relu,
+            # use_channelwise,
     ):
+        batch_size = 1
+        input_channels_per_group = 4
+        height = 1
+        width = 1
+        output_channels_per_group = 4
+        groups = 1
+        kernel_h = 1
+        kernel_w = 1
+        stride_h = 1
+        stride_w = 1
+        pad_h = 0
+        pad_w = 0
+        dilation = 1
+        X_scale = 1
+        X_zero_point = 0
+        W_scale = [1, 1]
+        W_zero_point = [0, 0]
+        Y_scale = 1
+        Y_zero_point = 0
+        use_bias = False
+        use_relu = False
+        use_channelwise = False
+
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
