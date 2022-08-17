@@ -379,15 +379,17 @@ LinearPackedContext::LinearPackedContext(
       "Reason: The provided (weight, bias) parameters are either invalid "
       "individually or their combination is not supported by Vulkan Impl.");
 
-  packed_.reserve(4);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(convert(pack_weights(weight)));
   packed_.emplace_back(convert(pack_biases(weight, bias)));
   packed_.emplace_back(weight.sizes());
   packed_.emplace_back(bias && bias->defined());
 
-  unpacked_.reserve(2);
-  unpacked_.emplace_back(weight);
-  unpacked_.emplace_back(bias);
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+  }
 }
 
 LinearPackedContext LinearPackedContext::pack(c10::impl::GenericList unpacked) {
