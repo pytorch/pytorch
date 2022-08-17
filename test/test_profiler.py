@@ -318,6 +318,9 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        # Expected tensor object tuple size, in th form of:
+        # [tensor_id, storage_id, offset, numel, itemsize, device_str]
+        tensor_tuple_size = 6
         found_root_node = False
         for n in nodes:
             assert "name" in n
@@ -325,6 +328,9 @@ class TestExecutionGraph(TestCase):
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
+            # Check if tensor tuple representation size is correct.
+            if n["name"] == "## TEST 2 ##":
+                assert len(n["inputs"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
 
@@ -1269,6 +1275,7 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._autograd._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
 
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
