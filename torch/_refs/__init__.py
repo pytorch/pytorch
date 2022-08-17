@@ -3707,11 +3707,11 @@ def eye(
     range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    # TODO: pin_memory=pin_memory, layout=layout
-    one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
-    if one.dtype is torch.bool:
-        return cond.logical_and(one)
+    if dtype is torch.bool:
+        return cond
     else:
+        # TODO: pin_memory=pin_memory, layout=layout
+        one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
         return torch.where(cond, one, 0)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
