@@ -71,7 +71,9 @@ bool mkldnn_bf16_gemm(
     op_attr = ideep::attr_t::fuse_sum();
   }
 
-  ideep::tensor::dims a_strides{{1, lda}}, b_strides{{1, ldb}}, c_strides{{1, ldc}};
+  // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
+  // Use identity: C = AB <=> C^T = B^T A^T
+  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
   if (transa != TransposeType::NoTranspose) {
     std::swap(a_strides[0], a_strides[1]);
   }
@@ -80,23 +82,23 @@ bool mkldnn_bf16_gemm(
   }
 
   ideep::tensor a({
-      /*sizes=*/{m, k},
+      /*sizes=*/{k, m},
       ideep::tensor::data_type::bf16,
       /*strides=*/a_strides},
     const_cast<c10::BFloat16*>(a_data));
   ideep::tensor b({
-      /*sizes=*/{k, n},
+      /*sizes=*/{n, k},
       ideep::tensor::data_type::bf16,
       /*strides=*/b_strides},
     const_cast<c10::BFloat16*>(b_data));
   ideep::tensor c({
-      /*sizes=*/{m, n},
+      /*sizes=*/{n, m},
       ideep::tensor::data_type::bf16,
       /*strides=*/c_strides},
     c_data);
 
   ideep::matmul_forward::compute(
-      a, b, c, alpha, beta,
+      b, a, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
 
   if (c.get_data_handle() != c_data){
@@ -104,7 +106,7 @@ bool mkldnn_bf16_gemm(
     // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
     ideep::tensor real_output({
-        /*sizes=*/{m, n},
+        /*sizes=*/{n, m},
         ideep::tensor::data_type::bf16,
         /*strides=*/c_strides},
       c_data);

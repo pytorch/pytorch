@@ -14,6 +14,100 @@
 namespace at {
 namespace native {
 
+namespace {
+// dense_to_sparse_{csr,bsr,csc,bsc} common helpers
+
+// Preparation fo the N-D dense -> sparse compressed conversion.
+// The N-D input is converted to 3-D (single batch dim) where we check that the
+// product of batch dims is nonzero and for each batch the sparse matrix
+// contained within has the same number of non-zero elements.
+// The batches are joined along the compressed axis. The generation of indices
+// for this matrix can be performed in a single step followed by a single step
+// conversion to restore the batch dimension.
+void dense_to_sparse_compressed_prepare_check_mask_values_batched(
+    Layout const& target_layout,
+    Tensor& values,
+    Tensor& mask,
+    const int64_t& n_batch_dim) {
+  if (n_batch_dim > 1) {
+    // For inputs with more than 1 batch dim we flatten them out.
+    // Input shape (b0, b1 ..., bn, r, c) -> (b, r ,c)
+    values = values.flatten(0, n_batch_dim - 1);
+    mask = mask.flatten(0, n_batch_dim - 1);
+  }
+
+  TORCH_CHECK(
+      mask.size(0) > 0,
+      "to_sparse_",
+      sparse_csr::layoutToString(target_layout, false, true),
+      ": Expected product of batch dimensions to be non-zero.");
+
+  // Compute the number of non-zero elements in the first batch, expand to full
+  // size
+  auto nse_per_batch = mask.select(0, 0).sum().expand(mask.size(0));
+  TORCH_CHECK(
+      mask.sum({-2, -1}).equal(nse_per_batch),
+      "Expect the same number of specified elements per batch.");
+
+  // We need to join batches into a matrix increasing the length of the
+  // compressed axis. This allows us to create indices for a compressed matrix
+  // and de-batch them later (two kernels). Otherwise we would have to create
+  // indices for each batch individually requiring n_batch kernels. For csr/bsr,
+  // we already have the batch dim adjacent to the compressed axis and can
+  // flatten them together. For csc/bsc, we need to transpose first.
+  // For BSR/CSR (b, r, c) -> (b*r, c)
+  // For BSC/CSC (b, c, r) -> (r, b*c)
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      target_layout,
+      "dense_to_sparse_compressed",
+      [&]() {
+        values = values.flatten(0, 1);
+        mask = mask.flatten(0, 1);
+      },
+      [&]() {
+        values = values.transpose(0, 1).flatten(1, 2);
+        mask = mask.transpose(0, 1).flatten(1, 2);
+      });
+}
+
+// After generating member tensors for sparse_compressed matrix, if the target
+// shape is N-D we must reform the batch dimensions.
+// Single kernel is used to restore one batch dimension in the compressed
+// indices. From there full batch shape is restored by reshape. No special
+// handling is needed for restoring batch dimensions of the values or
+// plain_indices it can be done with reshape/unflatten.
+void reshape_2d_sparse_compressed_members_to_nd_batched(
+    const IntArrayRef& full_sizes,
+    const int64_t& n_batch_dim,
+    Tensor& compressed_indices,
+    Tensor& plain_indices,
+    Tensor& values) {
+  auto batch_shape = full_sizes.slice(0, n_batch_dim);
+  auto n_batch = std::accumulate(
+      batch_shape.begin(), batch_shape.end(), 1, std::multiplies<int64_t>());
+  // NOTE: using this conversion requires the nnz per batch is the same for all
+  // batches that will be formed. We ensured this was the case on the way in so
+  // it is safe to use this conversion.
+  compressed_indices = at::_compressed_to_batched_compressed_indices(
+      compressed_indices, n_batch, /*out_int32*/ false);
+
+  // We can infer the last dim of the reshape targets, it will be nnz or
+  // nrow/ncol+1 depending on the layout and member tensor targeted.
+  auto batchsize_infer_last = DimVector(batch_shape);
+  batchsize_infer_last.push_back(-1);
+
+  // -1 will be nnz per batch
+  plain_indices = plain_indices.reshape(batchsize_infer_last);
+  // -1 will be ncols (bsc,csc) or nrows (bsr,csr) + 1
+  compressed_indices = compressed_indices.reshape(batchsize_infer_last);
+  // -1 will be nnz (per batch).
+  // Note: Unflatten rather than reshape as it will work
+  // for both blocked and unblocked layouts. reshape works for unblocked layouts
+  // only
+  values = values.unflatten(0, batchsize_infer_last);
+}
+} // namespace
+
 // Take a Device that may not have device_index set (i.e., having it as -1
 // representing the current device) and return the corresponding Device
 // according to the actual device at the time of this function call.  No-op
@@ -364,11 +458,7 @@ Tensor sparse_compressed_to_dense(
       "dtype argument is not supported by sparse_csr_to_dense");
 
   // Guard upfront against hybrid tensors (causes segfault)
-  auto batch_ndim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
-      self.layout(),
-      "sparse_compressed_to_dense",
-      [&]() { return self.crow_indices().dim() - 1; },
-      [&]() { return self.ccol_indices().dim() - 1; });
+  auto batch_ndim = sparse_csr::numBatchDimensions(self);
 
   TORCH_CHECK(
       (self.dim() - batch_ndim) == 2,
@@ -404,32 +494,24 @@ Tensor sparse_compressed_to_dense(
     Tensor compressed_indices;
     Tensor plain_indices;
     std::tie(compressed_indices, plain_indices) =
-        AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
-            self.layout(),
-            "sparse_compressed_to_dense",
-            [&]() {
-              return std::make_pair(self.crow_indices(), self.col_indices());
-            },
-            [&]() {
-              return std::make_pair(self.ccol_indices(), self.row_indices());
-            });
+        sparse_csr::getCompressedPlainIndices(self);
+
     auto values = self.values();
     Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
     if (self.dim() == 2) {
       // Pad shape so we can treat 2-d like batched, we will squeeze out the
       // phantom batch dim at the end
-      compressed_indices = compressed_indices.unsqueeze(0);
-      plain_indices = plain_indices.unsqueeze(0);
-      values = values.unsqueeze(0);
-      dense = dense.unsqueeze(0);
+      compressed_indices.unsqueeze_(0);
+      plain_indices.unsqueeze_(0);
+      values = values.unsqueeze_(0);
+      dense = dense.unsqueeze_(0);
     }
     if (self.dim() > 3) {
       // Flatten batch dims
-      auto n_batch_dim = self.dim() - 2;
-      compressed_indices = compressed_indices.flatten(0, n_batch_dim - 1);
-      plain_indices = plain_indices.flatten(0, n_batch_dim - 1);
-      values = values.flatten(0, n_batch_dim - 1);
-      dense = dense.flatten(0, n_batch_dim - 1);
+      compressed_indices = compressed_indices.flatten(0, batch_ndim - 1);
+      plain_indices = plain_indices.flatten(0, batch_ndim - 1);
+      values = values.flatten(0, batch_ndim - 1);
+      dense = dense.flatten(0, batch_ndim - 1);
     }
 
     // At this point everything has 3d shape either the batch dim was inserted,
@@ -805,31 +887,14 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   auto is_batched = n_batch_dim > 0;
   auto values = _batch_tile_tensor(self, blocksize);
   auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
-  not_zero_mask = not_zero_mask.any(-1).any(-1);
+  auto mask_shape = DimVector(not_zero_mask.sizes().slice(0, n_batch_dim + 2));
+  // Can't use -1 here one of sparse/batch dims may be zero
+  mask_shape.push_back(blocksize[0] * blocksize[1]);
+  not_zero_mask = not_zero_mask.view(mask_shape).any(-1);
 
   if (is_batched) {
-    // Some extra setup and checks for batched
-    if (n_batch_dim > 1) {
-      // Flatten to single batch dim
-      values = values.flatten(0, n_batch_dim - 1);
-      not_zero_mask = not_zero_mask.flatten(0, n_batch_dim - 1);
-    }
-    TORCH_CHECK(
-        not_zero_mask.size(0) > 0,
-        "to_sparse_bsc: Expected product of batch dimensions to be non-zero.");
-
-    // Batched inputs must have the  same nnz per batch.
-    auto not_zero_mask_0 = not_zero_mask.select(0, 0);
-    auto nse_per_batch = not_zero_mask_0.sum().repeat(not_zero_mask.size(0));
-    TORCH_CHECK(
-        not_zero_mask.sum({-2, -1}).equal(nse_per_batch),
-        "Expect the same number of specified elements per batch.");
-
-    // We need to join batches into a matrix increasing the number of cols.
-    // This allows us to create indices for col compressed matrix and de-batch
-    // them later. Avoiding a kernel start for each batch.
-    values = values.transpose(0, 1).flatten(1, 2);
-    not_zero_mask = not_zero_mask.transpose(0, 1).flatten(1, 2);
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseBsc, values, not_zero_mask, n_batch_dim);
   }
 
   Tensor col_indices;
@@ -841,35 +906,18 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
       col_indices, not_zero_mask.size(-1), false /*out_int32*/);
   {
-    // We need the values to blocked row major (they are), but blocks to be col
-    // major, so we transpose the leading two dims.
+    // We need the block-values in col major order, but blocks themselves to
+    // remain in row-major order, so we transpose the leading two dims, leaving
+    // the trailing two dims as is.
     values = values.transpose(0, 1).flatten(0, -3);
-    // The mask must transpose as well
-    // to index it correctly
+    // The mask must transpose as well to index it correctly.
     auto mask_indices =
         _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
     values = values.index_select(0, mask_indices);
   }
   if (is_batched) {
-    auto batch_shape = self.sizes().slice(0, n_batch_dim);
-    auto n_batch = std::accumulate(
-        batch_shape.begin(),
-        batch_shape.end(),
-        int64_t{1},
-        std::multiplies<int64_t>());
-    ccol_indices = at::_compressed_to_batched_compressed_indices(
-        ccol_indices, n_batch, false /*out_int32*/);
-
-    auto batchsize_infer_last = DimVector(batch_shape);
-    // we can infer nnz/ncol+1
-    batchsize_infer_last.push_back(-1);
-    // -1 dim is nnz (per batch)
-    row_indices = row_indices.reshape(batchsize_infer_last);
-    // -1 dim is nnrows (per batch) + 1
-    ccol_indices = ccol_indices.reshape(batchsize_infer_last);
-    // -1 dim is nnz (per batch) blocksize dims already included (hence
-    // unflatten)
-    values = values.unflatten(0, batchsize_infer_last);
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, ccol_indices, row_indices, values);
   }
 
   return at::native::_sparse_bsc_tensor_unsafe(
@@ -1049,6 +1097,19 @@ void convert_indices_from_csr_to_coo_cpu(
         }
       });
 }
+
+// This function unfolds the compressed indices of a compressed sparse matrix
+// into a batched compressed sparse tensor.
+// This is analogous to an unflatten-like operation:
+// unflatten(0, {b, r}) for csr/bsr with input shape (r*b, c)
+//          (output shape (b, r, c))
+// unflatten(1, {b, c}).transpose(0,1) for csc/bsc with input shape (r, c*b)
+//          (output shape (r, b, c) unflatten, (b, r, c) unflatten + transpose)
+// This only operates on the compressed indices as the plain indices and values
+// can be manipulated as described above without special handling.
+// It is a prerequisite for the conversion that the sparsity pattern is sane for
+// the batched shape. That is each batch has the same number of nonzero
+// elements.
 template <typename input_t, typename output_t>
 void compressed_to_batched_compressed_indices_cpu(
     const Tensor& batched_out,
