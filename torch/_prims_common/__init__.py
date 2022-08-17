@@ -51,8 +51,11 @@ Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
+    torch.Tensor.size,
+    torch.Tensor.storage_offset,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
@@ -442,19 +445,26 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
 # dims to be specified using negative indices
-def canonicalize_dim(rank: int, idx: int) -> int:
-    # TODO: add a comment for why this is
-    _rank = rank if rank != 0 else 1
+def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
+    if rank < 0:
+        msg = f"Rank cannot be negative but got {rank}"
+        raise IndexError(msg)
 
-    if idx >= 0 and idx < _rank:
+    if rank == 0:
+        if not wrap_scalar:
+            msg = f"Dimension specified as {idx} but tensor has no dimensions"
+            raise IndexError(msg)
+        rank = 1
+
+    if idx >= 0 and idx < rank:
         return idx
 
     if idx < 0:
-        _idx = idx + _rank
+        _idx = idx + rank
     else:
         _idx = idx
 
-    if _idx < 0 or _idx > _rank:
+    if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
         msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
             -rank, rank - 1, idx
@@ -619,7 +629,8 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
 
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]]
+    shape: Union[ShapeType, Tuple[ShapeType]],
+    validate=True,
 ) -> Tuple[int, ...]:
     """
     Returns a shape from varargs.
@@ -643,7 +654,8 @@ def extract_shape_from_varargs(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
-    validate_shape(shape)  # type: ignore[arg-type]
+    if validate:
+        validate_shape(shape)  # type: ignore[arg-type]
     return shape  # type: ignore[return-value]
 
 
@@ -743,6 +755,13 @@ def type_to_dtype(typ: type) -> torch.dtype:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
     raise ValueError("Invalid type!")
+
+
+def get_dtype(x: Union[torch.Tensor, NumberType]):
+    if isinstance(x, torch.Tensor):
+        return x.dtype
+    else:
+        return type_to_dtype(type(x))
 
 
 _ordered_types = (bool, int, float, complex)
@@ -1384,3 +1403,8 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
+
+
+def prod(xs: Sequence[NumberType]) -> NumberType:
+    """Product of elements in input sequence. Returns 1 for empty sequence"""
+    return reduce(operator.mul, xs, 1)

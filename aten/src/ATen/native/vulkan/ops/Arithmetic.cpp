@@ -10,63 +10,84 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-bool broadcast_input(const Tensor& input1, const Tensor& input2) {
-  return ((height_size(input1) > 1 && height_size(input2) == 1) ||
-          (height_size(input2) > 1 && height_size(input1) == 1) ||
-          (height_size(input1) == height_size(input2))) &&
-      ((width_size(input1) > 1 && width_size(input2) == 1) ||
-       (width_size(input2) > 1 && width_size(input1) == 1) ||
-       (width_size(input1) == width_size(input2)));
-}
-
 void check_inputs(const Tensor& input1, const Tensor& input2) {
-  TORCH_CHECK(
-      channels_size(input1) == channels_size(input2),
-      "Vulkan binary elementwise ops require channel dimension to be equal!");
-  if (batch_size(input1) != batch_size(input2)) {
-    TORCH_CHECK(
-        channels_size(input1) % 4 == 0,
-        "Vulkan binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
-  }
-
   const std::string broadcast_error_msg =
-      "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
-
-  TORCH_CHECK(broadcast_input(input1, input2), broadcast_error_msg);
+      "Incompatible dimensions for broadcasting for binary elementwise op!";
+  if (get_dim<Dim4D::Batch>(input1) != get_dim<Dim4D::Batch>(input2)) {
+    TORCH_CHECK(
+        get_dim<Dim4D::Batch>(input1) == 1 || get_dim<Dim4D::Batch>(input2),
+        broadcast_error_msg);
+    TORCH_CHECK(
+        (get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) &&
+         get_dim<Dim4D::Channel>(input1) % 4 == 0) ||
+            get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) ==
+                1 ||
+            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
+                1,
+        "Invalid broadcasting for Vulkan binary elementwise op! "
+        "If batch dimensions aren't equal, then channel dimensions must be "
+        "equal and multiple of 4 or one of the inputs must have "
+        "channel and batch dimensions both equal to 1!");
+  }
+  if (get_dim<Dim4D::Channel>(input1) != get_dim<Dim4D::Channel>(input2)) {
+    TORCH_CHECK(
+        get_dim<Dim4D::Channel>(input1) == 1 || get_dim<Dim4D::Channel>(input2),
+        broadcast_error_msg);
+    TORCH_CHECK(
+        get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) == 1 ||
+            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
+                1,
+        "Invalid broadcasting for Vulkan binary elementwise op! "
+        "If channel dimensions aren't equal, then one of the inputs must have "
+        "channel and batch dimensions both equal to 1!");
+  }
+  if (get_dim<Dim4D::Height>(input1) != get_dim<Dim4D::Height>(input2)) {
+    TORCH_CHECK(
+        get_dim<Dim4D::Height>(input1) == 1 || get_dim<Dim4D::Height>(input2),
+        broadcast_error_msg);
+  }
+  if (get_dim<Dim4D::Width>(input1) != get_dim<Dim4D::Width>(input2)) {
+    TORCH_CHECK(
+        get_dim<Dim4D::Width>(input1) == 1 || get_dim<Dim4D::Width>(input2),
+        broadcast_error_msg);
+  }
 }
 
-std::vector<int64_t> broadcast_size(
-    const Tensor& input1,
-    const Tensor& input2) {
-  std::vector<int64_t> out = {};
-  int input1_size = input1.sizes().size();
-  int input2_size = input2.sizes().size();
-  if (input1_size > input2_size) {
-    for (int i = 0; i < input1_size; i++) {
-      out.push_back(input1.sizes()[i]);
+std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
+  int64_t t1_size = t1.dim();
+  int64_t t2_size = t2.dim();
+
+  std::vector<int64_t> out;
+  if (t1_size > t2_size) {
+    for (int64_t i = 0; i < t1_size; i++) {
+      out.push_back(t1.sizes()[i]);
     }
   } else {
-    for (int i = 0; i < input2_size; i++) {
-      out.push_back(input2.sizes()[i]);
+    for (int64_t i = 0; i < t2_size; i++) {
+      out.push_back(t2.sizes()[i]);
     }
   }
 
-  if (width_size(input1) > 1 && width_size(input2) == 1) {
-    out[out.size() - 1] = width_size(input1);
-  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
-    out[out.size() - 1] = width_size(input2);
+  if (out.size() > 0) {
+    out[out.size() - 1] =
+        std::max(get_dim<Dim4D::Width>(t1), get_dim<Dim4D::Width>(t2));
   }
-
   if (out.size() > 1) {
-    if (height_size(input1) > 1 && height_size(input2) == 1) {
-      out[out.size() - 2] = height_size(input1);
-    } else if (height_size(input2) > 1 && height_size(input1) == 1) {
-      out[out.size() - 2] = height_size(input2);
-    }
+    out[out.size() - 2] =
+        std::max(get_dim<Dim4D::Height>(t1), get_dim<Dim4D::Height>(t2));
+  }
+  if (out.size() > 2) {
+    out[out.size() - 3] =
+        std::max(get_dim<Dim4D::Channel>(t1), get_dim<Dim4D::Channel>(t2));
+  }
+  if (out.size() > 3) {
+    out[out.size() - 4] =
+        std::max(get_dim<Dim4D::Batch>(t1), get_dim<Dim4D::Batch>(t2));
   }
 
   return out;
 }
+
 } // namespace
 using namespace api::utils;
 
@@ -195,15 +216,17 @@ Tensor arithmetic_tensor(
     uvec3 extents;
     uint32_t fill_0;
     uvec3 input1_extents;
-    uint32_t fill_1;
+    uint32_t channel_batch_size_1;
     uvec3 input2_extents;
+    uint32_t channel_batch_size_2;
     float alpha;
   } block{
       v_output.extents(),
       0u,
       v_self.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
+      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       alpha,
   };
 
@@ -326,6 +349,16 @@ Tensor& arithmetic_tensor_(
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
     const api::ShaderSource& shader_descriptor) {
+  TORCH_CHECK(
+      get_dim<Dim4D::Batch>(self_arg) >= get_dim<Dim4D::Batch>(other_arg) &&
+          get_dim<Dim4D::Channel>(self_arg) >=
+              get_dim<Dim4D::Channel>(other_arg) &&
+          get_dim<Dim4D::Height>(self_arg) >=
+              get_dim<Dim4D::Height>(other_arg) &&
+          get_dim<Dim4D::Width>(self_arg) >= get_dim<Dim4D::Width>(other_arg),
+      "Dimensions of input tensor to Vulkan in-place binary elementwise op "
+      "must be less than or equal the dimensions of the underlying tensor.");
+
   check_inputs(self_arg, other_arg);
 
   TORCH_CHECK(
@@ -344,11 +377,13 @@ Tensor& arithmetic_tensor_(
     uvec3 extents;
     uint32_t fill_0;
     uvec3 input_extents;
+    uint32_t channel_batch_size_other;
     float alpha;
   } block{
       v_self.extents(),
       0u,
       v_other.extents(),
+      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       alpha,
   };
 
@@ -431,13 +466,6 @@ Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  if (other_arg.sizes().size() == 0) {
-    return arithmetic_scalar(
-        self_arg,
-        other_arg.item<float>(),
-        c10::optional<Scalar>(alpha.to<float>()),
-        VK_KERNEL(add_scalar));
-  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
@@ -473,13 +501,6 @@ Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  if (other_arg.sizes().size() == 0) {
-    return arithmetic_scalar(
-        self_arg,
-        other_arg.item<float>(),
-        c10::optional<Scalar>(-1 * alpha.to<float>()),
-        VK_KERNEL(add_scalar));
-  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
@@ -503,13 +524,6 @@ Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  if (other_arg.sizes().size() == 0) {
-    return arithmetic_scalar(
-        self_arg,
-        other_arg.item<float>(),
-        c10::optional<Scalar>(),
-        VK_KERNEL(mul_scalar));
-  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
 }
@@ -536,13 +550,6 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  if (other_arg.sizes().size() == 0) {
-    return arithmetic_scalar(
-        self_arg,
-        1.0 / other_arg.item<float>(),
-        c10::optional<Scalar>(),
-        VK_KERNEL(mul_scalar));
-  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
 }

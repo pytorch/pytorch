@@ -1,6 +1,6 @@
 from typing import Callable
 
-from torch._prims.context import TorchRefsMode
+from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
 from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
 
 from torch.fx import GraphModule
@@ -57,7 +57,7 @@ def make_traced(fn: Callable):
         # TODO: caching
         wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
 
-        with TorchRefsMode():
+        with NvfuserPrimsMode(), TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
