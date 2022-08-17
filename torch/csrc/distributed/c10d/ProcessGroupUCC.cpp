@@ -1100,7 +1100,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allgather(
         tensor.device(),
         inputTensors,
         outputTensors[0],
-        "ucc:allgather");
+        "ucc:all_gather");
   }
 }
 
