@@ -171,6 +171,15 @@ def maybe_partition_graph(gm: GraphModule):
                 category=RuntimeWarning,
             )
         partitioned_graph = partitioner.fuse_partitions(partitions)
+
+        # Overwriting graph's __call__() function with nvfuser_execute
+        # This avoids the need to call the interpreter on the graph
+        for node in partitioned_graph.graph.nodes:
+            # TODO: use a better way to identify fused submodule
+            if node.op == "call_module" and "fused_" in node.name:
+                fused_module = getattr(partitioned_graph, node.name)
+                fused_module._wrapped_call = nvfuser_execute
+
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
@@ -181,11 +190,6 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args):
     # because it avoids PartitionedInterpreter's overhead
     gm, is_partitioned = maybe_partition_graph(gm)
     if is_partitioned:
-        result = PartitionedInterpreter(gm).run(*args)
-        # PartitionedInterpreter doesn't run unflatten using out_spec
-        if getattr(gm, "_out_spec", None) is not None:
-            assert gm._out_spec is not None  # for mypy
-            return tree_unflatten(result, gm._out_spec)
-        return result
+        return gm(*args)
     else:
         return nvfuser_execute(gm, *args)
