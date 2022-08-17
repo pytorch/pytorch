@@ -731,7 +731,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
-        skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
         xfail('cumprod'),
         xfail('lu_solve'),
         xfail('linalg.det'),
@@ -849,7 +848,6 @@ class TestOperators(TestCase):
         xfail('pinverse'),
         xfail('prod'),
         xfail('put'),
-        skip('linalg.det'),  # https://github.com/pytorch/functorch/issues/961
         xfail('quantile'),
         xfail('renorm'),
         xfail('take'),
