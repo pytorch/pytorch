@@ -1281,8 +1281,17 @@ def isclose(
 
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
-    g = gcd(a, b)
-    return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
+    dtype = a.dtype
+    promote_to_int = dtype in (torch.int8, torch.int16)
+    if promote_to_int:
+        a = prims.convert_element_type(a, torch.int32)
+        b = prims.convert_element_type(b, torch.int32)
+
+    g = torch.gcd(a, b)
+    # Avoid division by zero in case gcd(0, 0) == 0
+    g = torch.where(g == 0, 1, g)
+    res = torch.abs(prims.div(a, g) * b)
+    return res if not promote_to_int else prims.convert_element_type(res, dtype)
 
 
 # TODO: add docstring
