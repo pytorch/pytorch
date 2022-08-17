@@ -130,7 +130,11 @@ class _TestONNXRuntime(common_utils.TestCase):
 
         if self.is_script_test_enabled and self.is_script:
             script_model = model if is_model_script else torch.jit.script(model)
-            _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False, ignoreNone=False)
-
+            _run_test(
+                script_model,
+                scripting_remained_onnx_input_idx,
+                flatten=False,
+                ignoreNone=False,
+            )
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
