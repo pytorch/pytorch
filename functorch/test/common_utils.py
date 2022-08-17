@@ -9,9 +9,9 @@ import torch
 import functorch
 from functorch import vmap
 import torch.utils._pytree as pytree
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
+from torch.testing._internal.common_methods_invocations import op_db
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
@@ -36,6 +36,19 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         for idx in range(len(outs[0])):
             loop_out.append(torch.stack([i[idx] for i in outs], out_dim))
     return loop_out
+
+
+def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
+    if inplace_variant is None:
+        return False
+    if sample_input.broadcasts_input:
+        return False
+
+    # Check if input's dtype matches the output's dtype
+    args = (sample_input.input,) + sample_input.args
+    kwargs = sample_input.kwargs
+    output_dtype = op(*args, **kwargs).dtype
+    return sample_input.input.dtype == output_dtype
 
 
 # This is kind of dangerous, please think carefully before using it.
@@ -271,7 +284,7 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = functorch_lagging_op_db + additional_op_db
+    all_opinfos = op_db + additional_op_db
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
@@ -306,7 +319,7 @@ def tol1(op_name, override_dct, *, device_type=None):
 
 
 def opsToleranceOverride(test_case_name, base_test_name, overrides):
-    all_opinfos = functorch_lagging_op_db + additional_op_db
+    all_opinfos = op_db + additional_op_db
     for override in overrides:
         op_name, variant_name, override, device_type = override
         matching_opinfos = [o for o in all_opinfos

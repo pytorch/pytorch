@@ -30,7 +30,7 @@ from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
-from torch.onnx import symbolic_helper
+from torch.onnx import _type_utils, symbolic_helper
 
 
 # note (mkozuki): Why `grid_sampler` instead of `grid_sample`?
@@ -74,7 +74,9 @@ def scatter_add(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.JitScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
 
         return g.op(
