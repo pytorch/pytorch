@@ -23,12 +23,14 @@ def create_contiguous(shape):
 
 def is_symbolic_op(func):
     return func in [aten.sym_size.default, aten.dim.default,
-                    aten.is_contiguous.default, aten.stride.default, aten.sym_numel.default
+                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default
                     ]
 
 def handle_symbolic_op(func, args, kwargs):
     assert is_symbolic_op(func)
     if func == torch.ops.aten.sym_size.default:
+        return None
+    if func == torch.ops.aten.sym_stride.default:
         return None
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
