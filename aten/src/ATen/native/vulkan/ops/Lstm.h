@@ -16,13 +16,12 @@ class LstmPackedContext final : virtual public VulkanPackedContext,
  public:
   LstmPackedContext(
       const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
-      const bool has_biases,
-      const int64_t num_layers,
-      const double dropout,
-      const bool train,
-      const bool bidirectional,
-      const bool batch_first,
-      const bool fill_unpacked = true);
+      bool has_biases,
+      int64_t num_layers,
+      double dropout,
+      bool train,
+      bool bidirectional,
+      bool batch_first);
 
   /*
    * Assigns a name to each index in the unpacked list.

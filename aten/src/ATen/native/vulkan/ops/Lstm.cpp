@@ -152,8 +152,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 std::vector<c10::intrusive_ptr<LinearPackedContext>>
 pack_lstm_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
-    const int64_t num_layers,
-    const bool fill_unpacked) {
+    int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
       "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'.");
@@ -189,35 +188,26 @@ pack_lstm_linear_op_contexts(
     const auto& b_hg = b_h_ifgo[2];
     const auto& b_ho = b_h_ifgo[3];
 
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_ii.t(), b_ii, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_hi.t(), b_hi, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_if.t(), b_if, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_hf.t(), b_hf, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_ig.t(), b_ig, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_hg.t(), b_hg, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_io.t(), b_io, fill_unpacked));
-    linear_op_contexts.emplace_back(
-        create_packed_linear(w_ho.t(), b_ho, fill_unpacked));
+    linear_op_contexts.emplace_back(create_linear_context(w_ii.t(), b_ii));
+    linear_op_contexts.emplace_back(create_linear_context(w_hi.t(), b_hi));
+    linear_op_contexts.emplace_back(create_linear_context(w_if.t(), b_if));
+    linear_op_contexts.emplace_back(create_linear_context(w_hf.t(), b_hf));
+    linear_op_contexts.emplace_back(create_linear_context(w_ig.t(), b_ig));
+    linear_op_contexts.emplace_back(create_linear_context(w_hg.t(), b_hg));
+    linear_op_contexts.emplace_back(create_linear_context(w_io.t(), b_io));
+    linear_op_contexts.emplace_back(create_linear_context(w_ho.t(), b_ho));
   }
   return linear_op_contexts;
 }
 
 LstmPackedContext::LstmPackedContext(
     const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
-    const bool has_biases,
-    const int64_t num_layers,
-    const double dropout,
-    const bool train,
-    const bool bidirectional,
-    const bool batch_first,
-    const bool fill_unpacked) {
+    bool has_biases,
+    int64_t num_layers,
+    double dropout,
+    bool train,
+    bool bidirectional,
+    bool batch_first) {
   TORCH_INTERNAL_ASSERT(
       has_biases, "Vulkan LSTM expects 'has_biases' to be true.");
   TORCH_INTERNAL_ASSERT(!train, "Vulkan LSTM expects 'train' to be false.");
@@ -230,8 +220,7 @@ LstmPackedContext::LstmPackedContext(
       "Vulkan LSTM expects 'dropout' to be 0.0.");
 
   packed_.reserve(Packed::NumArgs);
-  packed_.emplace_back(
-      pack_lstm_linear_op_contexts(params_cpu, num_layers, fill_unpacked));
+  packed_.emplace_back(pack_lstm_linear_op_contexts(params_cpu, num_layers));
   packed_.emplace_back(has_biases);
   packed_.emplace_back(num_layers);
   packed_.emplace_back(dropout);
@@ -269,13 +258,8 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
     TORCH_CHECK(
-        unpacked_linear_context.size() ==
-            LinearPackedContext::Unpacked::NumArgs,
-        "unpacked_linear_context must have ",
-        Unpacked::NumArgs,
-        " arguments, found ",
-        unpacked_linear_context.size(),
-        "!");
+        unpacked_linear_context.size() > 0u,
+        "unpacked_linear_context does not have any elements!");
 
     params_cpu.emplace_back(
         unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
