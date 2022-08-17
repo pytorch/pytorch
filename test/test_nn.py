@@ -954,6 +954,14 @@ class TestNN(NNTestCase):
                     self.assertEqual(y, y_)
             self.assertEqual(y.sum(), 4186112.)
 
+    def test_conv2d_mixed_dtypes(self):
+        # Ensure correct error when input and parameter dtypes are mismatched on CPU
+        # See https://github.com/pytorch/pytorch/issues/83328
+        m = torch.nn.Conv2d(20, 80, 1)
+        inp = torch.rand([4, 20, 16, 16], dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError, r"Input type .* and weight type .* should be the same"):
+            m(inp)
+
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
@@ -14390,7 +14398,6 @@ class TestNNDeviceType(NNTestCase):
         if bias is not None:
             bias.requires_grad_(False)
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
-
 
     def test_Dropout(self, device):
         input = torch.empty(1000)
