@@ -48,11 +48,6 @@ void registerFusionBackend(
   getFusionBackends()[backend_type] = std::move(ctor);
 }
 
-void deregisterFusionBackend(at::Device::Type backend_type) {
-  std::lock_guard<std::mutex> guard(fusionBackendLock());
-  getFusionBackends().erase(backend_type);
-}
-
 bool hasFusionBackend(at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().count(backend_type);

@@ -217,7 +217,6 @@ class TORCH_API class_base {
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
 TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
-TORCH_API void deregisterCustomClassMethod(const c10::QualifiedName& name);
 
 // Given a qualified name (e.g. __torch__.torch.classes.Foo), return
 // the ClassType pointer to the Type that describes that custom class,

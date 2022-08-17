@@ -51,7 +51,8 @@ jobs:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
+            sudo apt update -q
+            wget -q https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
             sudo apt install ./buck.2021.01.12.01_all.deb
 
       - name: Download third party libraries and generate wrappers

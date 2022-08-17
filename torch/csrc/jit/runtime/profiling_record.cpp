@@ -22,15 +22,9 @@ class ProfileRegistry {
     return &profile_registry_;
   }
 
-  int registerProfileNode(const std::function<bool(const Node*)>& func) {
+  void registerProfileNode(const std::function<bool(const Node*)>& func) {
     std::lock_guard<std::mutex> guard(mutex_);
-    registry_funcs_[registry_index_] = func;
-    return registry_index_++;
-  }
-
-  void deregisterProfileNode(int index) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    registry_funcs_.erase(index);
+    registry_funcs_.push_back(func);
   }
 
   bool shouldProfileNode(const Node* node) {
@@ -41,7 +35,7 @@ class ProfileRegistry {
       return true;
     }
     for (const auto& func : registry_funcs_) {
-      if (func.second(node)) {
+      if (func(node)) {
         return true;
       }
     }
@@ -49,19 +43,14 @@ class ProfileRegistry {
   }
 
  private:
-  int registry_index_{};
-  std::unordered_map<int, std::function<bool(const Node*)>> registry_funcs_;
+  std::vector<std::function<bool(const Node*)>> registry_funcs_;
   std::mutex mutex_;
 };
 
 } // namespace
 
-int RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
-  return ProfileRegistry::getRegistry()->registerProfileNode(func);
-}
-
-void DeregisterProfilingNode(int index) {
-  ProfileRegistry::getRegistry()->deregisterProfileNode(index);
+void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileNode(func);
 }
 
 bool ShapeSymbolTable::bindSymbolicShapes(
