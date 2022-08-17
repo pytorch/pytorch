@@ -1366,8 +1366,23 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
-  // full check includes strict shape inference check
-  onnx::checker::check_model(model, full_check);
+  // baseline check
+  onnx::checker::check_model(model);
+  onnx::shape_inference::InferShapes(model);
+  // full check including strict shape inference check
+  // Notice that onnx::checker::check_model doesn't
+  // include non-strict model onnx::shape_inference::InferShapes(model).
+  // That's why we need to write another onnx::checker::check_model(model,
+  // full_check) here.
+  if (full_check) {
+    try {
+      onnx::checker::check_model(model, full_check);
+    } catch (const onnx::InferenceError& ex) {
+      TORCH_WARN(
+          "This is an invalid ONNX model with failed ONNX shape type inference. It is not executable by ONNXRUNTIME platform. More detail: ",
+          ex.what());
+    }
+  }
 }
 
 } // namespace jit
