@@ -1,18 +1,15 @@
-#define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/core/TensorBase.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/NumericLimits.cuh>
-#include <ATen/AccumulateType.h>
-#include <ATen/Dispatch.h>
+#pragma once
 #include <ATen/NumericUtils.h>
-#include <c10/util/accumulate.h>
-#include <c10/util/Load.h>
-
+#include <ATen/core/TensorBase.h>
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
-#include <ATen/native/cuda/ScanKernels.h>
+#include <c10/util/Load.h>
+#include <limits>
+#include <cmath>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 template <typename integer>
 constexpr inline integer ceil_div(integer n, integer m) {
@@ -158,7 +155,7 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
   }
 }
 
-void check_fits_in_unsigned(int64_t val, const char* name) {
+inline void check_fits_in_unsigned(int64_t val, const char* name) {
   constexpr auto umax = std::numeric_limits<uint32_t>::max();
   TORCH_CHECK(
       val >= 0 && val <= umax, name, " must fit in a 32-bit uint32_t value");
@@ -222,22 +219,6 @@ void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, con
   } else {
     scan_outer_dim_with_indices<scalar_t>(*self_, values, indices, dim, init, binary_op);
   }
-}
-
-void launch_cummax_cuda_kernel(const TensorBase& self, const TensorBase& values, const TensorBase& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
-    self.scalar_type(), "cummax_cuda", [&]() {
-    scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
-    scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::greater_equal<scalar_t>());
-  });
-}
-
-void launch_cummin_cuda_kernel(const TensorBase& self, const TensorBase& values, const TensorBase& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
-    self.scalar_type(), "cummin_cuda", [&]() {
-    scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
-    scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::less_equal<scalar_t>());
-  });
 }
 
 // TODO: The implementation of `tensor_kernel_scan_outer_dim` and
@@ -468,54 +449,4 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   }
 }
 
-void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
-      self.scalar_type(), "logcumsumexp_cuda",
-      [&]() {
-        using accscalar_t = acc_type<scalar_t, true>;
-        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-          scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
-          scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
-          if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
-          // nan will be propagated here
-              return ::log1p(std::exp(min - max)) + max;
-          } else {
-          // special case to correctly handle infinite inputs
-             return x;
-          }
-        };
-        scan_dim<scalar_t>(self, result, dim, init, log_add_exp);
-      });
-}
-
-void launch_cumsum_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
-      self.scalar_type(), "cumsum_cuda",
-      [&]() {
-        scalar_t init = 0;
-        scan_dim<scalar_t>(
-            self,
-            result,
-            dim,
-            init,
-            std::plus<scalar_t>());
-      });
-}
-
-void launch_cumprod_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
-        scalar_t init = 1;
-        scan_dim<scalar_t>(
-            self,
-            result,
-            dim,
-            init,
-            std::multiplies<scalar_t>());
-      });
-}
-
-}} // namespace at::native
+}}  // namespace at::native

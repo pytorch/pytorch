@@ -123,11 +123,11 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
     size_t size_at_dim = 0;
     for (const auto i : c10::irange(materialized.size())) {
       const Tensor& t = materialized[i];
+      all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
       if (!at::native::cat_should_skip_tensor(t)) {
         at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
         size_at_dim += t.size(dim);
         all_contiguous = all_contiguous && t.is_contiguous(memory_format);
-        all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
         all_same_sizes_and_stride = all_same_sizes_and_stride &&
             t.sizes() == materialized[valid].get().sizes() &&
             t.strides() == materialized[valid].get().strides();
@@ -3250,7 +3250,7 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
-              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+              src, " dims) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());
