@@ -534,3 +534,5 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. These modules are missing docs. Adding them here only for tracking
 .. automodule:: torch.nn.quantizable
 .. automodule:: torch.nn.quantizable.modules
+.. automodule:: torch.nn.quantized
+   :noindex:
