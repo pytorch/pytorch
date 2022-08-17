@@ -19,6 +19,24 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
  public:
   LinearPackedContext(const Tensor& weight, const c10::optional<Tensor>& bias);
 
+  /*
+   * Assigns a name to each index in the unpacked list.
+   */
+  struct Unpacked final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+  };
+
+  /*
+   * Assigns a name to each index in the packed list.
+   */
+  struct Packed final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+    static constexpr uint32_t WeightSizes = 2u;
+    static constexpr uint32_t BiasDefined = 3u;
+  };
+
   static LinearPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
