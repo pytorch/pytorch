@@ -141,7 +141,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   void compileRtc(
       const std::string& code,
       const std::string& name,
-      bool structured = false);
+      bool structured = false,
+      CompileOptions options = CompileOptions());
 
   //! Internal tests only. Runs the compiled CUDA kernel from compileRtc.
   void runRtc(

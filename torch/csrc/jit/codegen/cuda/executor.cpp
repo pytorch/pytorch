@@ -1098,7 +1098,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 void FusionExecutor::compileRtc(
     const std::string& code,
     const std::string& name,
-    bool structured) {
+    bool structured,
+    CompileOptions options) {
   FUSER_PERF_SCOPE("ExecutorRunFusion::compileRtc");
   std::string scode;
   if (!structured) {
@@ -1107,7 +1108,7 @@ void FusionExecutor::compileRtc(
     scode = code;
   }
   fusion_id_ = 1;
-  options_ = CompileOptions();
+  options_ = options;
 
   std::tie(compiled_kernel_, last_compiler_log_) =
       executor_utils::nvrtcCompile(scode, name, fusion_id_);
