@@ -14,6 +14,7 @@
 
 #include <regex>
 #include <stack>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -301,6 +302,8 @@ class InsertObserversHelper {
   // analyze the graph and record necessary information that can
   // be used in insert observers
   void analyze(Module& module, const std::string& method_name);
+
+  void removeActivationObservers();
 
   /**
    * Recursively insert observers for the method, also we'll process
@@ -1180,6 +1183,20 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
   return false;
 }
 
+void InsertObserversHelper::removeActivationObservers() {
+  std::vector<std::unordered_map<Value*, Module>::iterator>
+      values_to_be_removed;
+  for (auto it = observer_for_value_.begin(); it != observer_for_value_.end();
+       it++) {
+    if (!isWeight(it->first)) {
+      values_to_be_removed.push_back(it);
+    }
+  }
+  for (auto it : values_to_be_removed) {
+    observer_for_value_.erase(it);
+  }
+}
+
 void InsertObserversHelper::fillValueObserverMap(
     Module& module,
     const std::string& method_name) {
@@ -1581,8 +1598,56 @@ Module InsertObservers(
   // since we need to know the boundary value mapping to trace
   // through the calls
   helper.analyze(module, method_name);
+  // helper.removeActivationObservers();
   helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
+}
+
+Module InsertObserversForOnDevicePTQ(
+    Module& input_module,
+    const std::string& method_name,
+    const QConfigDict& qconfig_dict,
+    bool inplace,
+    QuantType quant_type) {
+  ModuleQConfigMap map_before_clone;
+  fillQConfigMap(input_module, qconfig_dict, map_before_clone);
+  ModuleCloneHelper mh;
+  Module cloned_module = mh.clone(input_module, map_before_clone, inplace);
+  std::shared_ptr<Graph> g = cloned_module.get_method(method_name).graph();
+  SwapFunctionalLinear(g);
+  std::string observer_method_name = "observe_" + method_name;
+  cloneMethod(cloned_module, method_name, observer_method_name);
+  ModuleQConfigMap module_qconfig_map;
+  // Since the types are changed after clone, we need to fill
+  // the qconfig map again
+  fillQConfigMap(cloned_module, qconfig_dict, module_qconfig_map);
+  GRAPH_DEBUG("Quant type:", quant_type);
+  InsertObserversHelper helper(module_qconfig_map, quant_type);
+  // Removes list mutation part is not clear. Is it needed
+  helper.preprocess(cloned_module, observer_method_name);
+  // Since we expect the graph to be inlined this should not have any use
+  // However, this function does handle if blocks
+  // Although as far as I understood If blocks are not really handled
+  // in JIT quantization. Should we just protect against this. That is if we
+  // find observable value inside If block? Also side effect of inlining is that
+  // you will have multiple getattrs for the same attribute and thus potentially
+  // multiple observers observing the same value. This will also lead to
+  // increased size of the packed param struct. I dont expect this to be a
+  // commong pattern but something to be aware fo Note that current quant
+  // workflow does not prevent this anyway since during inset quant dequant
+  // things are inlined anyway
+  helper.fillBoundaryValueMap(cloned_module, observer_method_name);
+  // analyze needs to run after fillBoundaryValueMap
+  // since we need to know the boundary value mapping to trace
+  // through the calls
+  helper.analyze(cloned_module, observer_method_name);
+  // Remove activation observer if quant_type is dynamic
+  if (quant_type == QuantType::DYNAMIC) {
+    helper.removeActivationObservers();
+  }
+  helper.insertObservers(
+      cloned_module, observer_method_name, /* is_entry_point */ true);
+  return cloned_module;
 }
 } // namespace jit
 } // namespace torch
