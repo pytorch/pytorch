@@ -2,17 +2,20 @@
 
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/function.h>
 
-bool THPEngine_initModule(PyObject *module);
+bool THPEngine_initModule(PyObject* module);
 
-namespace torch { namespace autograd { namespace python {
+namespace torch {
+namespace autograd {
+namespace python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
   ~PythonEngine() override;
-  void thread_init(int device,
+  void thread_init(
+      int device,
       const std::shared_ptr<ReadyQueue>& ready_queue,
       bool should_increment) override;
   void thread_on_exception(
@@ -33,9 +36,13 @@ struct PythonEngine : public Engine {
       InputBuffer&& input_buffer) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
-  std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() override;
-  private:
-    PythonEngine();
+  std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks()
+      override;
+
+ private:
+  PythonEngine();
 };
 
-}}} // namespace torch::autograd::python
+} // namespace python
+} // namespace autograd
+} // namespace torch

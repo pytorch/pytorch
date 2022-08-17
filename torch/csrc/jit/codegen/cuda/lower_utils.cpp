@@ -98,6 +98,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ExpandOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
        expr->getExprType().value() == ExprType::ViewAsScalar ||
@@ -182,14 +183,13 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
-bool isReductionOp(const Expr* expr) {
-  // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
-}
-
-bool isReductionTvOp(const Expr* expr) {
-  return isTvOp(expr) && isReductionOp(expr);
+TensorView* getTvInput(const Expr* expr) {
+  for (auto inp : expr->inputs()) {
+    if (auto tv = getTv(inp)) {
+      return tv;
+    }
+  }
+  return nullptr;
 }
 
 bool isScalarOp(const Expr* expr) {
@@ -263,8 +263,8 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(
     return c10::optional<IterDomain*>(reduction_on_xdim);
   }
 
-  if (reduction_on_xdim->extent()->isConst()) {
-    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+  if (reduction_on_xdim->extent()->isConstInt()) {
+    auto extent_value = reduction_on_xdim->extent()->evaluateInt();
     if (extent_value % at::cuda::warp_size() == 0) {
       return c10::optional<IterDomain*>(reduction_on_xdim);
     }
@@ -365,8 +365,8 @@ kir::Allocate* allocGlobalBufferForGridComm(
     DataType dtype,
     bool zero_init) {
   const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
+      IrBuilder::create<IterDomain>(IterDomainBuilder(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
   const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
   const auto buffer_tv =
       IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
@@ -406,6 +406,31 @@ class ExprFlattener : private kir::IrVisitor {
 
 std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
+}
+
+IterDomain* caMapExactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
+
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
 }
 
 } // namespace ir_utils
@@ -457,7 +482,7 @@ BasicAllocInfo getAllocInformation(
 
     // Allocation of a double buffered tensor is placed outside its
     // double buffer axis.
-    if (tv->isDoubleBuffered() &&
+    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
         tv->axis(info.alloc_pos) ==
             gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
       outer_alloc_found = true;

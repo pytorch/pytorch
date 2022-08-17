@@ -77,6 +77,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             applying the shuffle
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> shuffle_dp = dp.shuffle()
@@ -153,6 +154,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.buffer_size,
             self._enabled,
             self._seed,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
             self._rng.getstate(),
         )
         return state
@@ -163,6 +166,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.buffer_size,
             self._enabled,
             self._seed,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
             rng_state,
         ) = state
         self._rng = random.Random()

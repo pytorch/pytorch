@@ -104,19 +104,24 @@ class TestLazyReuseIr(TestCase):
     def testBatchNorm(self):
         device = get_test_device()
         x = torch.randn(16, 3, 224, 224, device=device)
-        bn = torch.nn.BatchNorm2d(3).to(device=device)
+        weight = torch.randn(3, device=device)
+        bias = torch.randn(3, device=device)
+
         for i in range(10):
-            z = bn(x)
+            # BatchNorm2d does extra checks on dimensions which SymInts don't support yet
+            # so we call `torch.ops.aten.native_batch_norm` to bypass the checks.
+            z, _, _ = torch.ops.aten.native_batch_norm(x, weight, bias, None, None, True, 0.1, 1e-5)
 
         device = "lazy"
         x_lazy = x.detach().clone().to(device=device)
-        bn = bn.to(device=device)
+        weight_lazy = weight.detach().clone().to(device=device)
+        bias_lazy = bias.detach().clone().to(device=device)
         for i in range(10):
-            z_lazy = bn(x_lazy)
+            z_lazy, _, _ = torch.ops.aten.native_batch_norm(x_lazy, weight_lazy, bias_lazy, None, None, True, 0.1, 1e-5)
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::TSNativeBatchNormForward") >= 7
+        assert metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm") >= 7
         metrics.reset()
         torch._lazy.ir_cache.reset()
 

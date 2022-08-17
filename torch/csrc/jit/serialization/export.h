@@ -262,5 +262,11 @@ bool getMobileInterfaceCallExport();
 
 CompilationOptions getOptionsFromGlobal();
 
+extern void (*_save_jit_module_to)(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func);
+
 } // namespace jit
 } // namespace torch

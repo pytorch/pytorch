@@ -437,17 +437,16 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-// Sums `tensor` repeatedly to produce a tensor of shape `shape`.
-// Precondition: is_expandable_to(shape, tensor.sizes()) must be true
 static inline Tensor sum_to(
     Tensor tensor,
-    const IntArrayRef shape,
+    const c10::SymIntArrayRef shape,
     bool always_return_non_view = false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
-  c10::SmallVector<int64_t, 8> reduce_dims;
-  const at::IntArrayRef sizes = tensor.sizes();
+
+  auto sizes = tensor.sym_sizes();
+  c10::SmallVector<c10::SymInt, 8> reduce_dims;
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
@@ -457,34 +456,57 @@ static inline Tensor sum_to(
       reduce_dims.push_back(i);
     }
   }
+
   if (!reduce_dims.empty()) {
-    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
+    tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
   }
+
   if (always_return_non_view) {
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
     // of the input.
-    return leading_dims > 0 ? at::view_copy(tensor, shape) : tensor.clone();
+    return leading_dims > 0 ? at::view_copy_symint(tensor, shape)
+                            : tensor.clone();
   } else {
-    return leading_dims > 0 ? tensor.view(shape) : tensor;
+    return leading_dims > 0 ? tensor.view_symint(shape) : tensor;
   }
 }
 
-// True if `shape` can be broadcasted to `desired`
-static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+// Sums `tensor` repeatedly to produce a tensor of shape `shape`.
+// Precondition: is_expandable_to(shape, tensor.sizes()) must be true
+static inline Tensor sum_to(
+    Tensor tensor,
+    const IntArrayRef shape,
+    bool always_return_non_view = false) {
+  auto sym_size = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
+  return sum_to(tensor, sym_size, always_return_non_view);
+}
+
+static inline bool is_expandable_to(
+    SymIntArrayRef shape,
+    c10::SymIntArrayRef desired) {
   size_t ndim = shape.size();
   size_t target_dim = desired.size();
   if (ndim > target_dim) {
     return false;
   }
   for (const auto i : c10::irange(ndim)) {
-    int64_t size = shape[ndim - i - 1];
-    int64_t target = desired[target_dim - i - 1];
+    auto size = shape[ndim - i - 1];
+    auto target = desired[target_dim - i - 1];
     if (size != target && size != 1) {
       return false;
     }
   }
   return true;
+}
+
+static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+  auto sym_shape = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
+  auto sym_desired = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(desired.data()), desired.size());
+  return is_expandable_to(sym_shape, sym_desired);
 }
 
 } // namespace at

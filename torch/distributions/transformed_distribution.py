@@ -6,6 +6,7 @@ from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
 from typing import Dict
 
+__all__ = ['TransformedDistribution']
 
 class TransformedDistribution(Distribution):
     r"""

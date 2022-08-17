@@ -1,82 +1,55 @@
-import fileinput
-import sys
+import argparse
+import json
 import os
-from typing import Any
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Dict, List
 
-from tools.stats.scribe import (
-    schema_from_sample,
-    rds_write,
-    register_rds_schema,
+from tools.stats.upload_stats_lib import (
+    download_gha_artifacts,
+    download_s3_artifacts,
+    unzip,
+    upload_to_rockset,
 )
 
 
-def sprint(*args: Any) -> None:
-    print("[sccache_stats]", *args, file=sys.stderr)
+def get_sccache_stats(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> List[Dict[str, Any]]:
+    with TemporaryDirectory() as temp_dir:
+        print("Using temporary directory:", temp_dir)
+        os.chdir(temp_dir)
 
+        # Download and extract all the reports (both GHA and S3)
+        download_s3_artifacts("sccache-stats", workflow_run_id, workflow_run_attempt)
 
-def parse_value(value: str) -> Any:
-    # Take the value from a line of `sccache --show-stats` and try to parse
-    # out a value
-    try:
-        return int(value)
-    except ValueError:
-        # sccache reports times as 0.000 s, so detect that here and strip
-        # off the non-numeric parts
-        if value.endswith(" s"):
-            return float(value[: -len(" s")])
+        artifact_paths = download_gha_artifacts(
+            "sccache-stats", workflow_run_id, workflow_run_attempt
+        )
+        for path in artifact_paths:
+            unzip(path)
 
-    return value
-
-
-def get_name(name: str) -> str:
-    return name.replace(" ", "_").replace("-", "_").lower()
-
-
-STAT_NAMES = {
-    "compile_requests",
-    "compile_requests_executed",
-    "cache_hits",
-    "cache_misses",
-    "cache_timeouts",
-    "cache_read_errors",
-    "forced_recaches",
-    "cache_write_errors",
-    "compilation_failures",
-    "cache_errors",
-    "non_cacheable_compilations",
-    "non_cacheable_calls",
-    "non_compilation_calls",
-    "unsupported_compiler_calls",
-    "average_cache_write",
-    "average_cache_read_miss",
-    "average_cache_read_hit",
-    "failed_distributed_compilations",
-}
+        stats_jsons = []
+        for json_file in Path(".").glob("**/*.json"):
+            with open(json_file) as f:
+                stats_jsons.append(json.load(f))
+        return stats_jsons
 
 
 if __name__ == "__main__":
-    if os.getenv("IS_GHA", "0") == "1":
-        data = {}
-        if len(sys.argv) == 2:
-            with open(sys.argv[1]) as f:
-                lines = f.readlines()
-        else:
-            lines = list(fileinput.input())
-        for line in lines:
-            line = line.strip()
-            values = [x.strip() for x in line.split("  ")]
-            values = [x for x in values if x != ""]
-            if len(values) == 2:
-                name = get_name(values[0])
-                if name in STAT_NAMES:
-                    data[name] = parse_value(values[1])
-
-        # The data from sccache is always the same so this should be fine, if it
-        # ever changes we will probably need to break this out so the fields
-        # we want are hardcoded
-        register_rds_schema("sccache_stats", schema_from_sample(data))
-
-        rds_write("sccache_stats", [data])
-        sprint("Wrote sccache stats to DB")
-    else:
-        sprint("Not in GitHub Actions, skipping")
+    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser.add_argument(
+        "--workflow-run-id",
+        type=int,
+        required=True,
+        help="id of the workflow to get artifacts from",
+    )
+    parser.add_argument(
+        "--workflow-run-attempt",
+        type=int,
+        required=True,
+        help="which retry of the workflow this is",
+    )
+    args = parser.parse_args()
+    stats = get_sccache_stats(args.workflow_run_id, args.workflow_run_attempt)
+    upload_to_rockset("sccache_stats", stats)

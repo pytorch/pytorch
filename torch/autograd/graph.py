@@ -47,11 +47,11 @@ class saved_tensors_hooks():
         >>> b = torch.ones(5, requires_grad=True) * 2
         >>> with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         ...     y = a * b
-        Packing tensor([1., 1., 1., 1., 1.])
-        Packing tensor([2., 2., 2., 2., 2.])
+        Packing tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Packing tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
         >>> y.sum().backward()
-        Unpacking tensor([1., 1., 1., 1., 1.])
-        Unpacking tensor([2., 2., 2., 2., 2.])
+        Unpacking tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Unpacking tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
 
     .. warning ::
         Performing an inplace operation on the input to either hooks may lead
@@ -93,6 +93,7 @@ class save_on_cpu(saved_tensors_hooks):
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:CUDAHOME)
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")

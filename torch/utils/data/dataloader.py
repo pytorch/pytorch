@@ -5,12 +5,16 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
-import os
-import threading
-import itertools
-import warnings
-import queue
 import functools
+import itertools
+import logging
+import os
+import queue
+import threading
+import time
+import warnings
+
+from datetime import timedelta
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
@@ -62,6 +66,8 @@ default_collate: _collate_fn_t = _utils.collate.default_collate
 default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
+logger = logging.getLogger(__name__)
 
 
 class _DatasetKind(object):
@@ -140,7 +146,7 @@ class DataLoader(Generic[T_co]):
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
-        collate_fn (callable, optional): merges a list of samples to form a
+        collate_fn (Callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
@@ -153,7 +159,7 @@ class DataLoader(Generic[T_co]):
             will be smaller. (default: ``False``)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: ``0``)
-        worker_init_fn (callable, optional): If not ``None``, this will be called on each
+        worker_init_fn (Callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
@@ -256,6 +262,7 @@ class DataLoader(Generic[T_co]):
                 torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
+            ws, rank = _get_distributed_settings()
             if num_workers > 0:
                 self.worker_init_fn = functools.partial(
                     _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
@@ -560,21 +567,51 @@ class DataLoader(Generic[T_co]):
 
     def _get_shared_seed(self):
         if isinstance(self.dataset, IterDataPipe):
-            _shared_tensor_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+            _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
             if dist.is_available() and dist.is_initialized():
                 rank = dist.get_rank()
+                ws = dist.get_world_size()
+                store = dist.distributed_c10d._get_default_store()
                 if rank == 0:
-                    ws = dist.get_world_size()
-                    reqs = []
-                    for rank_id in range(1, ws):
-                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
-                        reqs.append(req)
-                    for req in reqs:
-                        req.wait()
+                    _shared_seed_str = str(_shared_seed)
+                    store.set(_utils.DATAPIPE_SHARED_SEED, _shared_seed_str)
+                    logger.info(f"Shared seed ({_shared_seed_str}) sent to store on rank 0")
+                    # Use 'add' instead of 'get' since for some store implementations 'add'
+                    # doesn't work well with 'get'.
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    start = time.time()
+                    while _shared_seed_recv_cnt < ws:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the signal from the distribtued store on "
+                                               "Rank 0 that all other Ranks have received the shared seed. "
+                                               f"(world_size={ws}, received={_shared_seed_recv_cnt}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
+                    # Reset after all distributed processes have received the shared seed
+                    store.set(_utils.DATAPIPE_SHARED_SEED, "")
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
+                    assert _shared_seed_recv_cnt == 0
                 else:
-                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
-            _shared_seed = _shared_tensor_seed.item()
-            del _shared_tensor_seed
+                    _shared_seed_str = ""
+                    start = time.time()
+                    while len(_shared_seed_str) == 0:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the shared seed from the distribtued store "
+                                               f"on Rank {rank}. (world_size={ws}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
+                    logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    # Exit only when all ranks received seed, otherwise we are at risk that current rank
+                    # will reach same section of the code again while rank zero still in the previous iteration
+                    while _shared_seed_recv_cnt > 0:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
+                    _shared_seed = int(_shared_seed_str)
             return _shared_seed
         else:
             return None

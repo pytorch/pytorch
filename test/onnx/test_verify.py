@@ -1,15 +1,14 @@
 # Owner(s): ["module: onnx"]
 
-from test_pytorch_common import TestCase, run_tests
-from verify import verify
-
 import caffe2.python.onnx.backend as backend
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
+from torch.testing._internal import common_utils
+from verify import verify
 
 
-class TestVerify(TestCase):
+class TestVerify(common_utils.TestCase):
     maxDiff = None
 
     def assertVerifyExpectFail(self, *args, **kwargs):
@@ -106,4 +105,4 @@ class TestVerify(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()
