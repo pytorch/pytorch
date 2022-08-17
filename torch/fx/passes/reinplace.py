@@ -120,11 +120,10 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             # Re-inplacing might be running in a context where FakeTensorMode is already active.
             # if so, don't do an additional layer of wrapping.
             tree_map_only(torch.Tensor, assert_fake, args)
-            fake_args = args
-        else:
-            with FakeTensorMode() as mode:
-                fake_args = [mode.from_tensor(a) for a in args]
-        return super().run(*fake_args)
+            return super().run(*args)
+        with FakeTensorMode() as mode:
+            fake_args = [mode.from_tensor(a) for a in args]
+            return super().run(*fake_args)
 
 def _schemas_match(functional_schema, inplace_schema):
     names_match = inplace_schema.name.endswith("_") and inplace_schema.name[:-1] == functional_schema.name

@@ -88,7 +88,6 @@ def forward(self, a__1):
     return ge_tensor
     """)
 
-
     # This test won't actually run in CI, because it requires functionalize() from functorch.
     # I'm planning on testing more comprehensively with torchbench models,
     # but we can make this testing better once functorch moves into pytorch/pytorch.
