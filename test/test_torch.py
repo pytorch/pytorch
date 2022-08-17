@@ -6038,7 +6038,7 @@ class TestTorch(TestCase):
         # Different dtypes
         x = torch.tensor((1, 2, 3), dtype=torch.float)
         y = torch.tensor((1, 2, 3), dtype=torch.int)
-        z = torch.tensor((1, 1 ), dtype=torch.int)
+        z = torch.tensor((1, -1), dtype=torch.int)
         self.assertTrue(torch.equal(x, y))
         self.assertFalse(torch.equal(z, x))
 
