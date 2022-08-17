@@ -267,7 +267,12 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     // output 0 is continue_condition, never None.
     for (const auto i : c10::irange(1, block->outputs().size())) {
-      if (block->outputs().at(i)->type()->cast<NoneType>()) {
+      // Two conditions that we need to replace block output with optional
+      // 1. output is NoneType
+      // 2. input is optional but output type is not
+      if ((block->outputs().at(i)->type()->cast<NoneType>()) ||
+          (block->inputs().at(i + 1)->type()->cast<OptionalType>() &&
+           !block->outputs().at(i)->type()->cast<OptionalType>())) {
         ReplaceBlockOutputWithOptional(
             // Output 0 is continue_condition.
             // Inputs (0, 1) are (loop_counter, cond). So input i + 1

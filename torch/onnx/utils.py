@@ -622,6 +622,7 @@ def _optimize_graph(
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
     graph = _C._jit_pass_onnx(graph, operator_export_type)
+    print("ONNX: ", graph)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
 
