@@ -602,8 +602,10 @@ def pairwise_distance(
 def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
     check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
     check(p >= 0, lambda: "pdist only supports non-negative p values")
+    # For p == 2 we can use an efficient implementation, but other values of p
+    # require creating a much bigger tensor for an intermediate step
     if p == 2:
-        aTa = torch.matmul(a, a.T)
+        aTa = torch.mm(a, a.T)
         aTa_diag = torch.diag(aTa)
         t = torch.sqrt(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa)
     else:

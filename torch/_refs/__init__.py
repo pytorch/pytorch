@@ -3710,8 +3710,10 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
 
 
 # This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h
-# We don't actually need the tril_size, just the size of the trapezoid
-# and rectangle pieces so it's a little different
+# The components of the matrix that belong to the lower triangle with offset
+# form a pentagon that can be broken down into a top trapezoid and a bottom
+# rectangle. For the implementation of tril_indices, we need the sizes of
+# both of these, as well as the length of the top side of the trapezoid.
 def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
@@ -3774,6 +3776,10 @@ def tril_indices(
     )
 
 
+# Similar to _get_tril_sizes above, but here there is a top trapezoid and
+# a bottom rectangle instead. Note that you can't reduce this to
+# _get_tril_sizes(col, row, -offset) because that would correspond to
+# decomposing into a left trapezoid and right rectangle.
 def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
