@@ -75,7 +75,7 @@ DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
   return save_mobile_module_to_bytes(mobilem, extra_files, jitfiles, constants);
 }
 
-static void save_jit_module_to_write_func(
+void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool save_mobile_debug_info,
@@ -84,18 +84,6 @@ static void save_jit_module_to_write_func(
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
 }
-
-bool register_flatbuffer_all() {
-  (void)register_flatbuffer_loader();
-  (void)register_flatbuffer_serializer();
-  _save_jit_module_to = save_jit_module_to_write_func;
-  _load_jit_module_from_flatbuffer_bytes = parse_and_initialize_jit_module;
-  return true;
-}
-
-#if !defined(__APPLE__)
-const bool kFlatbufferSerializerJitInitialized = register_flatbuffer_all();
-#endif
 
 } // namespace jit
 } // namespace torch

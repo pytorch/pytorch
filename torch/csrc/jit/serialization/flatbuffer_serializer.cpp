@@ -818,23 +818,12 @@ DetachedBuffer::UniqueDetachedBuffer save_mobile_module_to_bytes(
   return DetachedBufferFriend::make_unique_detached_buffer(ret);
 }
 
-static void save_mobile_module_to_func(
+void save_mobile_module_to_func(
     const mobile::Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func) {
   auto buffer = save_mobile_module_to_bytes(module);
   writer_func(buffer->data(), buffer->size());
 }
-
-bool register_flatbuffer_serializer() {
-  _save_mobile_module_to = save_mobile_module_to_func;
-  return true;
-}
-
-// iOS builds are often build with -Wglobal-constructor to minimize
-// startup time. So let them call register manually if needed.
-#if !defined(__APPLE__)
-const bool kFlatbufferSerializerRegistered = register_flatbuffer_serializer();
-#endif
 
 } // namespace jit
 } // namespace torch

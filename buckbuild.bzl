@@ -699,7 +699,6 @@ def get_pt_operator_registry_dict(
         template_select = True,
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
-        enable_flatbuffer = False,
         **kwargs):
     code_gen_files = pt_operator_query_codegen(
         name,
@@ -739,7 +738,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"]),
         **kwargs
     )
 
@@ -1308,8 +1307,9 @@ def define_buck_targets(
             ":torch_mobile_module",
             ":torch_mobile_observer",
             ":torch_mobile_deserialize_common",
+            ":flatbuffers_mobile",
             C10,
-        ],
+        ]
     )
 
     pt_xplat_cxx_library(
@@ -1358,6 +1358,7 @@ def define_buck_targets(
             "torch/csrc/api/src/jit.cpp",
             "torch/csrc/jit/serialization/export_bytecode.cpp",
             "torch/csrc/jit/serialization/export_module.cpp",
+            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
@@ -1514,6 +1515,7 @@ def define_buck_targets(
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
+            ":flatbuffers_mobile",
             ":torch_mobile_deserialize",
         ],
     )
@@ -1729,7 +1731,7 @@ def define_buck_targets(
             third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":torch_mobile_train",
+            # ":torch_mobile_train",
         ],
     )
 
@@ -1765,6 +1767,10 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
+            ":aten_cpu",
+            ":torch_mobile_deserialize_common",
+            ":torch_mobile_module",
+            ":torch_mobile_headers",
             third_party("flatbuffers-api"),
         ],
         exported_deps = [
@@ -1775,10 +1781,6 @@ def define_buck_targets(
 
     fb_xplat_cxx_library(
         name = "flatbuffers_serializer_jit",
-        srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
-        exported_headers = [
-            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
-        ],
         compiler_flags = [
             "-g0",
             "-O3",

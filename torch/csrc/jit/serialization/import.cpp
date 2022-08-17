@@ -18,6 +18,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
@@ -448,14 +449,8 @@ Module _load_jit_module_from_bytes(
   auto format = getFileFormat(data.get());
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      if (_load_jit_module_from_flatbuffer_bytes != nullptr) {
-        return _load_jit_module_from_flatbuffer_bytes(
+      return parse_and_initialize_jit_module(
             data, size, extra_files, device);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enable flatbuffer")
-      }
     }
     case FileFormat::ZipFileFormat: {
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);

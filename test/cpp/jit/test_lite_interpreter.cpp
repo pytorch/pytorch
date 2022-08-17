@@ -680,7 +680,6 @@ void backportAllVersionCheck(
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
-  torch::jit::register_flatbuffer_all();
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);

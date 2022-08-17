@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -885,14 +886,9 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
-    if (_save_jit_module_to != nullptr) {
-      _save_jit_module_to(
-          module, extra_files, save_mobile_debug_info, writer_func);
-    } else {
-      TORCH_CHECK(
-          false,
-          "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-    }
+    save_jit_module_to_write_func(
+          module, extra_files, save_mobile_debug_info, writer_func
+    );
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);

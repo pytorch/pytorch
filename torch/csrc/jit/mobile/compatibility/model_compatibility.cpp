@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 
 #include <caffe2/serialize/in_memory_adapter.h>
 #include <sstream>
@@ -111,13 +112,7 @@ uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
   auto format = getFileFormat(data);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      if (get_flatbuffer_bytecode_version == nullptr) {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enabled flatbuffer");
-      } else {
-        return get_flatbuffer_bytecode_version(data);
-      }
+      return get_bytecode_version_from_bytes(data);
     }
     case FileFormat::ZipFileFormat: {
       auto rai =

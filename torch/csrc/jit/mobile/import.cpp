@@ -13,6 +13,7 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -87,19 +88,6 @@ namespace jit {
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
-
-mobile::Module (*load_flatbuffer_bytes)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>,
-    ExtraFilesMap*) = nullptr;
-
-mobile::Module (*load_flatbuffer_bytes_no_object)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>) = nullptr;
-
-uint64_t (*get_flatbuffer_bytecode_version)(char* flatbuffer_content) = nullptr;
 
 OpCode parseOpCode(const char* str);
 
@@ -621,13 +609,9 @@ mobile::Module _load_mobile_from_bytes(
           std::move(rai), device, extra_files, module_load_options);
     }
     case FileFormat::FlatbufferFileFormat: {
-      if (load_flatbuffer_bytes != nullptr) {
-        return load_flatbuffer_bytes(data, size, device, &extra_files);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enabled flatbuffer");
-      }
+      return parse_and_initialize_mobile_module(
+        data, size, device, &extra_files
+      );
     }
     default: {
       TORCH_CHECK(false, "Format error");
