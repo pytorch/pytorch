@@ -184,15 +184,23 @@ def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     output, counter = gen_tvar(counter)
     symbols[n] = output
+
     if isinstance(n.args[0], Node):
         input = symbols[n.args[0]]
-        assert isinstance(input, TVar)
-        return [BinConstraintT(input, output, op_eq)], counter
+        if isinstance(input, TVar):
+            return [BinConstraintT(input, output, op_eq)], counter
+
+        # then we have dimension variables
+        else:
+            for arg in n.args:
+                assert isinstance(symbols[arg], DVar)
+        my_size = [symbols[arg] for arg in n.args]
+        return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
+
     elif isinstance(n.args[0], tuple):
         # then the tuple is the size
         assert len(n.args[0]) <= 4
         my_size = [symbols[arg] for arg in n.args[0]]
-        print([BinConstraintT(output, TensorType(my_size), op_eq)])
         return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
     else:
         raise NotImplementedError('Method not yet implemented')
