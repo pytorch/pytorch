@@ -346,10 +346,9 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
-        # BUG: silent incorrectness: runs and produces numerical differences
-        skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
-        skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
-        skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+        skip('nn.functional.max_unpool1d'),  # this opinfo variant is non-determnistic
+        skip('nn.functional.max_unpool2d'),  # this opinfo variant is non-determnistic
+        skip('nn.functional.max_unpool3d'),  # this opinfo variant is non-determnistic
 
         xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
     }))
@@ -465,8 +464,8 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
-        skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
-        skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
+        skip('nn.functional.max_unpool1d'),  # this opinfo variant is nondeterministic
+        skip('nn.functional.max_unpool2d'),  # this opinfo variant is nondeterministic
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
     }))
@@ -661,11 +660,13 @@ class TestOperators(TestCase):
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
+        skip('nn.functional.max_unpool1d'),  # this opinfo variant is nondeterministic
+        skip('nn.functional.max_unpool2d'),  # this opinfo variant is nondeterministic
+        skip('nn.functional.max_unpool3d'),  # this opinfo variant is nondeterminstic
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
         xfail('_masked.prod'),  # .item or data-dependent control flow
 
@@ -684,11 +685,6 @@ class TestOperators(TestCase):
         skip('svd_lowrank', ''),  # randomness
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
-
-        # potential silent incorrectness
-        skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
-        skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
-        skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
 
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
