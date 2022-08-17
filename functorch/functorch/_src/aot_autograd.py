@@ -208,8 +208,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
-    with torch.set_grad_enabled(True):
-        out = flat_fn(*flat_args)
+    out = flat_fn(*flat_args)
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         out,
@@ -221,16 +220,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         _num_outs = 1
 
     joint_inputs = (flat_args, out)
-    with torch.set_grad_enabled(True):
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
-        if config.use_functionalize:
-            # Functionalize the foward backward graph. First create a
-            # fake fn to make functionalize happy
-            def fake_fn(primals, tangents):
-                return fx_g(primals, tangents)
+    if config.use_functionalize:
+        # Functionalize the foward backward graph. First create a
+        # fake fn to make functionalize happy
+        def fake_fn(primals, tangents):
+            return fx_g(primals, tangents)
 
-            fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+
+    if config.debug_joint:
+        print(fx_g.code)
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
