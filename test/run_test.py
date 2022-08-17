@@ -13,6 +13,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import json
+from typing import Dict, Optional, List, cast, Any
 
 import torch
 from torch.utils import cpp_extension
@@ -25,14 +27,13 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from typing import Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
-    from tools.stats.import_test_stats import get_test_times
+    from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         get_reordered_tests,
         get_test_case_configs,
@@ -71,6 +72,7 @@ def discover_tests(
     if extra_tests is not None:
         rc += extra_tests
     return sorted(rc)
+
 
 TESTS = discover_tests(
     blocklisted_patterns=[
@@ -255,6 +257,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
+    "test_cuda_trace",
 ] + FSDP_TEST
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -267,9 +270,6 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch"
 ]
-
-# the JSON file to store the S3 test stats
-TEST_TIMES_FILE = ".pytorch-test-times.json"
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -348,6 +348,20 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
+            # Enable xdoctest
+            # TODO: enable xdoctest later
+            # Many doctests assume the existence of these variables
+            # xdoctest_global_exec_lines = r'\n'.join([
+            #     'from torch import nn',
+            #     'import torch.nn.functional as F',
+            #     'import torch',
+            # ])
+            # executable += [
+            #     "--xdoctest",
+            #     "--xdoctest-style=google",
+            #     f"--xdoctest-global-exec='{xdoctest_global_exec_lines}'",
+            #     "--xdoctest-options=+IGNORE_WHITESPACE"
+            # ]
         else:
             print_to_stderr(
                 "Pytest cannot be used for this test. Falling back to unittest."
@@ -395,12 +409,12 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+
 run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
 
 
 def get_run_test_with_subprocess_fn():
     return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
-
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -553,6 +567,7 @@ def test_distributed(test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -569,6 +584,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
+
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -820,7 +836,7 @@ def get_selected_tests(options):
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) == "11.6":
+    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -862,14 +878,22 @@ def get_selected_tests(options):
             return selected_tests
 
         # Download previous test times to make sharding decisions
-        test_file_times = get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
-        if len(test_file_times) == 0:
+        path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
+        test_config = os.environ.get("TEST_CONFIG")
+        if test_config not in test_file_times:
             print(
-                "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+                "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
             )
             selected_tests = selected_tests[which_shard - 1 :: num_shards]
         else:
-            shards = calculate_shards(num_shards, selected_tests, test_file_times)
+            print("Found test time stats from artifacts")
+            test_file_times_config = test_file_times[test_config]
+            shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
             _, tests_from_shard = shards[which_shard - 1]
             selected_tests = tests_from_shard
 

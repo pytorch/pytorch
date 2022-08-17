@@ -7,7 +7,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
@@ -191,8 +191,18 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             )
         )
 
+        sig = inspect.signature(fn)
+        factory_kwargs = ("device", "dtype")
+        is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
+
         @wraps(fn)
         def _fn(*args, out=None, **kwargs):
+            if is_factory_fn and out is not None:
+                for k in factory_kwargs:
+                    out_attr = getattr(out, k)
+                    if k not in kwargs:
+                        kwargs[k] = out_attr
+
             result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
@@ -238,7 +248,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             # mypy does not see through  the definition of out_type given that it's in a different scope
             return out if is_tensor else return_type(*out)  # type: ignore[operator]
 
-        sig = inspect.signature(fn)
         out_param = inspect.Parameter(
             "out",
             kind=inspect.Parameter.KEYWORD_ONLY,
@@ -257,6 +266,29 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         return _fn
 
     return _out_wrapper
+
+
+def backwards_not_supported(prim):
+    class BackwardsNotSupported(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, args_spec, *flat_args):
+            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
+            g = torch._C._AutoDispatchBelowAutograd()
+            try:
+                return prim(*args, **kwargs)
+            finally:
+                del g
+
+        @staticmethod
+        def backward(ctx, *args):
+            raise RuntimeError("backwards not supported on prim")
+
+    @wraps(prim)
+    def _autograd_impl(*args, **kwargs):
+        flat_args, args_spec = tree_flatten((args, kwargs))
+        return BackwardsNotSupported.apply(args_spec, *flat_args)
+
+    return _autograd_impl
 
 
 # TODO: when tracing this will add torch tensors and not TensorMeta objects

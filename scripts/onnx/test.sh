@@ -66,6 +66,7 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
     --ignore "$top_dir/test/onnx/test_custom_ops.py" \
     --ignore "$top_dir/test/onnx/test_utility_funs.py" \
     --ignore "$top_dir/test/onnx/test_models.py" \
+    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "${test_paths[@]}"
 
   # Heavy memory usage tests that cannot run in parallel.
@@ -80,6 +81,7 @@ if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # TODO(#79802): Parameterize test_models.py
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
 
   pytest "${args[@]}" "${args_parallel[@]}" \

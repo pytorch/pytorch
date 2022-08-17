@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import os
 import pprint
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1542,6 +1543,24 @@ class TestMPS(TestCase):
             t = tensor_list[i].view(1, 784)
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu())
+
+    # See https://github.com/pytorch/pytorch/issues/82427
+    # Test should not crash
+    def test_bool_full(self):
+        x = torch.full((3, 3), True, device='mps')
+
+    # See https://github.com/pytorch/pytorch/issues/82663
+    def test_bool_expand(self):
+        x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
+        y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
+        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
+
+    # Empty unary op should return tensor of the same size
+    def test_empty_neg(self):
+        x = torch.tensor([[]], device='mps')
+        y = -x
+        self.assertEqual(x, y)
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -3418,12 +3437,15 @@ class TestNLLLoss(TestCase):
         self.assertEqual(y_cpu, y_mps.cpu())
 
     def test_pad(self):
-        def helper(shape, padding, op):
+        def helper(shape, padding, op, value=0):
             inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             inputCPU.retain_grad()
             inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
 
-            padCriteria = op(padding)
+            if (op in [nn.ConstantPad1d, nn.ConstantPad2d, nn.ConstantPad3d]):
+                padCriteria = op(padding, value)
+            else:
+                padCriteria = op(padding)
             outputCPU = padCriteria(inputCPU)
             outputMPS = padCriteria(inputMPS)
             self.assertEqual(outputCPU, outputMPS)
@@ -3439,6 +3461,8 @@ class TestNLLLoss(TestCase):
         helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
         # Replication 1D
         helper((2, 1, 6), 3, nn.ReplicationPad1d)
+        # Constant Pad 1D
+        helper((2, 3, 4), 2, nn.ConstantPad1d)
 
         # 2D Padding
         helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
@@ -3448,11 +3472,15 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
         # verify if a change in shape of padding would cause problems with graph caching
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
+        # Constant Pad 2D
+        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
         # verify if a change in shape of padding would cause problems with graph caching
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
+        # Constant Pad 3D
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -5833,6 +5861,98 @@ class TestViewOpsMPS(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+class TestConvolutionMPS(TestCase):
+    def test_conv1d_all_strides_paddings(self):
+        # https://github.com/pytorch/pytorch/issues/82921
+        def helper(stride, padding):
+            y_cpu = torch.randn(1, 57, 40)
+            conv_cpu = nn.Conv1d(57, 20, stride=stride, padding=padding, kernel_size=3, bias=False)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+
+            y_gpu = y_cpu.to(device='mps')
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu())
+        for stride in range(1, 4):
+            for padding in range(1, 4):
+                helper(stride, padding)
+
+
+    def test_conv1d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/81557
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.arange((128 * 176), dtype=torch.float32)
+        a_cpu = a_cpu.view(128, 176, 1).permute(0, 2, 1)
+        out_cpu = model_cpu(a_cpu)
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        self.assertEqual(out_cpu, out_mps.cpu(), rtol=2.6e-05, atol=2e-04)
+
+    def test_conv_transpose_1d_all_strides(self):
+        # https://github.com/pytorch/pytorch/issues/82711
+        def helper(stride):
+            y_cpu = torch.ones(1, 1, 2)
+            deconv_cpu = nn.ConvTranspose1d(in_channels=1, out_channels=1, kernel_size=1, stride=stride, bias=False, padding=1)
+            deconv_cpu.weight.data = torch.ones(1, 1, 2)
+            deconv_gpu = copy.deepcopy(deconv_cpu).to(device='mps')
+            x_cpu = deconv_cpu(y_cpu)
+
+            y_gpu = y_cpu.to(device='mps')
+            x_gpu = deconv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu())
+        [helper(stride) for stride in [1, 2, 3]]
+
+    def test_conv_transpose_1d_nn_functional(self):
+        # https://github.com/pytorch/pytorch/issues/82563
+        tin = torch.rand((1, 512, 1245), dtype=torch.float32)
+        tparams = torch.rand((512, 256, 16), dtype=torch.float32)
+        tbias = torch.rand((256), dtype=torch.float32)
+
+        device = 'cpu'
+        tcpu = torch.nn.functional.conv_transpose1d(tin.to(device), tparams.to(device), tbias.to(device), stride=8, padding=4)
+
+        device = 'mps'
+        tgpu = torch.nn.functional.conv_transpose1d(tin.to(device), tparams.to(device), tbias.to(device), stride=8, padding=4)
+
+        self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
+
+    def test_conv1d_contiguous(self):
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.ones(128, 1, 176)
+        out_cpu = model_cpu(a_cpu)
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        self.assertEqual(out_cpu.shape, out_mps.shape)
+        self.assertEqual(out_cpu, out_mps.cpu())
+
+    def test_conv2d_all_strides_paddings(self):
+        # https://github.com/pytorch/pytorch/issues/83180
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for strideX in range(1, 4):
+            for strideY in range(1, 4):
+                conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=(strideX, strideY))
+                conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+                x_cpu = conv_cpu(y_cpu)
+                x_gpu = conv_gpu(y_gpu)
+                self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+    def test_conv2d_single_stride(self):
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for stride in range(1, 4):
+            conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=stride)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
 class TestRNNMPS(TestCase):
     def test_lstm_1(self, device="mps", dtype=torch.float32):
 
@@ -6285,6 +6405,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['torch.float32'],
         'nn.functional.kl_div': ['torch.float32'],
         'nn.functional.l1_loss': ['torch.float32'],
+        'nn.functional.linear': ['torch.float32'],
         'nn.functional.huber_loss': ['torch.float32'],
         'nn.functional.leaky_relu': ['torch.float32'],
         'nn.functional.mse_loss': ['torch.float16', 'torch.float32'],
@@ -6298,6 +6419,7 @@ class TestConsistency(TestCase):
                                 'torch.int32',
                                 'torch.int64',
                                 'torch.uint8'],
+        'nn.functional.prelu': ['torch.float32'],
         'nn.functional.selu': ['torch.float32'],
         'nn.functional.silu': ['torch.float32'],
         'nn.functional.smooth_l1_loss': ['torch.float32',

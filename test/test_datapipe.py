@@ -1793,6 +1793,16 @@ class TestFunctionalMapDataPipe(TestCase):
         with self.assertRaisesRegex(IndexError, r"out of range"):
             input_dp1.zip(input_dp2, input_dp3)[5]
 
+        # Functional Test: Ensure `zip` can combine `Shuffler` with others
+        dp1 = dp.map.SequenceWrapper(range(10))
+        shuffle_dp1 = dp1.shuffle()
+        dp2 = dp.map.SequenceWrapper(range(10))
+        shuffle_dp2 = dp2.shuffle()
+        zip_dp = shuffle_dp1.zip(shuffle_dp2)
+        self.assertEqual(10, len(list(zip_dp)))
+        zip_dp2 = shuffle_dp1.zip(dp2)
+        self.assertEqual(10, len(list(zip_dp)))
+
         # __len__ Test: returns the length of the shortest DataPipe
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
         self.assertEqual(5, len(zip_dp))

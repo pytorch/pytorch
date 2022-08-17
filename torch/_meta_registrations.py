@@ -5,10 +5,14 @@ import torch._prims_common as utils
 from torch import Tensor
 from torch._prims_common import (
     check,
+    corresponding_complex_dtype,
+    corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
+
 from torch._prims_common.wrappers import out_wrapper
+from torch._refs import _broadcast_shapes
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -66,6 +70,12 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
+@register_meta(aten.randperm.generator_out)
+def meta_randperm(n, *, generator=None, out):
+    assert out.ndim == 1 and out.size(0) == n
+    return out
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -73,11 +83,6 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     output_sizes = list(self.size())
     output_sizes[dim[-1]] = lastdim
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
-
-
-@register_meta([aten.conj_physical.out])
-def meta_conj_physical_out(self, out):
-    return torch._resize_output_(out, self.size(), self.device)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -102,9 +107,12 @@ def meta_max(self):
 
 @register_meta(aten.angle.default)
 def meta_angle(self):
-    _, result_dtype = elementwise_dtypes(
-        self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    )
+    if self.is_complex():
+        result_dtype = corresponding_real_dtype(self.dtype)
+    else:
+        _, result_dtype = elementwise_dtypes(
+            self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
     return self.new_empty(self.size(), dtype=result_dtype)
 
 
@@ -167,12 +175,16 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+def dot_check(self, other):
+    check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+
+
 @register_meta(aten.dot.default)
 def meta_dot(self, tensor):
-    check(
-        self.dim() == 1 and tensor.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors",
-    )
+    dot_check(self, tensor)
     return self.new_empty(())
 
 
@@ -181,15 +193,6 @@ def _compute_reduction_shape(self, dims, keepdim):
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
 
     return utils.compute_reduction_output_shape(self.shape, dims)
-
-
-@register_meta(aten.var_mean.correction)
-def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
-    dim = utils.reduction_dims(self.shape, dim)
-    output_shape = _compute_reduction_shape(self, dim, keepdim)
-    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
-    result2 = self.new_empty(output_shape)
-    return result1, result2
 
 
 @register_meta(aten.inverse.default)
@@ -370,6 +373,37 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@torch.library.impl(meta_lib, "complex")
+@torch.library.impl(meta_lib, "complex.out")
+@out_wrapper()
+def meta_complex(real, imag):
+    assert real.dtype.is_floating_point
+    assert imag.dtype.is_floating_point
+    out_shape = _broadcast_shapes(real.shape, imag.shape)
+    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+@torch.library.impl(meta_lib, "vdot")
+def vdot(self, other):
+    if not self.is_complex:
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    dot_check(self, other)
+    return self.new_empty(())
+
+
+# Leaving this function around because a python implementation
+# of indexing shape inference is useful,
+# but not registering it to the dispatcher because we already
+# get shape inference through structured kernels
 @register_meta(aten.index.Tensor, register_dispatcher=False)
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
@@ -692,16 +726,6 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
         input.new_empty(output_shape),
         input.new_empty(output_shape, dtype=torch.long),
     )
-
-
-@register_meta([aten.nan_to_num.default])
-def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
-    return self.new_empty(self.shape)
-
-
-@torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
-def meta_remainder_scalar(scalar, other):
-    return other % scalar
 
 
 @torch.library.impl(meta_lib, "logical_not_")

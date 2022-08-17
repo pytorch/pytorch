@@ -95,7 +95,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   for (auto i : c10::irange(rank)) {
     auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
         this->tensor_->GetIrValue(), i);
-    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
     sym_sizes_.push_back(sn->toSymInt());
   }
 }
@@ -150,6 +150,10 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   // return upper bound
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return TensorImpl::sym_sizes_default();
+}
+
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return sym_strides_default();
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {

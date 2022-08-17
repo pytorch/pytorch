@@ -172,6 +172,8 @@ class PassManager:
         steps (int): Max number of times we run the passes (default = 1).
         run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
+        suppress_check_failures (bool): Whether to raise errors when running
+            checks
     """
 
     passes: List[Callable[[nn.Module], PassResult]] = []
