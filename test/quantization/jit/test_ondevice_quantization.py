@@ -10,7 +10,12 @@ from torch.ao.quantization import (
 
 from torch.ao.quantization.quantize_jit import (
     prepare_ondevice_dynamic_jit,
+    convert_ondevice_dynamic_jit,
 )
+
+from torch.ao.quantization.quant_type import QuantType
+
+from torch.jit._recursive import wrap_cpp_module
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -54,8 +59,18 @@ class OnDevicePTQUtils(object):
     observer_module_name = ['MinMaxObserver', 'PerChannelMinMaxObserver']
 
     @staticmethod
-    def insert_observers(m, qconfig_dict):
+    def insert_observers(model, qconfig_dict):
+        inputs = model.get_example_inputs()
+        scripted_model = get_script_module(model, False, inputs)
+        scripted_model = prepare_ondevice_dynamic_jit(scripted_model, qconfig_dict)
+        return scripted_model
+
+    @staticmethod
+    def insert_observers_quant_dequant(model, qconfig_dict):
+        inputs = model.get_example_inputs()
+        m = get_script_module(model, False, inputs)
         m = prepare_ondevice_dynamic_jit(m, qconfig_dict)
+        m = convert_ondevice_dynamic_jit(m, 'forward', True, False)
         return m
 
     @staticmethod
@@ -74,24 +89,24 @@ class OnDevicePTQUtils(object):
                 return True
         return False
 
+    @staticmethod
+    def is_calculate_qparam(node):
+        if node.kind() == "prim::CallMethod":
+            if node.s('name') == "calculate_qparams":
+                return True
+        return False
+
 
 class TestOnDeviceDynamicPTQInsertObservers(TestCase):
-    def _insert_observers(self, model, qconfig_dict):
-        inputs = model.get_example_inputs()
-        scripted_model = get_script_module(model, False, inputs)
-        scripted_model = OnDevicePTQUtils.insert_observers(scripted_model, qconfig_dict)
-        return scripted_model
-
-
     def _check_num_and_type_of_observers(self, model, num_observers):
         qconfig_dict = {"" : default_dynamic_qconfig}
-        scripted_model = self._insert_observers(model, qconfig_dict)
+        scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
             self.assertTrue(observer.original_name == 'MinMaxObserver')
         qconfig_dict = {"" : per_channel_dynamic_qconfig}
-        scripted_model = self._insert_observers(model, qconfig_dict)
+        scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
@@ -103,7 +118,7 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         inputs = model.get_example_inputs()
         orig_scripted_model = get_script_module(model, False, inputs)
         orig_forward_graph = orig_scripted_model.graph.str()
-        scripted_model = self._insert_observers(model, qconfig_dict)
+        scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         quant_forward_graph = scripted_model.graph.str()
         # exact graph matching is difficult so just resorting to # of lines
         # instead of implementing graph matching
@@ -135,10 +150,86 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         model = MyConvLinearModule()
         qconfig_dict = {"" : default_dynamic_qconfig}
         inputs = model.get_example_inputs()
-        scripted_model = self._insert_observers(model, qconfig_dict)
+        scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observe_forward_graph = scripted_model.observe_forward.graph
         num_weight_only_observers = 0
         for node in observe_forward_graph.nodes():
             if (self._observer_is_weight_only(node)):
                 num_weight_only_observers += 1
         self.assertEqual(num_weight_only_observers, 3)
+
+
+class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
+    def _validate_quant_dequant_nodes(self, model, num_nodes, per_channel=0):
+        quantize_forward_graph = model.quantize_forward.graph
+        quantize_per_tensor = quantize_per_channel = dequantize = 0
+        for n in quantize_forward_graph.nodes():
+            if "aten::quantize_per_tensor" in n.kind():
+                quantize_per_tensor += 1
+            if "aten::quantize_per_channel" in n.kind():
+                quantize_per_channel += 1
+            if "aten::dequantize" in n.kind():
+                dequantize += 1
+        self.assertEqual(quantize_per_tensor + quantize_per_channel, dequantize)
+        self.assertEqual(quantize_per_tensor + quantize_per_channel, num_nodes)
+
+
+    def _validate_calculate_qparams(self, model, num_nodes):
+        quantize_forward_graph = model.quantize_forward.graph
+        num_calculate_qparams = 0
+        for n in quantize_forward_graph.nodes():
+            if OnDevicePTQUtils.is_calculate_qparam(n):
+                num_calculate_qparams += 1
+        self.assertEqual(num_calculate_qparams, num_nodes)
+
+
+    def _validate_no_observer_forward(self, model):
+        quantize_forward_graph = model.quantize_forward.graph
+        for n in quantize_forward_graph.nodes():
+            if (n.kind() == "prim::CallMethod") and n.s("name") == "forward":
+                if (OnDevicePTQUtils.is_value_type_observer(n.inputsAt(0))):
+                    return False
+        return True
+
+
+    def _check_quant_dequant_and_calc_qparams(self, model, num_nodes):
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        self._validate_quant_dequant_nodes(m, num_nodes)
+        self._validate_calculate_qparams(m, num_nodes)
+        self._validate_no_observer_forward(m)
+
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        self._validate_quant_dequant_nodes(m, num_nodes, num_nodes)
+        self._validate_calculate_qparams(m, num_nodes)
+        self._validate_no_observer_forward(m)
+
+
+    def _check_quantize_forward_runs(self, model):
+        inputs = model.get_example_inputs()
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        # First must run observe forward to record the stats to produce
+        # correct scales and zero points
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+
+
+    def test_num_quant_dequant_nodes(self):
+        model = LinearAddModel()
+        self._check_quant_dequant_and_calc_qparams(model, 2)
+        model = MyConvLinearModule()
+        self._check_quant_dequant_and_calc_qparams(model, 3)
+
+
+    def test_quantize_forward_runs(self):
+        model = LinearAddModel()
+        self._check_quantize_forward_runs(model)
+        model = MyConvLinearModule()
+        self._check_quantize_forward_runs(model)
