@@ -18173,12 +18173,6 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.digamma',
-        dtypes=all_types_and(torch.bool),
-        ref=lambda x: x if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
         'special.dilogarithm_li_2',
         dtypes=all_types_and(torch.bool),
         ref=lambda x: x if TEST_SCIPY else None,
