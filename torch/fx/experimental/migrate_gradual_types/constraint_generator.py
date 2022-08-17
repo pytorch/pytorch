@@ -746,7 +746,8 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
 
     assert isinstance(n.args[0], Iterable)
     for arg in n.args[0]:
-        res.append(symbols[arg])
+        dim = arg if isinstance(arg, int) else symbols[arg]
+        res.append(dim)
     c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
     return [c], counter
 
