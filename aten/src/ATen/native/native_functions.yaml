@@ -2055,23 +2055,10 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
-# all calls to empty() in python used to go through the symint overload
-# even if all arguments were concerete integers.
-# adding symint overloads of kernels for every dispatch key allowed us
-# to skip redispatching to `empty.memory_format` and hit backend kernels directly
-# we recently updated signature parsing to dispath `empty()` calls in python
-# to `empty.SymInt` iff there's is a symint node argument
-# hopefully, we could simplify this entry soon
 - func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
-    CPU: empty_symint_cpu
-    CUDA: empty_symint_cuda
-    MPS: empty_symint_mps
+    CompositeExplicitAutograd: empty_symint_concrete
     Meta: empty_symint_meta
-    MkldnnCPU: empty_symint_mkldnn
-    SparseCPU, SparseCUDA, SparseMeta: empty_symint_sparse
-    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
-    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
   autogen: empty.SymInt_out
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version

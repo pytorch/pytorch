@@ -66,16 +66,6 @@ Tensor empty_per_channel_affine_quantized(
       quantizer);
 }
 
-Tensor empty_symint_unknown_quantized(
-    c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-      return at::native::empty_unknown_quantized(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
-}
-
 Tensor empty_unknown_quantized(
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
