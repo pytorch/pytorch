@@ -106,16 +106,18 @@ class IterableDataset(Dataset[T_co]):
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [3, 5, 4, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
         >>> # With even more workers
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
@@ -312,7 +314,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
     >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
-    ).manual_seed(42))
+    ...   ).manual_seed(42))
 
     Args:
         dataset (Dataset): Dataset to be split
