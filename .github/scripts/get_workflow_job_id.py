@@ -42,7 +42,7 @@ REQUEST_HEADERS = {
 
 print(f"=== HEADERS {REQUEST_HEADERS}")
 
-debug = requests.get(https://api.github.com/rate_limit, headers=REQUEST_HEADERS)
+debug = requests.get("https://api.github.com/rate_limit", headers=REQUEST_HEADERS)
 print(f"==== RESPONSE {debug.json()}")
 
 response = requests.get(
