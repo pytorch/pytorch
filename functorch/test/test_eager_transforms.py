@@ -2907,6 +2907,21 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
+def normalize_devices(fx_g):
+    for node in fx_g.graph.nodes:
+        args = list(node.args)
+        for idx, arg in enumerate(args):
+            if isinstance(arg, torch.device):
+                args[idx] = 'cpu'
+        node.args = tuple(args)
+        new_kwargs = {}
+        for k, v in node.kwargs.items():
+            if isinstance(v, torch.device):
+                v = 'cpu'
+            new_kwargs[k] = v
+        node.kwargs = new_kwargs
+    fx_g.recompile()
+    return fx_g
 
 class TestFunctionalize(TestCase):
     def _check_functionalize_correctness(self, f, inpt):
@@ -3053,16 +3068,17 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             return x
         # There's a copy_ in the graph, because the input (x) was mutated.
         # To preserve semantics, functionalize() needs to propagate the mutation.
-        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline((out.code), """\
 
 
 
 def forward(self, x_1) -> torch.Tensor:
+    ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(x_1, [4, 2])
-    _tensor_constant0 = self._tensor_constant0
-    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, _tensor_constant0);  view_copy_default = _tensor_constant0 = None
+    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
     copy__default = torch.ops.aten.copy_.default(x_1, view_copy_default_1);  x_1 = None
     return view_copy_default_1
@@ -3072,8 +3088,9 @@ def forward(self, x_1) -> torch.Tensor:
 
         def f(x: torch.Tensor) -> torch.Tensor:
             return x.transpose(1, 0)
-        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
@@ -3092,13 +3109,15 @@ def forward(self, x_1) -> torch.Tensor:
             out_view.add_(1)
             return out
 
-        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.arange(4, device=device, dtype=torch.float32))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, inpt_1) -> torch.Tensor:
+    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4])
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4]);  add_tensor = None
@@ -3117,19 +3136,23 @@ def forward(self, inpt_1) -> torch.Tensor:
             torch.aminmax(inpt_view, dim=0, out=(mins, maxs_view))
             return (maxs, mins)
 
-        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
         out = fn(torch.arange(8, device=device, dtype=torch.float32))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    view_copy_default = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
-    aminmax_default = torch.ops.aten.aminmax.default(view_copy_default, dim = 0);  view_copy_default = None
+    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    view_copy_default = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
+    aminmax_default = torch.ops.aten.aminmax.default(view_copy_default_1, dim = 0);  view_copy_default_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
-    view_copy_default_1 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
-    return (view_copy_default_1, getitem)
+    view_copy_default_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    return (view_copy_default_2, getitem)
     """)
 
     def test_functionalize_fx_reapply_views_simple(self, device):
@@ -3140,15 +3163,16 @@ def forward(self, inpt_1) -> torch.Tensor:
             y.add_(tmp)
             return x
 
-        out = make_fx(functionalize(f), trace_factory_functions=False)(torch.zeros(4, 2, device=device))
+        out = make_fx(functionalize(f))(torch.zeros(4, 2, device=device))
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
 
 def forward(self, x_1) -> torch.Tensor:
+    ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_default = torch.ops.aten.view.default(x_1, [4, 2])
-    _tensor_constant0 = self._tensor_constant0
-    add_tensor = torch.ops.aten.add.Tensor(view_default, _tensor_constant0);  view_default = _tensor_constant0 = None
+    add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
     view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
     copy__default = torch.ops.aten.copy_.default(x_1, view_default_1);  x_1 = None
     return view_default_1
@@ -3162,6 +3186,7 @@ def forward(self, x_1) -> torch.Tensor:
             return global_out
 
         out = make_fx(functionalize(f))()
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
@@ -3181,6 +3206,7 @@ def forward(self) -> torch.Tensor:
         a = torch.arange(4).reshape(2, 2)
         b = torch.ones(2, dtype=torch.long)
         out = make_fx(functionalize(f))(a, b)
+        out = normalize_devices(out)
         self.assertExpectedInline(out.code, """\
 
 
