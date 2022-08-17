@@ -1726,6 +1726,41 @@ def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
         _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
         yield SampleInput(case, args=(), kwargs=_kwargs)
 
+def sample_inputs_eye(op, device, dtype, requires_grad, **kwargs):
+    # only ints >= 0 are allowed for both arguments, unless m is omitted
+    sizes = (None, 0, 1, 2, 3, 4, 7, L, M, S)
+
+    for n, m in product(sizes, sizes):
+        if n is None:
+            continue
+
+        # TODO: no layout
+        _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
+        if m is None:
+            yield SampleInput(n, args=(), kwargs=_kwargs)
+        else:
+            yield SampleInput(n, args=(m,), kwargs=_kwargs)
+
+def error_inputs_eye(op_info, device, **kwargs):
+    # TODO: no layout
+    _kwargs = {'device': device, 'dtype': torch.float32}
+
+    yield ErrorInput(
+        SampleInput(-1, args=(), kwargs=_kwargs),
+        error_regex="n must be greater or equal to 0, got -1"
+    )
+
+    yield ErrorInput(
+        SampleInput(-7, args=(42,), kwargs=_kwargs),
+        error_regex="n must be greater or equal to 0, got -7"
+    )
+
+    yield ErrorInput(
+        SampleInput(0, args=(-3,), kwargs=_kwargs),
+        error_regex="m must be greater or equal to 0, got -3"
+    )
+
+
 def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
@@ -5773,23 +5808,27 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     for shape, kwarg in chain(product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)):
         yield SampleInput(make_arg(shape), kwargs=kwarg)
 
-def reference_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
+def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_diagonal_diag_embed(
         op_info, device, dtype, requires_grad, **kwargs)
 
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    shapes1d = ((0,), (1,))
     shapes2d = ((L, M),)
     shapes3d = ((L, M, S),)
+
+    kwargs1d = dict()
 
     kwargs2d = (
         # dim1 > dim2 is allowed
         dict(dim1=1, dim2=0),
         # negative dims are allowed
         dict(dim1=-2, dim2=-1),
-        # out of bounds offset should return an empty tensor
-        dict(offset=10000),
+        # out of bounds offset should return an empty tensor in diagonal and
+        # offset the diagonal in diag_embed
+        dict(offset=100),
     )
 
     kwargs3d = kwargs2d + (
@@ -5797,17 +5836,25 @@ def reference_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
         dict(offset=-1, dim1=0, dim2=2),
     )
 
+    samples1d = product(shapes1d, kwargs1d)
     samples2d = product(shapes2d, kwargs2d)
     samples3d = product(shapes3d, kwargs3d)
 
-    for shape, kwargs in chain(samples2d, samples3d):
+    for shape, kwargs in chain(samples1d, samples2d, samples3d):
+        if op_info.name in ('diagonal', '_refs.diagonal'):
+            # these are error inputs for diagonal
+            if shape in ((0,), (1,)):
+                continue
         yield SampleInput(input=make_arg(shape), kwargs=kwargs)
 
-def error_inputs_diagonal(op_info, device, **kwargs):
+def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    shapes1d = (0, 1, (0,), (1,))
     shapes2d = ((M, L),)
     shapes3d = ((M, S, L),)
+
+    kwargs1d = dict()
 
     kwargs2d = (
         # dim1 == dim2 is not allowed
@@ -5819,16 +5866,27 @@ def error_inputs_diagonal(op_info, device, **kwargs):
 
     kwargs3d = kwargs2d
 
+    samples1d = product(shapes1d, kwargs1d)
     samples2d = product(shapes2d, kwargs2d)
     samples3d = product(shapes3d, kwargs3d)
 
-    for shape, kwargs in chain(samples2d, samples3d):
+    for shape, kwargs in chain(samples1d, samples2d, samples3d):
         arg = make_arg(shape)
         sample = SampleInput(input=arg, kwargs=kwargs)
 
         dim1 = kwargs.get('dim1')
         dim2 = kwargs.get('dim2')
-        num_dim = arg.dim()
+
+        if op_info.name in ('diagonal', '_refs.diagonal'):
+            num_dim = arg.dim()
+        elif op_info.name in ('diag_embed', '_refs.diag_embed'):
+            # these are valid inputs for diag_embed
+            if shape in ((0,), (1,)):
+                continue
+            num_dim = arg.dim() + 1
+        else:
+            raise RuntimeError("should be unreachable")
+
         bound1 = -num_dim
         bound2 = num_dim - 1
         dim_range = range(bound1, bound2 + 1)
@@ -9994,7 +10052,9 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_diagonal_diag_embed),
+           sample_inputs_func=sample_inputs_diagonal_diag_embed,
+           reference_inputs_func=reference_inputs_diagonal_diag_embed,
+           error_inputs_func=error_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
            # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
            # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
@@ -10005,8 +10065,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed,
-           reference_inputs_func=reference_inputs_diagonal,
-           error_inputs_func=error_inputs_diagonal),
+           reference_inputs_func=reference_inputs_diagonal_diag_embed,
+           error_inputs_func=error_inputs_diagonal_diag_embed),
     OpInfo('diagonal_scatter',
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
@@ -15375,6 +15435,31 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
            )),
+    OpInfo('eye',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_eye,
+           error_inputs_func=error_inputs_eye,
+           supports_out=True,
+           supports_autograd=False,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # TODO: same as this?
+               # https://github.com/pytorch/pytorch/issues/81774
+               # also see: arange, new_full
+               # fails to match any schemas despite working in the interpreter
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # fails to match any schemas despite working in the interpreter
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -19311,6 +19396,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.diag_embed",
+        torch_opinfo_name="diag_embed",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
@@ -19649,6 +19739,17 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: should not compare results of empty_like
             DecorateInfo(unittest.skip("Can't check result for empty_like"), 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.eye",
+        torch_opinfo_name="eye",
+        supports_nvfuser=False,
+        skips=(
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
         ),
     ),
     PythonRefInfo(
