@@ -81,6 +81,15 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     const std::vector<int64_t> broadcasted_shape,
     const bool is_commutative = true
 ) {
+  // The common dtype check is relevant when op is done in-place.
+  // This is because binary_of_t produces new values and it could be that
+  // new_values.dtype != res.dtype. In such a case we should error out
+  // as soon as possible to avoid redundant kernel runs.
+  const auto common_dtype = at::result_type(x_, y_);
+  TORCH_CHECK(canCast(common_dtype, res.scalar_type()),
+      "Can't convert result type ", common_dtype,
+      " to output ", res.scalar_type());
+
   using KernelLauncher = KernelLauncher<kernel_t>;
 
   const Tensor x = is_commutative ? x_ : x_.coalesce();
@@ -304,7 +313,11 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   const auto res_indices = source._indices().index_select(1, selected_source);
   const auto selected_source_values = source._values().index_select(0, selected_source);
   const auto selected_probably_coalesced_values = probably_coalesced._values().index_select(0, selected_probably_coalesced);
-  const auto res_values = binary_op_t::apply(selected_source_values, selected_probably_coalesced_values);
+  const auto res_values = binary_op_t::apply(selected_source_values, selected_probably_coalesced_values)
+    // no-op for out-of-place calls, but we still need to cast when the op is supposed to be performed in-place
+    // but binary_op_t promotes types. For example, let the op == mul, x.dtype == int8, y.dtype == uint8,
+    // then mul(x, y).dtype == int16, while x.mul_(y).dtype == int8 and y.mul_(x).dtype == uint8.
+    .to(res.scalar_type());
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = res_values.dim() - 1;
   const auto res_shape = broadcasted_shape;
@@ -339,9 +352,10 @@ Tensor& _sparse_binary_op_intersection_kernel_out(
 ) {
   TORCH_CHECK(
       (x.is_sparse() && y.is_sparse())
-      && (x.dim() == y.dim()) && (x.sparse_dim() == y.sparse_dim()),
-      NAME, "(): expects sparse inputs with equal dimensionality ",
-      "and number of sparse dimensions");
+      && (x.dim() == y.dim()) && (x.sparse_dim() == y.sparse_dim())
+      && (x.sizes().slice(0, x.sparse_dim()) == y.sizes().slice(0, y.sparse_dim())),
+      NAME, "(): expects sparse inputs with equal dimensionality, ",
+      "number of sparse dimensions, and shape of sparse dimensions");
 
   const auto broadcasted_shape = infer_size(x.sizes(), y.sizes());
 
