@@ -55,11 +55,14 @@ except ImportError:
 
 # NB: numpy is a testing dependency!
 
-
-class TestPythonKey(TestCase):
+class AOTTestCase(TestCase):
     def setUp(self):
+        super().setUp()
+        # NB: We cache on function id, which is unreliable
+        # Can fix by using weakrefs, but not sure if it matters
         clear_compile_cache()
 
+class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
             return torch.sin(x)
@@ -208,10 +211,7 @@ def _outs_and_grads(fn, inps):
     return outs, grads
 
 
-class TestAOTAutograd(TestCase):
-    def setUp(self):
-        clear_compile_cache()
-
+class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(self, f, inp):
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
@@ -332,12 +332,7 @@ class TestAOTAutograd(TestCase):
 
 
 
-class TestEagerFusionOpInfo(TestCase):
-    def setUp(self):
-        # NB: We cache on function id, which is unreliable
-        # Can fix by using weakrefs, but not sure if it matters
-        clear_compile_cache()
-
+class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
@@ -444,10 +439,7 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
-class TestPartitioning(TestCase):
-    def setUp(self):
-        clear_compile_cache()
-
+class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -575,10 +567,7 @@ class TestPartitioning(TestCase):
             res = aot_mod(x)
         res.sum().backward()
 
-class TestAOTModuleSimplified(TestCase):
-    def setUp(self):
-        clear_compile_cache()
-
+class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
