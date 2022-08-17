@@ -52,7 +52,6 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -64,6 +63,9 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
+)
+from ._shard_utils import (
+    _create_chunk_sharded_tensor
 )
 from ._utils import (
     _apply_to_modules,
@@ -293,8 +295,9 @@ class StateDictType(Enum):
                meaningful to FSDP (because parameters are flattened). Note that
                these APIs are meant for use via the :func:`state_dict_type`
                context manager as follows:
+                   >>> # xdoctest: +SKIP("undefined variables")
                    >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-                   >>>     state = fsdp.state_dict()  # loads local state dict
+                   ...     state = fsdp.state_dict()  # loads local state dict
             3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
                return and load sharded, unflattened parameters. The ``state_dict``
                return by ``sharded_state_dict`` can be used by all other parallel
@@ -326,6 +329,7 @@ class FullStateDictConfig(StateDictConfig):
     together to optimize memory savings when taking checkpoints. Note that
     this config class is meant for user via the :func:`state_dict_type`
     context manager as follows:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
         >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
@@ -470,6 +474,7 @@ class FullyShardedDataParallel(nn.Module):
 
     Example::
 
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> import torch
         >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> torch.cuda.set_device(device_id)
@@ -623,9 +628,11 @@ class FullyShardedDataParallel(nn.Module):
 
             Example::
 
+                >>> # xdoctest: +SKIP("undefined variables")
                 >>> module = MyModule(device="meta")
                 >>> def my_init_fn(module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
+                >>>     ...
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
                 >>> # With torchdistX
@@ -1806,9 +1813,10 @@ class FullyShardedDataParallel(nn.Module):
 
         Example::
 
-        >>> model = DDP(FSDP(...))
-        >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-        >>>     checkpoint = model.state_dict()
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> model = DDP(FSDP(...))
+            >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+            >>>     checkpoint = model.state_dict()
 
         Args:
             module (torch.nn.Module): Root module.
@@ -1958,6 +1966,7 @@ class FullyShardedDataParallel(nn.Module):
         # nn.Module.state_dict() will detach the parameter. Therefore, we need
         # to get flat_param from the FlattenParamsWrapper to get the metadata.
         flat_param = getattr(self._fsdp_wrapped_module, FLAT_PARAM, None)
+        assert flat_param is not None
         # Construct a ShardedTensor from the flat_param.
         full_numel = flat_param._unsharded_size.numel()
         shard_offset = flat_param.numel() * self.rank
@@ -1995,16 +2004,13 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                local_shard = param.chunk(self.world_size)[self.rank].clone()
-                offsets = [0 for _ in param.size()]
-                offsets[0] = math.ceil(param.size()[0] / self.world_size) * self.rank
-                local_shards = [
-                    Shard.from_tensor_and_offsets(local_shard, offsets, self.rank)
-                ]
-                fqn = f"{prefix}{fqn}"
-                state_dict[fqn] = init_from_local_shards(
-                    local_shards, param.size(), process_group=self.process_group
-                )  # type: ignore[assignment]
+                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                    tensor=param,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    device_per_node=torch.cuda.device_count(),
+                    pg=self.process_group
+                )
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
         return state_dict
 
@@ -2051,22 +2057,23 @@ class FullyShardedDataParallel(nn.Module):
 
         Example::
 
-        >>> import torch
-        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        >>> from torch.distributed.fsdp import StateDictType
-        >>> torch.cuda.set_device(device_id)
-        >>> my_module = nn.Linear(...)
-        >>> sharded_module = FSDP(my_module)
-        >>> full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT, full_state_dict_config):
-        >>>     full_dict = sharded_module.state_dict()
-        >>> full_dict.keys()
-        >>> odict_keys(['weight', 'bias'])
-        >>> # using local state dict
-        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
-        >>>     local_dict = sharded_module.state_dict()
-        >>> local_dict.keys()
-        >>> odict_keys(['flat_param', 'inner.flat_param'])
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> import torch
+            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            >>> from torch.distributed.fsdp import StateDictType
+            >>> torch.cuda.set_device(device_id)
+            >>> my_module = nn.Linear(...)
+            >>> sharded_module = FSDP(my_module)
+            >>> full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+            >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT, full_state_dict_config):
+            >>>     full_dict = sharded_module.state_dict()
+            >>> full_dict.keys()
+            >>> odict_keys(['weight', 'bias'])
+            >>> # using local state dict
+            >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
+            >>>     local_dict = sharded_module.state_dict()
+            >>> local_dict.keys()
+            >>> odict_keys(['flat_param', 'inner.flat_param'])
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
@@ -2314,6 +2321,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         state_dict: Mapping[str, Any],
         *args,
+        **kwargs,
     ) -> NamedTuple:
         """
         The entry point of all three FSDP ``load_state_dict`` APIs. By default,
@@ -2332,24 +2340,25 @@ class FullyShardedDataParallel(nn.Module):
 
         Example::
 
-        >>> import torch
-        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        >>> from torch.distributed.fsdp import StateDictType
-        >>> torch.cuda.set_device(device_id)
-        >>> my_module = nn.Linear(...)
-        >>> sharded_module = FSDP(my_module)
-        >>> checkpoint = torch.load(PATH)
-        >>> full_state_dict = checkpoint['full_state_dict']
-        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
-        >>>     sharded_module.load_state_dict(full_state_dict)
-        >>> full_dict.keys()
-        >>> odict_keys(['weight', 'bias'])
-        >>> # using local state dict
-        >>> local_state_dict = checkpoint['local_state_dict']
-        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
-        >>>     sharded_module.load_state_dict(local_state_dict)
-        >>> local_dict.keys()
-        >>> odict_keys(['flat_param', 'inner.flat_param'])
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> import torch
+            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            >>> from torch.distributed.fsdp import StateDictType
+            >>> torch.cuda.set_device(device_id)
+            >>> my_module = nn.Linear(...)
+            >>> sharded_module = FSDP(my_module)
+            >>> checkpoint = torch.load(PATH)
+            >>> full_state_dict = checkpoint['full_state_dict']
+            >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
+            >>>     sharded_module.load_state_dict(full_state_dict)
+            >>> full_dict.keys()
+            >>> odict_keys(['weight', 'bias'])
+            >>> # using local state dict
+            >>> local_state_dict = checkpoint['local_state_dict']
+            >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
+            >>>     sharded_module.load_state_dict(local_state_dict)
+            >>> local_dict.keys()
+            >>> odict_keys(['flat_param', 'inner.flat_param'])
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
@@ -3841,6 +3850,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
             >>> model, optim = ...
             >>> full_osd = FSDP.full_optim_state_dict(model, optim)
@@ -3908,6 +3918,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
             >>> model, optim = ...
             >>> full_osd = FSDP.full_optim_state_dict(model, optim)  # only non-empty on rank 0
@@ -4004,6 +4015,7 @@ class FullyShardedDataParallel(nn.Module):
         :meth:`full_optim_state_dict`) to use parameter IDs and be loadable to
         a non-wrapped model::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> wrapped_model, wrapped_optim = ...
             >>> full_osd = FSDP.full_optim_state_dict(wrapped_model, wrapped_optim)
             >>> nonwrapped_model, nonwrapped_optim = ...
@@ -4013,6 +4025,7 @@ class FullyShardedDataParallel(nn.Module):
         To re-key a normal optimizer state dict from a non-wrapped model to be
         loadable to a wrapped model::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> nonwrapped_model, nonwrapped_optim = ...
             >>> osd = nonwrapped_optim.state_dict()
             >>> rekeyed_osd = FSDP.rekey_optim_state_dict(osd, OptimStateKeyType.PARAM_NAME, nonwrapped_model)

@@ -81,7 +81,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             for i in range(_outputs)
         ]
 
-    split_val = split_size_or_sizes.node()["value"]
+    split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
@@ -119,11 +119,12 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
 
     if symbolic_helper._is_split_static(indices_or_sections, _outputs):
-        split_val = indices_or_sections.node()["value"]
+        split_val = symbolic_helper._node_get(indices_or_sections.node(), "value")
 
         if split_val.dim() > 0:
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             res = []
+            assert _outputs is not None
             for i in range(_outputs - 1):
                 end = g.op(
                     "Gather",
