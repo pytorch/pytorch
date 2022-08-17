@@ -1,6 +1,6 @@
 import torch
 from .native import _get_native_backend_config_helper
-from .backend_config import DTypeConfig
+from .backend_config import BackendConfig, DTypeConfig
 
 
 # ===================
