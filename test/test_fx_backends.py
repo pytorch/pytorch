@@ -196,6 +196,10 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser = NvFuserBackend()
         compiled_module = nvfuser.compile(copy.deepcopy(traced))
 
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
+
         eager_result = traced(inputs)
         nvfuser_result = compiled_module(inputs)
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
@@ -216,6 +220,10 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser = NvFuserBackend()
         compiled_module = nvfuser.compile(copy.deepcopy(traced))
 
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
+
         eager_result = traced(inputs)
         nvfuser_result = compiled_module(inputs)
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
@@ -235,6 +243,10 @@ class TestFxNvFuserBackend(TestCase):
 
         nvfuser = NvFuserBackend()
         compiled_module = nvfuser.compile(copy.deepcopy(traced))
+
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
 
         eager_result = traced(inputs)
         nvfuser_result = compiled_module(inputs)
