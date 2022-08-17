@@ -474,7 +474,7 @@ class TestFSDPOptimState(FSDPTest):
         other tests that exercise the save/load workflow.
         """
         if rank0_only and state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            return
+            return  # not supported
         NUM_ITERS = 3
         model1, optim1, optim_input = self._init_nested_model(
             wrap=True, use_multiple_param_groups=use_multiple_param_groups,
