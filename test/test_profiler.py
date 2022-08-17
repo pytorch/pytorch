@@ -1248,10 +1248,11 @@ class TestTorchTidyProfiler(TestCase):
 
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
-        y = torch.ones(4, 1)
+        y = torch.ones(4, 1, requires_grad=True)
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + y
+            _ = x * y
 
         nodes = p.profiler.kineto_results.experimental_event_tree()
         node = find_node_with_name(nodes, "aten::add")
@@ -1271,6 +1272,14 @@ class TestTorchTidyProfiler(TestCase):
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
 
+        self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
+
+        mul_node = find_node_with_name(nodes, "aten::mul")
+        self.assertIsNotNone(mul_node)
+        self.assertEqual(
+            node.extra_fields.sequence_number + 1,
+            mul_node.extra_fields.sequence_number)
+
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
         alpha = 0.9
@@ -1287,6 +1296,40 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
         self.assertEqual(input_info.shapes, [[5, 5], [], []])
         self.assertEqual(input_info.ivalues, [None, None, alpha])
+
+    def test_allocations(self):
+        gc.collect()
+        with profile(profile_memory=True) as p:
+            x = torch.empty((3, 4))
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "[memory]")
+        self.assertIsNotNone(node)
+
+        alloc_size = 3 * 4 * 4  # fp32 -> 4 bytes
+        ptr = node.extra_fields.ptr
+        self.assertGreater(ptr, 0)
+        self.assertEqual(node.extra_fields.alloc_size, alloc_size)
+        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
+        self.assertEqual(node.extra_fields.device_index, -1)
+        total_allocated = node.extra_fields.total_allocated
+
+        # total_reserved is only for CUDACachingAllocator
+        self.assertEqual(node.extra_fields.total_reserved, 0)
+
+        with profile(profile_memory=True) as p:
+            del x
+            gc.collect()
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "[memory]")
+        self.assertIsNotNone(node)
+
+        self.assertEqual(node.extra_fields.ptr, ptr)
+        self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
+        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
+        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
 
 @dataclass(frozen=True)
