@@ -206,76 +206,63 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-@contextmanager
-def _disable_jit_autocast():
-    old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
-
-
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    with _disable_jit_autocast():
-        joint_forward_backward = create_joint_forward_backward(flat_fn)
-        # Set input tensors that require grad to leaves
-        with torch.set_grad_enabled(True):
-            out = flat_fn(*flat_args)
-        out = pytree.tree_map(
-            lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-            out,
-        )
+    joint_forward_backward = create_joint_forward_backward(flat_fn)
+    out = flat_fn(*flat_args)
+    out = pytree.tree_map(
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+        out,
+    )
 
-        if isinstance(out, (list, tuple)):
-            num_outs = len(out)
-        else:
-            num_outs = 1
+    if isinstance(out, (list, tuple)):
+        _num_outs = len(out)
+    else:
+        _num_outs = 1
 
-        joint_inputs = (flat_args, out)
-        with torch.set_grad_enabled(True):
-            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
-                *joint_inputs
-            )
+    joint_inputs = (flat_args, out)
+    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
-            if config.use_functionalize:
-                # Functionalize the foward backward graph. First create a
-                # fake fn to make functionalize happy
-                def fake_fn(primals, tangents):
-                    return fx_g(primals, tangents)
+    if config.use_functionalize:
+        # Functionalize the foward backward graph. First create a
+        # fake fn to make functionalize happy
+        def fake_fn(primals, tangents):
+            return fx_g(primals, tangents)
 
-                fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
-        if config.debug_joint:
-            print(fx_g.code)
+    if config.debug_joint:
+        print(fx_g.code)
 
+    with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
         if config.debug_graphs:
             print(fw_module.code, bw_module.code)
 
-        with torch.no_grad():
-            with track_graph_compiling("forward"):
-                compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        with track_graph_compiling("forward"):
+            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
 
-            fw_outs = call_func_with_args(compiled_fw, flat_args)
-
-            if config.debug_partitioner:
-                activation_sizes = 0
-                for out in fw_outs[num_outs:]:
-                    if isinstance(out, torch.Tensor):
-                        activation_sizes += out.storage().nbytes()
-                print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
-
-            bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-            with track_graph_compiling("backward", True):
-                compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
+        if config.debug_partitioner:
+            fw_outs = call_func_with_args(compiled_fw_func, flat_args)
+            activation_sizes = 0
+            for out in fw_outs[_num_outs:]:
+                if isinstance(out, torch.Tensor):
+                    activation_sizes += out.storage().nbytes()
+            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
     class CompiledFunction(torch.autograd.Function):
+        compiled_fw = compiled_fw_func
+        compiled_bw = None
+        num_outs = _num_outs
+
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *flat_tensor_args):
-            fw_outs = call_func_with_args(compiled_fw, flat_tensor_args)
+            fw_outs = call_func_with_args(
+                CompiledFunction.compiled_fw, flat_tensor_args
+            )
+            num_outs = CompiledFunction.num_outs
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
 
@@ -284,8 +271,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         def backward(ctx, *flat_args):
             contiguous_args = [t.contiguous() for t in flat_args]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            if CompiledFunction.compiled_bw is None:
+                with track_graph_compiling("backward", True):
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, all_args
+                    )
             ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(compiled_bw, all_args, steal_args=True)
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw, all_args, steal_args=True
+            )
+
             return tuple(out)
 
     return CompiledFunction.apply
