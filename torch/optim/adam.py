@@ -99,6 +99,7 @@ class Adam(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
             group.setdefault('capturable', False)
+            group.setdefault('differentiable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
