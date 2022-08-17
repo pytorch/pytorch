@@ -2,7 +2,8 @@ import contextlib
 from typing import Iterator, Set
 import functools
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
+import warnings
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
@@ -10,8 +11,7 @@ from dataclasses import dataclass
 @dataclass
 class TorchDispatchModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_dispatch", mode_class=TorchDispatchMode,
-                         base_mode_class=BaseTorchDispatchMode)
+        super().__init__(mode_name="torch_dispatch", mode_class=TorchDispatchMode)
 
     def get_mode(self):
         return _get_torch_dispatch_mode()
@@ -132,13 +132,13 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
           ``NotImplemented``.
 
     Independent subclasses of :class:`TorchDispatchMode` are compositional:
-    modes can be pushed onto a stack with :func:`push_torch_dispatch_mode`.
+    modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_dispatch__`` implementation, by default, they will forward on to
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self, replace=self.inner)`` to make PyTorch
+    ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
     # Force metaclass to generate constructor at the base of the hierarchy
@@ -159,6 +159,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_dispatch_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
@@ -169,7 +170,9 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
 
     @classmethod
     def push(cls, *args, **kwargs):
-        return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
@@ -177,7 +180,3 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
-
-@contextlib.contextmanager
-def push_torch_dispatch_mode(ctor) -> Iterator[object]:
-    return _push_mode(ctor, mode_info=TorchDispatchModeInfo())

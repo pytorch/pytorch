@@ -12,6 +12,7 @@ from . import (
     optimizer_overlap_hooks as optimizer_overlap,
 )
 
+__all__ = ['DDPCommHookType', 'register_ddp_comm_hook']
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
     model.register_comm_hook(state, comm_hook)
@@ -96,6 +97,7 @@ def register_ddp_comm_hook(
     Uses Python comm hook implementations.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)
     """
     comm_hook_type.value(model=model, state=state)

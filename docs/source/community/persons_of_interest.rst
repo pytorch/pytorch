@@ -70,7 +70,7 @@ Distributions & RNG
 -  Fritz Obermeyer (`fritzo <https://github.com/fritzo>`__)
 -  Neeraj Pradhan (`neerajprad <https://github.com/neerajprad>`__)
 -  Alican Bozkurt (`alicanb <https://github.com/alicanb>`__)
--  Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
+-  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
 Distributed
 ~~~~~~~~~~~
@@ -101,9 +101,9 @@ Linear Algebra (torch.linalg)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
--  Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 -  Mario Lezcano (`Lezcano <https://github.com/Lezcano>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
+-  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -127,6 +127,14 @@ NVIDIA / CUDA
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
+
+NVFuser
+~~~~~~~
+
+-  Christian Sarofeen (`csarofeen <https://github.com/csarofeen>`__)
+-  Alex Jann (`jjsjann123 <https://github.com/jjsjann123>`__)
+-  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 
 Intel / MKLDNN
 ~~~~~~~~~~~~~~
@@ -182,10 +190,11 @@ C10 utils and operator dispatch
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 -  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
 
-PyTorch -> ONNX
-~~~~~~~~~~~~~~~
+ONNX exporter
+~~~~~~~~~~~~~
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
--  Gary Miguel (`garymm <https://github.com/garymm>`__)
+-  Aaron Bockover (`abock <https://github.com/abock>`__)
+-  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
 -  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
@@ -214,16 +223,23 @@ Windows
 -  (emeritus) Teng Gao (`gaoteng-git <https://github.com/gaoteng-git>`__)
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 
-Apple M1
-~~~~~~~~
+Apple M1/MPS
+~~~~~~~~~~~~
 
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
+-  Ramin Azarmehr (`razarmehr <https://github.com/razarmehr>`__)
 
 PowerPC
 ~~~~~~~
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
+
+Docs / Tutorials
+~~~~~~~~~~~~~~~~
+
+- Svetlana Karslioglu (`svekars <https://github.com/svekars>`__)
 
 Library-level maintainers
 -------------------------

@@ -3,10 +3,11 @@
 import os
 import tempfile
 import unittest
+
 import expecttest
+from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
 
 from torchgen.gen_backend_stubs import run
-from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
 
 path = os.path.dirname(os.path.realpath(__file__))
 gen_backend_stubs_path = os.path.join(path, "../torchgen/gen_backend_stubs.py")
@@ -237,7 +238,7 @@ invalid_key: invalid_val"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native""",  # noqa: B950
+            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native, ir_gen""",  # noqa: B950
         )
 
     # if use_out_as_primary is provided, it must be a bool

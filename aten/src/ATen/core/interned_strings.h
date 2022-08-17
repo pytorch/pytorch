@@ -14,6 +14,8 @@ namespace c10 {
 
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
+  _(namespaces, prims)               \
+  _(namespaces, nvprims)             \
   _(namespaces, aten)                \
   _(namespaces, cuda)                \
   _(namespaces, onnx)                \
@@ -52,6 +54,8 @@ namespace c10 {
   _(prim, squeeze_copy)              \
   _(prim, unsqueeze_copy)            \
   _(prim, flatten_copy)              \
+  _(prim, expand_copy)               \
+  _(prim, expand_as_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
@@ -218,6 +222,8 @@ namespace c10 {
   _(cuda, _current_device)           \
   _(cuda, synchronize)               \
   _(aten, has_torch_function)        \
+  _(aten, is_autocast_enabled)       \
+  _(aten, is_autocast_cpu_enabled)   \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

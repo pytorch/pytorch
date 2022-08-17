@@ -19,6 +19,7 @@ import zipfile
 from typing import (
     Any,
     Callable,
+    cast,
     Collection,
     Dict,
     List,
@@ -125,30 +126,36 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 
 
 @contextlib.contextmanager
-def disable_apex_o2_state_dict_hook(model):
+def disable_apex_o2_state_dict_hook(
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction]
+):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
     # remove this hook while exporting.
     if not isinstance(model, torch.jit.ScriptFunction):
-        tmp_map = {}  # type: ignore[var-annotated]
+        model_hooks = {}  # type: ignore[var-annotated]
         for module in model.modules():
-            for k, v in module._state_dict_hooks.items():
-                if type(v).__name__ == "O2StateDictHook":
-                    if module not in tmp_map:
-                        tmp_map[module] = {}
-                    tmp_map[module][k] = v
-            if module in tmp_map:
-                for k in tmp_map[module].keys():
-                    module._state_dict_hooks.pop(k)
-    try:
-        yield
-    finally:
-        if not isinstance(model, torch.jit.ScriptFunction):
-            # FIXME(justinchuby): tmp_map is possibly unbound
-            for module, m_map in tmp_map.items():
-                for k, v in m_map.items():
-                    module._state_dict_hooks[k] = v
+            for key, hook in module._state_dict_hooks.items():
+                if type(hook).__name__ == "O2StateDictHook":
+                    if module not in model_hooks:
+                        model_hooks[module] = {}
+                    model_hooks[module][key] = hook
+            if module in model_hooks:
+                for key in model_hooks[module]:
+                    module._state_dict_hooks.pop(key)
+        try:
+            yield
+        finally:
+            # Add the hooks back
+            for module, m_map in model_hooks.items():
+                for key, hook in m_map.items():
+                    module._state_dict_hooks[key] = hook
+    else:
+        try:
+            yield
+        finally:
+            pass
 
 
 @contextlib.contextmanager
@@ -540,6 +547,7 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
+    _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -873,51 +881,60 @@ def _check_flatten_did_not_remove(original, jit_flattened):
         )
 
 
-def _create_jit_graph(model, args):
-    torch_out = None
-    params: Union[List, Tuple]
+def _create_jit_graph(
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
+) -> Tuple[
+    _C.Graph,
+    List[_C.IValue],
+    Optional[Any],
+    Optional[Union[_C.ScriptModule, _C.ScriptFunction]],
+]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
-    if isinstance(model, torch.jit.ScriptModule):
-        try:
-            graph = model.forward.graph
-        except AttributeError as e:
-            raise RuntimeError("'forward' method must be a script method") from e
-        _C._jit_pass_onnx_function_substitution(graph)
-        freezed_m = _C._freeze_module(model._c, preserveParameters=True)
-        module, params = _C._jit_onnx_list_model_parameters(freezed_m)
-        method_graph = module._get_method("forward").graph
-        args_params = tuple(args) + tuple(params)
-        param_count_list = _get_param_count_list(method_graph, args_params)
-        in_vars, _ = torch.jit._flatten(args_params)
-        graph = _C._propagate_and_assign_input_shapes(
-            method_graph, tuple(in_vars), param_count_list, False, False
-        )
-        return graph, params, torch_out, module
-    elif isinstance(model, torch.jit.ScriptFunction):
-        params = ()
+        torch_out = None
+
+        if isinstance(model, torch.jit.ScriptModule):
+            try:
+                graph = model.forward.graph
+            except AttributeError as e:
+                raise RuntimeError("'forward' method must be a script method") from e
+            _C._jit_pass_onnx_function_substitution(graph)
+            freezed_module = _C._freeze_module(
+                cast(_C.ScriptModule, model._c), preserveParameters=True
+            )
+            module, params = _C._jit_onnx_list_model_parameters(freezed_module)
+            method_graph = module._get_method("forward").graph
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
+            graph = _C._propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), param_count_list, False, False
+            )
+            return graph, params, torch_out, module
+
+        # torch.jit.ScriptFunction
+        params = []
         graph = model.graph
         _C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
-        # FIXME(justinchuby): flattened_args is possibly unbound
         graph = _C._propagate_and_assign_input_shapes(
             graph, flattened_args, param_count_list, False, False
         )
         return graph, params, torch_out, None
-    else:
-        graph, torch_out = _trace_and_get_graph_from_model(model, args)
-        _C._jit_pass_onnx_lint(graph)
-        state_dict = torch.jit._unique_state_dict(model)
-        params = list(state_dict.values())
-        graph_inputs = list(graph.inputs())
-        user_input_num = len(graph_inputs) - len(state_dict)
-        param_names = list(state_dict.keys())
-        for i, inp in enumerate(graph_inputs):
-            if i >= user_input_num:
-                inp.setDebugName(param_names[i - user_input_num])
-        _C._jit_pass_onnx_function_substitution(graph)
-        return graph, params, torch_out, None
+
+    graph, torch_out = _trace_and_get_graph_from_model(model, args)
+    _C._jit_pass_onnx_lint(graph)
+    state_dict = torch.jit._unique_state_dict(model)
+    params = list(state_dict.values())
+    graph_inputs = list(graph.inputs())
+    user_input_num = len(graph_inputs) - len(state_dict)
+    param_names = list(state_dict.keys())
+    for i, inp in enumerate(graph_inputs):
+        if i >= user_input_num:
+            inp.setDebugName(param_names[i - user_input_num])
+    _C._jit_pass_onnx_function_substitution(graph)
+    return graph, params, torch_out, None
 
 
 def _get_named_param_dict(graph, params):
@@ -951,11 +968,19 @@ _qtype_vtype_map = {
 }
 
 
-def unpack_quantized_tensor(value):
+def unpack_quantized_tensor(value, cast_onnx_accepted=True):
     if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
         q_value_dequantize = value.dequantize()
-        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
-        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_scale = (
+            torch.tensor(value.q_scale(), dtype=torch.double)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_scale(), dtype=torch.float32)
+        )
+        q_zero_point = (
+            torch.tensor(value.q_zero_point(), dtype=torch.int64)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_zero_point(), dtype=_qtype_vtype_map[value.dtype])
+        )
         q_value = q_value_dequantize / q_scale + q_zero_point
         q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
         return q_value, q_scale, q_zero_point
@@ -1159,7 +1184,6 @@ def export_to_pretty_string(
     symbolic_helper._set_opset_version(opset_version)
     symbolic_helper._set_operator_export_type(operator_export_type)
 
-    symbolic_helper._set_onnx_shape_inference(True)
     with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(
             keep_initializers_as_inputs, operator_export_type, opset_version
@@ -1686,30 +1710,30 @@ def _run_symbolic_function(
     """
 
     opset_version = GLOBALS.export_onnx_opset_version
-    symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]
-    # TODO(ezyang): I think this is not necessary anymore
-    if n.kind().endswith("_"):
-        ns_op_name = n.kind()[:-1]
+    node_kind = n.kind()
+    if node_kind.endswith("_"):
+        # Treat relu_ -> relu; add_ -> add etc.
+        ns_op_name = node_kind[:-1]
     else:
-        ns_op_name = n.kind()
-    ns, op_name = ns_op_name.split("::")
+        ns_op_name = node_kind
+
+    namespace, op_name = ns_op_name.split("::")
 
     try:
         symbolic_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        if ns == "aten":
+        if namespace == "aten":
             domain = ""
-        elif ns == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
+        elif namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
             domain = "caffe2"
         else:
-            domain = ns
+            domain = namespace
 
         if symbolic_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(
@@ -1717,7 +1741,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
                 ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1726,13 +1750,21 @@ def _run_symbolic_function(
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
             return symbolic_fn(g, *inputs, **attrs)
-        elif ns == "onnx":
+        elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
-        elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+        elif _should_aten_fallback(
+            namespace, op_name, opset_version, operator_export_type
+        ):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
@@ -1756,7 +1788,10 @@ def _run_symbolic_function(
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )

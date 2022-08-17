@@ -3,6 +3,7 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.utils.common import (
     _deprecation_warning,
     _iter_deprecated_functional_names,
@@ -81,6 +82,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     Examples:
         General Usage:
+            >>> # xdoctest: +SKIP
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
@@ -110,7 +112,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
-    _restored: bool = False
+    _number_of_samples_yielded: int = 0
+    _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
+    _fast_forward_iterator: Optional[Iterator] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
@@ -185,7 +189,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
-    def reset(self):
+    def reset(self) -> None:
         r"""
         Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
         depending on their functionalities, they may want to override this method with implementations that
@@ -220,6 +224,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         DataPipe with non-integral indices/keys, a custom sampler must be provided.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> dp = SequenceWrapper(range(10))
         >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)

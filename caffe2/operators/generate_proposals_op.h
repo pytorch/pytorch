@@ -28,7 +28,7 @@ class ConstTensorView {
     return dims_;
   }
   int dim(int i) const {
-    DCHECK_LE(i, dims_.size());
+    TORCH_DCHECK_LE(i, dims_.size());
     return dims_[i];
   }
   const T* data() const {
