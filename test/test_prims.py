@@ -351,7 +351,7 @@ class TestPrims(TestCase):
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_nvprims_var_mean = any(
-            torch.ops.nvprims.var_mean.default == node.target
+            torch.ops.nvprims.var_mean.main == node.target
             for node in call_function_nodes
         )
         self.assertTrue(includes_nvprims_var_mean)
