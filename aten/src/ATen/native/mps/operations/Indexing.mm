@@ -40,7 +40,6 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
   Tensor outputTensor = iter.tensor(0);
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(inputTensor);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
-  MTLResourceOptions options = [inputBuffer resourceOptions];
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
