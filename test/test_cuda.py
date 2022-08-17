@@ -3259,8 +3259,6 @@ torch.cuda.synchronize()
         free_bytes_after, _ = torch.cuda.mem_get_info()
         used_gb_after = (total_bytes - free_bytes_after) / 1e9
 
-        print(used_gb_before, used_gb_after)
-
         self.assertFalse(used_gb_before + 0.1 < used_gb_after)
 
     @unittest.skipIf((not TEST_CUDA) or
