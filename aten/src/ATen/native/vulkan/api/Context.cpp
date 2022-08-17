@@ -130,11 +130,15 @@ Context* context() {
 
       return new Context(runtime()->default_adapter_i(), config);
     } catch (const std::exception& e) {
-      TORCH_CHECK(
-          false, "Vulkan: Failed to initialize context! Error: ", e.what());
+      std::stringstream ss;
+      ss << "Pytorch Vulkan Context: Failed to initialize context! ";
+      ss << "Error: " << e.what();
+      throw std::runtime_error(ss.str());
     } catch (...) {
-      TORCH_CHECK(
-          false, "Vulkan: Failed to initialize context! Error: Unknown");
+      std::stringstream ss;
+      ss << "Pytorch Vulkan Context: Failed to initialize context! ";
+      ss << "Error: Unkown";
+      throw std::runtime_error(ss.str());
     }
 
     return nullptr;
