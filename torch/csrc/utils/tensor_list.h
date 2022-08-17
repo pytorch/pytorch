@@ -6,8 +6,10 @@ namespace at {
 class Tensor;
 }
 
-namespace torch { namespace utils {
+namespace torch {
+namespace utils {
 
 PyObject* tensor_to_list(const at::Tensor& tensor);
 
-}} // namespace torch::utils
+}
+} // namespace torch

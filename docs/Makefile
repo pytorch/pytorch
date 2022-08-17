@@ -18,7 +18,7 @@ figures:
 	@$(PYCMD) source/scripts/build_quantization_configs.py
 
 onnx_supported_aten_ops:
-	@$(PYCMD) source/scripts/build_onnx_supported_aten_op_csv_table.py
+	@$(PYCMD) source/scripts/onnx/build_onnx_supported_aten_op_csv_table.py
 
 docset: html
 	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url https://pytorch.org/docs/ --force $(BUILDDIR)/html/

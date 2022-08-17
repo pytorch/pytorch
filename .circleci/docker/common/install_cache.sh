@@ -5,7 +5,9 @@ set -ex
 install_ubuntu() {
   echo "Preparing to build sccache from source"
   apt-get update
-  apt-get install -y cargo pkg-config libssl-dev
+  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
+  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
+  apt-get install -y cargo
   echo "Checking out sccache repo"
   git clone https://github.com/pytorch/sccache
   cd sccache
@@ -46,7 +48,9 @@ fi
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
-  printf "#!/bin/sh\nif [ \$(ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
+  # Unset LD_PRELOAD for ps because of asan + ps issues
+  # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
+  printf "#!/bin/sh\nif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
   chmod a+x "/opt/cache/bin/$1"
 }
 

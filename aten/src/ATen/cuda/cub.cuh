@@ -385,4 +385,36 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
 
 #endif
 
+template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
+void unique(InputIteratorT input, OutputIteratorT output,
+            NumSelectedIteratorT num_selected_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub unique does not support more than INT_MAX elements");
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::Unique,
+              input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
+}
+
+template <typename InputIteratorT, typename OutputIteratorT, typename CountsOutputIteratorT,
+          typename LengthOutputIteratorT>
+void run_length_encode(InputIteratorT input, OutputIteratorT output, CountsOutputIteratorT counts_out,
+                       LengthOutputIteratorT length_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub run_length_encode does not support more than INT_MAX elements");
+  CUB_WRAPPER(
+      NO_ROCM(at_cuda_detail)::cub::DeviceRunLengthEncode::Encode,
+      input, output, counts_out, length_out, num_items,
+      at::cuda::getCurrentCUDAStream());
+}
+
+template <typename InputIteratorT, typename OutputIteratorT, typename ReductionOpT, typename T>
+void reduce(InputIteratorT input, OutputIteratorT output, int64_t num_items, ReductionOpT op, T init) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub reduce does not support more than INT_MAX elements");
+  CUB_WRAPPER(
+      NO_ROCM(at_cuda_detail)::cub::DeviceReduce::Reduce,
+      input, output, num_items, op, init,
+      at::cuda::getCurrentCUDAStream());
+
+}
+
 }}}  // namespace at::cuda::cub

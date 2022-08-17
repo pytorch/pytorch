@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 
 #include <ATen/Backtrace.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
@@ -606,13 +607,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymInt value) {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasValue(name)) {
-    Value* v = ArgumentStash::popValue(name);
-    n->addInput(v);
-  } else {
-    detail::genericAddInput(n, value);
-  }
+  addInputs(n, name, value.expect_int());
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
@@ -807,7 +802,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
-  TORCH_CHECK(false, "Tracing operations taking symbolic ints isn't supported");
+  addInputs(n, name, asIntArrayRefSlow(value));
 }
 
 void addInputs(

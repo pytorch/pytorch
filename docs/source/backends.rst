@@ -11,9 +11,11 @@ These backends include:
 
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
+- ``torch.backends.xeon``
 
 
 torch.backends.cuda
@@ -78,6 +80,14 @@ torch.backends.cudnn
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
 
+.. attribute::  torch.backends.cudnn.benchmark_limit
+
+    A :class:`int` that specifies the maximum number of cuDNN convolution algorithms to try when
+    `torch.backends.cudnn.benchmark` is True. Set `benchmark_limit` to zero to try every
+    available algorithm. Note that this setting only affects convolutions dispatched via the
+    cuDNN v8 API.
+
+
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mps
@@ -93,12 +103,16 @@ torch.backends.mkl
 
 .. autofunction::  torch.backends.mkl.is_available
 
+.. autoclass::  torch.backends.mkl.verbose
+
 
 torch.backends.mkldnn
 ^^^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mkldnn
 
 .. autofunction::  torch.backends.mkldnn.is_available
+
+.. autoclass::  torch.backends.mkldnn.verbose
 
 
 torch.backends.openmp
@@ -112,3 +126,8 @@ torch.backends.openmp
 .. add anything to the rendered page for now.
 .. py:module:: torch.backends.quantized
 .. py:module:: torch.backends.xnnpack
+
+
+torch.backends.xeon
+^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.xeon

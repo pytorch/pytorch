@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <cassert>
 #include <cstdio>

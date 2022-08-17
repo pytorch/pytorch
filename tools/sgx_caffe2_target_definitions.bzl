@@ -225,24 +225,26 @@ def add_sgx_perf_kernel_libs():
 
     # these are esentially disabled for hte sgx build but we still need them
     # to avoid linking issues
-    levels_and_flags = ([
-        (
-            "avx2",
-            [
-                "-mavx2",
-                "-mfma",
-                "-mavx",
-                "-mf16c",
-            ],
-        ),
-        (
-            "avx",
-            [
-                "-mavx",
-                "-mf16c",
-            ],
-        ),
-    ])
+    levels_and_flags = {
+        "x86_64": [
+            (
+                "avx2",
+                [
+                    "-mavx2",
+                    "-mfma",
+                    "-mavx",
+                    "-mf16c",
+                ],
+            ),
+            (
+                "avx",
+                [
+                    "-mavx",
+                    "-mf16c",
+                ],
+            ),
+        ],
+    }
 
     define_perf_kernels(
         prefix = "sgx_",

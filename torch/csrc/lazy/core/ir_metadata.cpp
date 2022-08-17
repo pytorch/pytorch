@@ -1,7 +1,7 @@
-#include <functional>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <functional>
 
 namespace torch {
 namespace lazy {

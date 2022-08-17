@@ -19,13 +19,13 @@ class LSTMCell(torch.nn.Module):
 
         >>> import torch.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
-        >>> input = torch.randn(3, 10)
+        >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
         >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-                hx, cx = rnn(input[i], (hx, cx))
-                output.append(hx)
+        ...     hx, cx = rnn(input[i], (hx, cx))
+        ...     output.append(hx)
     """
     _FLOAT_MODULE = torch.nn.LSTMCell
 
@@ -163,6 +163,7 @@ class _LSTMLayer(torch.nn.Module):
             hx_fw, cx_fw = (None, None)
         else:
             hx_fw, cx_fw = hidden
+        hidden_bw: Optional[Tuple[Tensor, Tensor]] = None
         if self.bidirectional:
             if hx_fw is None:
                 hx_bw = None
@@ -174,7 +175,8 @@ class _LSTMLayer(torch.nn.Module):
             else:
                 cx_bw = cx_fw[1]
                 cx_fw = cx_fw[0]
-            hidden_bw = hx_bw, cx_bw
+            if hx_bw is not None and cx_bw is not None:
+                hidden_bw = hx_bw, cx_bw
         if hx_fw is None and cx_fw is None:
             hidden_fw = None
         else:
@@ -191,11 +193,9 @@ class _LSTMLayer(torch.nn.Module):
                 h = None
                 c = None
             elif hidden_fw is None:
-                h = hidden_bw[0]
-                c = hidden_bw[1]
+                (h, c) = torch.jit._unwrap_optional(hidden_bw)
             elif hidden_bw is None:
-                h = hidden_fw[0]
-                c = hidden_fw[1]
+                (h, c) = torch.jit._unwrap_optional(hidden_fw)
             else:
                 h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore[list-item]
                 c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore[list-item]
@@ -262,6 +262,7 @@ class LSTM(torch.nn.Module):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
         >>> # To get the weights:
+        >>> # xdoctest: +SKIP
         >>> print(rnn.layers[0].weight_ih)
         tensor([[...]])
         >>> print(rnn.layers[0].weight_hh)
@@ -339,21 +340,19 @@ class LSTM(torch.nn.Module):
             else:
                 hxcx = hidden_non_opt
 
-        for idx, layer in enumerate(self.layers):
-            x, hxcx[idx] = layer(x, hxcx[idx])
-
         hx_list = []
         cx_list = []
-        for idx in range(self.num_layers):
-            hx_list.append(hxcx[idx][0])
-            cx_list.append(hxcx[idx][1])
+        for idx, layer in enumerate(self.layers):
+            x, (h, c) = layer(x, hxcx[idx])
+            hx_list.append(torch.jit._unwrap_optional(h))
+            cx_list.append(torch.jit._unwrap_optional(c))
         hx_tensor = torch.stack(hx_list)
         cx_tensor = torch.stack(cx_list)
 
         # We are creating another dimension for bidirectional case
         # need to collapse it
-        hx_tensor = hx_tensor.reshape(-1, *hx_tensor.shape[-2:])
-        cx_tensor = cx_tensor.reshape(-1, *cx_tensor.shape[-2:])
+        hx_tensor = hx_tensor.reshape(-1, hx_tensor.shape[-2], hx_tensor.shape[-1])
+        cx_tensor = cx_tensor.reshape(-1, cx_tensor.shape[-2], cx_tensor.shape[-1])
 
         if self.batch_first:
             x = x.transpose(0, 1)
@@ -380,5 +379,8 @@ class LSTM(torch.nn.Module):
 
     @classmethod
     def from_observed(cls, other):
-        return torch.ao.quantization.convert(other, inplace=False,
-                                             remove_qconfig=True)
+        # The whole flow is float -> observed -> quantized
+        # This class does float -> observed only
+        raise NotImplementedError("It looks like you are trying to convert a "
+                                  "non-quantizable LSTM module. Please, see "
+                                  "the examples on quantizable LSTMs.")
