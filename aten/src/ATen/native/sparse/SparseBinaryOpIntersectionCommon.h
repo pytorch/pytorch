@@ -157,7 +157,10 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
         // non-const because of gcc-5/clang-5 issues
         auto sdim = static_cast<uint32_t>(sparse_dim);
 
-        KernelLauncher::launch(iter, [=] FUNCAPI (index_t nnz_idx) -> hash_t {
+        KernelLauncher::launch(iter,
+            // Windows does not seem to like these nested captures without explicit names.
+            [ptr_indices, indices_dim_stride, indices_nnz_stride, sdim, ptr_hash_coeffs]
+            FUNCAPI (index_t nnz_idx) -> hash_t {
             const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
             auto hash = hash_t {0};
             for (uint32_t dim = 0; dim < sdim; ++dim) {
@@ -223,7 +226,12 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
         auto sdim = static_cast<uint32_t>(sparse_dim);
 
         // Fusing hash computation with hash intersection.
-        KernelLauncher::launch(iter, [=] FUNCAPI (index_t nnz_idx) -> index_t {
+        KernelLauncher::launch(iter,
+            // Windows does not seem to like these nested captures without explicit names.
+            [ptr_indices, ptr_sorted_hash, sorted_hash_len, ptr_hash_coeffs,
+              ptr_intersection_count, ptr_intersection_first_idx, sdim,
+              indices_dim_stride, indices_nnz_stride]
+            FUNCAPI (index_t nnz_idx) -> index_t {
             // Compute hash value
             const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
             auto hash = hash_t {0};
@@ -294,7 +302,10 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
         auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
         auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
         const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
-        KernelLauncher::launch(iter, [=] FUNCAPI (
+        KernelLauncher::launch(iter,
+            // Windows does not seem to like these nested captures without explicit names.
+            [ptr_selected_source, ptr_selected_probably_coalesced, ptr_argsort]
+            FUNCAPI (
               index_t idx,
               hash_t count,
               hash_t first_match_idx,
@@ -331,7 +342,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   get_sparse_impl(res)->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
   get_sparse_impl(res)->set_nnz_and_narrow(res_nnz);
-  // Result is coalesced iff arguments are coalesced.
+  // Result is coalesced iff arguments are coalesced, conditioned on the fact
+  // that we do not check that intersection hash values are sorted and unique.
   // <= : intersection contains only unique indices (or empty), and the algorithm's
   // behavior is order-preserving. So, the result has only unique indices (or empty) which are sorted.
   // => : proof by contraposition. The contrapositive statement reads
