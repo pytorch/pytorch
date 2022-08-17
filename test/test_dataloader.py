@@ -1773,10 +1773,11 @@ except RuntimeError as e:
                 self.assertEqual(input, self.data[offset:offset + 3])
 
     def test_batch_sampler(self):
-        self._test_batch_sampler()
-        self._test_batch_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN:
-            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
+        for _ in range(100):
+            self._test_batch_sampler()
+            self._test_batch_sampler(num_workers=4)
+            if not NO_MULTIPROCESSING_SPAWN:
+                self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):

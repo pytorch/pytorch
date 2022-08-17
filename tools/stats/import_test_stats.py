@@ -114,6 +114,8 @@ def get_disabled_tests(
             key = "DISABLED "
             issue_url = item["html_url"]
             issue_number = issue_url.split("/")[-1]
+            if issue_number == "83512":
+                continue
             if title.startswith(key) and issue_number not in IGNORE_DISABLED_ISSUES:
                 test_name = title[len(key) :].strip()
                 body = item["body"]
