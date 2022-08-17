@@ -23,7 +23,6 @@ namespace native {
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
 
-namespace {
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
@@ -43,7 +42,6 @@ void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
   });
 }
-}  // namespace (anonymous)
 
 using namespace at::cuda;
 
