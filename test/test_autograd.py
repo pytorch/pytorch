@@ -3718,6 +3718,32 @@ class TestAutograd(TestCase):
         del t
         self.assertIsNone(ref())
 
+    def test_anomaly_mode_no_check_nan(self):
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                return torch.tensor(float("nan")).expand(10, 10)
+
+        def run_fn(a):
+            out = MyFunc.apply(a)
+            return out.sum()
+
+        with warnings.catch_warnings(record=True) as w:
+            with torch.autograd.detect_anomaly(check_nan=False):
+                inp = torch.rand(10, 10, requires_grad=True)
+                out = run_fn(inp)
+                out.backward(retain_graph=True)
+
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+                        out.backward(retain_graph=True)
+
+                out.backward()
+
     # TODO: update these tests to use the linalg module and move to test_linalg.py
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
