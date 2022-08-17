@@ -31,6 +31,23 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TorchDynamoUseCases(unittest.TestCase):
 
+    def test_dim(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: TensorType([1, 2])):
+                y = x.dim()
+                return y
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        y_res = z3.z3.Int(2)
+        self.assertEqual(s.model()[y_res], 2)
+
 
     def test_reshape(self):
         """

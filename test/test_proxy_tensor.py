@@ -175,9 +175,7 @@ class TestGenericProxyTensor(TestCase):
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
-        r1 = fx_f(*new_inps)
-        r2 = f(*new_inps)
-        self.assertEqual(r1, r2)
+        self.assertEqual(fx_f(*new_inps), f(*new_inps))
 
     def test_make_fx_simple(self):
         def f(x):
@@ -286,10 +284,11 @@ class TestGenericProxyTensor(TestCase):
             self.assertTrue(is_any_sigmoid(gm))
             return torch.digamma(x)
 
-        traced = make_fx(f2_logging_tensor)(torch.randn(3))
-        self.assertFalse(is_any_sum(traced))
-        self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
-        self.assertTrue(is_any_digamma(traced))
+        with self.assertRaisesRegex(AssertionError, "ProxyTensor is wrapped with another Tensor subclass"):
+            traced = make_fx(f2_logging_tensor)(torch.randn(3))
+            self.assertFalse(is_any_sum(traced))
+            self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+            self.assertTrue(is_any_digamma(traced))
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -515,8 +514,6 @@ def forward(self, x_1):
         model = Foo()
 
         def f(args, params, buffers):
-            for p in params.values():
-                p.grad = None
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
@@ -1104,7 +1101,6 @@ symbolic_tensor_failures = {
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('stack', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode a...
     xfail('std', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('std_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...

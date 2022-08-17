@@ -690,12 +690,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return shifted - shifted_logsumexp
 
 
-@register_decomposition(aten.addcdiv)
-@pw_cast_for_opmath
-def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    return self + value * (tensor1 / tensor2)
-
-
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
 @register_decomposition(aten.addcmul)
 @pw_cast_for_opmath
@@ -1244,10 +1238,10 @@ def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
     if self.dim() <= 1:
-        return self.view(self.shape)
+        return self
 
     if dim0 == dim1:
-        return self.view(self.shape)
+        return self
     perm = list(range(self.dim()))
     perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
     return torch.permute(self, perm)
