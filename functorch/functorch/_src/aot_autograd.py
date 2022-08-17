@@ -254,23 +254,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         if config.debug_graphs:
             print(fw_module.code, bw_module.code)
 
-        with track_graph_compiling("forward"):
-            compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
-
-        # TODO: Delay this backwards compilation until the backwards pass
         with torch.no_grad():
+            with track_graph_compiling("forward"):
+                compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+
             fw_outs = call_func_with_args(compiled_fw, flat_args)
 
-        if config.debug_partitioner:
-            activation_sizes = 0
-            for out in fw_outs[num_outs:]:
-                if isinstance(out, torch.Tensor):
-                    activation_sizes += out.storage().nbytes()
-            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+            if config.debug_partitioner:
+                activation_sizes = 0
+                for out in fw_outs[num_outs:]:
+                    if isinstance(out, torch.Tensor):
+                        activation_sizes += out.storage().nbytes()
+                print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
 
-        bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-        with track_graph_compiling("backward", True):
-            compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
+            bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
+            with track_graph_compiling("backward", True):
+                compiled_bw = aot_config.bw_compiler(bw_module, bw_args)
 
     class CompiledFunction(torch.autograd.Function):
         @staticmethod
@@ -319,20 +318,27 @@ def create_aot_dispatcher_function(
     with preserve_rng_state(), fake_mode as mode:
 
         def process_inputs(flat_args):
-            flat_args = pytree.tree_map(
-                lambda x: x.detach().requires_grad_(x.requires_grad)
-                if isinstance(x, Tensor)
-                else x,
-                flat_args,
-            )
-            fake_flat_tensor_args = pytree.tree_map(
-                lambda x: mode.from_tensor(x)
-                if mode
-                else x
-                if isinstance(x, Tensor)
-                else x,
-                flat_args,
-            )
+            if mode:
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor, mode.from_tensor, flat_args
+                )
+            else:
+                # The detach().requires_grad_() pattern can cause some subtle bugs.
+                # These will be fixed once FakeTensor is always-on for AOTAutograd.
+                #
+                # For models that might resize their inputs, the input tensors
+                # must have allow_tensor_metadata_change() set to true.
+                # detach() returns a view tensor, but with that field set to false.
+                #
+                # Specifically, this breaks quantized models
+                # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
+                # because they use a "running-mean" style op that requires
+                # resizing the running counter buffers stored on the module.
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor,
+                    lambda x: x.detach().requires_grad_(x.requires_grad),
+                    flat_args,
+                )
             return fake_flat_tensor_args
 
         fake_flat_tensor_args = process_inputs(flat_args)
