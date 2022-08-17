@@ -1061,6 +1061,28 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
   };
 }
 
+std::vector<QuantFusionInfo> dynamic_quantized_linear_pattern_and_replacements() {
+  std::string linear_dynamic = R"(
+graph(%packed_params, %a):
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::linear(%a, %w_dequant, %b)
+        return (%r) )";
+
+  // This pattern ignores reduce range
+  // Set the reduce range to default to true, since qnnpack backend ignores this
+  // argument.
+  std::string quantized_linear_dynamic = R"(
+graph(%packed_params, %a):
+        %reduce_range : bool = prim::Constant[value=1]()
+        %r = quantized::linear_dynamic(%a, %packed_params, %reduce_range)
+        return (%r) )";
+
+  return {
+      {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
+  };
+}
+
 std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
   std::string linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):

@@ -9,6 +9,8 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization.quantize_jit import (
+    prepare_dynamic_jit,
+    convert_dynamic_jit,
     prepare_ondevice_dynamic_jit,
     convert_ondevice_dynamic_jit,
 )
@@ -25,6 +27,8 @@ from torch.testing._internal.common_quantization import (
 )
 
 from torch.testing import FileCheck
+
+import io
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
@@ -66,7 +70,7 @@ class OnDevicePTQUtils(object):
         return scripted_model
 
     @staticmethod
-    def insert_observers_quant_dequant(model, qconfig_dict):
+    def ptq_dynamic_quantize(model, qconfig_dict):
         inputs = model.get_example_inputs()
         m = get_script_module(model, False, inputs)
         m = prepare_ondevice_dynamic_jit(m, qconfig_dict)
@@ -95,6 +99,23 @@ class OnDevicePTQUtils(object):
             if node.s('name') == "calculate_qparams":
                 return True
         return False
+
+    @staticmethod
+    def get_linear_packed_param_fp_weight(node):
+        weight = node.inputsAt(0).node()
+        if weight.kind() != "aten::quantize_per_tensor" and weight.kind() != "aten::quantize_per_channel":
+            raise ValueError("Quantized weight must be produced.")
+        fp_weight = weight.inputsAt(0).node()
+        assert fp_weight.kind() == "prim::GetAttr", "Weight must be an attribute of the module."
+        fp_weight_name = fp_weight.s('name')
+        return fp_weight_name
+
+    @staticmethod
+    def is_per_channel_quantized_packed_param(node):
+        assert node.kind() == 'quantized::linear_prepack', "Node must corresponds to linear_prepack."
+        weight = node.inputsAt(0).node()
+        assert weight.kind() != "aten::quantize_per_tensor" or weight.kind() != "aten::quantize_per_channel"
+        return weight.kind() != "aten::quantize_per_tensor"
 
 
 class TestOnDeviceDynamicPTQInsertObservers(TestCase):
@@ -162,15 +183,12 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
 class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
     def _validate_quant_dequant_nodes(self, model, num_nodes, per_channel=0):
         quantize_forward_graph = model.quantize_forward.graph
-        quantize_per_tensor = quantize_per_channel = dequantize = 0
+        quantize_per_tensor = quantize_per_channel = 0
         for n in quantize_forward_graph.nodes():
             if "aten::quantize_per_tensor" in n.kind():
                 quantize_per_tensor += 1
             if "aten::quantize_per_channel" in n.kind():
                 quantize_per_channel += 1
-            if "aten::dequantize" in n.kind():
-                dequantize += 1
-        self.assertEqual(quantize_per_tensor + quantize_per_channel, dequantize)
         self.assertEqual(quantize_per_tensor + quantize_per_channel, num_nodes)
 
 
@@ -194,13 +212,13 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
 
     def _check_quant_dequant_and_calc_qparams(self, model, num_nodes):
         qconfig_dict = {"" : default_dynamic_qconfig}
-        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         self._validate_quant_dequant_nodes(m, num_nodes)
         self._validate_calculate_qparams(m, num_nodes)
         self._validate_no_observer_forward(m)
 
         qconfig_dict = {"" : per_channel_dynamic_qconfig}
-        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         self._validate_quant_dequant_nodes(m, num_nodes, num_nodes)
         self._validate_calculate_qparams(m, num_nodes)
         self._validate_no_observer_forward(m)
@@ -209,12 +227,12 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
     def _check_quantize_forward_runs(self, model):
         inputs = model.get_example_inputs()
         qconfig_dict = {"" : default_dynamic_qconfig}
-        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         m.observe_forward(*inputs)
         m.quantize_forward(*inputs)
 
         qconfig_dict = {"" : per_channel_dynamic_qconfig}
-        m = OnDevicePTQUtils.insert_observers_quant_dequant(model, qconfig_dict)
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         # First must run observe forward to record the stats to produce
         # correct scales and zero points
         m.observe_forward(*inputs)
@@ -233,3 +251,205 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
         self._check_quantize_forward_runs(model)
         model = MyConvLinearModule()
         self._check_quantize_forward_runs(model)
+
+
+class TestOnDeviceDynamicPTQFinalize(TestCase):
+    def _validate_packed_params(self, model, num_nodes, per_channel=0):
+        quantize_forward_graph = model.quantize_forward.graph
+        quantize_per_tensor = quantize_per_channel = 0
+        linear_prepack = 0
+        linear_prepack_uses = 0
+        for n in quantize_forward_graph.nodes():
+            if n.kind() == 'prim::SetAttr':
+                maybe_packed_param_value = n.inputsAt(1)
+                maybe_packed_param = maybe_packed_param_value.node()
+                if maybe_packed_param.kind() == 'quantized::linear_prepack':
+                    linear_prepack += 1
+                    linear_prepack_uses += len(maybe_packed_param_value.uses())
+                    if OnDevicePTQUtils.is_per_channel_quantized_packed_param(maybe_packed_param):
+                        quantize_per_channel += 1
+                    else:
+                        quantize_per_tensor += 1
+        self.assertEqual(quantize_per_tensor + quantize_per_channel, num_nodes)
+        self.assertEqual(quantize_per_channel, per_channel)
+        self.assertEqual(linear_prepack, num_nodes)
+        self.assertEqual(linear_prepack_uses, num_nodes)
+
+
+    def _validate_no_linear_unpack(self, model):
+        quantize_forward_graph = model.quantize_forward.graph
+        for n in quantize_forward_graph.nodes():
+            if n.kind() == 'quantized::linear_unpack':
+                return False
+        return True
+
+
+    def _validate_setattr_fp_weights(self, model, num_nodes):
+        quantize_forward_graph = model.quantize_forward.graph
+        fp_weights_setattr = 0
+        fp_weight_names = []
+        for n in quantize_forward_graph.nodes():
+            if n.kind() == 'prim::SetAttr':
+                maybe_packed_param = n.inputsAt(1).node()
+                if maybe_packed_param.kind() == 'quantized::linear_prepack':
+                    weight_name = OnDevicePTQUtils.get_linear_packed_param_fp_weight(maybe_packed_param)
+                    fp_weight_names.append(weight_name)
+
+        for n in quantize_forward_graph.nodes():
+            # This is basically detecting
+            # %x = prim::Constant
+            # = prim::SetAttr(<weight_name>)(module_value, x)
+            # Thus making sure that the original fp weights are
+            # reset
+            if n.kind() == 'prim::SetAttr':
+                weight_name = n.s('name')
+                if weight_name in fp_weight_names:
+                    maybe_constant = n.inputsAt(1).node()
+                    if maybe_constant.kind() == 'prim::Constant':
+                        fp_weights_setattr += 1
+        self.assertEqual(fp_weights_setattr, num_nodes)
+
+
+    def _validate_quantized_forward(self, model, num_nodes):
+        quantized_forward_graph = model.quantized_forward.graph
+        quantize_per_tensor = quantize_per_channel = 0
+        quantized_linear_dynamic = 0
+        linear_packed_params = 0
+        num_setattr = 0
+        for n in quantized_forward_graph.nodes():
+            if "aten::quantize_per_tensor" in n.kind():
+                quantize_per_tensor += 1
+            if "aten::quantize_per_channel" in n.kind():
+                quantize_per_channel += 1
+            if "quantized::linear_dynamic" in n.kind():
+                quantized_linear_dynamic += 1
+            if n.kind() == 'prim::GetAttr':
+                output = n.outputsAt(0)
+                output_type = output.type()
+                if "LinearPackedParamsBase" in output_type.str():
+                    linear_packed_params += 1
+            if n.kind() == 'prim::SetAttr':
+                num_setattr += 1
+        self.assertEqual(quantize_per_tensor, 0)
+        self.assertEqual(quantize_per_channel, 0)
+        self.assertEqual(quantized_linear_dynamic, num_nodes)
+        self.assertEqual(linear_packed_params, num_nodes)
+        # self.assertEqual(num_setattr, 0)
+
+
+    def _check_quantize_forward(self, model, num_nodes):
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        self._validate_packed_params(m, num_nodes)
+        self._validate_no_linear_unpack(m)
+        self._validate_setattr_fp_weights(m, num_nodes)
+
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        self._validate_packed_params(m, num_nodes, num_nodes)
+        self._validate_no_linear_unpack(m)
+        self._validate_setattr_fp_weights(m, num_nodes)
+
+
+    def _check_quantized_forward(self, model, num_nodes):
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        self._validate_quantized_forward(m, num_nodes)
+
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        self._validate_quantized_forward(m, num_nodes)
+
+
+    def _check_against_ref_dynamic_ptq(self, model):
+        model.eval()
+        inputs = model.get_example_inputs()
+        ref_m = torch.jit.script(model)
+        torch._C._jit_pass_inline(ref_m.graph)
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        ref_m = prepare_dynamic_jit(ref_m, qconfig_dict)
+        ref_m = convert_dynamic_jit(ref_m)
+        ref_output = ref_m(*inputs)
+
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+        output = m.quantized_forward(*inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+        thrown = False
+        try:
+            m(*inputs)
+        except Exception as e:
+            thrown = True
+        self.assertTrue(thrown)
+
+        # test with per channel quant
+        ref_m = torch.jit.script(model)
+        torch._C._jit_pass_inline(ref_m.graph)
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        ref_m = prepare_dynamic_jit(ref_m, qconfig_dict)
+        ref_m = convert_dynamic_jit(ref_m)
+        ref_output = ref_m(*inputs)
+
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+        output = m.quantized_forward(*inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+        thrown = False
+        try:
+            m(*inputs)
+        except Exception as e:
+            thrown = True
+        self.assertTrue(thrown)
+
+
+    def _check_serialization_deserialization(self, model):
+        model.eval()
+        inputs = model.get_example_inputs()
+        ref_m = torch.jit.script(model)
+        torch._C._jit_pass_inline(ref_m.graph)
+        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        ref_m = prepare_dynamic_jit(ref_m, qconfig_dict)
+        ref_m = convert_dynamic_jit(ref_m)
+        buffer = io.BytesIO()
+        torch.jit.save(ref_m, buffer)
+        buffer.seek(0)
+        ref_m = torch.jit.load(buffer)
+        ref_output = ref_m(*inputs)
+
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        output = m.quantized_forward(*inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+
+
+    def test_quantize_forward(self):
+        model = LinearAddModel()
+        self._check_quantize_forward(model, 2)
+        model = MyConvLinearModule()
+        self._check_quantize_forward(model, 3)
+
+
+    def test_quantized_forward(self):
+        model = LinearAddModel()
+        self._check_quantized_forward(model, 2)
+        model = MyConvLinearModule()
+        self._check_quantized_forward(model, 3)
+
+
+    def test_against_offdevice_dynamic_ptq(self):
+        model = LinearAddModel()
+        self._check_against_ref_dynamic_ptq(model)
+        model = MyConvLinearModule()
+        self._check_against_ref_dynamic_ptq(model)
+
+
+    def test_serialization_deserialization(self):
+        model = MyConvLinearModule()
+        self._check_serialization_deserialization(model)
