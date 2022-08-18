@@ -15,6 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -23,11 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
 )
 
 from torch.testing._internal.common_device_type import ops
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
@@ -55,8 +55,14 @@ except ImportError:
 
 # NB: numpy is a testing dependency!
 
+class AOTTestCase(TestCase):
+    def setUp(self):
+        super().setUp()
+        # NB: We cache on function id, which is unreliable
+        # Can fix by using weakrefs, but not sure if it matters
+        clear_compile_cache()
 
-class TestPythonKey(TestCase):
+class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
             return torch.sin(x)
@@ -205,7 +211,7 @@ def _outs_and_grads(fn, inps):
     return outs, grads
 
 
-class TestAOTAutograd(TestCase):
+class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(self, f, inp):
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
@@ -267,9 +273,12 @@ class TestAOTAutograd(TestCase):
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
+
         with torch.set_grad_enabled(True):
-            f(*inps)
-        self.assertTrue(graph_size > 2)
+            out = f(*inps)
+            self.assertIsNone(graph_size)
+            out.sum().backward()
+            self.assertTrue(graph_size > 2)
         self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
@@ -323,8 +332,8 @@ class TestAOTAutograd(TestCase):
 
 
 
-class TestEagerFusionOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+class TestEagerFusionOpInfo(AOTTestCase):
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
@@ -426,11 +435,11 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
                  partition_fn=partitioner,
-                 decompositions=default_decompositions)(*inps)
+                 decompositions=default_decompositions)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
-class TestPartitioning(TestCase):
+class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -518,8 +527,6 @@ class TestPartitioning(TestCase):
         ins, outs = get_ins_outs(fw_graph)
         self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
 
-
-class TestContiguous(TestCase):
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -531,8 +538,36 @@ class TestContiguous(TestCase):
         out = aot_function(f, nop)(inp)
         torch.autograd.grad(out, inp, torch.randn(3, 2))
 
+    def test_preserve_random(self):
+        def fn(x):
+            return torch.nn.functional.dropout(x, 0.5) + x
 
-class TestAOTModuleSimplified(TestCase):
+        x = torch.randn(4)
+
+        torch.manual_seed(0)
+        ref = fn(x)
+
+        torch.manual_seed(0)
+        aot_fn = aot_function(fn, nop)
+        res = aot_fn(x)
+
+        assert torch.allclose(ref, res)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self):
+        mod = torchvision.models.resnet18().cuda()
+        mod.train()
+
+        x = torch.randn(16, 3, 32, 32, device="cuda")
+        aot_mod = memory_efficient_fusion(mod)
+
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
+
+class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -597,39 +632,6 @@ class TestAOTModuleSimplified(TestCase):
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
         res = aot_mod(*inputs)
-
-class TestRandom(TestCase):
-    def test_preserve_random(self):
-        def fn(x):
-            return torch.nn.functional.dropout(x, 0.5) + x
-
-
-        x = torch.randn(4)
-
-        torch.manual_seed(0)
-        ref = fn(x)
-
-        torch.manual_seed(0)
-        aot_fn = aot_function(fn, nop)
-        res = aot_fn(x)
-
-        assert torch.allclose(ref, res)
-
-
-class TestAutocast(TestCase):
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
-        mod.train()
-
-        x = torch.randn(16, 3, 32, 32, device="cuda")
-        aot_mod = memory_efficient_fusion(mod)
-
-        # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
-            res = aot_mod(x)
-        res.sum().backward()
 
 
 only_for = ("cpu")

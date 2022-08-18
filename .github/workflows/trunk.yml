@@ -60,8 +60,10 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
