@@ -1,5 +1,6 @@
 import torch
 import operator
+import warnings
 from typing import Callable, Dict, Iterable
 
 from torch.fx._symbolic_trace import _assert_is_none
@@ -560,6 +561,22 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
             my_gt, counter = gen_bvar(counter)
             equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
             return [equality_constraint], counter
+
+        elif isinstance(e1, TVar) and isinstance(e2, int):
+            # then we made the wrong assumption about the argument being a tensor
+            # so we should fix the assumption
+            warnings.warn(f'Made the wrong assumption for node {n}. Correctness not guaranteed.')
+
+            new_e1, counter = gen_dvar(counter)
+            symbols[n.args[0]] = new_e1
+            symbols[n.args[0]]
+
+            gt_constraint = BinConstraintD(new_e1, e2, op_gt)
+
+            my_gt, counter = gen_bvar(counter)
+            equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
+            return [equality_constraint], counter
+
         else:
             raise NotImplementedError('Method not yet implemented')
 
