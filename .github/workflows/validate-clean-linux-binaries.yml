@@ -20,9 +20,10 @@ env:
 jobs:
   validate-clean-linux-binaries:
     runs-on: ubuntu-20.04-m60
+    timeout-minutes: 360
     strategy:
       matrix:
-        package_install: ["libtorch"]
+        package_install: ["conda", "pip", "libtorch"]
         # cpu has errors, so they have been left out
         cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
