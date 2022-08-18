@@ -916,30 +916,44 @@
   other: grad / (1 + pow(2, self - other))
   result: self_t / (1 + pow(2, other_p - self_p)) + other_t / (1 + pow(2, self_p - other_p))
 
+# Note [Gradient formula for xlogy at x = 0, y <= 0]
+# x * log(y) is not defined at y <= 0, so we cannot even talk about differentiability
+# Now, xlogy(0, y) = 0 by definition.
+# This does not make it differentiable as it's not defined in a neighbourhood of a point
+# (0, y) when y <= 0.
+# Now, when a function is non-differentiable, sometimes we return "a relatively sensible value"
+# In this case, as per the discussion in https://github.com/pytorch/pytorch/issues/80770, we choose
+# this value to be zero, which is the directional derivative along the line {x = 0}.
 - name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad * at::xlogy((self != 0), other)
-  other: grad * at::where(other.isnan() | (self != 0), self / other, 0)
-  result: self_t * at::xlogy((self_p != 0), other_p) + other_t * self_p / other_p
+  self: at::xlogy(grad, other).masked_fill((self == 0.) & (other <= 0.), 0.)
+  other: grad * self / other
+  result: at::xlogy(self_t, other_p).masked_fill((self_p == 0.) & (other_p <= 0.), 0.) + other_t * self_p / other_p
 
 - name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, 0)
+  other: grad * self / other
   result: auto_element_wise
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
-  self: grad * at::xlogy((self != 0), other)
+  self: "other.toDouble() > 0.
+          ? at::xlogy(grad,  other)
+          : at::xlogy(grad,  other).masked_fill(self == 0., 0.)"
   result: auto_element_wise
 
+# See Note [Gradient formula for xlogy at x = 0, y <= 0]
+# Same here but with y <= -1
 - name: special_xlog1py(Tensor self, Tensor other) -> Tensor
-  self: grad * other.log1p()
+  self: at::special_xlog1py(grad,  other).masked_fill((self == 0.) & (other <= -1.), 0.)
   other: grad * self / (other + 1)
-  result: self_t * other_p.log1p() + other_t * self_p / (other_p + 1)
+  result: at::special_xlog1py(self_t,  other_p).masked_fill((self_p == 0.) & (other_p <= -1.), 0.) + other_t * self_p / (other_p + 1)
 
 - name: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
   other: grad * self / (other + 1)
   result: auto_element_wise
 
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * log1p(other.toDouble())
+  self: "other.toDouble() > -1.
+          ? at::special_xlog1py(grad,  other)
+          : at::special_xlog1py(grad,  other).masked_fill(self == 0., 0.)"
   result: auto_element_wise
 
 - name: special_zeta(Tensor self, Tensor other) -> Tensor

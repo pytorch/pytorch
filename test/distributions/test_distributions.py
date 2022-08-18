@@ -1424,9 +1424,6 @@ class TestDistributions(DistributionsTestCase):
         # approximation enters the forbidden parameter space. We instead compare with the
         # theoretical results.
         dist = Poisson(rate_zero)
-        s = dist.sample()
-        dist.log_prob(s).backward()
-        torch.testing.assert_allclose(rate_zero.grad, -1.0)
         dist.log_prob(torch.ones_like(rate_zero)).backward()
         torch.testing.assert_allclose(rate_zero.grad, torch.inf)
 

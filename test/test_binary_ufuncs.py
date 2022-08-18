@@ -4129,6 +4129,22 @@ class TestBinaryUfuncs(TestCase):
         test_zeros_special_helper(*xlogy_fns, scalar=True)
         test_zeros_special_helper(*xlog1py_fns, scalar=True)
 
+    @dtypes(torch.float64)
+    def test_xlogy_xlog1py_gradients(self, device, dtype):
+        make_arg = partial(torch.tensor, dtype=dtype, device=device, requires_grad=True)
+
+        zeros = torch.zeros((2,), dtype=dtype, device=device)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-1.5, 0.0])
+        torch.special.xlogy(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-2.5, -1.0])
+        torch.special.xlog1py(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
+
     def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same
         # priority level as 0-dim tensors
