@@ -285,7 +285,7 @@ def reinplace(gm, *sample_args):
         Later, we should beef this up to check for out= or mutable ops.
 
     (1b) Check that the self argument we're attempting to reinplace
-         has the same metadata as the output.
+         has acceptable metadata to reinplace with.
 
          For example, if we have:
            a = torch.ones(1)
@@ -307,6 +307,9 @@ def reinplace(gm, *sample_args):
 
          This optimization is only really important for user programs
          that directly use inplace comparison ops though.
+
+         We also cannot re-inplace on tensors that have overlapping memory,
+         e.g. torch.ones(1).expand(4, 4).add_(1)
 
     (2) Check if "a" is an alias of any of the program inputs.
 
@@ -472,7 +475,14 @@ def reinplace(gm, *sample_args):
                     self_has_wrong_metadata = True
                 if self_meta.dtype != node_meta.dtype:
                     self_has_wrong_metadata = True
-            if self_has_wrong_metadata:
+                # We also cannot re-inplace on tensors that have internal memory overlap.
+                # e.g. torch.ones(1).expand(4, 4).add_(1)
+                if torch._debug_has_internal_overlap(self_meta) == 1:
+                    self_has_wrong_metadata = True
+            # Here, we (optimistically) assume that a.resize(b) is valid to re-inplace,
+            # Since users should never really be calling the functional "torch.ops.aten.resize"
+            # op directly in their programs.
+            if self_has_wrong_metadata and node.target != torch.ops.aten.resize.default:
                 continue
 
             # Step 2: ensure that the op we're trying to re-inplace isn't a program i
@@ -540,8 +550,8 @@ def reinplace(gm, *sample_args):
                     node_to_update.args = tuple(new_args)
                     node_to_update.kwargs = new_kwargs
 
-                    old_flattened_res = tree_flatten(old.meta['fake_result'])
-                    node_flattened_res = tree_flatten(node_to_update.meta['fake_result'])
+                    old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
+                    node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
 
                     old_res_storage = set(StorageWeakRef(x.storage()) for x in old_flattened_res if isinstance(x, FakeTensor))
                     node_res_storage = set(StorageWeakRef(x.storage()) for x in node_flattened_res if isinstance(x, FakeTensor))

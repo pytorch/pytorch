@@ -587,8 +587,8 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     clone_default = torch.ops.aten.clone.default(a_1);  a_1 = None
-    ge_scalar = torch.ops.aten.ge_.Scalar(clone_default, 0)
-    _to_copy_default = torch.ops.aten._to_copy.default(clone_default, dtype = torch.float32, layout = torch.strided);  clone_default = None
+    ge_scalar = torch.ops.aten.ge.Scalar(clone_default, 0);  clone_default = None
+    _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
     return _to_copy_default
     """)  # noqa: B950
 
