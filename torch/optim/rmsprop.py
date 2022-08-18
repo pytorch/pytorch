@@ -93,6 +93,7 @@ class RMSprop(Optimizer):
             group.setdefault('centered', False)
             group.setdefault('foreach', None)
             group.setdefault('maximize', False)
+            group.setdefault('differentiable', False)
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -127,7 +128,7 @@ class RMSprop(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = torch.tensor(0)
+                    state['step'] = 0
                     state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if group['momentum'] > 0:
                         state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
@@ -140,8 +141,8 @@ class RMSprop(Optimizer):
                 if group['centered']:
                     grad_avgs.append(state['grad_avg'])
 
-                if group['differentiable'] and state['step'].requires_grad:
-                    raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
+                if group['differentiable'] and isinstance(state['step'], Tensor):
+                    raise RuntimeError('`step` can\'t be a tensor')
 
                 state['step'] += 1
 
@@ -245,7 +246,7 @@ def _single_tensor_rmsprop(params: List[Tensor],
             avg = square_avg.sqrt()
 
         if differentiable:
-            avg = avg.clone().add_(eps)
+            avg = avg.add(eps)
         else:
             avg = avg.add_(eps)
 
