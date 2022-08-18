@@ -462,10 +462,8 @@ class ModelReport:
             new_info (DetectorQConfigInfo): The DetectorQConfigInfo with the information we are trying to merge the new info
                 into it
         """
-        is_activation_dynamic = combined_info.is_activation_dynamic or new_info.is_activation_dynamic
-        is_per_channel = combined_info.is_weight_per_channel or new_info.is_weight_per_channel
-        combined_info.is_activation_dynamic = is_activation_dynamic
-        combined_info.is_weight_per_channel = is_per_channel
+        combined_info.is_activation_dynamic = combined_info.is_activation_dynamic or new_info.is_activation_dynamic
+        combined_info.is_weight_per_channel = combined_info.is_weight_per_channel or new_info.is_weight_per_channel
 
     def _update_detector_equalization_qconfig_info(self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo):
         r"""
