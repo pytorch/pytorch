@@ -1,7 +1,7 @@
 import bisect
 import itertools
 import math
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -156,16 +156,35 @@ def _all_gather_sharded_tensor(
         pg = distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
     shards = sharded_tensor.local_shards()
-    local_tensor = shards[0].tensor.flatten()
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
-    num_padding = chunk_size - local_tensor.numel()
-    if num_padding > 0:
-        local_tensor = F.pad(local_tensor, [0, num_padding])
-    tensor = torch.empty(chunk_size * world_size, dtype=local_tensor.dtype).cuda()
+    cuda_device = torch.device("cuda", torch.cuda.current_device())
+    if shards:
+        local_tensor = shards[0].tensor.flatten()
+        if not local_tensor.is_cuda:
+            move_to_cpu = torch.ones(1, device=cuda_device)
+            local_tensor = local_tensor.cuda()
+        else:
+            move_to_cpu = torch.zeros(1, device=cuda_device)
+        num_padding = chunk_size - local_tensor.numel()
+        if num_padding > 0:
+            local_tensor = F.pad(local_tensor, [0, num_padding])
+    else:
+        local_tensor = torch.zeros(
+            chunk_size, dtype=sharded_tensor.dtype, device=cuda_device
+        )
+        move_to_cpu = torch.zeros(1, device=cuda_device)
+
+    tensor = torch.empty(
+        chunk_size * world_size,
+        dtype=local_tensor.dtype,
+        device=cuda_device,
+    )
     dist._all_gather_base(tensor, local_tensor, group=pg)
-    return tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
+
+    tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
+    return tensor
 
 
 def _gather_state_dict(
@@ -173,25 +192,16 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, this API gathers all the ShardedTensor in the state_dict
-    to the output_rank, and creates a new state_dict which the values are either
-    the gathered tensors (rank == output_rank) or None (rank != output_rank).
+    Given a state_dict, this API gathers all the ShardedTensors in the state_dict.
     """
     new_state_dict = {}
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
-            """
-            # TODO: It is unclear why the following implementation cause a
-            # timeout in some unittests on AWS servers but not other environment.
-            output_tensor = (
-                torch.empty(tensor.shape, dtype=tensor.dtype).cuda()
-                if curr_rank == output_rank
-                else None
-            )
-            tensor.gather(output_rank, output_tensor)
-            """
             output_tensor = _all_gather_sharded_tensor(tensor, pg)
-            tensor = output_tensor
+            if tensor.local_shards() and tensor.local_shards()[0].tensor.is_cuda:
+                tensor = output_tensor
+            else:
+                tensor = output_tensor.cpu()
         new_state_dict[key] = tensor
     return new_state_dict
 

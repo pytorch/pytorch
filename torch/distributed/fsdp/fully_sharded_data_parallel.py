@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import copy
 import functools
@@ -55,18 +54,14 @@ from torch.nn.parameter import Parameter
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
-    _flatten_full_optim_state_dict,
-    _get_flat_param_to_fsdp_module,
+    _flatten_optim_state_dict,
     _get_param_id_to_param,
     _get_param_to_param_id,
-    _OptimStateKey,
+    _optim_state_dict,
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
-    _unflatten_optim_state,
 )
-from ._shard_utils import (
-    _create_chunk_sharded_tensor
-)
+from ._shard_utils import _create_chunk_sharded_tensor
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2010,7 +2005,7 @@ class FullyShardedDataParallel(nn.Module):
                     world_size=self.world_size,
                     device_per_node=torch.cuda.device_count(),
                     pg=self.process_group
-                )
+                )  # type: ignore[assignment]
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
         return state_dict
 
@@ -3672,7 +3667,7 @@ class FullyShardedDataParallel(nn.Module):
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
         rank0_only: bool = True,
-        group=None,
+        group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
         Consolidates the full optimizer state on rank 0 and returns it
@@ -3723,115 +3718,54 @@ class FullyShardedDataParallel(nn.Module):
             :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=True``,
             then nonzero ranks return an empty :class:`dict`.
         """
-        osd = optim.state_dict()
-        osd_state, osd_param_groups = osd["state"], osd["param_groups"]
-        rank = dist.get_rank(group)
-        to_save = not rank0_only or rank == 0
-        full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
-        full_osd_state = full_osd["state"] if to_save else None
+        return _optim_state_dict(
+            model=model,
+            optim=optim,
+            optim_input=optim_input,
+            rank0_only=rank0_only,
+            shard_state=False,
+            group=group,
+        )
 
-        # Construct the local mapping between unflattened parameter names
-        # (`_OptimStateKey`s) and parameter IDs and broadcast rank 0's mapping
-        param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = \
-            _get_param_to_unflat_param_names(model)
-        flat_param_id_to_param: List[torch.nn.Parameter] = \
-            _get_param_id_to_param(model, optim_input)
-        optim_state_key_to_flat_param_id: Dict[_OptimStateKey, int] = {}  # local
-        r0_flat_param_id_to_optim_state_key: Dict[int, _OptimStateKey] = collections.OrderedDict()  # rank 0
-        for flat_param_id, param in enumerate(flat_param_id_to_param):
-            # Do not include parameters without state to avoid empty mappings
-            # just like in normal `torch.optim.Optimizer.state_dict()`
-            if flat_param_id not in osd_state:
-                continue
-            optim_state_key = _OptimStateKey(
-                unflat_param_names=tuple(param_to_unflat_param_names[param]),
-                is_flat_param=isinstance(param, FlatParameter),
-            )
-            if rank == 0:
-                r0_flat_param_id_to_optim_state_key[flat_param_id] = optim_state_key
-            optim_state_key_to_flat_param_id[optim_state_key] = flat_param_id
-        obj_list = [r0_flat_param_id_to_optim_state_key] if rank == 0 else [None]
-        dist.broadcast_object_list(obj_list, src=0, group=group)
-        r0_flat_param_id_to_optim_state_key = obj_list[0]
-
-        # Ensure that all ranks have at least the optimizer states needed by
-        # rank 0's optimizer
-        missing_keys: List[_OptimStateKey] = []
-        for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
-            if r0_optim_state_key not in optim_state_key_to_flat_param_id:
-                # A parameter from rank 0's optimizer does not exist for this
-                # rank's optimizer
-                missing_keys.append(r0_optim_state_key)
-                continue
-            flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
-            assert flat_param_id >= 0 and flat_param_id < len(flat_param_id_to_param), \
-                "Check the `flat_param_id_to_param` construction"
-        device = torch.device("cuda", torch.cuda.current_device())
-        num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
-        dist.all_reduce(num_missing, group=group)
-        if num_missing.item() > 0:
-            obj_list = [None for _ in range(dist.get_world_size(group))]
-            dist.all_gather_object(obj_list, missing_keys, group=group)
-            error_msg = (
-                "FSDP currently requires each rank to have at least the "
-                "optimizer states needed by rank 0's optimizer but some ranks "
-                "are missing some of those states"
-            )
-            for rank, keys in enumerate(obj_list):
-                if len(keys) > 0:
-                    error_msg += (
-                        f"\nRank {rank} is missing states for the parameters: "
-                        f"{[key.unflat_param_names for key in keys]}"
-                    )
-            raise RuntimeError(error_msg)
-
-        # Iterate in rank 0's flattened parameter ID order to ensure aligned
-        # all-gathers across ranks
-        flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
-        for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
-            flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
-            param = flat_param_id_to_param[flat_param_id]
-            if r0_optim_state_key.is_flat_param:
-                fsdp_module = flat_param_to_fsdp_module[param]
-                unflat_state = _unflatten_optim_state(
-                    param, osd_state[flat_param_id], fsdp_module, to_save,
-                )
-                if to_save:
-                    assert len(unflat_state) == len(r0_optim_state_key.unflat_param_names)
-                    for unflat_param_name, unflat_param_state in zip(
-                        r0_optim_state_key.unflat_param_names, unflat_state,
-                    ):
-                        full_osd_state[unflat_param_name] = unflat_param_state
-            elif to_save:
-                assert len(r0_optim_state_key.unflat_param_names) == 1
-                unflat_param_name = r0_optim_state_key.unflat_param_names[0]
-                full_osd_state[unflat_param_name] = copy.copy(osd_state[flat_param_id])
-                for state_name, value in full_osd_state[unflat_param_name].items():
-                    if torch.is_tensor(value):
-                        full_osd_state[unflat_param_name][state_name] = value.cpu()
-
-        if not to_save:
-            return {}
-
-        # Handle the "param_groups" part of the optimizer state dict
-        full_osd_param_groups = full_osd["param_groups"]  # alias
-        for flat_param_group in osd_param_groups:
-            unflat_param_group = copy.deepcopy(flat_param_group)
-            param_group_params = [
-                flat_param_id_to_param[flat_param_id]
-                for flat_param_id in flat_param_group["params"]
+    @staticmethod
+    def sharded_optim_state_dict(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        optim_input: Optional[
+            Union[
+                List[Dict[str, Any]], Iterable[torch.nn.Parameter],
             ]
-            nested_unflat_param_names = [
-                param_to_unflat_param_names[param]
-                for param in param_group_params
-            ]
-            unflat_param_group["params"] = [
-                unflat_param_name
-                for unflat_param_names in nested_unflat_param_names
-                for unflat_param_name in unflat_param_names
-            ]  # flatten the list of lists
-            full_osd_param_groups.append(unflat_param_group)
-        return full_osd
+        ] = None,
+        group: Optional[dist.ProcessGroup] = None,
+    ) -> Dict[str, Any]:
+        """
+        The API is similar to :meth:``full_optim_state_dict`` but this API
+        chunks all non-zero-dimension states to ShardedTensor to save memory.
+        This API should only be used when the model state_dict is derived with
+        the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
+
+        For the detail usages, refer to the :meth:``full_optim_state_dict`` doc.
+
+        .. warning:: The returned state dict contains ShardedTensor and cannot be
+            directly used by the regular ``optim.load_state_dict``.
+        """
+
+        # TODO: The ultimate goal of the optimizer state APIs should be the same
+        # as state_dict/load_state_dict -- using one API to get optimizer states
+        # and one API to load optimizer states. ``state_dict_type`` will be used
+        # to decide which optimizer states should be returned.
+        # There are currently two APIs to load a full optimizer state. So the
+        # first step of the unification is to merge the two full optimizer state
+        # loading APIs.
+        # Task: https://github.com/pytorch/pytorch/issues/82232
+        return _optim_state_dict(
+            model=model,
+            optim=optim,
+            optim_input=optim_input,
+            rank0_only=False,
+            shard_state=True,
+            group=group,
+        )
 
     @staticmethod
     def shard_full_optim_state_dict(
@@ -3895,10 +3829,49 @@ class FullyShardedDataParallel(nn.Module):
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
-        sharded_osd = _flatten_full_optim_state_dict(
+        sharded_osd = _flatten_optim_state_dict(
             full_optim_state_dict, model, True,
         )
         return _rekey_sharded_optim_state_dict(sharded_osd, model, optim_input)
+
+    @staticmethod
+    def flatten_sharded_optim_state_dict(
+        sharded_optim_state_dict: Dict[str, Any],
+        model: torch.nn.Module,
+        optim_input: Optional[
+            Union[
+                List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+            ]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        The API is similar to :meth:``shard_full_optim_state_dict``. The only
+        difference is that the input ``sharded_optim_state_dict`` should be
+        returned from :meth:`sharded_optim_state_dict`. Therefore, there will be
+        allgather calls on each rank to gather ShardedTensor.
+
+        Args:
+            sharded_optim_state_dict (Dict[str, Any]): Optimizer state dict
+                corresponding to the unflattened parameters and holding the
+                sharded optimizer state.
+            model (torch.nn.Module):
+                Refer to :meth:``shard_full_optim_state_dict``.
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Refer to :meth:``shard_full_optim_state_dict``.
+
+        Returns:
+            Refer to :meth:``shard_full_optim_state_dict``.
+        """
+
+        # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
+        # See the TODO in ``shard_full_optim_state_dict`` for the future
+        # unification plan.
+        flattened_osd = _flatten_optim_state_dict(
+            sharded_optim_state_dict,
+            model=model,
+            shard_state=True,
+        )
+        return _rekey_sharded_optim_state_dict(flattened_osd, model, optim_input)
 
     @staticmethod
     def scatter_full_optim_state_dict(
@@ -3978,7 +3951,11 @@ class FullyShardedDataParallel(nn.Module):
         if rank == 0:
             if full_optim_state_dict is None:
                 raise ValueError("Rank 0 must pass in the full optimizer state dict")
-            flat_osd = _flatten_full_optim_state_dict(full_optim_state_dict, model, False)
+            flat_osd = _flatten_optim_state_dict(
+                full_optim_state_dict,
+                model=model,
+                shard_state=False,
+            )
             processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
         # Broadcast the optim state dict without positive-dimension tensor
         # state and the FSDP parameter IDs from rank 0 to all ranks
