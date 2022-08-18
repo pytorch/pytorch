@@ -86,18 +86,24 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
+    @parametrize("device", device_list)
     @parametrize("use_torchscript", [True, False])
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
-    def test_transformerencoder_fastpath_torchscript(self, use_torchscript, with_no_grad, training):
+    def test_transformerencoder_fastpath_no_crash(self, device, use_torchscript, with_no_grad, training):
         """
         Test TransformerEncoder does not crash
         """
+        d_model = 12
+        nhead = 4
+        dim_feedforward = 12
+        batch_first = True
+
         model = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True),
+            torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=batch_first),
             num_layers=2,
             enable_nested_tensor=True
-        )
+        ).to(device)
 
         if training:
             model = model.train()
@@ -107,15 +113,38 @@ class TestTransformers(NNTestCase):
         if use_torchscript:
             model = torch.jit.script(model)
 
-        x = torch.Tensor([[[1, 2], [3, 4]]]).to(torch.float)
-        mask = torch.Tensor([[0, 1]]).to(torch.bool)
+        # each input is (input, mask)
+        input_mask_pairs = [
+            # basic small input
+            (
+                torch.ones(1, 2, d_model),
+                [[0, 1]]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1024. 
+            (
+                torch.ones(1, 1026, d_model),
+                [[0]*1024+[1]*2]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1025. 
+            (
+                torch.ones(1, 1026, d_model),
+                [[0]*1025+[1]*1]
+            )
+        ]
+        input_mask_pairs = [
+            (
+                torch.Tensor(pair[0]).to(torch.float).to(device), 
+                torch.Tensor(pair[1]).to(torch.bool).to(device)
+            ) for pair in input_mask_pairs
+        ]
 
         if with_no_grad:
             cm = torch.no_grad()
         else:
             cm = contextlib.nullcontext()
         with cm:
-            model(x, src_key_padding_mask=mask)
+            for input, src_key_padding_mask in input_mask_pairs:
+                model(input, src_key_padding_mask=src_key_padding_mask)
 
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
