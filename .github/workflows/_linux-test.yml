@@ -41,6 +41,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         id: filter
         run: .github/scripts/filter_test_configs.py --test-matrix "${{ inputs.test-matrix }}" --pr-number "${{ github.event.pull_request.number }}"
+
+      - name: DEBUG
+        run: |
+          echo "${{ steps.filter.outputs.test-matrix }}"
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
 
