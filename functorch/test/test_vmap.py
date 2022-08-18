@@ -1495,28 +1495,40 @@ class TestVmapOperators(Namespace.TestVmapBase):
         # self._test_unary(lambda t: op(number, t), getter, device='cuda')
         # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
-    # TODO: as_strided BR
-    @unittest.expectedFailure
     def test_as_strided(self):
         def _test(sizes, strides, offset, tensor, lambd):
+            # bdim at dim 0 test
             result = vmap(lambda t: t.as_strided(sizes, strides, offset))(tensor)
             expected = vmap(lambd)(tensor)
             self.assertTrue(result._base is expected._base)
             self.assertEqual(result, expected)
 
+            # bdim at dim -1 test
+            tensor = tensor.movedim(0, -1)
+            result = vmap(lambda t: t.as_strided(sizes, strides, offset), -1)(tensor)
+            expected = vmap(lambd, -1)(tensor)
+            self.assertTrue(result._base is expected._base)
+            self.assertEqual(result, expected)
+
         # single vmap test
         B0 = 5
+        # Each Tensor has shape [B0, 2, 3]; the expressions below
+        # are just to get tensors of different strides that have shape [B0, 2, 3]
         tensors = [
             # contiguous
             torch.randn(B0, 2, 3),
             # non-contiguous
             torch.randn(B0, 3, 2).transpose(1, 2),
+            torch.randn(3, 2, B0).movedim(-1, 0).transpose(1, 2),
             # non-zero storage offset
             torch.randn(2, B0, 2, 3)[1],
+            torch.randn(2, 2, B0, 3)[1].movedim(1, 0),
             # non-contiguous strides, zero storage offset
             torch.randn(B0, 2, 4, 3, 7)[:, :, 0, :, 0],
+            torch.randn(2, 4, B0, 3, 7).movedim(2, 0)[:, :, 0, :, 0],
             # non-contiguous strides, non-zero storage offset
             torch.randn(B0, 2, 4, 3, 7)[:, :, 2, :, 1],
+            torch.randn(2, 4, 3, 7, B0).movedim(-1, 0)[:, :, 2, :, 1],
         ]
 
         for x in tensors:
@@ -1529,6 +1541,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
             _test([3, 2], [S1, S0], offset, x, lambda x: x.transpose(0, 1))
             # select
             _test([2], [S0], offset + S1, x, lambda x: x[:, 1])
+            # diagonal
+            _test([2], [S0 + S1], offset, x, lambda x: x.diagonal())
+            # strided slice
+            _test([2], [S1 * 2], offset, x, lambda x: x[0, ::2])
 
         # Nested vmap test
         B1 = 7
@@ -1544,23 +1560,13 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 2, 3).transpose(0, 1)
             vmap(lambda x: x.as_strided([1, 1, 1], [1, 1]))(x)
 
-        # Sanity check #1: we require the batch dims to be at the front of the
-        # tensor (in memory layout).
-        msg = 'batch dims being vmapped over are at the front of the tensor'
-        with self.assertRaisesRegex(RuntimeError, msg):
-            x = torch.randn(2, B0, 3).transpose(0, 1)
-            vmap(lambda x: x.as_strided([2, 3], [B0 * 3, 1]))(x)
-        with self.assertRaisesRegex(RuntimeError, msg):
-            x = torch.randn(B0, 2, 3, B1).movedim(3, 1)
-            vmap(vmap(lambda x: x.as_strided([2, 3], [B1 * 3, B1])))(x)
-
-        # All the Sanity check #2{a,b,c} cases check that
+        # All the Sanity check #1{a,b,c} cases check that
         # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
         # doesn't index memory that is out of bounds of xs[i]. This condition
         # is important to the correctness of the as_strided batching rule
         # (see NOTE: [When will the as_strided_batching_rule fail?])
 
-        # Sanity check #2a: The maximum indexable location of
+        # Sanity check #1a: The maximum indexable location of
         # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
         # is less than or equal to the maximum indexable location of xs[i].
         msg = 'This is not supported inside of vmap'
@@ -1574,14 +1580,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, B1, 3, 5)
             vmap(vmap(lambda x: x.as_strided([4, 4], [4, 1], 0)))(x)
 
-        # Sanity check #2b: The min indexable location of
+        # Sanity check #1b: The min indexable location of
         # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
         # is greater than or equal to the min indexable location of xs[i].
         with self.assertRaisesRegex(RuntimeError, msg):
             x = torch.randn(2, B0, 3)[1]
             vmap(lambda x: x.as_strided([3], [1], B0 * 3 - 1))(x)
 
-        # Sanity check #2c:
+        # Sanity check #1c:
         # xs[i] is a zero-dim tensor, but
         # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
         # is not
@@ -3195,7 +3201,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout2d', ''),  # randomness
         xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
-        xfail('as_strided'),  # as_strided is too crazy
+        xfail('as_strided'),  # Our test runner can't handle this; manual test exists
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
