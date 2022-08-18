@@ -110,7 +110,7 @@ jobs:
               ("11.6") { wget https://download.pytorch.org/libtorch/cu116/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip;
                        unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip; }
                        ;;
-              ("11.7") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
+              ("11.7 test") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
                        unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip; }
                        ;;
               (*) echo "No binary available"
