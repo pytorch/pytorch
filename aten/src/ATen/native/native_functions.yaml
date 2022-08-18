@@ -230,12 +230,13 @@
   dispatch:
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
+    NestedTensorCPU, NestedTensorCUDA: native_dropout_nested
   tags: nondeterministic_seeded
   autogen: native_dropout.out
 
 - func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   dispatch:
-    CPU: native_dropout_backward_cpu
+    CPU, NestedTensorCPU, NestedTensorCUDA: native_dropout_backward
     CUDA: native_dropout_backward_cuda
   autogen: native_dropout_backward.out
 
@@ -252,15 +253,9 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  dispatch:
-    CompositeImplicitAutograd: dropout
-    NestedTensorCPU, NestedTensorCUDA: dropout_nested
   tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  dispatch:
-    CompositeImplicitAutograd: dropout_
-    NestedTensorCPU, NestedTensorCUDA: dropout_nested_
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
