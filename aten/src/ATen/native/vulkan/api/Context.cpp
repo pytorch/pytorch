@@ -129,22 +129,26 @@ Context* context() {
       };
 
       return new Context(runtime()->default_adapter_i(), config);
+    } catch (const c10::Error& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
+          e.what());
     } catch (const std::exception& e) {
-      std::stringstream ss;
-      ss << "Pytorch Vulkan Context: Failed to initialize context! ";
-      ss << "Error: " << e.what();
-      VK_THROW(ss.str());
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
+          e.what());
     } catch (...) {
-      std::stringstream ss;
-      ss << "Pytorch Vulkan Context: Failed to initialize context! ";
-      ss << "Error: Unknown";
-      VK_THROW(ss.str());
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context!");
     }
 
     return nullptr;
   }());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(context, "Invalid Vulkan context!");
+  TORCH_CHECK(
+      context,
+      "Pytorch Vulkan Context: The global context could not be retrieved "
+      "because it failed to initialize.");
 
   return context.get();
 }

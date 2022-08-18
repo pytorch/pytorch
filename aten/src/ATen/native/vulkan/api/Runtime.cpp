@@ -253,19 +253,21 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
   try {
     return std::make_unique<Runtime>(Runtime(default_config));
+  } catch (const c10::Error& e) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. Error: ",
+        e.what());
   } catch (const std::exception& e) {
-    std::stringstream ss;
-    ss << "Pytorch Vulkan Runtime: ";
-    ss << "Failed to initialize the global vulkan runtime! ";
-    ss << "The global vulkan runtime is invalid. Error: ";
-    ss << e.what();
-    VK_THROW(ss.str());
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. Error: ",
+        e.what());
   } catch (...) {
-    std::stringstream ss;
-    ss << "Pytorch Vulkan Runtime: ";
-    ss << "Failed to initialize the global vulkan runtime! ";
-    ss << "The global vulkan runtime is invalid. Error: Unknown";
-    VK_THROW(ss.str());
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. "
+        "Error: Unknown");
   }
 
   return std::unique_ptr<Runtime>(nullptr);
@@ -289,6 +291,10 @@ Runtime::Runtime(const RuntimeConfiguration config)
         case AdapterSelector::First:
           default_adapter_i_ = create_adapter(select_first);
       }
+    } catch (const c10::Error& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
+          e.what());
     } catch (const std::exception& e) {
       TORCH_WARN(
           "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
@@ -375,10 +381,12 @@ Runtime* runtime() {
   // Runtime.h as it would have internal linkage.
   static const std::unique_ptr<Runtime> p_runtime =
       init_global_vulkan_runtime();
+
   TORCH_CHECK(
       p_runtime,
       "Pytorch Vulkan Runtime: The global runtime could not be retrieved "
       "because it failed to initialize.");
+
   return p_runtime.get();
 }
 
