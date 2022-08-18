@@ -137,7 +137,7 @@ Context* context() {
     } catch (...) {
       std::stringstream ss;
       ss << "Pytorch Vulkan Context: Failed to initialize context! ";
-      ss << "Error: Unkown";
+      ss << "Error: Unknown";
       VK_THROW(ss.str());
     }
 
