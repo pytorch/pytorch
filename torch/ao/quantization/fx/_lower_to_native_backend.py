@@ -550,11 +550,10 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
         # TODO: maybe define a WeightedDynamicallyQuantizedModule
         q_module = q_class.from_reference(ref_module)  # type: ignore[attr-defined]
 
-        # replace reference moduel with dynamically quantized module
+        # replace reference module with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
-
-        ref_node.replace_input_with(input_dynamic_q_node, input_dynamic_q_node.args[0])
+        ref_node.replace_input_with(dq_node, input_dynamic_q_node.args[0])
 
 def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
     """
