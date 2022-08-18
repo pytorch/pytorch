@@ -45,7 +45,7 @@ jobs:
           nvidia-smi
       - name: Install pytorch and smoke test
         env:
-          ENV_NAME: env-${{PACKAGE_VER}}-${{ github.run_id }}
+          ENV_NAME: env-${{ matrix.package_install }}-${{ github.run_id }}
           CUDA_VER: ${{ matrix.cuda_version }}
           PACKAGE_VER: ${{matrix.package_install}}
         run: |
