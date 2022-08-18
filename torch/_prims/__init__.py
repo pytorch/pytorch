@@ -1167,7 +1167,7 @@ _as_strided_doc = """
 """
 
 as_strided = _make_prim(
-    schema="as_strided(Tensor(a!) a, int[] size, int[] stride, int storage_offset) -> Tensor(a!)",
+    schema="as_strided(Tensor(a!) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a!)",
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1525,7 +1525,7 @@ _slice_doc = """
     """
 
 slice = _make_prim(
-    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int[]? strides=None) -> Tensor(a)",
+    schema="slice(Tensor(a) a, SymInt[] start_indices, SymInt[] limit_indices, SymInt[]? strides=None) -> Tensor(a)",
     meta=_slice_meta,
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1608,8 +1608,9 @@ _slice_in_dim_doc = """
     Convenience wrapper for slicing just one dimension using slice.
     """
 
+# TODO: make stride SymInt
 slice_in_dim = _make_prim(
-    schema="slice_in_dim(Tensor(a) a, int start_index, int limit_index, int stride=1, int axis=0) -> Tensor(a)",
+    schema="slice_in_dim(Tensor(a) a, SymInt start_index, SymInt limit_index, int stride=1, int axis=0) -> Tensor(a)",
     meta=_slice_in_dim_meta,
     impl_aten=_slice_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1660,7 +1661,7 @@ _split_dim_doc = """
 
 # TODO: consider renaming split_dim_view
 split_dim = _make_prim(
-    schema="split_dim(Tensor(a) a, int dim, int outer_length) -> Tensor(a)",
+    schema="split_dim(Tensor(a) a, int dim, SymInt outer_length) -> Tensor(a)",
     meta=_split_dim_meta,
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1853,7 +1854,7 @@ _reshape_doc = """
   containing a copy of the data in a.
   """
 reshape = _make_prim(
-    schema="reshape(Tensor a, int[] shape) -> Tensor",
+    schema="reshape(Tensor a, SymInt[] shape) -> Tensor",
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2147,7 +2148,7 @@ _resize_doc = """
 
 # TODO: review support arbitrary resizes
 resize = _make_prim(
-    schema="resize(Tensor(a!) a, int[] shape) -> Tensor(a!)",
+    schema="resize(Tensor(a!) a, SymInt[] shape) -> Tensor(a!)",
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -2369,7 +2370,7 @@ _empty_doc = """
 """
 
 empty = _make_prim(
-    schema="empty(int[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="empty(SymInt[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     meta=_empty_meta,
     impl_aten=_empty_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2394,7 +2395,7 @@ _empty_strided_doc = """
 
 # TODO: add layout, pin_memory
 empty_strided = _make_prim(
-    schema="empty_strided(int[] shape, int[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="empty_strided(SymInt[] shape, SymInt[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_empty_strided_meta,
     impl_aten=torch.empty_strided,
@@ -2434,7 +2435,7 @@ _full_doc = """
 
 # TODO: add layout
 full = _make_prim(
-    schema="full(int[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="full(SymInt[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     meta=_full_meta,
     impl_aten=_full_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2621,7 +2622,7 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 uniform = _make_prim(
     schema=(
-        "uniform(int[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,
@@ -2745,7 +2746,7 @@ _fft_c2r_doc = """
 
 
 fft_c2r = _make_prim(
-    schema="fft_c2r(Tensor self, *, int[] dim, int last_dim_size) -> Tensor",
+    schema="fft_c2r(Tensor self, *, int[] dim, SymInt last_dim_size) -> Tensor",
     meta=_fft_c2r_meta,
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,
