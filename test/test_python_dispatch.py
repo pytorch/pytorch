@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 import logging
@@ -871,6 +871,24 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
+
+    def test_shallow_copy_and_detach(self) -> None:
+        seen = set()
+        test_case = self
+
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                tree_map_only(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
+                if kwargs is None:
+                    kwargs = {}
+                r = func(*args, **kwargs)
+                tree_map_only(torch.Tensor, lambda t: seen.add(t), r)
+                return r
+
+        with TestMode():
+            x = torch.randn(3, requires_grad=True)
+            loss = (x * x).sum()
+            loss.backward()
 
     def test_nested_enable_torch_dispatch_mode(self) -> None:
         class A(LoggingTensorMode):
