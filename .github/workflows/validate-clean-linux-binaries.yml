@@ -52,14 +52,14 @@ jobs:
           set -ex
           
           # install conda with cuda
-          if [ ${PACKAGE_VER} == 'conda' && ${CUDA_VER} != "cpu" && ${CUDA_VER} != "rocm" ]; then
+          if [ ${PACKAGE_VER} == 'conda'] && [ ${CUDA_VER} != "cpu" ] && [ ${CUDA_VER} != "rocm" ]; then
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
             conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
             conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
             conda env remove -p ${ENV_NAME}
             
           # install conda cpu only
-          elif [ ${PACKAGE_VER} == 'conda' && ${CUDA_VER} == "cpu" ]; then
+          elif [ ${PACKAGE_VER} == 'conda' ] && [ ${CUDA_VER} == "cpu" ]; then
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
             conda install pytorch torchvision torchaudio cpuonly -c pytorch
             conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]);print(y);"
