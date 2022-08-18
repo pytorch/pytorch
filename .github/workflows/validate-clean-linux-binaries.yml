@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        package_install: ["pip"]
+        package_install: ["libtorch"]
         cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
@@ -89,5 +89,31 @@ jobs:
                        ;;
              (*) echo "No binary available"
                    ;;
+              esac
+          fi          
+                    
+          # install libtorch
+          if [ ${PACKAGE_VER} == 'libtorch' ]; then
+            case ${CUDA_VER} in
+              ("rocm") { wget https://download.pytorch.org/libtorch/rocm5.1.1/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Brocm5.1.1.zip;
+                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Brocm5.1.1.zip; }
+                       ;;
+              ("cpu") { wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcpu.zip;
+                      unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcpu.zip; }
+                      ;;
+              ("10.2") { wget https://download.pytorch.org/libtorch/cu102/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu102.zip;
+                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu102.zip; }
+                       ;;
+              ("11.3") { wget https://download.pytorch.org/libtorch/cu113/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu113.zip;
+                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu113.zip; }
+                       ;;
+              ("11.6") { wget https://download.pytorch.org/libtorch/cu116/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip;
+                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip; }
+                       ;;
+              ("11.7") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
+                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip; }
+                       ;;
+              (*) echo "No binary available"
+                  ;;
               esac
           fi
