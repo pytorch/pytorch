@@ -408,6 +408,43 @@ class CodeGen(object):
             else:
                 body.append('\n')
 
+        prev_stacktrace = None
+
+        def append_stacktrace_summary(node : Node):
+            """
+            Append a summary of the stacktrace to the generated code. This is
+            useful for debugging.
+            """
+            nonlocal prev_stacktrace
+            if node.op not in {'placeholder', 'output'}:
+                if node.stack_trace:
+                    if node.stack_trace != prev_stacktrace:
+                        prev_stacktrace = node.stack_trace
+
+                        lines = node.stack_trace.strip().split('\n')
+                        idx = 0
+                        context_lines = []
+                        while idx < len(lines):
+                            line = lines[idx].strip()
+                            if line.startswith('File '):
+                                break
+                            context_lines.append(line)
+                            idx += 1
+
+                        summary_lines = []
+                        if context_lines:
+                            summary_lines.append(', '.join(context_lines))
+
+                        if idx + 1 < len(lines):
+                            summary_lines.append(lines[idx].strip())  # lineage
+                            summary_lines.append(lines[idx+1].strip())  # code snippet
+
+                        summary_str = ', '.join(summary_lines)
+                        body.append(f'\n# {summary_str}\n')
+                        # body.append(f'\n# {lines}\n')
+                elif prev_stacktrace != "":
+                    prev_stacktrace = ""
+                    body.append('\n# No stacktrace found for following nodes \n')
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -475,6 +512,7 @@ class CodeGen(object):
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
+            append_stacktrace_summary(node)
             emit_node(node)
             delete_unused_values(node)
 
