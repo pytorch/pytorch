@@ -353,6 +353,7 @@ quantization and will be dynamically quantized during inference.
 torch.ao.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.quantized
+   :noindex:
 .. automodule:: torch.ao.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
