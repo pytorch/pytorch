@@ -777,9 +777,6 @@ class FullyShardedDataParallel(nn.Module):
         self._exec_order_data = _ExecOrderData()
         # Used for `BACKWARD_POST` prefetching
         self._need_rebuild_full_params = False
-        # The data structures use tuples of handles to generalize over the case
-        # where a module's forward involves multiple handles. The two forward
-        # order structures are populated and finalized in the first iteration.
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
