@@ -672,13 +672,15 @@ class _ExecOrderData:
     def next_iter(self):
         """
         Advances the internal data structures per iteration. This should be
-        called in the pre-forward rather than in the post-backward since the
-        backward may not run (e.g. inference).
+        called in the root's pre-forward rather than in the post-backward
+        callback since the backward may not run (e.g. inference).
         """
         if self.is_first_iter is None:
             self.is_first_iter = True
         else:
             self.is_first_iter = False
+        self.handles_to_post_forward_order_index.clear()
+        self.handles_post_forward_order.clear()
         if dist.get_debug_level() == dist.DebugLevel.INFO:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
