@@ -31,6 +31,9 @@ class _InternalGlobals:
         self.operator_export_type: Optional[_C_onnx.OperatorExportTypes] = None
         self.onnx_shape_inference: bool = True
 
+        # Internal feature flags
+        self.runtime_type_check: bool = True
+
     @property
     def training_mode(self):
         """The training mode for the exporter."""

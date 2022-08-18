@@ -2,11 +2,17 @@
 
 The module returns a no-op decorator when the beartype library is not installed.
 """
+from torch.onnx._globals import GLOBALS
 
-try:
-    from beartype import beartype
-except ImportError:
-    def _no_op_decorator(func):
-        return func
 
+def _no_op_decorator(func):
+    return func
+
+
+if not GLOBALS.runtime_type_check:
     beartype = _no_op_decorator
+else:
+    try:
+        from beartype import beartype
+    except ImportError:
+        beartype = _no_op_decorator
