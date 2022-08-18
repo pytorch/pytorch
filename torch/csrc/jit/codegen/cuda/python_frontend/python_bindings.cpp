@@ -184,7 +184,8 @@ void initNvFuserPythonBindings(PyObject* module) {
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<
                               torch::jit::fuser::cuda::ComplexDouble,
-                              c10::complex<double>>({out->index}, static_cast<c10::complex<double>>(val)));
+                              c10::complex<double>>(
+                {out->index}, static_cast<c10::complex<double>>(val)));
             return out;
           },
           py::return_value_policy::reference)
