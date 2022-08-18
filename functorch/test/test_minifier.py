@@ -69,7 +69,7 @@ class TestMinifier(TestCase):
     def test_tup_use(self):
         def f(a, b):
             tup = torch.std_mean(a)
-            return tup[0] + b * tup[1]
+            return (tup[0] + b * tup[1],)
 
         inps = [torch.randn(3), torch.randn(3)]
 
