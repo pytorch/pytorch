@@ -259,13 +259,13 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
     ss << "Failed to initialize the global vulkan runtime! ";
     ss << "The global vulkan runtime is invalid. Error: ";
     ss << e.what();
-    throw std::runtime_error(ss.str());
+    VK_THROW(ss.str());
   } catch (...) {
     std::stringstream ss;
     ss << "Pytorch Vulkan Runtime: ";
     ss << "Failed to initialize the global vulkan runtime! ";
     ss << "The global vulkan runtime is invalid. Error: Unknown";
-    throw std::runtime_error(ss.str());
+    VK_THROW(ss.str());
   }
 
   return std::unique_ptr<Runtime>(nullptr);

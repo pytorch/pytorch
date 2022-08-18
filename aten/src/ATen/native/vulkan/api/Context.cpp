@@ -133,12 +133,12 @@ Context* context() {
       std::stringstream ss;
       ss << "Pytorch Vulkan Context: Failed to initialize context! ";
       ss << "Error: " << e.what();
-      throw std::runtime_error(ss.str());
+      VK_THROW(ss.str());
     } catch (...) {
       std::stringstream ss;
       ss << "Pytorch Vulkan Context: Failed to initialize context! ";
       ss << "Error: Unkown";
-      throw std::runtime_error(ss.str());
+      VK_THROW(ss.str());
     }
 
     return nullptr;
