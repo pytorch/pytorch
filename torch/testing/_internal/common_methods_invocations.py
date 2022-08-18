@@ -3261,6 +3261,26 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
 
+    # error inputs for input tensor
+    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input
+    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input with stride=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
+                     error_regex='stride must be greater than zero, but got 0')
+
+    # error inputs for empty input with dilation=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                     error_regex='dilation must be greater than zero, but got 0')
+
+    # error inputs for invalied output size
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                     error_regex='Invalid computed output size: -4')
+
 def error_inputs_max_pool2d(op_info, device, **kwargs):
     # error inputs when pad is negative
     x = torch.rand([0, 1, 49], dtype=torch.float32)
@@ -4102,6 +4122,11 @@ def error_inputs_avg_pool2d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4}),
                      error_regex='pad should be at most half of kernel size')
 
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
+
 def error_inputs_avg_pool3d(op_info, device, **kwargs):
     # error inputs when pad is negative
     x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
@@ -4117,6 +4142,11 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
     # 3-dimensional kernel
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4}),
                      error_regex='pad should be at most half of kernel size')
+
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
