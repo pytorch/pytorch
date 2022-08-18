@@ -10,7 +10,7 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import (
     QConfig,
     default_qconfig,
-    assert_valid_qconfig,   
+    assert_valid_qconfig,
 )
 from torch.ao.quantization.observer import (
     ObserverBase,
