@@ -42,6 +42,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             - Key is used for dict. New key is acceptable.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
         >>> def add_one(x):
         ...     return x + 1
@@ -200,6 +201,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
         ...
+        >>> # xdoctest: +SKIP
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]

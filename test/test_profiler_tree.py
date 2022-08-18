@@ -762,6 +762,7 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
@@ -898,13 +899,11 @@ class TestProfilerTree(TestCase):
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/optim/sgd.py(...): sgd
@@ -938,10 +937,8 @@ class TestProfilerTree(TestCase):
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                       torch/_tensor.py(...): __hash__
-                        <built-in function _has_torch_function_unary>
                         <built-in function id>
                     torch/autograd/grad_mode.py(...): __init__
                       <built-in function is_grad_enabled>

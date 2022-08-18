@@ -168,6 +168,7 @@ class DistributedOptimizer:
         >>> from torch import optim
         >>> from torch.distributed.optim import DistributedOptimizer
         >>>
+        >>> # xdoctest: +SKIP
         >>> with dist_autograd.context() as context_id:
         >>>   # Forward pass.
         >>>   rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))

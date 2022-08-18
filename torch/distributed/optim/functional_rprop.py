@@ -24,6 +24,7 @@ class _FunctionalRprop(object):
         etas: Tuple[float, float] = (0.5, 1.2),
         step_sizes: Tuple[float, float] = (1e-6, 50),
         foreach: bool = False,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -32,6 +33,7 @@ class _FunctionalRprop(object):
         self.etas = etas
         self.step_sizes = step_sizes
         self.foreach = foreach
+        self.maximize = maximize
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -86,4 +88,5 @@ class _FunctionalRprop(object):
                     step_size_max=step_size_max,
                     etaminus=etaminus,
                     etaplus=etaplus,
-                    foreach=self.foreach)
+                    foreach=self.foreach,
+                    maximize=self.maximize)

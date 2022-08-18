@@ -91,6 +91,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
+        torch.is_anomaly_check_nan_enabled,
         torch.is_grad_enabled,
         torch.merge_type_from_type_comment,
         torch.parse_ir,
@@ -251,6 +252,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,
+        Tensor.__hash__,
         Tensor.as_subclass,
         Tensor.reinforce,
         Tensor.new,
@@ -279,7 +281,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor
+        Tensor.to_padded_tensor,
     }
 
 
@@ -691,6 +693,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),
         torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
+        torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
+        torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (lambda input, weight, bias, padding, output_padding, stride, dilation,
                                              groups, benchmark, deterministic: -1),
         torch.miopen_depthwise_convolution: (lambda input, weight, bias, padding, stride, dilation, groups, benchmark,
@@ -1153,7 +1157,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
         Tensor.__long__: lambda self: -1,
-        Tensor.__hash__: lambda self: -1,
         Tensor.__index__: lambda self: -1,
         Tensor.__len__: lambda self: -1,
         Tensor.__format__: lambda self, format_spec: -1,
