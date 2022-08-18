@@ -19270,7 +19270,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcdiv",
         torch_opinfo_name="addcdiv",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
@@ -19498,9 +19497,8 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: .tolist() is not supported for tensor subclasses.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.hsplit",
