@@ -66,7 +66,7 @@ jobs:
             conda env remove -p ${ENV_NAME}
           fi
                     
-          # install pip
+          # install pip -- tested for all cuda except cpu
           if [ ${PACKAGE_VER} == 'pip' ]; then
             apt-get install python3-pip -y
             case $CUDA_VER in
@@ -93,7 +93,7 @@ jobs:
               esac
           fi          
                     
-          # install libtorch
+          # install libtorch -- tested for all cuda except cpu and 11.7
           if [ ${PACKAGE_VER} == 'libtorch' ]; then
             apt-get install unzip -y
             case ${CUDA_VER} in
@@ -111,10 +111,6 @@ jobs:
                        ;;
               ("11.6") { wget https://download.pytorch.org/libtorch/cu116/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip;
                        unzip libtorch-cxx11-abi-shared-with-deps-1.12.1+cu116; }
-                       ;;
-               # 11.7 gives error 403
-              ("11.7 placeholder") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
-                       unzip libtorch-cxx11-abi-shared-with-deps-1.12.1+cu117; }
                        ;;
               (*) echo "No binary available"
                   ;;
