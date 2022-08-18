@@ -764,7 +764,7 @@ class FullyShardedDataParallel(nn.Module):
         self._hook_registered = False
 
         # Used to prevent running the pre-backward hook multiple times
-        self._pre_backward_hook_has_run: Dict[Tuple[FlatParamHandle, ...], bool] = {}
+        self._pre_backward_hook_has_run: bool = False
         self._is_root: Optional[bool] = None  # `None` indicates not yet set
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
@@ -776,7 +776,7 @@ class FullyShardedDataParallel(nn.Module):
         self._init_reshard_after_forward()
         self._exec_order_data = _ExecOrderData()
         # Used for `BACKWARD_POST` prefetching
-        self._need_pre_backward_unshard: Dict[Tuple[FlatParamHandle, ...], bool] = {}
+        self._need_rebuild_full_params = False
         # The data structures use tuples of handles to generalize over the case
         # where a module's forward involves multiple handles. The two forward
         # order structures are populated and finalized in the first iteration.
