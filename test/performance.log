@@ -1,5 +1,0 @@
-onednn_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:acdb:f0 dst_f32:p:blocked:Acdb16a:f0,attr-scratchpad:user ,,1x3x3x3,0.00195312
-onednn_verbose,exec,cpu,convolution,brgconv:avx512_core,forward_training,src_f32::blocked:acdb:f0 wei_f32:p:blocked:Acdb16a:f0 bia_undef::undef::f0 dst_f32::blocked:acdb:f0,attr-scratchpad:user ,alg:convolution_direct,mb2_ic3oc1_ih224oh222kh3sh1dh0ph0_iw224ow222kw3sw1dw0pw0,0.125
-onednn_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:acdb:f0 dst_f32:p:blocked:Acdb16a:f0,attr-scratchpad:user ,,1x3x3x3,0.00195312
-onednn_verbose,exec,cpu,convolution,jit:avx512_core,forward_training,src_f32::blocked:abcd:f0 wei_f32:p:blocked:Acdb16a:f0 bia_undef::undef::f0 dst_f32:p:blocked:aBcd16b:f0,attr-scratchpad:user attr-post-ops:eltwise_relu ,alg:convolution_direct,mb2_ic3oc1_ih224oh222kh3sh1dh0ph0_iw224ow222kw3sw1dw0pw0,0.713135
-
