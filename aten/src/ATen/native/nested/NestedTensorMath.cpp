@@ -706,9 +706,7 @@ Tensor clone_nested(
   else if (memory_format == c10::MemoryFormat::Contiguous) {
     const Tensor& self_buffer = self_ptr->get_buffer(),
         sizemat = self_ptr->get_nested_size_tensor();
-    // TODO: use self.empty_like() rather than self.new_empty(self.sizes())
-    //       once nested-tensor empty_like comes out
-    Tensor output_buffer = self_buffer.new_empty(self_buffer.sizes());
+    Tensor output_buffer = at::empty_like(self_buffer);
     Tensor output = wrap_buffer(output_buffer, sizemat);
     std::vector<Tensor> self_unbind = self.unbind(),
         output_unbind = output.unbind();
@@ -1037,10 +1035,10 @@ namespace {
 //     proposed_shape: user proposed new shape
 //     op: the options for new size and stride matrices
 // Returns:
-//     whether reshape as view is possible (i.e. old buffer can be reused)
+//     whether viewable
 //     size matrix after reshape
-//     stride matrix after reshape (not fully populated if reshape as view is impossible)
-inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
+//     stride matrix after reshape (not fully populated if not viewable)
+inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     const std::vector<IntArrayRef>& sizes,
     const std::vector<IntArrayRef>& strides,
     const IntArrayRef& proposed_shape,
@@ -1048,7 +1046,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
   int64_t ntensors = sizes.size(),
       ndims_underlying = sizes[0].size(),
       ndims_underlying_reshaped = proposed_shape.size() - 1;
-  bool reshape_as_view = true;
+  bool viewable = true;
   Tensor sizemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op),
       stridemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op);
   int64_t* sizemat_reshaped_ptr = sizemat_reshaped.data_ptr<int64_t>(),
@@ -1133,7 +1131,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
     }
     // reshape as view is impossible
     else {
-      reshape_as_view = false;
+      viewable = false;
       // fill reshaped size into sizemat
       for (int64_t idim = 0; idim < ndims_underlying_reshaped; idim++) {
         sizemat_reshaped_ptr[idim] = size_reshaped[idim];
@@ -1141,7 +1139,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
       sizemat_reshaped_ptr += ndims_underlying_reshaped;
     }
   }
-  return std::make_tuple(reshape_as_view, sizemat_reshaped, stridemat_reshaped);
+  return std::make_tuple(viewable, sizemat_reshaped, stridemat_reshaped);
 }
 } // namespace
 
@@ -1174,24 +1172,22 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   }
   TORCH_CHECK(
       ntensors == ntensors_reshaped,
-      "for now reshape cannot change the implicit batch dimension");
+      "for now view cannot change the implicit batch dimension");
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
-  const Tensor& buffer = self_ptr->get_buffer(),
-      sizemat = self_ptr->get_nested_size_tensor();
-  bool reshape_as_view;
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  bool viewable;
   Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(reshape_as_view, sizemat_reshaped, stridemat_reshaped) = NestedTensor_reshape_size_stride(
+  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   TORCH_CHECK(
-      reshape_as_view,
+      viewable,
       "view size is not compatible with input tensor's size and stride "
       "(at least one dimension spans across two contiguous subspaces). "
       "Use .reshape(...) instead.");
-  const std::vector<int64_t>& offsets = self_ptr->get_offsets();
-  return wrap_buffer(buffer, sizemat_reshaped, stridemat_reshaped, offsets);
+  return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_offsets()));
 }
 
 // See Note [Special size rule for nested tensor]
@@ -1224,11 +1220,11 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_size_tensor();
-  bool reshape_as_view;
+  bool viewable;
   Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(reshape_as_view, sizemat_reshaped, stridemat_reshaped) = NestedTensor_reshape_size_stride(
+  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
-  if (reshape_as_view) {
+  if (viewable) {
     return self.view(proposed_shape);
   }
   else {
