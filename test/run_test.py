@@ -572,15 +572,17 @@ def run_doctests(test_module, test_directory, options):
     if torch._C.has_lapack:
         os.environ['TORCH_DOCTEST_LAPACK'] = '1'
 
-    try:
-        # Is there a better check if quantization is enabled?
-        import torch.nn.quantized as nnq  # NOQA
-        torch.backends.quantized.engine = 'qnnpack'
-        torch.backends.quantized.engine = 'fbgemm'
-    except (ImportError, RuntimeError):
-        ...
-    else:
-        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+    # Temporary disable qentine tests
+    if 0:
+        try:
+            # Is there a better check if quantization is enabled?
+            import torch.nn.quantized as nnq  # NOQA
+            torch.backends.quantized.engine = 'qnnpack'
+            torch.backends.quantized.engine = 'fbgemm'
+        except (ImportError, RuntimeError):
+            ...
+        else:
+            os.environ['TORCH_DOCTEST_QENGINE'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
