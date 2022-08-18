@@ -6,7 +6,8 @@ from torch.ao.quantization.fx._model_report.detector import (
     DETECTOR_OBS_ARGS_KEY,
     DETECTOR_OBS_TO_INSERT_KEY,
     DETECTOR_IS_POST_OBS_KEY,
-    DETECTOR_TARGET_NODE_KEY
+    DETECTOR_TARGET_NODE_KEY,
+    DetectorQConfigInfo
 )
 from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx.graph_module import GraphModule
@@ -424,6 +425,32 @@ class ModelReport:
 
         return visualizer
 
+    def _generate_qconfig_mapping_helper(
+        self,
+        detector_qconfig_info_compiled: Dict[str, DetectorQConfigInfo]
+    ) -> QConfigMapping:
+        r"""
+        This helper takes in the compiled detector qconfig info that
+        has been compiled together and merges it into a QConfigMapping
+        """
+        # keep track of the qconfigmapping
+        qconfig_mapping = QConfigMapping()
+
+        # loop through each module / fqn and attempt to create QConfigMapping
+        for fqn, module in self._model.named_modules():
+            # if we have a qconfig info for this module
+            if fqn in detector_qconfig_info_compiled:
+                qconfig_info_compiled = detector_qconfig_info_compiled[fqn]
+
+                # now generate the qconfig and add it to the mapping
+                generated_qconfig = qconfig_info_compiled.generate_qconfig(module)
+
+                # add to our config
+                qconfig_mapping.set_module_name(fqn, generated_qconfig)
+
+        # return compiled mapping
+        return qconfig_mapping
+
     def generate_qconfig_mapping(self) -> QConfigMapping:
         r"""
         Generates a QConfigMapping based on the suggestions of the
@@ -435,8 +462,47 @@ class ModelReport:
         and can only be generated once the reports have been generated.
 
         Returns a QConfigMapping for the quantization configuration
+
+        Note:
+            Throws exception if we try to generate mapping on model we already removed observers from
+            Throws exception if we try to generate mapping without preparing for callibration
         """
-        pass
+        # if we haven't prepped model for callibration, then we shouldn't generate mapping yet
+        if not self._prepared_flag:
+            raise Exception("Cannot generate report without preparing model for callibration")
+
+        # if we already removed the observers, we cannot mapping
+        if self._removed_observers:
+            raise Exception("Cannot generate report on model you already removed observers from")
+
+        # keep track of qconfig info for each module across detectors
+        detector_qconfig_info_compiled: Dict[str, DetectorQConfigInfo] = {}
+
+        for detector in self._desired_report_detectors:
+            # get the info from the detector
+            detector_info: Dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(self._model)
+
+            # we go through the modules
+            for module_fqn in detector_info:
+                # see if we already have info on it
+                if module_fqn in detector_qconfig_info_compiled:
+                    # we combine the current options with what is there
+                    current_options = detector_qconfig_info_compiled[module_fqn]
+                    detector_options = detector_info[module_fqn]
+
+                    is_activation_dynamic = current_options.is_activation_dynamic or detector_options.is_activation_dynamic
+                    is_per_channel = current_options.is_weight_per_channel or detector_options.is_weight_per_channel
+                    current_options.is_activation_dynamic = is_activation_dynamic
+                    current_options.is_weight_per_channel = is_per_channel
+                else:
+                    # we just use this for now
+                    detector_qconfig_info_compiled[module_fqn] = detector_info[module_fqn]
+
+        # now we generate the QConfig for each of the options
+        mapping: QConfigMapping = self._generate_qconfig_mapping_helper(detector_qconfig_info_compiled)
+
+        # return the generated mapping
+        return mapping
 
     def generate_equalization_mapping(self) -> QConfigMapping:
         r"""

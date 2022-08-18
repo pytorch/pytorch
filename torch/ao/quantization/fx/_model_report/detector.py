@@ -6,9 +6,19 @@ import torch.nn.qat as nnqat
 from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
-from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
-from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.qconfig import (
+    QConfig,
+    default_qconfig,
+    assert_valid_qconfig,   
+)
+from torch.ao.quantization.observer import (
+    ObserverBase,
+    default_dynamic_quant_observer,
+    default_per_channel_weight_observer,
+    default_observer,
+    default_weight_observer,
+)
 from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
@@ -16,6 +26,66 @@ DETECTOR_TARGET_NODE_KEY = "target_node"
 DETECTOR_OBS_TO_INSERT_KEY = "observer_to_insert"
 DETECTOR_IS_POST_OBS_KEY = "is_post_observer"
 DETECTOR_OBS_ARGS_KEY = "observer_args"
+
+# Mapping related code
+class DetectorQConfigInfo():
+    r"""
+    This class contains the QConfig information for a single module.
+    The list of variables / values this contains can grow depending on the
+    extensibility of the qconfig mapping feature set but this currently includes:
+    - if activation observer is dynamic
+    - if weight observer is per channel
+
+
+    Args:
+        module_fqn (str): The fully qualified name (fqn) of the module that this
+            information contains info relavent to qconfig for
+    """
+
+    def __init__(self, module_fqn: str):
+        super().__init__()
+        self.module_fqn = module_fqn
+
+        # populate this section with all the variables we might find important
+        # change from none if your detector is actually using this
+        self.is_activation_dynamic = False
+        self.is_weight_per_channel = False
+
+    def generate_qconfig(self, module: torch.nn.Module) -> QConfig:
+        r"""
+        Args:
+            module (torch.nn.Module) The module we are generating
+            the qconfig for
+
+        Returns the generated QConfig according to what a valid configuration is
+        """
+        # Apply suggestions to new qconfig
+        module_qconfig = default_qconfig
+
+        # keep track of dynamic and per_channel recommendations
+        recommendations_list = []
+        # append as if a list of combinations
+        recommendations_list.append((self.is_activation_dynamic, self.is_weight_per_channel))
+        recommendations_list.append((self.is_activation_dynamic, False))  # only trying dynamic rec
+        recommendations_list.append((False, self.is_weight_per_channel))  # only trying dynamic
+
+        # now we try each of the combinations
+        for rec in recommendations_list:
+            # rec[0] -> dynamic recommended
+            # rec[1] -> per channel recommended
+            activation = default_dynamic_quant_observer if rec[0] else default_observer
+            weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
+            test_config = QConfig(activation, weight)
+            try:
+                assert_valid_qconfig(test_config, module)
+                module_qconfig = test_config
+                break
+            except AssertionError:
+                # if not a valid configuration, we move on to the next one in priority
+                continue
+
+        # return the QConfig chosen
+        return module_qconfig
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -31,6 +101,7 @@ class DetectorBase(ABC):
 
     def __init__(self):
         super().__init__()
+        self.detector_config_info = None
 
     @abstractmethod
     def determine_observer_insert_points(self, model) -> Dict:
@@ -46,6 +117,18 @@ class DetectorBase(ABC):
     @abstractmethod
     def get_detector_name(self) -> str:
         r""" Returns the name of the current detector """
+        pass
+
+
+    @abstractmethod
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
         pass
 
     def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
@@ -133,6 +216,31 @@ class PerChannelDetector(DetectorBase):
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
         return "per_channel_detector"
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # run the helper function to populate the dictionary
+        per_channel_info = self._detect_per_channel_helper(model)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in per_channel_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            per_chan_supported: bool = per_channel_info[module_fqn][self.PER_CHAN_SUPPORTED_KEY]
+            detector_qconfig_info.is_weight_per_channel = per_chan_supported
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
 
     def determine_observer_insert_points(self, model: nn.Module) -> Dict:
         r"""
@@ -349,6 +457,32 @@ class DynamicStaticDetector(DetectorBase):
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
+
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # run the helper function to populate the dictionary
+        dynamic_static_info = self._generate_dict_info(model)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in dynamic_static_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            dynamic_static_recommended: bool = dynamic_static_info[module_fqn][self.DEFAULT_DYNAMIC_REC_KEY]
+            detector_qconfig_info.is_activation_dynamic = dynamic_static_recommended
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
 
     def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
         r"""Returns whether the given module is supported for observers
@@ -638,6 +772,17 @@ class InputWeightEqualizationDetector(DetectorBase):
             # this is for report gen and we also need to check if it contains observers
             has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
             return is_supported_type and has_obs
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # currently doesn't do anything for input-weight equalization detector
+        return {}
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
@@ -1082,6 +1227,17 @@ class OutlierDetector(DetectorBase):
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
         return num_children == 0 and not is_activation_post_process(module)
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # currently doesn't do anything for outlier detector
+        return {}
 
     def _supports_report_gen(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for report generation
