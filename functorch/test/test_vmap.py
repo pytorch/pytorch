@@ -3128,7 +3128,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 continue
             self.assertEqual(vmap_out, loop_out)
 
-    def vmap_inplace_test(self, func, args, kwargs, in_dims):
+    def vmap_inplace_test(self, func, args, kwargs, in_dims, postprocess_fn=None):
         # NB: This test assumes that the first argument is being modified.
         # This is OK because it's what every other OpInfo-based test assumes,
         # but it is going to need a more robust solution eventually.
@@ -3218,6 +3218,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
+        xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
