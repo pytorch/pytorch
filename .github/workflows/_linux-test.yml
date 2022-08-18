@@ -36,8 +36,9 @@ jobs:
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        fetch-depth: 1
-        submodules: false
+        with:
+          fetch-depth: 1
+          submodules: false
 
       - name: Select all requested test configurations
         id: filter
