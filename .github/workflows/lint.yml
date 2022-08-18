@@ -13,9 +13,6 @@ on:
 jobs:
   lintrunner:
     runs-on: linux.20_04.16x
-    secrets:
-      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
     steps:
       - name: DEBUG API rate limit
         run: |
