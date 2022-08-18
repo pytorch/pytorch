@@ -6738,13 +6738,35 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((M, M), ()),
              ((M, M), (2,),),
-             ((S, M, M), ()),
-             ((S, M, M), (2,)),
+             ((M, S), ()),
+             ((M, S), (-1,)),
+             ((M, M), (2,),),
+             ((S, M, S), ()),
+             ((S, M, S), (2,)),
              ((3, 3, S, S), ()),)
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
 
+def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
+    # (row, col, offset)
+    args_list = ((0, 0),
+                 (20, 0),
+                 (0, 20),
+                 (20, 21, 0),
+                 (20, 21, 7),
+                 (20, 21, -7),
+                 # Large test cases below are deliberately commented out to speed up CI
+                 # tests and to avoid OOM error. When modifying implementations of
+                 # tril_indices and triu_indices, please enable these tests and make sure
+                 # they pass.
+                 # (2, 68435455, 3),
+                 # (5000, 5000),
+                 # (5000, 5000, 1234),
+                 # (5000, 5000, -1233),
+                 )
+    for args in args_list:
+        yield SampleInput(args[0], args=args[1:], kwargs={"dtype": dtype, "device": device})
 
 def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -16044,6 +16066,32 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
+    OpInfo('triu_indices',
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+           )),
+    OpInfo('tril_indices',
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+           )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18501,6 +18549,42 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.triu",
+        torch_opinfo_name="triu",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.tril",
+        torch_opinfo_name="tril",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.triu_indices",
+        torch_opinfo_name="triu_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+        )),
+    PythonRefInfo(
+        "_refs.tril_indices",
+        torch_opinfo_name="tril_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+        )),
+    PythonRefInfo(
         "_refs.meshgrid",
         torch_opinfo_name="meshgrid",
         torch_opinfo_variant_name="list_of_tensors",
@@ -18833,6 +18917,20 @@ python_ref_db = [
         supports_nvfuser=False,
         supports_out=True,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.pairwise_distance",
+        torch_opinfo_name="nn.functional.pairwise_distance",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.pdist",
+        torch_opinfo_name="nn.functional.pdist",
+        supports_out=True,
+        supports_nvfuser=False,
+        skips=(
+            # RunTimeError: no _refs support for torch.Tensor.index_select
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
@@ -19955,14 +20053,9 @@ tri_tests_args = [
     (6, 3, -1),
     (6, 3, -3),
     (6, 3, -9),
-    (258, 253, 1, torch.float32),
-    (257, 258, 1, torch.float64),
-    (258, 258, 1, torch.short),
     (3, 513, 1, torch.long),
     (513, 3, 1, torch.int),
-    (513, 0, 1, torch.double),
     (1024, 1024),
-    (1024, 1024, 500, torch.float32),
     (1024, 1024, 1023),
     (1024, 1024, -500),
     (1023, 1025),

@@ -234,6 +234,10 @@ __all__ = [
     "vstack",
     "unflatten",
     "unbind",
+    "triu",
+    "tril",
+    "triu_indices",
+    "tril_indices",
     #
     # Tensor Creation
     #
@@ -3086,10 +3090,7 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    if t.dtype is torch.bool:
-        return cond.logical_and(t)
-    else:
-        return torch.where(cond, t, 0)
+    return utils.mask_tensor(cond, t)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3919,6 +3920,180 @@ def _make_r_binary_op(base_op):
 rtruediv = _make_r_binary_op(true_divide)
 rfloordiv = _make_r_binary_op(floor_divide)
 rpow = _make_r_binary_op(pow)
+
+
+@register_decomposition(torch.ops.aten.triu)
+@out_wrapper()
+def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
+    utils.check(
+        a.ndim >= 2, lambda: "triu: input tensor must have at least 2 dimensions"
+    )
+    h, w = a.shape[-2:]
+    mask = (
+        torch.arange(w, device=a.device).unsqueeze(-2)
+        - torch.arange(h, device=a.device).unsqueeze(-1)
+    ) >= diagonal
+
+    return utils.mask_tensor(mask, a)
+
+
+@register_decomposition(torch.ops.aten.tril)
+@out_wrapper()
+def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
+    utils.check(
+        a.ndim >= 2, lambda: "tril: input tensor must have at least 2 dimensions"
+    )
+    h, w = a.shape[-2:]
+    mask = (
+        torch.arange(w, device=a.device).unsqueeze(-2)
+        - torch.arange(h, device=a.device).unsqueeze(-1)
+    ) <= diagonal
+
+    return utils.mask_tensor(mask, a)
+
+
+# This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h
+# The components of the matrix that belong to the lower triangle with offset
+# form a pentagon that can be broken down into a top trapezoid and a bottom
+# rectangle. For the implementation of tril_indices, we need the sizes of
+# both of these, as well as the length of the top side of the trapezoid.
+def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
+    if row == 0 or col == 0:
+        return 0, 0, 0
+
+    m_first_row = min(col, 1 + offset) if offset > 0 else int(row + offset > 0)
+    m_last_row = max(0, min(col, row + offset))
+    n_row_all = max(0, min(row, row + offset))
+    n_row_trapezoid = m_last_row - m_first_row + 1
+
+    # Number of elements in top trapezoid
+    trapezoid_size = (m_first_row + m_last_row) * n_row_trapezoid // 2
+    # Number of elemetns in bottom rectangle
+    diff_row = n_row_all - n_row_trapezoid
+    rectangle_size = max(0, (n_row_all - n_row_trapezoid) * col)
+
+    return trapezoid_size, rectangle_size, m_first_row
+
+
+def _trilu_checks(
+    name: str,
+    row: int,
+    col: int,
+    dtype: torch.dtype,
+    layout: torch.layout,
+    pin_memory: bool,
+):
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    check(row >= 0, lambda: f"row must be non-negative, got {row}")
+    check(col >= 0, lambda: f"col must be non-negative, got {col}")
+    check(
+        layout == torch.strided,
+        lambda: f"only support layout=torch.strided, got {layout}",
+    )
+    check(
+        dtype in (torch.int32, torch.int64),
+        lambda: f"\"{name}\" not implemented for '{dtype}'",
+    )
+
+
+# This is based on tril_indices_cuda in aten/src/ATen/native/cuda/TensorFactories.cu
+@register_decomposition(torch.ops.aten.tril_indices)
+def tril_indices(
+    row: int,
+    col: int,
+    offset: int = 0,
+    *,
+    dtype: torch.dtype = torch.long,
+    layout: torch.layout = torch.strided,
+    device: DeviceLikeType = "cpu",
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    _trilu_checks("tril_indices", row, col, dtype, layout, pin_memory)
+
+    trapezoid_size, rectangle_size, m_first_row = _get_tril_sizes(row, col, offset)
+    row_offset = max(0, -offset)
+
+    # first we do the indices for top trapezoid
+    xs1 = torch.arange(0, trapezoid_size, dtype=torch.float64, device=device)
+    b = m_first_row - 0.5
+    row_inds1 = torch.floor(-b + torch.sqrt(b * b + 2 * xs1))
+    col_inds1 = torch.floor(xs1 - (2 * m_first_row - 1 + row_inds1) * row_inds1 * 0.5)
+    row_inds1 = prims.to_dtype(row_inds1 + row_offset, dtype)
+    col_inds1 = prims.to_dtype(col_inds1, dtype)
+
+    # then bottom rectangle
+    xs2 = torch.arange(0, rectangle_size, device=device)
+    row_inds2 = xs2 // col + (col - m_first_row + 1 + row_offset)
+    col_inds2 = xs2 % col
+    row_inds2 = prims.to_dtype(row_inds2, dtype)
+    col_inds2 = prims.to_dtype(col_inds2, dtype)
+
+    return torch.stack(
+        (torch.cat((row_inds1, row_inds2)), torch.cat((col_inds1, col_inds2)))
+    )
+
+
+# Similar to _get_tril_sizes above, but here there is a top trapezoid and
+# a bottom rectangle instead. Note that you can't reduce this to
+# _get_tril_sizes(col, row, -offset) because that would correspond to
+# decomposing into a left trapezoid and right rectangle.
+def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
+    if row == 0 or col == 0:
+        return 0, 0, 0
+
+    m_first_row = max(0, col - offset) if offset > 0 else col
+
+    # Number of elements in top rectangle
+    rectangle_size = max(0, min(row, -offset) * col)
+
+    # Number of elements in bottom trapezoid
+    trapezoid_size_tril, rectangle_size_tril, _ = _get_tril_sizes(row, col, offset - 1)
+    triu_size = row * col - (trapezoid_size_tril + rectangle_size_tril)
+    trapezoid_size = triu_size - rectangle_size
+
+    return trapezoid_size, rectangle_size, m_first_row
+
+
+@register_decomposition(torch.ops.aten.triu_indices)
+def triu_indices(
+    row: int,
+    col: int,
+    offset: int = 0,
+    *,
+    dtype: torch.dtype = torch.long,
+    layout: torch.layout = torch.strided,
+    device: DeviceLikeType = "cpu",
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    _trilu_checks("triu_indices", row, col, dtype, layout, pin_memory)
+
+    trapezoid_size, rectangle_size, m_first_row = _get_triu_sizes(row, col, offset)
+    col_offset = max(0, offset)
+
+    # indices for top rectangle
+    xs2 = torch.arange(0, rectangle_size, device=device)
+    row_inds2 = xs2 // col
+    col_inds2 = xs2 % col
+    row_inds2 = prims.to_dtype(row_inds2 + col_offset, dtype)
+    col_inds2 = prims.to_dtype(col_inds2, dtype)
+
+    # bottom trapezoid
+    xs1 = torch.arange(0, trapezoid_size, dtype=torch.float64, device=device)
+    b = -0.5 - m_first_row
+    row_inds1 = torch.floor(-b - torch.sqrt(b * b - 2 * xs1))
+    col_inds1 = torch.floor(xs1 - ((2 * m_first_row - 1 - row_inds1) * row_inds1) * 0.5)
+    row_inds1 = prims.to_dtype(row_inds1, dtype)
+    col_inds1 = prims.to_dtype(col_inds1, dtype)
+
+    if col:
+        row_inds1 = row_inds1 + (rectangle_size // col)
+    col_inds1 = col_inds1 + col_offset
+
+    return torch.stack(
+        (torch.cat((row_inds2, row_inds1)), torch.cat((col_inds2, col_inds1)))
+    )
+
 
 import torch._refs.fft
 import torch._refs.linalg
