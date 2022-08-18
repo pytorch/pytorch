@@ -30,10 +30,6 @@ jobs:
   filter:
     runs-on: ubuntu-latest
     steps:
-      - name: Get PR labels
-        id: pr-labels
-        uses: joerick/pr-labels-action@v1.0.6
-
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
@@ -41,8 +37,10 @@ jobs:
           submodules: false
 
       - name: Select all requested test configurations
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         id: filter
-        run: .github/scripts/filter_test_configs.py --test-matrix "${{ inputs.test-matrix }}" --labels "${{ steps.pr-labels.outputs.labels }}"
+        run: .github/scripts/filter_test_configs.py --test-matrix "${{ inputs.test-matrix }}"
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
 
