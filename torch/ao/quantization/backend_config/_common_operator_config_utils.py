@@ -8,8 +8,11 @@ import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from collections import namedtuple
 from typing import List
-from .observation_type import ObservationType
-from .backend_config import BackendPatternConfig, DTypeConfig
+from .backend_config import (
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType,
+)
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,

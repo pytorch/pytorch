@@ -1,7 +1,9 @@
 import torch
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
-from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.backend_config.observation_type import ObservationType
+from torch.ao.quantization.backend_config import (
+    get_native_backend_config,
+    ObservationType,
+)
 from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern,

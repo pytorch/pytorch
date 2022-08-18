@@ -10,8 +10,12 @@ from ._common_operator_config_utils import (
     _get_conv_configs,
     _get_share_qparams_op_configs,
 )
-from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
-from .observation_type import ObservationType
+from .backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType
+)
 from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
