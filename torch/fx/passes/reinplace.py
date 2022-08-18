@@ -113,15 +113,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         self.node_counter = -1
         curr_mode = _get_torch_dispatch_mode()
 
-        def assert_fake(x):
-            assert isinstance(x, FakeTensor)
-
-        if type(curr_mode) == FakeTensorMode:
-            # Re-inplacing might be running in a context where FakeTensorMode is already active.
-            # if so, don't do an additional layer of wrapping.
-            tree_map_only(torch.Tensor, assert_fake, args)
-            return super().run(*args)
-        with FakeTensorMode() as mode:
+        with FakeTensorMode(allow_meta=True) as mode:
             fake_args = [mode.from_tensor(a) for a in args]
             return super().run(*fake_args)
 
