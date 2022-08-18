@@ -1,5 +1,7 @@
 {
-  "being_migrated": {},
+  "being_migrated": {
+    "torch.nn.quantized.functional": "torch.ao.nn.quantized.functional"
+  },
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
