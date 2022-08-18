@@ -34,6 +34,9 @@ jobs:
         id: pr-labels
         uses: joerick/pr-labels-action@v1.0.6
 
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
       - name: Select all requested test configurations
         id: filter
         run: .github/scripts/filter_test_configs.py --test-matrix ${{ github.event.inputs.test-matrix }} --labels ${{ steps.pr-labels.outputs.labels }}
@@ -49,10 +52,6 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-
 #      - name: Setup Linux
 #        uses: ./.github/actions/setup-linux
 #
