@@ -31,7 +31,10 @@ from common_utils import (
     check_vmap_fallback,
     is_batch_norm_training,
     is_valid_inplace_sample_input,
+    loop2,
 )
+
+from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
@@ -743,7 +746,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
-        xfail('linalg.eig'),
         xfail('complex'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('pinverse'),
@@ -752,7 +754,6 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('put'),
         xfail('take'),
-        xfail('linalg.eigvals'),
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
@@ -832,15 +833,11 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('linalg.det'),
         xfail('linalg.eig'),
-        xfail('linalg.eigvals'),
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.pinv'),
         xfail('linalg.pinv', 'hermitian'),
-        xfail('linalg.slogdet'),
-        xfail('linalg.solve'),
-        xfail('logdet'),
         xfail('lu'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
@@ -876,7 +873,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_pool3d'),
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('linalg.tensorsolve'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
@@ -906,7 +902,6 @@ class TestOperators(TestCase):
         xfail('chalf', ''),
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
-        xfail('linalg.solve_ex', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
@@ -1397,6 +1392,27 @@ class TestOperators(TestCase):
                 compute_grad, (cotangents,), {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
+
+    def test_vmapvmapjvp_linalg_solve(self):
+        ops = [op for op in op_db if op.name == "linalg.solve"]
+        assert len(ops) > 0
+
+        # this specializes a lot of code from the get_fallback_and_vmap_exhaustive test. If we need this more
+        # generally, this could go for a refactor
+
+        B0 = 2
+        B1 = 3
+
+        # we want to check the case where A will be seen as contiguous by jvp but during the vmap calls will become
+        # non-contiguous because vmap will expand. This will happen during both levels of vmap
+        A = torch.randn(4, 4)
+        k = torch.randn(4, 5, B1, B0)
+        fn, args = get_jvp_variant_primals_tangents(torch.linalg.solve, SampleInput(A, args=(k,)))
+
+        in_dims_all = (None, -1, None, -1)
+        batched_out = vmap(vmap(fn, in_dims=in_dims_all), in_dims=in_dims_all)(*args)
+        loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
+        self.assertEqual(loop_out, batched_out)
 
 
 only_for = ("cpu", "cuda")
