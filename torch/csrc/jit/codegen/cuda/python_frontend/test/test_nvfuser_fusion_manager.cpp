@@ -4,8 +4,8 @@
 
 #include <torch/torch.h>
 
-#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
 // Tests go in torch::jit
 namespace torch {
