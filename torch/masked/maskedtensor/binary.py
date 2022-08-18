@@ -2,14 +2,12 @@
 
 import torch
 
-from .core import _masks_match, _tensors_match, is_masked_tensor
+from .core import _map_mt_args_kwargs, _masks_match, _tensors_match, _wrap_result, is_masked_tensor
 
 __all__ = []  # type: ignore[var-annotated]
 
 BINARY_NAMES = [
     "add",
-    #    "addcdiv",
-    #    "addcmul",
     "atan2",
     "arctan2",
     "bitwise_and",
@@ -23,9 +21,6 @@ BINARY_NAMES = [
     "fmod",
     "logaddexp",
     "logaddexp2",
-    #    "logical_and",
-    #    "logical_or",
-    #    "logical_xor",
     "mul",
     "multiply",
     "nextafter",
@@ -82,14 +77,11 @@ def _get_at_least_one_mask(a, b):
 
 
 def _binary_helper(fn, args, kwargs, inplace):
-    from .passthrough import _map_mt_args_kwargs, _wrap_result
-
     if len(kwargs) != 0:
         raise ValueError("len(kwargs) must equal 0")
-    if len(args) > 2:
-        for a in args[1:]:
-            if torch.is_tensor(a):
-                raise TypeError("MaskedTensor binary ops do not support Tensor arguments")
+    for a in args[2:]:
+        if torch.is_tensor(a):
+            raise TypeError("MaskedTensor binary ops do not support Tensor arguments aside from the lhs and rhs")
 
     if not _masks_match(*args[:2]):
         raise ValueError(
@@ -112,8 +104,14 @@ def _binary_helper(fn, args, kwargs, inplace):
         args, kwargs, lambda x: x.get_mask()
     )
 
-    if args[0].layout() == torch.sparse_coo:
-        if is_masked_tensor(data_args[1]):
+    args0_layout = args[0].layout() if is_masked_tensor(args[0]) else args[0].layout
+    same_layout = (
+        (is_masked_tensor(args[1]) and args[1].layout() != args0_layout)
+        or (torch.is_tensor(args[1]) and args[1].layout != args0_layout)
+    )
+
+    if args0_layout == torch.sparse_coo:
+        if same_layout:
             if not _tensors_match(data_args[0].indices(), data_args[1].indices()):
                 raise ValueError(
                     "sparse_coo indices must match. If you need support for this, please open an issue on Github."
@@ -121,32 +119,31 @@ def _binary_helper(fn, args, kwargs, inplace):
             if data_args[0].size() != data_args[1].size():
                 raise ValueError("input1 and input2 must have the same size for binary functions.")
 
+            data_args[1] = data_args[1].values()
+
         i = data_args[0].indices()
         size = data_args[0].size()
         data_args[0] = data_args[0].values()
-        if is_masked_tensor(args[1]):
-            data_args[1] = data_args[1].values()
         v = fn(*data_args)
         result_data = torch.sparse_coo_tensor(i, v, size)
 
-    elif args[0].layout() == torch.sparse_csr:
-        if is_masked_tensor(data_args[1]) and not (
-            _tensors_match(data_args[0].crow_indices(), data_args[1].crow_indices())
-            and _tensors_match(
-                data_args[0].col_indices(), data_args[1].col_indices()
-            )
-        ):
-            raise ValueError(
-                "sparse_csr indices must match. If you need support for this, please open an issue on Github."
-            )
+    elif args0_layout == torch.sparse_csr:
+        if same_layout:
+            if not (
+                _tensors_match(data_args[0].crow_indices(), data_args[1].crow_indices())
+                and _tensors_match(
+                    data_args[0].col_indices(), data_args[1].col_indices()
+                )
+            ):
+                raise ValueError(
+                    "sparse_csr indices must match. If you need support for this, please open an issue on Github."
+                )
+
+            data_args[1] = data_args[1].values()
 
         crow = data_args[0].crow_indices()
         col = data_args[0].col_indices()
         data_args[0] = data_args[0].values()
-        if is_masked_tensor(args[1]) or (
-            torch.is_tensor(args[1]) and args[1].layout == torch.sparse_coo
-        ):
-            data_args[1] = data_args[1].values()
         v = fn(*data_args)
         result_data = torch.sparse_csr_tensor(crow, col, v)
 
@@ -158,8 +155,8 @@ def _binary_helper(fn, args, kwargs, inplace):
         return args[0]
     else:
         result_mask = _get_at_least_one_mask(*args[:2])
-        # sparse tensors don't have strides
-        if args[0].layout() == torch.strided:
+        # sparse tensors don't have strides so we can only expand if the layout is strided
+        if args0_layout == torch.strided:
             result_mask = result_mask.expand_as(result_data)
         return _wrap_result(result_data, result_mask)
 
