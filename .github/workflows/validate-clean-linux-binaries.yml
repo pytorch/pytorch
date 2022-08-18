@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        package_install: ["pip"]
+        package_install: ["conda"]
         cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
