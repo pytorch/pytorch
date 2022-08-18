@@ -1052,8 +1052,6 @@ class HFOperations(unittest.TestCase):
                 node = n
 
         positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
-        print(positive)
-        print(negative)
 
         self.assertEqual(positive, z3.sat)
         self.assertEqual(negative, z3.sat)
