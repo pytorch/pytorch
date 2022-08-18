@@ -739,7 +739,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":torch_flatbuffer_all"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_jit"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -1347,7 +1347,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":torch_flatbuffer_all",
+            ":flatbuffers_jit",
             ":torch_mobile_core",
         ],
     )
@@ -1633,7 +1633,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1660,7 +1659,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1744,7 +1742,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1800,7 +1797,7 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "torch_flatbuffer_all",
+        name = "flatbuffers_jit",
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",

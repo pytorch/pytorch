@@ -175,7 +175,9 @@ class TestGenericProxyTensor(TestCase):
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
         new_inps = tree_map(_create_new_input, inps)
-        self.assertEqual(fx_f(*new_inps), f(*new_inps))
+        r1 = fx_f(*new_inps)
+        r2 = f(*new_inps)
+        self.assertEqual(r1, r2)
 
     def test_make_fx_simple(self):
         def f(x):
@@ -284,11 +286,10 @@ class TestGenericProxyTensor(TestCase):
             self.assertTrue(is_any_sigmoid(gm))
             return torch.digamma(x)
 
-        with self.assertRaisesRegex(AssertionError, "ProxyTensor is wrapped with another Tensor subclass"):
-            traced = make_fx(f2_logging_tensor)(torch.randn(3))
-            self.assertFalse(is_any_sum(traced))
-            self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
-            self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f2_logging_tensor)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+        self.assertTrue(is_any_digamma(traced))
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -411,13 +412,16 @@ def forward(self, x_1):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-        g = make_fx(f, tracing_mode=self.tracing_mode)()
-        self.assertEqual(g(), f())
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -438,6 +442,28 @@ def forward(self, x_1):
 
         g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
+
+    def test_constant_blowup(self):
+        def f():
+            val = torch.tensor([2])
+            blowup = val.repeat(1000)
+            return blowup.sum().item()
+
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
+        )
+
+    def test_constant_random(self):
+        def f():
+            val = torch.tensor([2.0])
+            val.normal_()
+            return val.item()
+
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
+        )
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -511,6 +537,8 @@ def forward(self, x_1):
         model = Foo()
 
         def f(args, params, buffers):
+            for p in params.values():
+                p.grad = None
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
@@ -588,17 +616,7 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    def test_mode_tracing_factory_function_no_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-        # setting the flag to false should not trace factory functions
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
-        self.assertFalse(
-            any(
-                node.target == aten.randn.default
-                for node in traced.graph.nodes
-            )
-        )
+    pass
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -626,7 +644,7 @@ class TestFakeProxyTensor(TestCase):
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
-    def _test_dynamic(self, fn, trace_inputs, test_inputs):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
         Also returns shape env
@@ -635,7 +653,9 @@ class TestSymbolicTracing(TestCase):
         traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
-            self.assertEqual(traced_f(*input), fn(*input))
+            rx, ry = traced_f(*input), fn(*input)
+            if assert_eq:
+                self.assertEqual(rx, ry)
         return traced_f.shape_env
 
 
@@ -662,6 +682,19 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
         assert len(shape_env.guards) == 0
 
+    def test_multiply_shape(self):
+        def f(a):
+            return torch.empty(a.shape[0] * 2)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    size = a_1.size(0);  a_1 = None
+    mul = size * 2;  size = None
+    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    size_1 = empty.size(0)
+    return empty""")
+
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)
@@ -677,6 +710,24 @@ class TestSymbolicTracing(TestCase):
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
         assert len(shape_env.guards) == 1
+
+    def test_new_empty(self):
+        def f(a, b):
+            return a.new_empty(b.shape[0], b.shape[1] * 2)
+
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
+
+
+    def test_expand(self):
+        def f(a):
+            b = torch.mul(a, a)
+            c = b.expand(a.shape)
+            return c
+
+        self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
+        self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
+
+
 
 make_fx_failures = {
     # unknown
@@ -701,6 +752,8 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1073,7 +1126,6 @@ symbolic_tensor_failures = {
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('stack', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode a...
     xfail('std', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('std_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
