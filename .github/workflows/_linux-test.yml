@@ -52,6 +52,18 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: DEBUG
+        env:
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+        run: |
+          set +x
+
+          echo ${TEST_CONFIG}
+          echo ${SHARD_NUMBER}
+          echo ${NUM_TEST_SHARDS}
+
 #      - name: Setup Linux
 #        uses: ./.github/actions/setup-linux
 #
