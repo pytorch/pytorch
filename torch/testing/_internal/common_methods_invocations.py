@@ -3281,6 +3281,14 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                      error_regex='Invalid computed output size: -4')
 
+    # error inputs when kernel_size=0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
+                     error_regex='kernel_size must be greater than zero')
+
+    # error inputs for strides > 0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
+                     error_regex='stride must be greater than zero')
+
 def error_inputs_max_pool2d(op_info, device, **kwargs):
     # error inputs when pad is negative
     x = torch.rand([0, 1, 49], dtype=torch.float32)
@@ -4147,6 +4155,11 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
     x = torch.zeros(3, 3, 3, 3)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2, 2), 'divisor_override': 0}),
                      error_regex='divisor must be not zero')
+
+    # error inputs for invalid input dimension
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs='kernel_size': 1, 'stride': 50, 'padding': 0}),
+                     error_regex='non-empty 4D or 5D (batch mode) tensor expected for input')
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
