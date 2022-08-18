@@ -918,6 +918,7 @@ class FullyShardedDataParallel(nn.Module):
         Recursively auto wraps the root module given by the key "module" in
         ``auto_wrap_kwargs`` with the arguments in ``auto_wrap_kwargs`` and
         ``fsdp_kwargs``.
+
         Precondition: ``auto_wrap_policy`` contains the arguments expected by
             ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
             ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
@@ -979,6 +980,7 @@ class FullyShardedDataParallel(nn.Module):
         module is already on a non-CPU device, then the compute device is that
         non-CPU device. If the module is on CPU, then the compute device is the
         current device.
+
         The ``device_id`` argument should be what the user passed into the FSDP
         constructor to produce a faithful error. If ``device_id`` is not
         ``None``, then we enforce that it must either be (1) the same as the
@@ -986,8 +988,10 @@ class FullyShardedDataParallel(nn.Module):
         (3) the general unindexed device. Hence, ``device_id`` is simply a way
         for the user to have FSDP move the module to device, but that target
         device is fixed to the current device.
+
         NOTE: For now, the compute device is always a CUDA GPU device with its
         explicit index.
+
         Precondition: ``_check_single_device_module()``.
         """
         if not torch.cuda.is_available():
@@ -1030,10 +1034,12 @@ class FullyShardedDataParallel(nn.Module):
         Materializes the wrapped module ``module`` in place if needed: either
         if the module has parameters that use meta device or are torchdistX
         fake tensors.
+
         This method uses ``param_init_fn`` to materialize the module if the
         function is not ``None`` and falls back to default behavior otherwise.
         For meta device, this calls ``reset_parameters()``, and for torchdistX
         fake tensors, this calls ``deferred_init.materialize_module()``.
+
         Precondition: ``self.compute_device`` is set via
         ``_get_compute_device()``.
         """
@@ -1082,10 +1088,12 @@ class FullyShardedDataParallel(nn.Module):
         where ``device_id`` should be what the user passed into the FSDP
         constructor. Since the entire module is moved, ignored parameters are
         moved as well.
+
         - If ``device_id`` is not ``None``, then this moves ``module`` to the
         corresponding device.
         - If ``device_id`` is ``None``, then this does not move ``module`` but
         warns the user if it is only CPU.
+
         Precondition: ``_check_single_device_module()``.
         """
         cpu_device = torch.device("cpu")
