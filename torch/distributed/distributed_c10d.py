@@ -64,9 +64,9 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
+    ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
 except ImportError:
     _UCC_AVAILABLE = False
-
 
 logger = logging.getLogger(__name__)
 
@@ -1156,6 +1156,7 @@ def batch_isend_irecv(p2p_op_list):
         op in the op_list.
 
     Examples:
+        >>> # xdoctest: +SKIP("no rank")
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
@@ -1369,6 +1370,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
@@ -1711,6 +1713,7 @@ def all_gather_object(object_list, obj, group=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> # Assumes world_size of 3.
@@ -1797,16 +1800,17 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
         >>> dist.gather_object(
-                gather_objects[dist.get_rank()],
-                output if dist.get_rank() == 0 else None,
-                dst=0
-            )
+        ...     gather_objects[dist.get_rank()],
+        ...     output if dist.get_rank() == 0 else None,
+        ...     dst=0
+        ... )
         >>> # On rank 0
         >>> output
         ['foo', 12, {1: 2}]
@@ -1902,6 +1906,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
@@ -1999,6 +2004,7 @@ def scatter_object_list(
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
@@ -2084,6 +2090,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
@@ -2153,6 +2160,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
@@ -2594,6 +2602,7 @@ def all_to_all_single(
         `all_to_all_single` is experimental and subject to change.
 
     Examples:
+        >>> # xdoctest: +SKIP("Undefined rank")
         >>> input = torch.arange(4) + rank * 4
         >>> input
         tensor([0, 1, 2, 3])     # Rank 0
@@ -2709,6 +2718,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         `all_to_all` is experimental and subject to change.
 
     Examples:
+        >>> # xdoctest: +SKIP("Undefined rank")
         >>> input = torch.arange(4) + rank * 4
         >>> input = list(input.chunk(4))
         >>> input
@@ -2889,6 +2899,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
         ``None``.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() != 1:
@@ -3146,6 +3157,7 @@ def new_subgroups(
 
     Examples:
         >>> # Create intra-machine subgroups.
+        >>> # xdoctest: +SKIP("need process group init")
         >>> cur_subgroup, subgroups = dist.new_subgroups()
         >>> # Allreduce within the machine.
         >>> rank = dist.get_rank()
@@ -3260,6 +3272,7 @@ def new_subgroups_by_enumeration(
 
     Examples:
         >>> # Create two subgroups, where each has 2 processes.
+        >>> # xdoctest: +SKIP("need process group init")
         >>> cur_subgroup, subgroups = dist.new_subgroups(ranks=[[0, 2], [1, 3]])
         >>> rank = dist.get_rank()
         >>> tensor = torch.ones(1, device=rank) * rank
