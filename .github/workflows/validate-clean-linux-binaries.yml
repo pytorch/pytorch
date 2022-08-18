@@ -20,10 +20,11 @@ env:
 jobs:
   validate-clean-linux-binaries:
     runs-on: ubuntu-20.04-m60
+    timeout-minutes: 60
     strategy:
       matrix:
         package_install: ["conda", "pip", "libtorch"]
-        cuda_version: ["11.7", "11.6", "11.3", "10.2"]
+        cuda_version: ["11.7", "11.6", "11.3", "10.2", "cpu"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
       GPU_ARCH_TYPE: cuda
@@ -44,24 +45,42 @@ jobs:
           nvidia-smi
       - name: Install pytorch and smoke test
         env:
-          ENV_NAME: env-${{ github.run_id }}
+          ENV_NAME: env-${PACKAGE_VER}-${{ github.run_id }}
           CUDA_VER: ${{ matrix.cuda_version }}
           PACKAGE_VER: ${{matrix.package_install}}
         run: |
-          # install conda
-          if [ ${PACKAGE_VER} == 'conda' ]; then
+          # install conda with cuda
+          if [ ${PACKAGE_VER} == 'conda' && ${CUDA_VER} != "cpu" ]; then
             set -ex
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
             conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
             conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
             conda env remove -p ${ENV_NAME}
+          # install conda cpu only
+          else
+            conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
+            conda install pytorch torchvision torchaudio cpuonly -c pytorch
+            conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]);print(y);
+            onda env remove -p ${ENV_NAME}
           fi
           
           # install pip
           if [ ${PACKAGE_VER} == 'pip' ]; then
             case ${CUDA_VER} in
-              "10.2") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio
-              "11.3") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
-              "11.6") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu116
-              "11.7") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117
+              "cpu") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu; python3 -c "import torch;y=torch.randn([3,5]);print(y);"
+              "10.2") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio; python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
+              "11.3") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113; python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
+              "11.6") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu116; python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
+              "11.7") py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117; python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
+          fi
+          
+          
+          # install libtorch
+          if [ ${PACKAGE_VER} == 'pip' ]; then
+            case ${CUDA_VER} in
+              "cpu:) wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcpu.zip; unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcpu.zip
+              "10.2") wget https://download.pytorch.org/libtorch/cu102/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu102.zip; unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu102.zip
+              "11.3") wget https://download.pytorch.org/libtorch/cu113/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu113.zip; unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu113.zip
+              "11.6") wget https://download.pytorch.org/libtorch/cu116/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip; unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip
+              "11.7") wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip; unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip
           fi
