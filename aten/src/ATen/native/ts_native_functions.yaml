@@ -192,7 +192,7 @@ supported:
   - diagonal_backward
   - slice_backward
   - new_empty_strided
-  - narrow_copy
+  # - narrow_copy
   - pixel_shuffle
   - pixel_unshuffle
   - select_backward

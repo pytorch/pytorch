@@ -176,8 +176,10 @@ def parse_native_yaml_struct(
             # Only cuda-like devices in tree require device guards
             device_guard=is_cuda_dispatch_key(k),
             index=v,
-            # Only Meta and CompositeImplicitAutograd natively support symint
-            symint=k in [DispatchKey.Meta, DispatchKey.CompositeImplicitAutograd],
+            # Which dispatch keys natively support symint
+            # Note: DispatchKey.CompositeExplicitAutograd has to match out
+            # composites; I think there's some factoring problem here
+            symint=k in [DispatchKey.Meta, DispatchKey.CompositeImplicitAutograd, DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeExplicitAutogradNonFunctional],
         )
     return ParsedYaml(rs, indices)
 

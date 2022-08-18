@@ -2037,7 +2037,7 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
   autogen: _embedding_bag_per_sample_weights_backward.out
 
-- func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: empty.names(SymInt[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:

@@ -918,7 +918,7 @@ RegisterOperators reg_expand_copy({
             IValue self, size, implicit;
             pop(stack, self, size, implicit);
             push(
-                stack, at::native::expand(self.toTensor(), size.toIntVector()));
+                stack, self.toTensor().expand(size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),
