@@ -208,7 +208,7 @@ class TestCommon(TestCase):
                 (torch.version.cuda is not None)
                 and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
 
-            if skip_bfloat and is_lower_than_cuda11_0() and ((isinstance(sample.input, torch.Tensor) and sample.input.dtype == torch.bfloat16) or any(isinstance(arg, torch.Tensor) and arg.dtype==torch.bfloat16 for arg in sample.args)):
+            if skip_bfloat and is_lower_than_cuda11_0 and ((isinstance(sample.input, torch.Tensor) and sample.input.dtype == torch.bfloat16) or any(isinstance(arg, torch.Tensor) and arg.dtype==torch.bfloat16 for arg in sample.args)):
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
