@@ -6750,24 +6750,12 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
     # (row, col, offset)
-    args_list = ((1, 1),
-                 (3, 3, 1),
-                 (3, 3, 2),
-                 (3, 3, 200),
-                 (3, 3, -1),
-                 (3, 3, -2),
-                 (3, 3, -200),
-                 (0, 3, 0),
-                 (3, 0, 0),
-                 (0, 0, 0),
+    args_list = ((0, 0),
+                 (20, 0),
+                 (0, 20),
                  (20, 21, 0),
-                 (20, 21, 10),
-                 (20, 21, -10),
-                 (60, 3),
-                 (60, 3, 37),
-                 (60, 3, -37),
-                 (3, 60, 37),
-                 (3, 60, -37),
+                 (20, 21, 7),
+                 (20, 21, -7),
                  # Large test cases below are deliberately commented out to speed up CI
                  # tests and to avoid OOM error. When modifying implementations of
                  # tril_indices and triu_indices, please enable these tests and make sure

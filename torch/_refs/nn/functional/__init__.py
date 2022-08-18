@@ -607,7 +607,7 @@ def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
     if p == 2:
         aTa = torch.mm(a, a.T)
         aTa_diag = torch.diag(aTa)
-        t = torch.sqrt(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa)
+        t = torch.sqrt(torch.clamp(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa, min=0))
     else:
         t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
     i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)

@@ -3090,10 +3090,7 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    if t.dtype is torch.bool:
-        return cond.logical_and(t)
-    else:
-        return torch.where(cond, t, 0)
+    return utils.mask_tensor(cond, t)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3937,10 +3934,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) >= diagonal
 
-    if a.dtype is torch.bool:
-        return mask.logical_and(a)
-    else:
-        return torch.where(mask, a, 0)
+    return utils.mask_tensor(mask, a)
 
 
 @register_decomposition(torch.ops.aten.tril)
@@ -3955,10 +3949,7 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) <= diagonal
 
-    if a.dtype is torch.bool:
-        return mask.logical_and(a)
-    else:
-        return torch.where(mask, a, 0)
+    return utils.mask_tensor(mask, a)
 
 
 # This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h
@@ -3984,6 +3975,28 @@ def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     return trapezoid_size, rectangle_size, m_first_row
 
 
+def _trilu_checks(
+    name: str,
+    row: int,
+    col: int,
+    dtype: torch.dtype,
+    layout: torch.layout,
+    pin_memory: bool,
+):
+    if pin_memory:
+        raise NotImplementedError("PrimTorch doesn't support pinned memory")
+    check(row >= 0, lambda: f"row must be non-negative, got {row}")
+    check(col >= 0, lambda: f"col must be non-negative, got {col}")
+    check(
+        layout == torch.strided,
+        lambda: f"only support layout=torch.strided, got {layout}",
+    )
+    check(
+        dtype in (torch.int32, torch.int64),
+        lambda: f"\"{name}\" not implemented for '{dtype}'",
+    )
+
+
 # This is based on tril_indices_cuda in aten/src/ATen/native/cuda/TensorFactories.cu
 @register_decomposition(torch.ops.aten.tril_indices)
 def tril_indices(
@@ -3996,14 +4009,7 @@ def tril_indices(
     device: DeviceLikeType = "cpu",
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    if pin_memory:
-        raise NotImplementedError("PrimTorch doesn't support pinned memory")
-    check(row >= 0, lambda: f"row must be non-negative, got {row}")
-    check(col >= 0, lambda: f"row must be non-negative, got {col}")
-    check(
-        layout == torch.strided,
-        lambda: f"only support layout=torch.strided, got {layout}",
-    )
+    _trilu_checks("tril_indices", row, col, dtype, layout, pin_memory)
 
     trapezoid_size, rectangle_size, m_first_row = _get_tril_sizes(row, col, offset)
     row_offset = max(0, -offset)
@@ -4060,14 +4066,7 @@ def triu_indices(
     device: DeviceLikeType = "cpu",
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    if pin_memory:
-        raise NotImplementedError("PrimTorch doesn't support pinned memory")
-    check(row >= 0, lambda: f"row must be non-negative, got {row}")
-    check(col >= 0, lambda: f"row must be non-negative, got {col}")
-    check(
-        layout == torch.strided,
-        lambda: f"only support layout=torch.strided, got {layout}",
-    )
+    _trilu_checks("triu_indices", row, col, dtype, layout, pin_memory)
 
     trapezoid_size, rectangle_size, m_first_row = _get_triu_sizes(row, col, offset)
     col_offset = max(0, offset)
