@@ -36,10 +36,12 @@ jobs:
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        fetch-depth: 1
+        submodules: false
 
       - name: Select all requested test configurations
         id: filter
-        run: .github/scripts/filter_test_configs.py --test-matrix ${{ github.event.inputs.test-matrix }} --labels ${{ steps.pr-labels.outputs.labels }}
+        run: .github/scripts/filter_test_configs.py --test-matrix ${{ inputs.test-matrix }} --labels ${{ steps.pr-labels.outputs.labels }}
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
 
@@ -64,6 +66,9 @@ jobs:
           echo ${SHARD_NUMBER}
           echo ${NUM_TEST_SHARDS}
 
+#      - name: Checkout PyTorch
+#        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+#
 #      - name: Setup Linux
 #        uses: ./.github/actions/setup-linux
 #
