@@ -55,11 +55,3 @@ jobs:
           conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
           conda env remove -p ${ENV_NAME}
           echo "conda"
-      - name: Install pip pytorch and smoke test
-        env:
-          ENV_NAME: env-${{ github.run_id }}
-          CUDA_VER: ${{ matrix.cuda_version }}
-          PACKAGE_VER: ${{matrix.package_install}}
-        if: ${PACKAGE_VER} == "pip"&& ${CUDA_VER} == "10.2"
-        run: |
-          pip3 install torch torchvision torchaudio
