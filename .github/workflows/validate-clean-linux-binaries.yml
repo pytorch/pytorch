@@ -69,22 +69,22 @@ jobs:
           # install pip
           if [ ${PACKAGE_VER} == 'pip' ]; then
             case $CUDA_VER in
-              ("rocm") { pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/rocm5.1.1";
+              ("rocm") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/rocm5.1.1";
                       python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
                       ;;
-              ("cpu") { pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cpu";
+              ("cpu") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cpu";
                      python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
                      ;;
-              ("10.2") { pip3 install torch torchvision torchaudio;
+              ("10.2") { python3 -m pip3 install torch torchvision torchaudio;
                        python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
                        ;;
-              ("11.3") { pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu113";
+              ("11.3") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu113";
                        python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
                        ;;
-              ("11.6") { pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu116";
+              ("11.6") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu116";
                        python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
                        ;;
-              ("11.7") { pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu117";
+              ("11.7") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu117";
                        python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
                        ;;
              (*) echo "No binary available"
