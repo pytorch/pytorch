@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Callable, List, Optional, Tuple
 
 import torch
+import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
@@ -39,13 +40,13 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
             if isinstance(x, Tensor):
-                return x.to(computation_dtype)
+                return prims.convert_element_type(x, computation_dtype)
             else:
                 return x
 
         def decrease_prec(x):
             if isinstance(x, Tensor):
-                return x.to(result_dtype)
+                return prims.convert_element_type(x, result_dtype)
             else:
                 return x
 

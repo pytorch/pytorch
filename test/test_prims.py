@@ -509,5 +509,22 @@ class TestRefs(TestCase):
 instantiate_device_type_tests(TestRefs, globals())
 
 
+class TestDecomp(TestCase):
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_decomposition_type_promotion(self, device, dtype):
+        x = torch.rand(5, device=device).to(dtype)
+        y = torch.rand(5, device=device).to(dtype)
+
+        with TorchRefsMode() as mode:
+            def fn(*arg):
+                return _is_func_unsupported_nvfuser(mode, torch.ops.aten.leaky_relu_backward.default, arg, {})
+            assert(fn(x, y, 0.3, False))
+
+
+instantiate_device_type_tests(TestDecomp, globals())
+
+
 if __name__ == "__main__":
     run_tests()
