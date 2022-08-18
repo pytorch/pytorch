@@ -255,21 +255,36 @@ TORCH_LIBRARY(custom, m) {
 };""",
         )
 
-    def test_3_namespaces_schema_registration_code_invalid(self) -> None:
+    def test_3_namespaces_schema_registration_code_valid(self) -> None:
         custom2_native_function, _ = torchgen.model.NativeFunction.from_yaml(
             {"func": "custom2::func() -> bool"},
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
-        with self.assertRaises(AssertionError):
-            get_native_function_schema_registrations(
-                native_functions=[
-                    DEFAULT_NATIVE_FUNCTION,
-                    self.custom_native_function,
-                    custom2_native_function,
-                ],
-                schema_selector=self.selector,
-            )
+        (
+            aten_registrations,
+            custom_registrations,
+        ) = get_native_function_schema_registrations(
+            native_functions=[
+                DEFAULT_NATIVE_FUNCTION,
+                self.custom_native_function,
+                custom2_native_function,
+            ],
+            schema_selector=self.selector,
+        )
+        self.assertEqual(aten_registrations, ['m.def("func() -> bool", {});\n'])
+        self.assertEqual(
+            custom_registrations,
+            """
+TORCH_LIBRARY(custom, m) {
+  m.def("func() -> bool", {});
+
+};
+TORCH_LIBRARY(custom2, m) {
+  m.def("func() -> bool", {});
+
+};""",
+        )
 
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):

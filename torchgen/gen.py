@@ -1593,10 +1593,6 @@ def get_native_function_schema_registrations(
         if namespace == "aten":
             aten_schema_registrations = schema_registrations_body
         else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
