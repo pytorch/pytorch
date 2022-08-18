@@ -36,9 +36,14 @@ from pytorch_test_common import (
 )
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import verification
+from torch.onnx import _constants, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
+
+# The min onnx opset version to test for
+MIN_ONNX_OPSET_VERSION = 9
+# The max onnx opset version to test for
+MAX_ONNX_OPSET_VERSION = _constants.onnx_main_opset
 
 
 def _init_test_generalized_rcnn_transform():
@@ -112,13 +117,23 @@ def _construct_tensor_for_quantization_test(
     return tensor
 
 
-def _parameterized_class_attrs_and_values():
+def _parameterized_class_attrs_and_values(
+    min_opset_version: int, max_opset_version: int
+):
     attrs = ("opset_version", "is_script", "keep_initializers_as_inputs")
     input_values = []
     input_values.extend(itertools.product((7, 8), (True, False), (True,)))
     # Valid opset versions are defined in torch/onnx/_constants.py.
-    # Versions are intentionally set statically, to not be affected by elsewhere changes.
-    input_values.extend(itertools.product(range(9, 17), (True, False), (True, False)))
+    # Versions are intentionally set statically, to not be affected by changes elsewhere.
+    if min_opset_version < 9:
+        raise ValueError("min_opset_version must be >= 9")
+    input_values.extend(
+        itertools.product(
+            range(min_opset_version, max_opset_version + 1),
+            (True, False),
+            (True, False),
+        )
+    )
     return {"attrs": attrs, "input_values": input_values}
 
 
@@ -143,7 +158,9 @@ def _parametrize_rnn_args(arg_name):
 
 
 @parameterized.parameterized_class(
-    **_parameterized_class_attrs_and_values(),
+    **_parameterized_class_attrs_and_values(
+        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+    ),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 @common_utils.instantiate_parametrized_tests
