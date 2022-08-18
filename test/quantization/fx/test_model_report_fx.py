@@ -15,7 +15,11 @@ from torch.ao.quantization.fx._model_report.detector import (
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
-from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
+from torch.ao.quantization.observer import (
+    HistogramObserver,
+    default_per_channel_weight_observer,
+    default_observer
+)
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
@@ -1147,7 +1151,57 @@ class TestFxModelReportClass(QuantizationTestCase):
         - Tests that qconfigmapping is generated
         - Tests that mappings include information for for relavent modules
         """
-        pass
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(PerChannelDetector())
+            detector_set.add(DynamicStaticDetector())
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the models
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+
+            # get the mapping without error
+            qconfig_mapping = mod_report.generate_qconfig_mapping()
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+            # get the visualizer so we can get access to reformatted reports by module fqn
+            mod_reports_by_fqn = mod_report.generate_visualizer().generated_reports
+
+            # compare the entries of the mapping to those of the report
+            # we should have the same number of entries
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), len(mod_reports_by_fqn))
+
+            # for the non_empty one, we should have 2 because we have only applicable linears
+            # so should have suggestions for each module named
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
+
+            # only two linears, make sure per channel min max for weight since fbgemm
+            # also static distribution since a simple single callibration
+            for key in qconfig_mapping.module_name_qconfigs:
+                config = qconfig_mapping.module_name_qconfigs[key]
+                self.assertEqual(config.weight, default_per_channel_weight_observer)
+                self.assertEqual(config.activation, default_observer)
+
+            # make sure these can actually be used to prepare the model
+            prepared = quantize_fx.prepare_fx(TwoThreeOps(), qconfig_mapping, example_input)
+
+            # now convert the model to ensure no errors in conversion
+            converted = quantize_fx.convert_fx(prepared)
 
     @skipIfNoFBGEMM
     def test_equalization_mapping_generation(self):
