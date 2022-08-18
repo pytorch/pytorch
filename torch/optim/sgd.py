@@ -114,7 +114,6 @@ class SGD(Optimizer):
             group.setdefault('nesterov', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
-            group.setdefault('differentiable', False)
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
