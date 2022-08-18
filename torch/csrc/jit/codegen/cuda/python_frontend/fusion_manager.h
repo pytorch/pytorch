@@ -100,28 +100,46 @@ class FusionManager {
   void printIr() const;
   
 
-   //! The rest of the public methods are only used in C++
+  //! The rest of the public methods are only used in C++
 
+  //! Returns a pointer for the Fusion associated with the current cache
+  //! pointer if the current cache entry is a terminal node.
   Nvf::Fusion* fusionPtr() const;
+  //! Queries the current cache entry to see if a record matches one of its
+  //! children
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
       std::shared_ptr<RecordFunctor>& rec) const;
+  //! Creates a child node for the current cache entry
   void createFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
+  //! Creates a child node for the current cache entry that is terminal
   void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
+  //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
+  //! Traverses the cache from the current entry to the child associated
+  //! with the record given.
   void traverseFusionCache(std::shared_ptr<RecordFunctor>& rec);
 
  private:
+  //! Gives a pointer to the FusionExecutorCache associated with the
+  //! current cache entry if it is a terminal node.
   Nvf::FusionExecutorCache* fusionExecutorCachePtr() const;
+  //! Returns the pointer to the current cache entry
   FusionCacheEntry* fusionCachePtr() const;
 
+  //! The static pointer to the FusionManager
   static thread_local FusionManager* singleton_;
 
+  //! The max allowed number of fusions in the cache
   size_t max_fusions_;
+  //! The current number of fusions in the cache.
   size_t num_fusions_;
-  //! The fusion cache is implemented as a prefix tree of entries containing
-  //! a Record representing a Fusion Definition line entry.
+  //! A dummy record for start of the fusion cache tree.
   std::shared_ptr<RecordFunctor> start_record_;
+  //! The top of the prefix tree used to start a cache look up of a given
+  //! fusion definition.
   std::unique_ptr<FusionCacheEntry> fusion_cache_start_;
+  //! A pointer to the current cache entry in a cache lookup of a fusion
+  //! definition.
   FusionCacheEntry* fusion_cache_ptr_;
 };
 

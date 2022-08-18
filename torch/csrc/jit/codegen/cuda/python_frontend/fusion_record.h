@@ -37,6 +37,9 @@ enum class RecordType {
 //! The hash and equality operators are used to facilitate the hashing of
 //! RecordFunctors in a hash map given those operators need to be
 //! specified for custom objects.
+//!
+//! The print function is used to print the given Record as a statement
+//! in a python formated function.
 
 struct RecordFunctor {
   RecordFunctor(
@@ -97,6 +100,8 @@ struct RecordFunctor {
   //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) {}
 
+  //! The base print function when printing Record for a given FusionDefinition
+  //! in python formated code.
   virtual void print(std::ostream& os, bool close_function = true) const {
     bool first_output = true;
     for (auto& output : outputs_) {

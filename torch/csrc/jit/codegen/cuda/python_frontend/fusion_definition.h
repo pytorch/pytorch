@@ -8,7 +8,10 @@ namespace Nvf = torch::jit::fuser::cuda;
 namespace nvfuser {
 
 struct RecordFunctor;
-struct FusionManager;
+class FusionManager;
+
+//! This is helper function used to print a python formated 
+//! Fusion IR DataType when printing a fusion definition.
 
 const char* dtypeToPyString(Nvf::DataType t);
 
@@ -92,10 +95,6 @@ class FusionDefinition {
   //! Defines a Record that records the operation required to
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
-
-  //! These methods are used to replay the operations for building the
-  //! nvFuser Fusion IR on a cache miss.
-
   //! Adds a Tensor/Scalar input to the Fusion object
   void addInput(Nvf::Val* input);
   //! Adds a Tensor/Scalar output to the Fusion object
@@ -106,13 +105,21 @@ class FusionDefinition {
   void setFusionState(size_t index, Nvf::Val* val);
 
  private:
+  //! Builds an nvFuser Fusion IR object upon exit of a FusionDefintion
+  //! when a cache lookup fails.
   void buildFusionIr();
+  //! Returns the FusionManager Ptr that holds the cache of Fusions
   FusionManager* fusionManagerPtr() const;
 
+  //! Holds the defined maximum length of a FusionDefinition in order to
+  //! prevent a run away error. The user should feel free to increase this
+  //! number as appropriate.
   size_t max_length_;
 
+  //! A pointer the FusionManager that holds the cache of fusions
   FusionManager* fusion_manager_;
 
+  //! Holds an End Record
   std::shared_ptr<RecordFunctor> end_record_;
 
   //! A vector of record operations in the FusionDefintion

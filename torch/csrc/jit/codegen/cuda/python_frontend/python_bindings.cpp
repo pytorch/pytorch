@@ -37,10 +37,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
 
-  //! Binding an object that owns a FusionExecutorCache instance and provides
-  //! an interface
-  //! \todo This object will be removed when a FusionManager is added
-  //! containing a cache.
+  //! Binding the FusionManager that holds a cache of Fusions
   py::class_<nvfuser::FusionManager> fusion_manager(nvfuser, "FusionManager");
   fusion_manager
       .def_static(
@@ -79,6 +76,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "__enter__",
           [](nvfuser::FusionDefinition& self) -> nvfuser::FusionDefinition* {
+            // Instrumentation to mark the beginning of a FusionDefinition
             Nvf::inst::Trace::instance()->beginEvent(
                 "FusionDefinition Context Manager");
             return self.enter();
@@ -90,7 +88,7 @@ void initNvFuserPythonBindings(PyObject* module) {
              void* exc_value,
              void* traceback) {
             self.exit();
-            // End FusionDefinition Context Manager
+            // Mark the end of a FusionDefinition Context Manager
             Nvf::inst::Trace::instance()->endEvent(nullptr);
           })
       .def(
