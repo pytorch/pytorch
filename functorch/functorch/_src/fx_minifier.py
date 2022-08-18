@@ -33,12 +33,12 @@ class ConcreteProp(torch.fx.Interpreter):
 
 # inplace modifies node/inps
 def _convert_node_to_placeholder(node, inps):
-    if node.op == 'output':
+    if node.op == 'output' or node.op == "placeholder":
         return
     node.op = 'placeholder'
     node.args = ()
     node.target = node.name
-    concrete_val = node.meta['concrete_value']
+    concrete_val = node.meta.get('concrete_value', None)
     if isinstance(concrete_val, torch.Tensor):
         inps.append(concrete_val)
     else:
@@ -155,9 +155,11 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
             if node.op == 'output':
                 output = node
                 break
+
         output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         if len(output_args) == 1:
             return None
+
         for idx in range(0, len(output_args), granularity):
             output.args = (output_args[:idx] + output_args[idx + granularity:],)
             if graph_fails(cur_graph, cur_inps):
