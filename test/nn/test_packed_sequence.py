@@ -1,9 +1,13 @@
 import itertools
 import random
+import copy
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch.nn.utils.rnn as rnn_utils
+from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_device_type import dtypes, dtypesIfCUDA
 
 
 class PackedSequenceTest(TestCase):
