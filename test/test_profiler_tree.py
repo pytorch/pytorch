@@ -661,10 +661,10 @@ class TestProfilerTree(TestCase):
 
         # There's some lazy initialization in __torch_function__. If we don't
         # run this the first run won't match the replicates.
-        x + y
+        torch.add(x, y)
 
         with torch.profiler.profile(with_stack=True) as p:
-            x + y
+            torch.add(x, y)
 
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
@@ -672,20 +672,21 @@ class TestProfilerTree(TestCase):
             test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_torch_function
               torch/profiler/profiler.py(...): __enter__
                 ...
-              test_profiler_tree.py(...): __torch_function__
-                torch/_tensor.py(...): __torch_function__
-                  <built-in function all>
-                    torch/_tensor.py(...): <genexpr>
-                      <built-in function issubclass>
-                    torch/_tensor.py(...): <genexpr>
-                  <built-in method add of TorchFunctionTensor object at 0xXXXXXXXXXXXX>
-                    aten::add
-                  torch/_tensor.py(...): _convert
-                    <built-in function isinstance>
-                    <built-in function isinstance>
-                    <built-in method as_subclass of Tensor object at 0xXXXXXXXXXXXX>
-                      aten::alias
-                    <built-in function isinstance>
+              <built-in method add of type object at 0xXXXXXXXXXXXX>
+                test_profiler_tree.py(...): __torch_function__
+                  torch/_tensor.py(...): __torch_function__
+                    <built-in function all>
+                      torch/_tensor.py(...): <genexpr>
+                        <built-in function issubclass>
+                      torch/_tensor.py(...): <genexpr>
+                    <built-in method add of type object at 0xXXXXXXXXXXXX>
+                      aten::add
+                    torch/_tensor.py(...): _convert
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in method as_subclass of Tensor object at 0xXXXXXXXXXXXX>
+                        aten::alias
+                      <built-in function isinstance>
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   torch/profiler/profiler.py(...): _transit_action
@@ -882,6 +883,7 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
