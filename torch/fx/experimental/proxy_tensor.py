@@ -77,6 +77,10 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     return transform(d[tracer])
 
 
+def get_proxy_slots(obj):
+    return obj.__dict__.get(proxy_slot)
+
+
 def track_tensor(tensor, proxy, *, constant, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
