@@ -73,6 +73,15 @@ kernel void bitwise_xor_scalar(constant uint& length [[buffer(0)]],
   out[offset] = a[offset] ^ b;
 }}
 
+kernel void bitwise_not(constant uint& length [[buffer(0)]],
+                         device {0}  *out [[buffer(1)]],
+                         device {1}  *a [[buffer(2)]],
+                         uint offset [[thread_position_in_grid]]) {{
+  if (offset >= length) {{
+    return;
+  }}
+  out[offset] = ~a[offset];
+}}
 )METAL";
 
 
@@ -262,12 +271,66 @@ at::Tensor& bitwise_xor_out_mps (const at::Tensor& self, const at::Tensor& other
  return _bitwise_op_out_mps(self, other, output, "xor");
 }
 
+at::Tensor& bitwise_not_out_mps (const at::Tensor& self, at::Tensor& output_) {
+  // Handle boolean tensor using logical not
+  if (self.scalar_type() == c10::ScalarType::Bool) {
+    return at::native::logical_not_out_mps(self, output_);
+  }
+
+  at::Tensor output = output_;
+  bool needs_output_copy = false;
+
+  at::native::resize_output(output, self.sizes());
+  if (!output.is_contiguous()) {
+    output = output.contiguous();
+    needs_output_copy = true;
+  }
+  if (self.dim() == 0) {
+    if (self.scalar_type() == c10::ScalarType::Byte) {
+      // Unsigned types need a special handling to keep result of operation in 0..255 output
+      output.fill_(c10::Scalar(static_cast<uint8_t>(~self.item<uint8_t>())));
+    } else {
+      output.fill_(c10::Scalar(~self.item<int64_t>()));
+    }
+    return output_;
+  }
+  using namespace at::mps;
+  MPSStream* stream = getCurrentMPSStream();
+  id<MTLComputePipelineState> cplState = getCPLState(MPSDevice::getInstance()->device(),
+                                                     getMetalType(output),
+                                                     getMetalType(self),
+                                                     getMetalType(self),
+                                                     "bitwise_not");
+  uint32_t length = output.numel();
+  dispatch_sync(stream->queue(), ^(){
+    id<MTLCommandBuffer> buffer = stream->commandBuffer();
+    id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
+
+    id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
+    id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
+
+    [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
+    [commandEncoder setComputePipelineState:cplState];
+    [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
+    [commandEncoder setBuffer:outBuf offset:output.storage_offset()*output.itemsize() atIndex:1];
+    [commandEncoder setBuffer:selfBuf offset:self.storage_offset()*self.itemsize()  atIndex:2];
+    dispatch1DJob(commandEncoder, cplState, length);
+    [commandEncoder endEncoding];
+    stream->commit(true);
+  });
+  if (needs_output_copy) {
+      output_.copy_(output);
+  }
+  return output_;
+}
+
 
 
 TORCH_LIBRARY_IMPL(aten, MPS, m) {
   m.impl("bitwise_and.Tensor_out", bitwise_and_out_mps);
   m.impl("bitwise_or.Tensor_out", bitwise_or_out_mps);
   m.impl("bitwise_xor.Tensor_out", bitwise_xor_out_mps);
+  m.impl("bitwise_not.out", bitwise_not_out_mps);
 }
 
 } // anonymous namespace
