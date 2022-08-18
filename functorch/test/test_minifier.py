@@ -66,6 +66,22 @@ class TestMinifier(TestCase):
         self.assertEqual(len(min_f.graph.nodes), 2)
         self.assertEqual(len(inps), 1)
 
+    def test_tup_use(self):
+        def f(a, b):
+            tup = torch.std_mean(a)
+            return tup[0] + b * tup[1]
+
+        inps = [torch.randn(3), torch.randn(3)]
+
+        def has_add(fx_g, inps):
+            return (torch.ops.aten.add.Tensor in set([i.target for i in fx_g.graph.nodes]))
+
+        failing_f = make_fx(f)(*inps)
+        min_f, inps = minifier(failing_f, inps, has_add)
+
+        self.assertEqual(len(min_f.graph.nodes), 4)
+        self.assertEqual(len(inps), 2)
+
 
 if __name__ == "__main__":
     run_tests()
