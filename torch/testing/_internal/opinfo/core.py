@@ -1097,11 +1097,16 @@ class OpInfo(object):
 #   by adding kwargs to the constructor.
 
 
-def _find_referenced_opinfo(referenced_name, variant_name):
+def _find_referenced_opinfo(referenced_name, variant_name, *, op_db=None):
     '''
     Finds the OpInfo with the given name that has no variant name.
     '''
-    from torch.testing._internal.common_methods_invocations import op_db
+    # NOTE: searching the global op_db doesn't work when OpInfos are split into
+    # different modules, as otherwise the op_db will not be fully constructed
+    # yet. So, instead the local op_db must be passed in explicitly.
+    if op_db is None:
+        from torch.testing._internal.common_methods_invocations import op_db
+
     for opinfo in op_db:
         if opinfo.name == referenced_name and opinfo.variant_test_name == variant_name:
             return opinfo
@@ -1158,6 +1163,7 @@ class PythonRefInfo(OpInfo):
             name,  # the stringname of the callable Python reference
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
+            op_db=None,  # The database of opinfos to search for the parent opinfo
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             validate_view_consistency=True,
@@ -1166,7 +1172,8 @@ class PythonRefInfo(OpInfo):
 
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
+        self.torch_opinfo = _find_referenced_opinfo(
+            torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db)
         self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
