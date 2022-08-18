@@ -1210,7 +1210,47 @@ class TestFxModelReportClass(QuantizationTestCase):
         - Tests that equalization config generated when input-weight equalization detector used
         - Tests that mappings include information for for relavent modules
         """
-        pass
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(InputWeightEqualizationDetector(0.6))
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the models
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+
+            # get the mapping without error
+            qconfig_mapping = mod_report.generate_qconfig_mapping()
+            equalization_mapping = mod_report.generate_equalization_mapping()
+
+            # tests a lot more simple for the equalization mapping
+
+            # shouldn't have any equalization suggestions for this case
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
+
+
+            # make sure these can actually be used to prepare the model
+            prepared = quantize_fx.prepare_fx(
+                TwoThreeOps(),
+                qconfig_mapping,
+                example_input,
+                _equalization_config=equalization_mapping
+            )
+
+            # now convert the model to ensure no errors in conversion
+            converted = quantize_fx.convert_fx(prepared)
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
