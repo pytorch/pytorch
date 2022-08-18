@@ -20,11 +20,11 @@ env:
 jobs:
   validate-clean-linux-binaries:
     runs-on: ubuntu-20.04-m60
-    timeout-minutes: 60
+    timeout-minutes: 360
     strategy:
       matrix:
-        package_install: ["conda"]
-        cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm"]
+        package_install: ["libtorch"]
+        cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm", "cpu"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
       GPU_ARCH_TYPE: cuda
@@ -51,7 +51,7 @@ jobs:
         run: |
           set -ex
           
-          # install conda with cuda
+          # install conda with cuda -- tested for all
           if [ ${PACKAGE_VER} == 'conda' ] && [ ${CUDA_VER} != "cpu" ] && [ ${CUDA_VER} != "rocm" ]; then
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
             conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
@@ -66,7 +66,7 @@ jobs:
             conda env remove -p ${ENV_NAME}
           fi
                     
-          # install pip -- tested for all cuda except cpu
+          # install pip -- tested for all cuda except cpu -- takes a very long time
           if [ ${PACKAGE_VER} == 'pip' ]; then
             apt-get install python3-pip -y
             case $CUDA_VER in
