@@ -138,7 +138,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         for idx, node in enumerate(cur_graph.nodes):
             new_node = new_graph.node_copy(node, lambda x: env[x])
             if node.op not in ['placeholder', 'output']:
-                if idx % granularity == 0 and idx not in tested:
+                # If idx is divisible by (granularity * 2), it would have been checked already.
+                if idx % granularity == 0 and (idx % (granularity * 2) != 0) and idx not in tested:
                     output_node = new_graph.output((new_node,))
                     if len(new_graph.nodes) < len(cur_graph.nodes) and graph_fails(new_graph, cur_inps):
                         return ReproState(new_graph, cur_inps)
@@ -150,6 +151,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     @register_strategy("Remove outputs")
     def remove_outputs(cur_graph, cur_inps, granularity):
+        granularity = max(1, granularity // 2)
         for idx, node in enumerate(cur_graph.nodes):
             node.idx = idx
             if node.op == 'output':
@@ -239,17 +241,21 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     failing_state = ReproState(failing_graph, inps)
 
-    def try_granularity(failing_state, granularity):
+    def try_granularity(failing_state, granularity, use_non_granular=True):
         print(f"Trying granularity {granularity}")
 
+        strategies = []
         num_nodes = len(failing_state.graph.nodes)
         num_outputs = len(get_outputs(failing_state.graph))
         if num_outputs > num_nodes // 2:
-            new_state = remove_outputs(failing_state, max(granularity // 2, 1))
-            if new_state is not None:
-                return new_state
+            strategies += [remove_outputs]
 
-        for strategy in [eliminate_dead_code, remove_unused_inputs, remove_suffix, delta_debugging]:
+        if use_non_granular:
+            strategies += [eliminate_dead_code, remove_unused_inputs]
+
+        strategies += [remove_suffix, delta_debugging]
+
+        for strategy in strategies:
             new_state = strategy(failing_state, granularity)
             if new_state is not None:
                 return new_state
@@ -257,7 +263,12 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     while True:
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
+        new_state = try_granularity(failing_state, granularity, use_non_granular=True)
+        if new_state is not None:
+            failing_state = new_state
+            continue
 
+        granularity //= 2
         has_progress = False
         while granularity >= 1:
             new_state = try_granularity(failing_state, granularity)
@@ -267,13 +278,15 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
                 has_progress = True
                 break
             granularity //= 2
-        if not has_progress:
-            new_state = remove_outputs(failing_state, 1)
-            if new_state is not None:
-                has_progress = True
-                failing_state = new_state
-        if not has_progress:
-            break
+        if has_progress:
+            continue
+
+        new_state = remove_outputs(failing_state, 1)
+        if new_state is not None:
+            failing_state = new_state
+            continue
+
+        break
 
     if not graph_fails(failing_state.graph, failing_state.inps):
         raise RuntimeError("Uh oh, something went wrong :( Final graph is not failing")
