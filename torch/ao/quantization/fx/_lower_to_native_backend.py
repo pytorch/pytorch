@@ -935,6 +935,7 @@ def _lower_to_native_backend(
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
     model = fold_weight(model, node_name_to_scope)
+    model.graph.eliminate_dead_code()
     model.recompile()
     model.graph.lint()
     return model
