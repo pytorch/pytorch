@@ -1008,7 +1008,7 @@
 
 - name: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   self: grad.masked_fill(mask, 0)
-  value: at::where(mask, grad, 0).sum()
+  value: masked_fill_backward(grad, mask)
   mask: non_differentiable
   result: self_t.masked_fill(mask, value_t)
 
