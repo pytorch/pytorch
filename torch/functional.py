@@ -1637,6 +1637,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU

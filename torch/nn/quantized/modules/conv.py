@@ -681,6 +681,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'qnnpack'
+        >>> from torch.nn import quantized as nnq
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -864,6 +865,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'fbgemm'
+        >>> from torch.nn import quantized as nnq
         >>> # With cubic kernels and equal stride
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding

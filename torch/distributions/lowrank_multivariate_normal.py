@@ -8,6 +8,7 @@ from torch.distributions.utils import _standard_normal, lazy_property
 
 __all__ = ['LowRankMultivariateNormal']
 
+
 def _batch_capacitance_tril(W, D):
     r"""
     Computes Cholesky of :math:`I + W.T @ inv(D) @ W` for a batch of matrices :math:`W`
@@ -53,6 +54,7 @@ class LowRankMultivariateNormal(Distribution):
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([[1.], [0.]]), torch.ones(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[[1],[0]]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
