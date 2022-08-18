@@ -1,7 +1,8 @@
 import itertools
+import unittest
 from functools import partial
 from itertools import product
-from typing import Iterable
+from typing import Iterable, List
 
 import numpy as np
 from numpy import inf
@@ -9,12 +10,47 @@ from numpy import inf
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_magma_version
-from torch.testing._internal.common_device_type import has_cusolver
-from torch.testing._internal.common_utils import (
-    make_fullrank_matrices_with_distinct_singular_values,
+from torch.testing._internal.common_cuda import (
+    _get_magma_version,
+    _get_torch_cuda_version,
+    CUDA11OrLater,
+    with_tf32_off,
 )
-from torch.testing._internal.opinfo.core import clone_sample, ErrorInput, S, SampleInput
+from torch.testing._internal.common_device_type import (
+    has_cusolver,
+    skipCPUIfNoLapack,
+    skipCUDAIf,
+    skipCUDAIfNoCusolver,
+    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfRocm,
+    tol,
+    toleranceOverride,
+)
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex,
+    all_types_and_complex_and,
+    double_types,
+    floating_and_complex_types,
+    floating_and_complex_types_and,
+)
+from torch.testing._internal.common_utils import (
+    GRADCHECK_NONDET_TOL,
+    make_fullrank_matrices_with_distinct_singular_values,
+    slowTest,
+    TEST_WITH_ROCM,
+)
+from torch.testing._internal.opinfo.core import (
+    clone_sample,
+    DecorateInfo,
+    ErrorInput,
+    gradcheck_wrapper_hermitian_input,
+    OpInfo,
+    ReductionOpInfo,
+    S,
+    SampleInput,
+)
+from torch.testing._internal.opinfo.refs import PythonRefInfo, ReductionPythonRefInfo
 
 
 def sample_kwargs_vector_norm(t, **kwargs):
@@ -1178,3 +1214,1079 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(inp, kwargs=dict(ind=len(shape_lhs))))
 
     return samples
+
+
+op_db: List[OpInfo] = [
+    OpInfo(
+        "linalg.cross",
+        ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
+        op=torch.linalg.cross,
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.half),
+        aten_name="linalg_cross",
+        sample_inputs_func=sample_inputs_cross,
+        supports_out=True,
+        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=True,
+    ),
+    OpInfo(
+        "linalg.det",
+        op=torch.linalg.det,
+        aliases=("det",),
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        aten_name="linalg_det",
+        sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
+        decorators=[
+            skipCUDAIfNoMagma,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
+            ),
+        ],
+        check_batched_gradgrad=False,
+        supports_inplace_autograd=False,
+    ),
+    OpInfo(
+        "linalg.det",
+        op=torch.linalg.det,
+        variant_test_name="singular",
+        aliases=("det",),
+        dtypes=double_types(),
+        backward_dtypes=double_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        aten_name="linalg_det",
+        sample_inputs_func=sample_inputs_linalg_det_singular,
+        decorators=[
+            skipCUDAIfNoMagma,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
+            ),
+        ],
+        check_batched_gradgrad=False,
+        supports_inplace_autograd=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestGradients", "test_fn_fwgrad_bwgrad"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+            ),
+            # dtypes are tested in the suite above, no need to repeat it for singular
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_dtypes"),
+        ),
+    ),
+    OpInfo(
+        "linalg.cholesky",
+        aten_name="linalg_cholesky",
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # See https://github.com/pytorch/pytorch/pull/78358
+        check_batched_forward_grad=False,
+        sample_inputs_func=sample_inputs_linalg_cholesky,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.cholesky_ex",
+        aten_name="linalg_cholesky_ex",
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # See https://github.com/pytorch/pytorch/pull/78358
+        check_batched_forward_grad=False,
+        sample_inputs_func=sample_inputs_linalg_cholesky,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.vecdot",
+        aten_name="linalg_vecdot",
+        ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
+        dtypes=floating_and_complex_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(
+            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
+        ),
+        sample_inputs_func=sample_inputs_linalg_vecdot,
+        check_batched_forward_grad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=(torch.complex64, torch.complex128),
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.cond",
+        aten_name="linalg_cond",
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_cond,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+    ),
+    OpInfo(
+        "linalg.eig",
+        aten_name="linalg_eig",
+        op=torch.linalg.eig,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_eig,
+        check_batched_forward_grad=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # AssertionError: Scalars are not equal!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="cpu"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+    ),
+    OpInfo(
+        "linalg.eigvals",
+        aten_name="linalg_eigvals",
+        op=torch.linalg.eigvals,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_invertible,
+        check_batched_forward_grad=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        skips=(
+            # Pre-existing condition; Needs to be fixed
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_operator"
+            ),
+            # exits early on eager extremal value test
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.eigh",
+        aten_name="linalg_eigh",
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_eigh,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        check_batched_forward_grad=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.eigvalsh",
+        aten_name="linalg_eigvalsh",
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_eigh,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        check_batched_forward_grad=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        skips=(
+            # Pre-existing condition; Needs to be fixed
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.householder_product",
+        aten_name="linalg_householder_product",
+        op=torch.linalg.householder_product,
+        aliases=("orgqr",),
+        dtypes=floating_and_complex_types(),
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
+        # TODO: backward uses in-place operations that vmap doesn't like
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        check_batched_forward_grad=False,
+        sample_inputs_func=sample_inputs_householder_product,
+        decorators=[
+            skipCUDAIfNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_forward_ad"
+            ),
+        ],
+    ),
+    OpInfo(
+        "linalg.ldl_factor",
+        aten_name="linalg_ldl_factor",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_ldl_factor,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+    ),
+    OpInfo(
+        "linalg.ldl_factor_ex",
+        aten_name="linalg_ldl_factor_ex",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_ldl_factor,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+    ),
+    OpInfo(
+        "linalg.ldl_solve",
+        aten_name="linalg_ldl_solve",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_ldl_solve,
+        decorators=[
+            skipCUDAIf(
+                _get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"
+            ),
+            skipCUDAIfNoCusolver,
+            skipCUDAIfRocm,
+            skipCPUIfNoLapack,
+        ],
+    ),
+    OpInfo(
+        "linalg.lstsq",
+        aten_name="linalg_lstsq",
+        dtypes=floating_and_complex_types(),
+        supports_out=True,
+        sample_inputs_func=sample_inputs_linalg_lstsq,
+        error_inputs_func=error_inputs_lstsq,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        skips=(
+            # we skip gradient checks for this suite as they are tested in
+            # variant_test_name='grad_oriented'
+            DecorateInfo(unittest.skip("Skipped!"), "TestGradients"),
+            # The values for attribute 'shape' do not match
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.lstsq",
+        aten_name="linalg_lstsq",
+        variant_test_name="grad_oriented",
+        # gradchecks for forward AD fails with multi-Tensor outputs
+        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
+        supports_out=False,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_lstsq,
+        error_inputs_func=error_inputs_lstsq_grad_oriented,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        skips=(
+            # tests do not work with passing lambda for op
+            DecorateInfo(
+                unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperatorSignatures",
+                "test_get_torch_func_signature_exhaustive",
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.matrix_power",
+        aliases=("matrix_power",),
+        aten_name="linalg_matrix_power",
+        dtypes=floating_and_complex_types(),
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
+        supports_inplace_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        check_batched_grad=False,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        sample_inputs_func=sample_inputs_linalg_matrix_power,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        skips=(
+            # Strides are not the same!
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+        ),
+    ),
+    OpInfo(
+        "linalg.multi_dot",
+        # Need this lambda because gradcheck does not work with TensorList inputs
+        aten_name="linalg_multi_dot",
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(
+            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
+        ),
+        supports_inplace_autograd=False,
+        # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # https://github.com/pytorch/pytorch/issues/66357
+        check_batched_forward_grad=False,
+        sample_inputs_func=sample_inputs_linalg_multi_dot,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67470
+            DecorateInfo(
+                unittest.skip("67470!"), "TestCommon", "test_noncontiguous_samples"
+            ),
+            # Fails on XLA.
+            # AssertionError: False is not true : Tensors failed to compare as equal!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestOpInfo",
+                device_type="xla",
+                dtypes=(torch.long,),
+            ),
+            # https://github.com/pytorch/pytorch/issues/71774
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+                device_type="cpu",
+                dtypes=(torch.long,),
+            ),
+        ),
+    ),
+    # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
+    OpInfo(
+        "linalg.norm",
+        aten_name="linalg_norm",
+        op=torch.linalg.norm,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        sample_inputs_func=sample_inputs_linalg_norm,
+        supports_forward_ad=True,
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+    ),
+    OpInfo(
+        "linalg.norm",
+        op=torch.linalg.norm,
+        variant_test_name="subgradients_at_zero",
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        sample_inputs_func=partial(
+            sample_inputs_linalg_norm, variant="subgradient_at_zero"
+        ),
+        aten_name="linalg_norm",
+        supports_forward_ad=True,
+        # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+        # Could not allocate memory to change Tensor SizesAndStrides!
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # [NEW] Skips specifically for sample inputs at zero
+            # norm's vjp/jvp are not well-conditioned near zero
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestGradients", "test_fn_fwgrad_bwgrad"
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.matrix_norm",
+        aten_name="linalg_matrix_norm",
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        check_batched_forward_grad=False,
+        check_batched_gradgrad=False,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        sample_inputs_func=sample_inputs_linalg_matrix_norm,
+    ),
+    OpInfo(
+        "linalg.qr",
+        aten_name="linalg_qr",
+        op=torch.linalg.qr,
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # In-place ops
+        check_batched_gradgrad=False,
+        sample_inputs_func=sample_inputs_linalg_qr_geqrf,
+        decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.slogdet",
+        aten_name="linalg_slogdet",
+        op=torch.linalg.slogdet,
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.vander",
+        aten_name="linalg_vander",
+        ref=np_vander_batched,
+        op=torch.linalg.vander,
+        dtypes=all_types_and_complex(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        skips=(
+            # Pre-existing condition (calls .item); needs to be fixed
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
+            ),
+        ),
+        sample_inputs_func=sample_inputs_linalg_vander,
+    ),
+    ReductionOpInfo(
+        "linalg.vector_norm",
+        op=torch.linalg.vector_norm,
+        identity=0,
+        nan_policy="propagate",
+        supports_multiple_dims=True,
+        complex_to_real=True,
+        supports_forward_ad=True,
+        # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+        # got: Could not allocate memory to change Tensor SizesAndStrides!
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        generate_args_kwargs=sample_kwargs_vector_norm,
+        aten_name="linalg_vector_norm",
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.lu_factor",
+        aten_name="linalg_lu_factor",
+        op=torch.linalg.lu_factor,
+        dtypes=floating_and_complex_types(),
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_lu,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.lu_factor_ex",
+        aten_name="linalg_lu_factor_ex",
+        op=torch.linalg.lu_factor_ex,
+        dtypes=floating_and_complex_types(),
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_lu,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.lu",
+        aten_name="linalg_lu",
+        op=torch.linalg.lu,
+        dtypes=floating_and_complex_types(),
+        # https://github.com/pytorch/pytorch/issues/80411
+        # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_lu,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.lu_solve",
+        op=torch.linalg.lu_solve,
+        aten_name="linalg_lu_solve",
+        dtypes=floating_and_complex_types(),
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        supports_forward_ad=True,
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_lu_solve,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Tests different backward paths"),
+                "TestCommon",
+                "test_floating_inputs_are_differentiable",
+            ),
+        ),
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+    ),
+    OpInfo(
+        "linalg.inv",
+        aten_name="linalg_inv",
+        op=torch.linalg.inv,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_invertible,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # AssertionError: Scalars are not equal!
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.inv_ex",
+        aten_name="linalg_inv_ex",
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_invertible,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # AssertionError: Scalars are not equal!
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.solve",
+        aten_name="linalg_solve",
+        op=torch.linalg.solve,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_solve,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.solve_ex",
+        aten_name="linalg_solve_ex",
+        op=torch.linalg.solve_ex,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_solve,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.solve_triangular",
+        aten_name="linalg_solve_triangular",
+        op=torch.linalg.solve_triangular,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_solve_triangular,
+        supports_fwgrad_bwgrad=True,
+        skips=(skipCPUIfNoLapack,),
+        # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
+        supports_forward_ad=True,
+    ),
+    OpInfo(
+        "linalg.matrix_rank",
+        aten_name="linalg_matrix_rank",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_invertible,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.matrix_rank",
+        aten_name="linalg_matrix_rank",
+        variant_test_name="hermitian",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.pinv",
+        aten_name="linalg_pinv",
+        op=torch.linalg.pinv,
+        dtypes=floating_and_complex_types(),
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_pinv,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # errors with "leaked XXXX bytes CUDA memory on device 0"
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.pinv",
+        aten_name="linalg_pinv",
+        variant_test_name="singular",
+        # pinv is Frechet-differentiable in a rank-preserving neighborhood,
+        # so we feed inputs that are the products of two full-rank factors,
+        # to avoid any rank changes caused by the perturbations in the gradcheck
+        op=lambda a, b: torch.linalg.pinv(a @ b.mT),
+        dtypes=floating_and_complex_types(),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_pinv_singular,
+        # Only large tensors show issues with implicit backward used prior to
+        # explicit backward implementation.
+        decorators=[slowTest, skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            # CUDA runs out of memory
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
+                dtypes=[torch.cdouble],
+            ),
+            # This test takes almost 2 hours to run!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_gradgrad",
+                device_type="cuda",
+                dtypes=[torch.cdouble],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.pinv",
+        aten_name="linalg_pinv",
+        variant_test_name="hermitian",
+        dtypes=floating_and_complex_types(),
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # See https://github.com/pytorch/pytorch/pull/78358
+        check_batched_forward_grad=False,
+        sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.svd",
+        op=torch.linalg.svd,
+        aten_name="linalg_svd",
+        decomp_aten_name="_linalg_svd",
+        dtypes=floating_and_complex_types(),
+        # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
+        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=True,
+        check_batched_forward_grad=False,
+        # We're using at::allclose, which does not have a batching rule
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        sample_inputs_func=sample_inputs_svd,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="mps",
+                dtypes=[torch.float32],
+            ),
+        ),
+    ),
+    OpInfo(
+        "linalg.svdvals",
+        op=torch.linalg.svdvals,
+        aten_name="linalg_svdvals",
+        decomp_aten_name="_linalg_svd",
+        dtypes=floating_and_complex_types(),
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=True,
+        # We're using at::allclose, which does not have a batching rule
+        check_batched_gradgrad=False,
+        sample_inputs_func=sample_inputs_linalg_svdvals,
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+    ),
+    OpInfo(
+        "linalg.tensorinv",
+        ref=np.linalg.tensorinv,
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_tensorinv,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # See https://github.com/pytorch/pytorch/pull/78358
+        check_batched_forward_grad=False,
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+    ),
+    OpInfo(
+        "linalg.tensorsolve",
+        ref=lambda a, b, dims=None: np.linalg.tensorsolve(a, b, axes=dims),
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_tensorsolve,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        decorators=[
+            skipCUDAIfNoMagmaAndNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
+        ],
+    ),
+]
+
+python_ref_db: List[OpInfo] = [
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        supports_nvfuser=False,  # clone_default
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.matrix_norm",
+        torch_opinfo_name="linalg.matrix_norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.norm",
+        torch_opinfo_name="linalg.norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svd",
+        torch_opinfo_name="linalg.svd",
+        supports_out=True,
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svdvals",
+        torch_opinfo_name="linalg.svdvals",
+        supports_out=True,
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+]
