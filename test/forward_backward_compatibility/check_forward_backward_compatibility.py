@@ -86,6 +86,7 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper.functional", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper.out", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper_", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
