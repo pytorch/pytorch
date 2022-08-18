@@ -207,6 +207,10 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
+
+file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE pyi_python "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -218,13 +222,15 @@ add_custom_command(
       --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
-    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
-    "${TORCH_SRC_DIR}/nn/functional.pyi.in"
-    "${TOOLS_PATH}/pyi/gen_pyi.py"
-    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
-    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+      "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
+      "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
+      "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      ${pyi_python}
+      ${autograd_python}
+      ${torchgen_python}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
