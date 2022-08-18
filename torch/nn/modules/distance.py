@@ -13,12 +13,12 @@ class PairwiseDistance(Module):
     if ``p`` is negative, i.e.:
 
     .. math ::
-        \mathrm{dist}\left(\mathbf{v}, \mathbf{u}\right) = \left\Vert \mathbf{v}-\mathbf{u} + \epsilon \mathbf{e} \right\Vert_p,
+        \mathrm{dist}\left(x, y\right) = \left\Vert x-y + \epsilon e \right\Vert_p,
 
-    where :math:`\mathbf{e}` is the vector of ones and the ``p``-norm is given by.
+    where :math:`e` is the vector of ones and the ``p``-norm is given by.
 
     .. math ::
-        \Vert \mathbf{x} \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
+        \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
 
     Args:
         p (real, optional): the norm degree. Can be negative. Default: 2
