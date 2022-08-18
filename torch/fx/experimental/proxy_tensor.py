@@ -240,7 +240,8 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     constant = None
     # NB: do NOT include factories as constants
     if (
-        all_constant
+        torch.Tag.nondeterministic_seeded not in func_overload.tags  # type: ignore[attr-defined]
+        and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
     ):

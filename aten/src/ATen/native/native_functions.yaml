@@ -256,18 +256,25 @@
   tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: abs(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -928,6 +935,7 @@
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: bernoulli_out
     MPS: bernoulli_out_mps
@@ -935,6 +943,7 @@
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: bernoulli_
     MPS: bernoulli_mps_
@@ -943,6 +952,7 @@
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: bernoulli_
     MPS: bernoulli_mps_
@@ -4007,10 +4017,12 @@
   dispatch:
     CompositeExplicitAutograd: rand
   autogen: rand.names_out
+  tags: nondeterministic_seeded
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
   device_guard: False
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: rand
   autogen: rand.generator_with_names_out
@@ -4021,14 +4033,17 @@
     CompositeExplicitAutograd: rand
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: rand
 
 - func: rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: rand_out
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
@@ -4044,6 +4059,7 @@
     CompositeExplicitAutograd: randint
 
 - func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
@@ -4053,22 +4069,27 @@
     CompositeExplicitAutograd: randint
 
 - func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
 - func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
@@ -4094,10 +4115,12 @@
     CompositeExplicitAutograd: randn
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randn
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   device_check: NoCheck
   device_guard: False
   dispatch:
@@ -4105,6 +4128,7 @@
   autogen: randn.names_out
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   device_check: NoCheck
   device_guard: False
   dispatch:
@@ -4112,8 +4136,10 @@
   autogen: randn.generator_with_names_out
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
@@ -4129,14 +4155,17 @@
     CompositeExplicitAutograd: randperm
 
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm_out
 
 - func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
@@ -4324,6 +4353,7 @@
   tags: nondeterministic_seeded
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  tags: nondeterministic_seeded
   device_check: NoCheck   # TensorIterator
 
 - func: relu(Tensor self) -> Tensor
@@ -5622,6 +5652,7 @@
   autogen: _dirichlet_grad.out
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+  tags: nondeterministic_seeded
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
@@ -7492,6 +7523,7 @@
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: random_
     Meta: random_meta_
@@ -7500,6 +7532,7 @@
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: random_
@@ -7509,6 +7542,7 @@
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: random_
@@ -7517,6 +7551,7 @@
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: uniform_
@@ -7527,12 +7562,14 @@
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
@@ -7540,6 +7577,7 @@
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: exponential_
@@ -7548,6 +7586,7 @@
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: geometric_
@@ -8267,6 +8306,7 @@
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: multinomial_out
 
@@ -8960,6 +9000,7 @@
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   variants: method
   dispatch:
     CPU, CUDA: normal_
@@ -8973,10 +9014,12 @@
 # but we can't due to overload ambiguity with normal.Tensor_float.
 - func: normal_functional(Tensor self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: normal_functional
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: normal_out
     MPS: normal_mps_out
@@ -8994,6 +9037,7 @@
     CPU, CUDA: normal_out
     Meta: normal_out_meta
     MPS: normal_mps_out
+  tags: nondeterministic_seeded
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
@@ -9007,6 +9051,7 @@
     CPU, CUDA: normal_out
     Meta: normal_out_meta
     MPS: normal_mps_out
+  tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
@@ -9018,10 +9063,12 @@
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: normal
+  tags: nondeterministic_seeded
 
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: normal_out
+  tags: nondeterministic_seeded
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
@@ -10272,6 +10319,7 @@
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  tags: nondeterministic_seeded
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: rrelu_with_noise_out_cuda
@@ -10291,6 +10339,7 @@
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
+  tags: nondeterministic_seeded
   dispatch:
     CPU: rrelu_with_noise_cpu_
     CUDA: rrelu_with_noise_cuda_
