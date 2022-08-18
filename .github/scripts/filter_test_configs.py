@@ -49,15 +49,15 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         "include": []
     }
 
-    for config in test_matrix.get("include", []):
-        config_name = config.get("name", "")
+    for entry in test_matrix.get("include", []):
+        config_name = entry.get("config", "")
         if not config_name:
             continue
 
         label = f"{CIFLOW_PREFIX}{config_name.strip().lower()}"
         if label in labels:
             print(f"Select {config_name} because label {label} is presented in the pull request by the time the test starts")
-            filtered_test_matrix["include"].append(config)
+            filtered_test_matrix["include"].append(entry)
 
     # If no matching label is found, the default is to run everything as normal
     return filtered_test_matrix if filtered_test_matrix["include"] else test_matrix
@@ -75,10 +75,6 @@ def main() -> None:
     labels = get_labels(pr_number)
     # Then filter the test matrix and keep only the selected ones
     filtered_test_matrix = filter(test_matrix, labels)
-
-    print(json.dumps(filtered_test_matrix))
-    print("=======")
-    print(labels)
 
     # Set the filtered test matrix as the output
     print(f"::set-output name=test-matrix::{json.dumps(filtered_test_matrix)}")
