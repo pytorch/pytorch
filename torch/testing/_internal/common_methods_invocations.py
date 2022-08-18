@@ -4231,7 +4231,7 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
 
     # error inputs for invalid input dimension
     x = torch.rand([0, 1, 49], dtype=torch.float32)
-    yield ErrorInput(SampleInput(x, kwargs='kernel_size': 1, 'stride': 50, 'padding': 0}),
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 1, 'stride': 50, 'padding': 0}),
                      error_regex='non-empty 4D or 5D (batch mode) tensor expected for input')
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
