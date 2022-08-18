@@ -44,10 +44,7 @@ def key_extractor(tensors, additional_exclude=None):
 
 
 def to_flat_tuple(args, kwargs):
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return tree_flatten((args, kwargs))
 
 def get_tensors(args, kwargs):
     flat_all = to_flat_tuple(args, kwargs)
