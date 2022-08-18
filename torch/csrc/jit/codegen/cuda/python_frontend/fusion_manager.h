@@ -41,9 +41,9 @@ struct FusionCacheEntry {
 //! \class FusionManager
 //! \brief A singleton class used in the nvFuser python interface
 //! to manage the caching of fusions.
-//! 
+//!
 //! Example:
-//!   
+//!
 //!   fm = FusionManager.get()
 //!
 //!   with FusionDefinition(fm) as fd :
@@ -73,7 +73,7 @@ struct FusionCacheEntry {
 //! The fusion manager implements a prefix tree of records in order to cache
 //! fusions.  A leaf of the tree with a terminal node contains an nvFuser
 //! Fusion IR container for a cached instance.
-//! 
+//!
 //! \todo Add the ability to evict a fusion.  There is currently a max number
 //! of fusions that is checked to prevent a runaway case.
 
@@ -81,13 +81,12 @@ class FusionManager {
   //! The constructor is private given the FusionManager is only constructed
   //! as a singleton.
   FusionManager(size_t max_fusions);
-  
+
   //! Copy and Assignment of the FusionManager is not supported
   FusionManager(const FusionManager&) = delete;
   FusionManager& operator=(const FusionManager&) = delete;
 
  public:
-
   //! The next 4 pubic methods are the python interface methods
 
   //! Gets a pointer to the singleton and creates a new one if necessary
@@ -98,7 +97,6 @@ class FusionManager {
   std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
   //! Prints the nvFuser IR if the current cache pointer is a terminal node
   void printIr() const;
-  
 
   //! The rest of the public methods are only used in C++
 

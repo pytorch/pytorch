@@ -10,7 +10,7 @@ namespace nvfuser {
 struct RecordFunctor;
 class FusionManager;
 
-//! This is helper function used to print a python formated 
+//! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
 
 const char* dtypeToPyString(Nvf::DataType t);
