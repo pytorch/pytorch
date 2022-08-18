@@ -5,6 +5,7 @@ dependencies:
   - numpy
   - pytest
   - pytest-cov
+  - xdoctest
   - codecov
   - pip
   - pyyaml

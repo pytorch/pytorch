@@ -181,6 +181,11 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args):
     # because it avoids PartitionedInterpreter's overhead
     gm, is_partitioned = maybe_partition_graph(gm)
     if is_partitioned:
-        return PartitionedInterpreter(gm).run(*args)
+        result = PartitionedInterpreter(gm).run(*args)
+        # PartitionedInterpreter doesn't run unflatten using out_spec
+        if getattr(gm, "_out_spec", None) is not None:
+            assert gm._out_spec is not None  # for mypy
+            return tree_unflatten(result, gm._out_spec)
+        return result
     else:
         return nvfuser_execute(gm, *args)
