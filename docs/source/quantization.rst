@@ -1133,6 +1133,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
 .. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.quantized
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
@@ -1144,3 +1145,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.sparsity
 .. py:module:: torch.ao.sparsity.scheduler
 .. py:module:: torch.ao.sparsity.sparsifier
+
+.. py:module:: torch.nn.quantized
+.. py:module:: torch.nn.quantized.modules
