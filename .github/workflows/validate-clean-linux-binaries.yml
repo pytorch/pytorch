@@ -18,11 +18,11 @@ env:
   WITH_PUSH: ${{ github.event_name == 'push' }}
 
 jobs:
-  validate-linux-binaries:
+  validate-clean-linux-binaries:
     runs-on: ubuntu-20.04-m60
     strategy:
       matrix:
-        cuda_version: ["11.7", "11.6"]
+        cuda_version: ["11.7", "11.6", "11.3", "10.2"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
       GPU_ARCH_TYPE: cuda
