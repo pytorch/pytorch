@@ -175,9 +175,13 @@ class LinearMixedPrecision(nn.Module):
                 # local shard. This supports both FULL_SHARD and SHARD_GRAD_OP
                 # cases. In FULL_SHARD, we have the additional property that
                 # param._full_param_padded has not been freed.
+                param_is_sharded = (
+                    fsdp_module.sharding_strategy != ShardingStrategy.NO_SHARD
+                    and fsdp_module.world_size > 1
+                )
                 is_fsdp_unit_active = (
-                    param._is_sharded and
-                    (param.data.data_ptr() != param._local_shard.data_ptr())
+                    param_is_sharded
+                    and param.data.data_ptr() != param._local_shard.data_ptr()
                 )
                 if is_fsdp_unit_active:
                     num_active_fsdp += 1
@@ -190,7 +194,7 @@ class LinearMixedPrecision(nn.Module):
                         cls.assertEqual(0, param._mp_shard.storage().size())
                     else:
                         cls.assertFalse(hasattr(param, '_mp_shard'))
-                elif param._is_sharded:
+                elif param_is_sharded:
                     # This FSDP unit is not active as full param has been
                     # freed or not yet allocated. Ensure param points to full
                     # precision param.
@@ -342,15 +346,11 @@ class TestFSDPMixedPrecision(FSDPTest):
                         else:
                             self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
                     # p._mp_shard should be freed.
-                    if model.params[0]._is_sharded:  # i.e. world_size > 1
-                        # TODO: free the mixed precision shard after forward
-                        # when world_size == 1 as well, currently when
-                        # world_size == 1 it is only freed after backward.
-                        if mp_config.param_dtype is not None:
-                            self._validate_mp_shard_freed(model)
-                        else:
-                            # We never should have allocated an _mp_shard.
-                            self._validate_no_mp_shard(model)
+                    if mp_config.param_dtype is not None:
+                        self._validate_mp_shard_freed(model)
+                    else:
+                        # We never should have allocated an _mp_shard.
+                        self._validate_no_mp_shard(model)
 
                     loss = act.sum()
                     loss = scaler.scale(loss)

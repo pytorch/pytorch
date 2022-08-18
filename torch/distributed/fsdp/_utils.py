@@ -1,11 +1,13 @@
+import traceback
 from collections import OrderedDict
 import dataclasses
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.parallel.scatter_gather import _is_namedtuple  # type: ignore[attr-defined]
-
+from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
+    _is_namedtuple,
+)
 from torch.nn.utils.rnn import PackedSequence
 
 """Useful functions to deal with tensor types with other python container types."""
@@ -78,3 +80,11 @@ def _apply_to_modules(
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)
+
+def p_assert(cond: Any, s: Any) -> None:
+    """This is used as an alternate to ``assert`` when in the backward context
+    to print the error message ``s`` since otherwise, it is swallowed."""
+    if not cond:
+        print(s)
+        traceback.print_stack()
+        raise AssertionError

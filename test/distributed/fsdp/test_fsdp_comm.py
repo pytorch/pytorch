@@ -147,11 +147,6 @@ class TestCommunication(FSDPTest):
                 f"is_first_iter={is_first_iter} " \
                 f"is_last_iter_no_sync={is_last_iter_no_sync} " \
                 f"sharding_strategy={sharding_strategy}"
-        if is_first_iter and pass_type == PassType.FWD:
-            # With execution order validation, on the first iteration, we have
-            # an additional all-gather before every actual all-gather in the
-            # forward pass
-            num_all_gathers *= 2
         return num_all_gathers
 
     def _print_ref_num_all_gathers_in_pass(
