@@ -25,6 +25,7 @@ pytorch_includes = [
     "aten/src/ATen/cuda/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cuda/linalg/*",
+    "aten/src/ATen/native/cuda/special/*",
     "aten/src/ATen/native/cudnn/*",
     "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",

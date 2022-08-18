@@ -236,6 +236,7 @@ filegroup(
         "aten/src/ATen/cuda/*.cu",
         "aten/src/ATen/cuda/detail/*.cu",
         "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/cuda/special/*.cu",
         "aten/src/ATen/native/nested/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",

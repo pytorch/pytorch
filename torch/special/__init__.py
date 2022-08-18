@@ -4,6 +4,7 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
     'airy_ai',
+    'bernoulli_number',
     'bessel_j0',
     'bessel_j1',
     'bessel_y0',
@@ -12,6 +13,11 @@ __all__ = [
     'chebyshev_polynomial_u',
     'chebyshev_polynomial_v',
     'chebyshev_polynomial_w',
+    'complete_legendre_elliptic_integral_d',
+    'complete_legendre_elliptic_integral_e',
+    'complete_legendre_elliptic_integral_k',
+    'cos_pi',
+    'cosh_pi',
     'digamma',
     'entr',
     'erf',
@@ -21,9 +27,11 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
+    'factorial',
     'gammainc',
     'gammaincc',
     'gammaln',
+    'harmonic_number',
     'hermite_polynomial_h',
     'hermite_polynomial_he',
     'i0',
@@ -32,6 +40,7 @@ __all__ = [
     'i1e',
     'laguerre_polynomial_l',
     'legendre_polynomial_p',
+    'ln_gamma_sign',
     'log1p',
     'log_ndtr',
     'log_softmax',
@@ -47,15 +56,19 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'scaled_modified_bessel_k0',
+    'scaled_modified_bessel_k1',
     'shifted_chebyshev_polynomial_t',
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
-    'scaled_modified_bessel_k0',
-    'scaled_modified_bessel_k1',
+    'sin_pi',
     'sinc',
+    'sinh_pi',
     'softmax',
     'spherical_bessel_j0',
+    'tan_pi',
+    'tanh_pi',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1277,6 +1290,189 @@ Spherical Bessel function of the first kind of order :math:`0`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bernoulli_number = _add_docstr(_special.special_bernoulli_number,
+                               r"""
+bernoulli_number(n, *, out=None) -> Tensor
+
+:math:`n^{\mathrm{th}}` Bernoulli number, :math:`B_{n}`.
+
+""" + r"""
+Args:
+    n (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_legendre_elliptic_integral_d = _add_docstr(_special.special_complete_legendre_elliptic_integral_d,
+                                                    r"""
+complete_legendre_elliptic_integral_d(k, *, out=None) -> Tensor
+
+Complete Legendre elliptic integral, :math:`D\left(k\right)`.
+
+""" + r"""
+Args:
+    k (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_legendre_elliptic_integral_e = _add_docstr(_special.special_complete_legendre_elliptic_integral_e,
+                                                    r"""
+complete_legendre_elliptic_integral_e(k, *, out=None) -> Tensor
+
+Complete Legendre elliptic integral of the second kind, 
+:math:`E\left(k\right)`.
+
+""" + r"""
+Args:
+    k (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_legendre_elliptic_integral_k = _add_docstr(_special.special_complete_legendre_elliptic_integral_k,
+                                                    r"""
+complete_legendre_elliptic_integral_k(k, *, out=None) -> Tensor
+
+Complete Legendre elliptic integral of the first kind, :math:`K\left(k\right)`.
+
+""" + r"""
+Args:
+    k (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+cos_pi = _add_docstr(_special.special_cos_pi,
+                     r"""
+cos_pi(z, *, out=None) -> Tensor
+
+Cosine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+cosh_pi = _add_docstr(_special.special_cosh_pi,
+                      r"""
+cosh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic cosine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+factorial = _add_docstr(_special.special_factorial,
+                        r"""
+factorial(n, *, out=None) -> Tensor
+
+:math:`n^{\mathrm{th}}` factorial, :math:`n!`.
+
+""" + r"""
+Args:
+    n (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+harmonic_number = _add_docstr(_special.special_harmonic_number,
+                              r"""
+harmonic_number(n, *, out=None) -> Tensor
+
+:math:`n^{\mathrm{th}}` harmonic number, :math:`H_{n}`.
+
+""" + r"""
+Args:
+    n (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+ln_gamma_sign = _add_docstr(_special.special_ln_gamma_sign,
+                            r"""
+ln_gamma_sign(z, *, out=None) -> Tensor
+
+Sign of :math:`\ln{\Gamma{\left(z \right)}}`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sin_pi = _add_docstr(_special.special_sin_pi,
+                     r"""
+sin_pi(z, *, out=None) -> Tensor
+
+Sine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sinh_pi = _add_docstr(_special.special_sinh_pi,
+                      r"""
+sinh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic sine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+tan_pi = _add_docstr(_special.special_tan_pi,
+                     r"""
+tan_pi(z, *, out=None) -> Tensor
+
+Tangent of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+tanh_pi = _add_docstr(_special.special_tanh_pi,
+                      r"""
+tanh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic tangent of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
 
 Keyword args:
     {out}

@@ -43,7 +43,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vmap_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_key_set_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp
+)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
@@ -62,7 +63,9 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cub_test.cu)
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cub_test.cu
+)
+
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
@@ -79,37 +82,42 @@ list(APPEND ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_packedtensoraccessor_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_vectorized_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip)
-# TODO: fix and enable these
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
-
-list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip
+  # TODO: fix and enable these
+  # ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
+  # ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
+)
 
 list(APPEND ATen_MOBILE_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
+)
 
 list(APPEND ATen_VEC_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
-  )
+)
+
+list(APPEND ATen_VULKAN_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp
+)
 
 # Caffe2 specific tests
 if(BUILD_CAFFE2)
   list(APPEND ATen_CPU_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp)
-  list(APPEND ATen_CUDA_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp)
-endif()
+    ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp
+  )
 
+  list(APPEND ATen_CUDA_TEST_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp
+  )
+endif()
 
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)

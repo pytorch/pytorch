@@ -18009,6 +18009,12 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
+        'special.bernoulli_number',
+        dtypes=all_types_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
             precisionOverride(
@@ -18110,6 +18116,48 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.complete_legendre_elliptic_integral_e',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.complete_legendre_elliptic_integral_k',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.complete_legendre_elliptic_integral_d',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.cos_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.cosh_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.factorial',
+        dtypes=all_types_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.harmonic_number',
+        dtypes=all_types_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
@@ -18153,6 +18201,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.ln_gamma_sign',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -18288,6 +18342,18 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
+        'special.sin_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sinh_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
         'special.spherical_bessel_j0',
         decorators=(
             toleranceOverride(
@@ -18299,6 +18365,18 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.tan_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.tanh_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
         supports_autograd=False,
     ),
 ]

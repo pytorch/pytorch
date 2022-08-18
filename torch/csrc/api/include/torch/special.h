@@ -1401,5 +1401,239 @@ inline Tensor spherical_bessel_j0(const Tensor& x) {
 inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
 }
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.cos_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::cos_pi(x);
+/// ```
+inline Tensor cos_pi(const Tensor& z) {
+  return torch::special_cos_pi(z);
+}
+
+inline Tensor& cos_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_cos_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.cosh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::cosh_pi(x);
+/// ```
+inline Tensor cosh_pi(const Tensor& z) {
+  return torch::special_cosh_pi(z);
+}
+
+inline Tensor& cosh_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_cosh_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sin_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sin_pi(x);
+/// ```
+inline Tensor sin_pi(const Tensor& z) {
+  return torch::special_sin_pi(z);
+}
+
+inline Tensor& sin_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_sin_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sinh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sinh_pi(x);
+/// ```
+inline Tensor sinh_pi(const Tensor& z) {
+  return torch::special_sinh_pi(z);
+}
+
+inline Tensor& sinh_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_sinh_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.tan_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::tan_pi(x);
+/// ```
+inline Tensor tan_pi(const Tensor& z) {
+  return torch::special_tan_pi(z);
+}
+
+inline Tensor& tan_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_tan_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.tanh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::tanh_pi(x);
+/// ```
+inline Tensor tanh_pi(const Tensor& z) {
+  return torch::special_tanh_pi(z);
+}
+
+inline Tensor& tanh_pi_out(Tensor& out, const Tensor& z) {
+  return torch::special_tanh_pi_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.harmonic_number.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::harmonic_number(x);
+/// ```
+inline Tensor harmonic_number(const Tensor& n) {
+  return torch::special_harmonic_number(n);
+}
+
+inline Tensor& harmonic_number_out(Tensor& out, const Tensor& n) {
+  return torch::special_harmonic_number_out(out, n);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.factorial.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::factorial(x);
+/// ```
+inline Tensor factorial(const Tensor& n) {
+  return torch::special_factorial(n);
+}
+
+inline Tensor& factorial_out(Tensor& out, const Tensor& n) {
+  return torch::special_factorial_out(out, n);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.bernoulli_number.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bernoulli_number(x);
+/// ```
+inline Tensor bernoulli_number(const Tensor& n) {
+  return torch::special_bernoulli_number(n);
+}
+
+inline Tensor& bernoulli_number_out(Tensor& out, const Tensor& n) {
+  return torch::special_bernoulli_number_out(out, n);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.ln_gamma_sign.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::ln_gamma_sign(x);
+/// ```
+inline Tensor ln_gamma_sign(const Tensor& z) {
+  return torch::special_ln_gamma_sign(z);
+}
+
+inline Tensor& ln_gamma_sign_out(Tensor& out, const Tensor& z) {
+  return torch::special_ln_gamma_sign_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_legendre_elliptic_integral_e.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_legendre_elliptic_integral_e(x);
+/// ```
+inline Tensor complete_legendre_elliptic_integral_e(const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_e(z);
+}
+
+inline Tensor& complete_legendre_elliptic_integral_e_out(Tensor& out, const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_e_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_legendre_elliptic_integral_k.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_legendre_elliptic_integral_k(x);
+/// ```
+inline Tensor complete_legendre_elliptic_integral_k(const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_k(z);
+}
+
+inline Tensor& complete_legendre_elliptic_integral_k_out(Tensor& out, const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_k_out(out, z);
+}
+
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_legendre_elliptic_integral_d.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_legendre_elliptic_integral_d(x);
+/// ```
+inline Tensor complete_legendre_elliptic_integral_d(const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_d(z);
+}
+
+inline Tensor& complete_legendre_elliptic_integral_d_out(Tensor& out, const Tensor& z) {
+  return torch::special_complete_legendre_elliptic_integral_d_out(out, z);
+}
 } // namespace special
 } // namespace torch

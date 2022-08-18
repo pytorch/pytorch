@@ -45,6 +45,7 @@ ATEN_NATIVE_MIOPEN_CPP_PATTERN = ["aten/src/ATen/native/miopen/*.cpp"]
 
 ATEN_NATIVE_CUDA_CU_PATTERN = [
     "aten/src/ATen/native/cuda/*.cu",
+    "aten/src/ATen/native/cuda/special/*.cu",
     "aten/src/ATen/native/nested/cuda/*.cu",
     "aten/src/ATen/native/quantized/cuda/*.cu",
     "aten/src/ATen/native/sparse/cuda/*.cu",

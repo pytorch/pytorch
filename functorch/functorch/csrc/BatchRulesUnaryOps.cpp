@@ -163,17 +163,24 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(exp2);
 
   // torch.special.* functions
+  UNARY_POINTWISE(special_bernoulli_number);
+  UNARY_POINTWISE(special_complete_legendre_elliptic_integral_d);
+  UNARY_POINTWISE(special_complete_legendre_elliptic_integral_e);
+  UNARY_POINTWISE(special_complete_legendre_elliptic_integral_k);
+  UNARY_POINTWISE(special_cos_pi);
+  UNARY_POINTWISE(special_cosh_pi);
+  UNARY_POINTWISE(special_digamma);
   UNARY_POINTWISE(special_entr);
   UNARY_POINTWISE(special_erf);
   UNARY_POINTWISE(special_erfc);
   UNARY_POINTWISE(special_erfcx);
   UNARY_POINTWISE(special_erfinv);
+  UNARY_POINTWISE(special_exp2);
   UNARY_POINTWISE(special_expit);
   UNARY_POINTWISE(special_expm1);
-  UNARY_POINTWISE(special_digamma);
-  UNARY_POINTWISE(special_psi);
-  UNARY_POINTWISE(special_exp2);
+  UNARY_POINTWISE(special_factorial);
   UNARY_POINTWISE(special_gammaln);
+  UNARY_POINTWISE(special_harmonic_number);
   UNARY_POINTWISE(special_i0);
   UNARY_POINTWISE(special_i0e);
   UNARY_POINTWISE(special_i1);
@@ -181,8 +188,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE(special_log1p);
   UNARY_POINTWISE(special_ndtr);
   UNARY_POINTWISE(special_ndtri);
+  UNARY_POINTWISE(special_psi);
   UNARY_POINTWISE(special_round);
+  UNARY_POINTWISE(special_sin_pi);
   UNARY_POINTWISE(special_sinc);
+  UNARY_POINTWISE(special_sinh_pi);
+  UNARY_POINTWISE(special_tan_pi);
+  UNARY_POINTWISE(special_tanh_pi);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
   UNARY_POINTWISE_ALL(elu);
