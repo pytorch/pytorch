@@ -646,6 +646,14 @@ def logsumexp(
     return result
 
 
+@register_decomposition(torch.ops.aten.special_multigammaln)
+@out_wrapper()
+def multigammaln(a: TensorLikeType, dim: int) -> TensorLikeType:
+    c = 0.25 * dim * (dim - 1) * prims.log(torch.pi)
+    b = prims.arange(0, dim) / 2
+    return sum(prims.lgamma(a - b), -1) + c
+
+
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper()
 def nan_to_num(

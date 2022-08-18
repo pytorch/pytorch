@@ -18630,6 +18630,11 @@ python_ref_db = [
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
     ),
+    PythonRefInfo(
+        "_refs.multigammaln",
+        torch_opinfo_name="multigammln",
+        supports_nvfuser=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
         torch_opinfo_name="log",
