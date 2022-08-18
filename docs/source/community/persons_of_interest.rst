@@ -266,13 +266,17 @@ XLA
 ~~~
 
 -  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
--  Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
--  Zach Cain (`zcain117 <https://github.com/zcain117>`__)
+-  Milad Mohammadi (`miladm <https://github.com/miladm>`__)
+-  Yeounoh Chung (`yeounoh <https://github.com/yeounoh>`__)
+-  Jiewen Tan (`alanwaketan <https://github.com/alanwaketan>`__)
 -  Brian Hirsch (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Wonjoo Lee (`wonjoolee95 <https://github.com/wonjoolee95>`__)
 -  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
 -  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
 -  (emeritus) Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
 -  (emeritus) Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+-  (emeritus) Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
+-  (emeritus) Zach Cain (`zcain117 <https://github.com/zcain117>`__)
 
 TorchServe
 ~~~~~~~~~~
