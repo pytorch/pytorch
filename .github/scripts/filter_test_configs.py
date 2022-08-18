@@ -4,6 +4,7 @@ import json
 import os
 import requests
 from typing import Any, Dict, Set, List
+import yaml
 import warnings
 
 CIFLOW_PREFIX = "ciflow/"
@@ -64,8 +65,10 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
 def main() -> None:
     args = parse_args()
-    # The original test matrix set by the workflow
-    test_matrix = json.loads(args.test_matrix)
+    # Load the original test matrix set by the workflow. Its format, however,
+    # doesn't follow the strict JSON format, so we load it using yaml here for
+    # its more relaxed syntax
+    test_matrix = yaml.safe_load(args.test_matrix)
     pr_number = args.pr_number
 
     # First, query all the labels from the pull requests
