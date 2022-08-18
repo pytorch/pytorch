@@ -206,6 +206,10 @@ def _outs_and_grads(fn, inps):
 
 
 class TestAOTAutograd(TestCase):
+    def setUp(self):
+        super().setUp()
+        clear_compile_cache()
+
     def verify_aot_autograd(self, f, inp):
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
@@ -267,9 +271,12 @@ class TestAOTAutograd(TestCase):
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
+
         with torch.set_grad_enabled(True):
-            f(*inps)
-        self.assertTrue(graph_size > 2)
+            out = f(*inps)
+            self.assertIsNone(graph_size)
+            out.sum().backward()
+            self.assertTrue(graph_size > 2)
         self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
@@ -431,7 +438,7 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
                  partition_fn=partitioner,
-                 decompositions=default_decompositions)(*inps)
+                 decompositions=default_decompositions)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
