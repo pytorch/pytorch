@@ -13,6 +13,9 @@ on:
 jobs:
   lintrunner:
     runs-on: linux.20_04.16x
+    secrets:
+      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
     steps:
       - name: DEBUG API rate limit
         run: |
@@ -43,10 +46,12 @@ jobs:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
-          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN}}
+          GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          PYTORCHBOT_TOKEN: ${{ secrets.PYTORCHBOT_TOKEN }}
+          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GH_PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $MERGEBOT_TOKEN" https://api.github.com/rate_limit
 
