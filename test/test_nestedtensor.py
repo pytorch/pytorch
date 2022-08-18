@@ -675,7 +675,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_dropout(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
@@ -723,26 +722,19 @@ class TestNestedTensorDeviceType(TestCase):
         with freeze_rng_state():
             y1 = torch.nn.functional.dropout(nt, p)
         self.assertEqual(y0, y1)
-        # inplace
-        # in principle, since we have established the correctness of functional, we could simply compare inplace vs functional
-        # in practice, cuda functional has its own implementation to skip `bernoulli_`
-        # so cuda functional will differ from cuda inplace causing test failure
-        # in `test_dropout_cuda_float64 (__main__.TestNestedTensorDeviceTypeCUDA)`
-        # on `linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)`
-        expect = nt.clone()
-        torch.nn.functional.dropout(nt, p, inplace=True)
-        for i in range(ntensors):
-            actual_tensor = nt[i].view(-1)
-            expect_tensor = expect[i].view(-1)
-            for j in range(actual_tensor.shape[0]):
-                if actual_tensor[j].item() == 0.0:
-                    expect_tensor[j] = 0.0
-                else:
-                    expect_tensor[j] /= 1.0 - p
-        self.assertEqual(nt, expect)
 
-    # dropout works directly on the underlying buffer memory
-    # so contiguous / noncontiguous does not make any difference
+    @dtypes(torch.float, torch.double)
+    def test_dropout_noncontiguous(self, device, dtype):
+        ntensors = 4
+        nt0 = self.random_nt(device, dtype, ntensors, (4, 4))
+        nt1 = nt0.transpose(-1, -2)
+        p = 0.3
+        with freeze_rng_state():
+            dropouter = torch.nn.Dropout(p)
+            y0 = dropouter(nt0)
+        with freeze_rng_state():
+            y1 = torch.nn.functional.dropout(nt1, p).transpose(-1, -2)
+        self.assertEqual(y0, y1)
 
     # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
@@ -1375,6 +1367,13 @@ class TestNestedTensorAutograd(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
+
+    def test_dropout_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))]).requires_grad_(True)
+        p = 0.2
+        y = torch.nn.functional.dropout(nt, p)
+        y.backward(nt.clone())
+        self.assertEqual(nt.grad, y)
 
     def test_nested_tensor_bmm_gradcheck(self):
         a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)

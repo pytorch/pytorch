@@ -13,7 +13,7 @@
 namespace at {
 namespace native {
 
-// See Note [nested tensor matmul] TODO in NestedTensorMath.cpp
+// See Note [nested tensor matmul] in NestedTensorMath.cpp
 std::tuple<Tensor, Tensor> matmul_backward_nested(
     const Tensor& grad,
     const Tensor& self,
