@@ -131,11 +131,15 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   recording_.emplace_back(record);
   auto cache_entry =
       fusionManagerPtr()->lookupFusionCacheEntry(recording_.back());
+  // If the Record is found in the cache, the FusionDefinition and the Cache
+  // will not share Record given the Record had to be created in order to 
+  // match it but it also already existed in the cache.
   if (cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") hit in Fusion Cache.\n";
     }
+  // The FusionDefinition and the Cache will share the Record
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
