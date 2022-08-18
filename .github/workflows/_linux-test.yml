@@ -42,7 +42,7 @@ jobs:
 
       - name: Select all requested test configurations
         id: filter
-        run: .github/scripts/filter_test_configs.py --test-matrix ${{ inputs.test-matrix }} --labels ${{ steps.pr-labels.outputs.labels }}
+        run: .github/scripts/filter_test_configs.py --test-matrix "${{ inputs.test-matrix }}" --labels "${{ steps.pr-labels.outputs.labels }}"
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
 
