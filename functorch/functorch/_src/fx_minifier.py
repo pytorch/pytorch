@@ -156,10 +156,10 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
                 output = node
                 break
 
-        if len(output.args) == 1:
+        output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
+        if len(output_args) == 1:
             return None
 
-        output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         for idx in range(0, len(output_args), granularity):
             output.args = (output_args[:idx] + output_args[idx + granularity:],)
             if graph_fails(cur_graph, cur_inps):
