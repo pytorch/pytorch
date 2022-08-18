@@ -758,44 +758,19 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
+  // TODO: for_blob produces non-resizable tensors, we might want this to be
+  // resizable (have to define a custom allocator in that case)
   Tensor tensor;
   if (r.idx == 0) {
-    auto sizes = r.intlist(1);
-    auto strides = r.intlistOptional(2);
-    auto storage_offset = r.toInt64Optional(3);
-
-    auto itemsize = options.dtype().itemsize();
-    std::size_t size_bytes;
-    if (strides.list.has_value()) {
-      size_bytes = at::detail::computeStorageNbytes(
-          sizes,
-          *(strides.list),
-          itemsize,
-          storage_offset.has_value() ? *storage_offset : 0);
-    } else {
-      size_bytes = at::detail::computeStorageNbytesContiguous(
-          sizes, itemsize, storage_offset.has_value() ? *storage_offset : 0);
-    }
-
-    auto meta_allocator = at::GetAllocator(kMeta);
-    auto storage_impl = c10::make_intrusive<StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
-        size_bytes,
-        meta_allocator->allocate(size_bytes),
-        meta_allocator,
-        /*resizeable=*/true);
-    tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage_impl), options.computeDispatchKey(), options.dtype());
-
-    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-    if (strides.list.has_value()) {
-      tensor_impl->set_sizes_and_strides(sizes, *(strides.list));
-    } else {
-      tensor_impl->set_sizes_contiguous(sizes);
-    }
-    if (storage_offset) {
-      tensor_impl->set_storage_offset(*storage_offset);
-    }
+    tensor = at::for_blob(nullptr, r.intlist(1))
+                 .strides(r.intlistOptional(2))
+                 .storage_offset(r.toInt64Optional(3))
+                 .context(nullptr, [](void* ctx) {})
+                 .target_device(
+                     options.device()) // TODO: this shouldn't be necessary if
+                                       // it came from options
+                 .options(options)
+                 .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
