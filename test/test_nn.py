@@ -13646,6 +13646,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCPU
     def test_conv_contiguous_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/80837.
         for dtype in [torch.float, torch.bfloat16]:
             conv = nn.Conv2d(
                 1,
@@ -13671,6 +13672,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCPU
     def test_conv_ic1_channels_last_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
         for dtype in [torch.float, torch.bfloat16]:
             conv = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), padding=(1, 1), bias=False)
             conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
