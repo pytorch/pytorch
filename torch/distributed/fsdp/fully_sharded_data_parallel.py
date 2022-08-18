@@ -12,6 +12,7 @@ from enum import Enum, auto
 from typing import (
     Any,
     Callable,
+    Deque,
     Dict,
     Generator,
     Iterable,
@@ -902,6 +903,7 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
+        allow_over_all_gather: bool = True,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -917,6 +919,7 @@ class FullyShardedDataParallel(nn.Module):
                 device_id=device_id,
                 sync_module_states=sync_module_states,
                 forward_prefetch=forward_prefetch,
+                allow_over_all_gather=allow_over_all_gather,
             )
             return
 
@@ -947,6 +950,7 @@ class FullyShardedDataParallel(nn.Module):
                 "param_init_fn": param_init_fn,
                 "device_id": device_id,
                 "sync_module_states": sync_module_states,
+                "allow_over_all_gather": allow_over_all_gather,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -957,6 +961,7 @@ class FullyShardedDataParallel(nn.Module):
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
+        self.allow_over_all_gather = allow_over_all_gather
         if self.world_size == 1:
             sharding_strategy = ShardingStrategy.NO_SHARD
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
@@ -1016,6 +1021,8 @@ class FullyShardedDataParallel(nn.Module):
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
         self._streams: Dict[str, torch.cuda.Stream] = {}
+        self._free_events: Deque[torch.cuda.Event] = collections.deque()
+        self._max_num_issued_all_gathers = 2
         self._exec_order_data = _ExecOrderData()
         self._handles_prefetched: Dict[Tuple[FlatParamHandle, ...], bool] = {}
         # Used for `BACKWARD_POST` prefetching
@@ -1453,6 +1460,14 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
         """
+        if (
+            not self.allow_over_all_gather
+            and len(self._free_events) >= self._max_num_issued_all_gathers
+        ):
+            # Synchronize the current stream to block the CPU thread and
+            # prevent it from over-all-gathering
+            free_event = self._free_events.popleft()
+            free_event.synchronize()
         with torch.cuda.stream(self._streams["all_gather"]):
             for handle in handles:
                 handle.pre_unshard()
@@ -1479,6 +1494,10 @@ class FullyShardedDataParallel(nn.Module):
             free_unsharded_flat_params,
         ):
             handle.reshard(free_unsharded_flat_param)
+            if not self.allow_over_all_gather and free_unsharded_flat_param:
+                free_event = torch.cuda.Event()
+                free_event.record()
+                self._free_events.append(free_event)
             handle.post_reshard()
 
     @property
@@ -1732,6 +1751,7 @@ class FullyShardedDataParallel(nn.Module):
                 fsdp_module._is_root = False
                 fsdp_module._streams = self._streams
                 fsdp_module._exec_order_data = self._exec_order_data
+                fsdp_module._free_events = self._free_events
                 fsdp_module._handles_prefetched = self._handles_prefetched
                 fsdp_module._need_pre_backward_unshard = self._need_pre_backward_unshard
                 for handle in fsdp_module._handles:
