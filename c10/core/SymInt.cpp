@@ -78,13 +78,6 @@ bool SymInt::operator<(SymInt sci) const {
   return data_ < sci.data_;
 }
 
-void SymInt::operator*=(SymInt sci) {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic mul_ isn't supported yet");
-  data_ = data_ * sci.data_;
-}
-
 bool SymInt::operator<(int64_t sci) const {
   TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
   return data_ < sci;

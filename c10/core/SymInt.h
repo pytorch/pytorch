@@ -99,7 +99,6 @@ class C10_API SymInt {
   bool operator==(SymInt sci) const;
   bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
-  void operator*=(SymInt sci);
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
