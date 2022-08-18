@@ -25,7 +25,6 @@ constexpr auto kDynamicLayerBackModeKey = c10::DispatchKey::FT_DYNAMIC_LAYER_BAC
 //# constexpr auto kPythonKey = c10::DispatchKey::FT_PYTHON_KEY;
 
 // Some helper macros
-#define DECLTYPE_AUTO(...) decltype(__VA_ARGS__), __VA_ARGS__
 #define SINGLE_ARG(...) __VA_ARGS__
 
 }} // namespace at::functorch

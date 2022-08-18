@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -274,7 +274,6 @@ class TestNestedTensor(TestCase):
         nt = torch.nested_tensor([])
         empty = nt.to_padded_tensor(4)
         self.assertEqual(empty, torch.tensor([]))
-
 class TestNestedTensorDeviceType(TestCase):
 
     # Helper function to generate a random nested tensor
@@ -617,17 +616,31 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_sum_dim(self, device, dtype):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
 
-        def test_sum(nt, dim, keepdim=True):
+        def test_sum(device, dtype, ntensors, max_sizes, dim, keepdim=True):
+            nt = self.random_nt(device, dtype, ntensors, max_sizes)
             nt2 = nt.clone()
-            nt = nt.sum(dim=dim, keepdim=keepdim)
             ub2 = nt2.unbind()
-            ub2 = [t.sum(-1, keepdim=keepdim) for t in ub2]
-            nt2 = torch.nested_tensor(ub2)
-            self.assertEqual(nt, nt2)
+            nt.requires_grad_(True)
+            [t.requires_grad_(True) for t in ub2]
+            nt_sum = nt.sum(dim=dim, keepdim=keepdim)
+            ub2_sum = [t.sum(-1, keepdim=keepdim) for t in ub2]
+            self.assertEqual(nt_sum, torch.nested_tensor(ub2_sum))
+
+            # test backward
+            # generate gradient tensor that has the same size as the output
+            size = nt_sum._nested_tensor_size()
+            gt2 = []
+            for i in range(ntensors):
+                gt2.append(torch.randn(size[i].tolist(), device=device, dtype=dtype))
+            gt = torch.nested_tensor(gt2).clone()
+            nt_sum.backward(gt)
+            for t2, g2 in zip(ub2_sum, gt2):
+                t2.backward(g2)
+            self.assertEqual(nt.grad, torch.nested_tensor([t.grad for t in ub2]))
             return
 
         for ntensors, max_sizes in params:
-            test_sum(self.random_nt(device, dtype, ntensors, max_sizes), len(max_sizes))
+            test_sum(device, dtype, ntensors, max_sizes, len(max_sizes))
 
         # Test error inputs
         with self.assertRaisesRegex(RuntimeError, "NestedTensor can only be reduced across the last"):
@@ -662,7 +675,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_dropout(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
@@ -710,30 +722,22 @@ class TestNestedTensorDeviceType(TestCase):
         with freeze_rng_state():
             y1 = torch.nn.functional.dropout(nt, p)
         self.assertEqual(y0, y1)
-        # inplace
-        # in principle, since we have established the correctness of functional, we could simply compare inplace vs functional
-        # in practice, cuda functional has its own implementation to skip `bernoulli_`
-        # so cuda functional will differ from cuda inplace causing test failure
-        # in `test_dropout_cuda_float64 (__main__.TestNestedTensorDeviceTypeCUDA)`
-        # on `linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)`
-        expect = nt.clone()
-        torch.nn.functional.dropout(nt, p, inplace=True)
-        for i in range(ntensors):
-            actual_tensor = nt[i].view(-1)
-            expect_tensor = expect[i].view(-1)
-            for j in range(actual_tensor.shape[0]):
-                if actual_tensor[j].item() == 0.0:
-                    expect_tensor[j] = 0.0
-                else:
-                    expect_tensor[j] /= 1.0 - p
-        self.assertEqual(nt, expect)
 
-    # dropout works directly on the underlying buffer memory
-    # so contiguous / noncontiguous does not make any difference
+    @dtypes(torch.float, torch.double)
+    def test_dropout_noncontiguous(self, device, dtype):
+        ntensors = 4
+        nt0 = self.random_nt(device, dtype, ntensors, (4, 4))
+        nt1 = nt0.transpose(-1, -2)
+        p = 0.3
+        with freeze_rng_state():
+            dropouter = torch.nn.Dropout(p)
+            y0 = dropouter(nt0)
+        with freeze_rng_state():
+            y1 = torch.nn.functional.dropout(nt1, p).transpose(-1, -2)
+        self.assertEqual(y0, y1)
 
     # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_softmax(self, device, dtype):
         # normal nested tensor
         ntensors = 4
@@ -1102,6 +1106,26 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
+    def test_transpose_inference_mode_interaction(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # Construct in default mode and transpose while in inference mode
+        with torch.inference_mode():
+            ntT = nt.transpose(-1, -2)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.transpose(-1, -2)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+        # Construct and transpose while in inference mode
+        with torch.inference_mode():
+            nt = self.random_nt(device, dtype, 4, (4, 4))
+            ntT = nt.transpose(-1, -2)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.transpose(-1, -2)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+    @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_reshape(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
@@ -1278,7 +1302,7 @@ class TestNestedTensorAutograd(TestCase):
             nt = torch._nested_tensor_from_mask(inpt, mask)
             # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_padded(self):
         nested_size = torch.tensor([[1, 2], [2, 2]])
@@ -1292,7 +1316,7 @@ class TestNestedTensorAutograd(TestCase):
             return nt.to_padded_tensor(0)
 
         data = (padded_tensor, nested_size)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_padded_fused(self):
         nested_size = torch.tensor([[1, 8], [2, 8]])
@@ -1305,7 +1329,7 @@ class TestNestedTensorAutograd(TestCase):
             # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
         data = (padded_tensor, nested_size)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_list(self):
 
@@ -1318,7 +1342,7 @@ class TestNestedTensorAutograd(TestCase):
             # This implictily tests to_padded_tensor grads
             return c.to_padded_tensor(0)
         data = (a, b, c)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_size_dim(self):
         a = torch.nested_tensor([])
@@ -1343,6 +1367,13 @@ class TestNestedTensorAutograd(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
+
+    def test_dropout_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))]).requires_grad_(True)
+        p = 0.2
+        y = torch.nn.functional.dropout(nt, p)
+        y.backward(nt.clone())
+        self.assertEqual(nt.grad, y)
 
     def test_nested_tensor_bmm_gradcheck(self):
         a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
@@ -1467,11 +1498,26 @@ class TestNestedTensorAutograd(TestCase):
             d = torch.functional.F.linear(nt, weight, bias)
             return d.to_padded_tensor(0)
         data = (a, b, c, weight, bias)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
         # Test linear with no bias added
         data = (a, b, c, weight)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_nested_tensor_softmax(self):
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, dim):
+            nt = torch.nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.softmax(nt, dim=dim)
+            return d.to_padded_tensor(0)
+
+        # softmax over last dim
+        data = (a, b, c, -1)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_linear_backward(self):
         a = torch.randn(1, 2, requires_grad=False)
