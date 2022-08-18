@@ -2750,7 +2750,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_nncl_rank_membership(self):
-        self._test_rank_membership(backend="gloo")
+        self._test_rank_membership(backend="nccl")
 
 if __name__ == "__main__":
     assert (
