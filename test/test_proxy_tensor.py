@@ -443,6 +443,17 @@ def forward(self, x_1):
         g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
 
+    def test_constant_blowup(self):
+        def f():
+            val = torch.tensor([2])
+            blowup = val.repeat(1000)
+            return blowup.sum().item()
+
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
+        )
+
     def test_decomposition_interpreter(self):
         def fn(x):
             return torch.nn.functional.silu(x)
