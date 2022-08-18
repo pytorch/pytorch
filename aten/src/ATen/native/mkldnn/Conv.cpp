@@ -179,12 +179,12 @@ Tensor mkldnn_convolution(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
- 
+
   check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
 
   bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
- 
+
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   auto output_sizes = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
@@ -211,7 +211,7 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-	is_channels_last);
+        is_channels_last);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
@@ -223,7 +223,7 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-	is_channels_last);
+        is_channels_last);
   }
 
   if (input.is_mkldnn()) {
@@ -237,11 +237,15 @@ Tensor mkldnn_convolution(
 }
 
 Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool bias_defined, bool is_channels_last)
-{
-  
+    IntArrayRef input_size,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
   auto grad_y = itensor_from_tensor(grad_output);
@@ -276,9 +280,15 @@ Tensor mkldnn_convolution_backward_input(
 }
 
 std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined, bool is_channels_last)
-{
+    IntArrayRef weight_size,
+    const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
   const ideep::tensor grad_y = itensor_from_tensor(grad_output);
   const ideep::tensor x = itensor_from_tensor(input);
 
@@ -295,7 +305,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         padding.vec(),
         padding.vec(),
         groups,
-	is_channels_last);
+        is_channels_last);
   } else {
     ideep::convolution_backward_weights::compute_v2(
         x,
@@ -307,7 +317,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         padding.vec(),
         padding.vec(),
         groups,
-	is_channels_last);
+        is_channels_last);
   }
 
   if (!is_channels_last) {
