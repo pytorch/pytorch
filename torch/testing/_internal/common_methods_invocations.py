@@ -13936,6 +13936,8 @@ op_db: List[OpInfo] = [
                             'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestNNCOpInfo', 'test_nnc_correctness'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
