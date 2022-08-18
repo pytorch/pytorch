@@ -13,6 +13,14 @@ if not GLOBALS.runtime_type_check:
     beartype = _no_op_decorator
 else:
     try:
+        import warnings
+
         from beartype import beartype
+        from beartype import roar as _roar
+
+        warnings.filterwarnings(
+            "ignore",
+            category=_roar.BeartypeDecorHintPep585DeprecationWarning,
+        )
     except ImportError:
         beartype = _no_op_decorator
