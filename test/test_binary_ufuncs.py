@@ -4133,29 +4133,17 @@ class TestBinaryUfuncs(TestCase):
     def test_xlogy_xlog1py_gradients(self, device, dtype):
         make_arg = partial(torch.tensor, dtype=dtype, device=device, requires_grad=True)
 
-        x = make_arg([0.0])
-        y = make_arg([-1.5])
+        zeros = torch.zeros((2,), dtype=dtype, device=device)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-1.5, 0.0])
         torch.special.xlogy(x, y).sum().backward()
-        self.assertTrue(torch.isnan(x.grad).all().item())
-        self.assertEqual(y.grad, 0.0)
+        self.assertEqual(x.grad, zeros)
 
-        x = make_arg([0.0])
-        y = make_arg([0.0])
-        torch.special.xlogy(x, y).sum().backward()
-        self.assertEqual(x.grad, float("-inf"))
-        self.assertTrue(torch.isnan(y.grad).all().item())
-
-        x = make_arg([0.0])
-        y = make_arg([-2.5])
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-2.5, -1.0])
         torch.special.xlog1py(x, y).sum().backward()
-        self.assertTrue(torch.isnan(x.grad).all().item())
-        self.assertEqual(y.grad, 0.0)
-
-        x = make_arg([0.0])
-        y = make_arg([-1.0])
-        torch.special.xlog1py(x, y).sum().backward()
-        self.assertEqual(x.grad, float("-inf"))
-        self.assertTrue(torch.isnan(y.grad).all().item())
+        self.assertEqual(x.grad, zeros)
 
     def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same
