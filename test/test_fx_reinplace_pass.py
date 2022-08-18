@@ -88,6 +88,29 @@ def forward(self, a__1):
     return ge_tensor
     """)
 
+    def test_reinplace_overlapping_memory(self):
+        def f(a_):
+            a = a_.clone()
+            b = a.expand(4, 4)
+            # Can't reinplace because b has overlapping memory.
+            c = b.add(1)
+            return c
+        inpt = torch.ones(1)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    expand_default = torch.ops.aten.expand.default(clone_default, [4, 4]);  clone_default = None
+    add_tensor = torch.ops.aten.add.Tensor(expand_default, 1);  expand_default = None
+    return add_tensor
+    """)
+
     # This test won't actually run in CI, because it requires functionalize() from functorch.
     # I'm planning on testing more comprehensively with torchbench models,
     # but we can make this testing better once functorch moves into pytorch/pytorch.

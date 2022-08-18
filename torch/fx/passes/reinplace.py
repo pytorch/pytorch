@@ -285,7 +285,7 @@ def reinplace(gm, *sample_args):
         Later, we should beef this up to check for out= or mutable ops.
 
     (1b) Check that the self argument we're attempting to reinplace
-         has the same metadata as the output.
+         has acceptable metadata to reinplace with.
 
          For example, if we have:
            a = torch.ones(1)
@@ -307,6 +307,9 @@ def reinplace(gm, *sample_args):
 
          This optimization is only really important for user programs
          that directly use inplace comparison ops though.
+
+         We also cannot re-inplace on tensors that have overlapping memory,
+         e.g. torch.ones(1).expand(4, 4).add_(1)
 
     (2) Check if "a" is an alias of any of the program inputs.
 
@@ -471,6 +474,10 @@ def reinplace(gm, *sample_args):
                 if self_meta.numel() != node_meta.numel():
                     self_has_wrong_metadata = True
                 if self_meta.dtype != node_meta.dtype:
+                    self_has_wrong_metadata = True
+                # We also cannot re-inplace on tensors that have internal memory overlap.
+                # e.g. torch.ones(1).expand(4, 4).add_(1)
+                if torch._debug_has_internal_overlap(self_meta) > 0:
                     self_has_wrong_metadata = True
             if self_has_wrong_metadata:
                 continue
