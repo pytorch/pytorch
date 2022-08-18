@@ -153,6 +153,7 @@ def get_tests(
         # Parse the reports and transform them to JSON
         test_cases = []
         for xml_report in Path(".").glob("**/*.xml"):
+            job_id = get_job_id(xml_report)
             test_cases.extend(
                 parse_xml_report(
                     "testcase",
@@ -165,6 +166,23 @@ def get_tests(
         pytest_parallel_times = get_pytest_parallel_times()
 
         return test_cases, pytest_parallel_times
+
+
+def get_tests_for_circleci(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> Tuple[List[Dict[str, Any]], Dict[Any, Any]]:
+    # Parse the reports and transform them to JSON
+    test_cases = []
+    for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
+        test_cases.extend(
+            parse_xml_report(
+                "testcase", xml_report, workflow_run_id, workflow_run_attempt
+            )
+        )
+
+    pytest_parallel_times = get_pytest_parallel_times()
+
+    return test_cases, pytest_parallel_times
 
 
 def get_invoking_file_times(
@@ -261,7 +279,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
     parser.add_argument(
         "--workflow-run-id",
-        type=int,
         required=True,
         help="id of the workflow to get artifacts from",
     )
@@ -276,10 +293,23 @@ if __name__ == "__main__":
         required=True,
         help="Head branch of the workflow",
     )
-    args = parser.parse_args()
-    test_cases, pytest_parallel_times = get_tests(
-        args.workflow_run_id, args.workflow_run_attempt
+    parser.add_argument(
+        "--circleci",
+        action="store_true",
+        help="If this is being run through circleci",
     )
+    args = parser.parse_args()
+
+    print(f"Workflow id is: {args.workflow_run_id}")
+
+    if args.circleci:
+        test_cases, pytest_parallel_times = get_tests_for_circleci(
+            args.workflow_run_id, args.workflow_run_attempt
+        )
+    else:
+        test_cases, pytest_parallel_times = get_tests(
+            args.workflow_run_id, args.workflow_run_attempt
+        )
 
     # Flush stdout so that any errors in rockset upload show up last in the logs.
     sys.stdout.flush()

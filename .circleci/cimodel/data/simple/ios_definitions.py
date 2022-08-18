@@ -11,7 +11,7 @@ class ArchVariant:
 
     def render(self):
         extra_parts = [self.custom_build_name] if len(self.custom_build_name) > 0 else []
-        return "_".join([self.name] + extra_parts)
+        return "-".join([self.name] + extra_parts).replace("_", "-")
 
 
 def get_platform(arch_variant_name):
@@ -25,30 +25,25 @@ class IOSJob:
         self.is_org_member_context = is_org_member_context
         self.extra_props = extra_props
 
-    def gen_name_parts(self, with_version_dots):
-
-        version_parts = self.xcode_version.render_dots_or_parts(with_version_dots)
-        build_variant_suffix = "_".join([self.arch_variant.render(), "build"])
-
+    def gen_name_parts(self):
+        version_parts = self.xcode_version.render_dots_or_parts("-")
+        build_variant_suffix = self.arch_variant.render()
         return [
-            "pytorch",
             "ios",
         ] + version_parts + [
             build_variant_suffix,
         ]
 
     def gen_job_name(self):
-        return "_".join(self.gen_name_parts(False))
+        return "-".join(self.gen_name_parts())
 
     def gen_tree(self):
-
         platform_name = get_platform(self.arch_variant.name)
-
         props_dict = {
-            "build_environment": "-".join(self.gen_name_parts(True)),
+            "name": self.gen_job_name(),
+            "build_environment": self.gen_job_name(),
             "ios_arch": self.arch_variant.name,
             "ios_platform": platform_name,
-            "name": self.gen_job_name(),
         }
 
         if self.is_org_member_context:
@@ -63,16 +58,16 @@ class IOSJob:
 WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False, extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("x86_64", "full_jit"), is_org_member_context=False, extra_props={
-        "lite_interpreter": miniutils.quote(str(int(False)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("x86-64", "full_jit"), is_org_member_context=False, extra_props={
+    #     "lite_interpreter": miniutils.quote(str(int(False)))}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
         "use_metal": miniutils.quote(str(int(True))),
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "full_jit"), extra_props={
-        "lite_interpreter": miniutils.quote(str(int(False)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom"), extra_props={
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "full_jit"), extra_props={
+    #     "lite_interpreter": miniutils.quote(str(int(False)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom-ops"), extra_props={
         "op_list": "mobilenetv2.yaml",
         "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("x86_64", "coreml"), is_org_member_context=False, extra_props={
