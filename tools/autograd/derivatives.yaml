@@ -1537,13 +1537,14 @@
   self: grad.expand(self.sizes())
   result: auto_linear
 
-- name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
-  result: auto_linear
-
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: sum_backward(grad, self.sizes(), dim, keepdim)
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this function once semantics for nested tensor expand have been settled on
+      self: _nested_sum_backward(grad, self, dim, keepdim)
 
 - name: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
