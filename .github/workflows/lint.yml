@@ -1,5 +1,9 @@
 name: Lint
 
+env:
+  ACTIONS_STEP_DEBUG: true
+  ACTIONS_RUNNER_DEBUG: true
+
 on:
   pull_request:
   push:
