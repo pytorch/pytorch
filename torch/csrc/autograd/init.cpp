@@ -196,12 +196,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("FPGA", c10::DeviceType::FPGA)
       .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
-      .value("Lazy", c10::DeviceType::Lazy)
-      .value("MPS", c10::DeviceType::MPS)
-      .value("HPU", c10::DeviceType::HPU)
-      .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
-      .value("Metal", c10::DeviceType::Metal);
+      .value("Metal", c10::DeviceType::Metal)
+      .value("XPU", c10::DeviceType::XPU)
+      .value("MPS", c10::DeviceType::MPS)
+      .value("Meta", c10::DeviceType::Meta)
+      .value("HPU", c10::DeviceType::HPU)
+      .value("VE", c10::DeviceType::VE)
+      .value("Lazy", c10::DeviceType::Lazy)
+      .value("IPU", c10::DeviceType::IPU);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
