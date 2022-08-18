@@ -11762,7 +11762,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, q_input)
 
     @common_utils.parametrize(
-        "function",
+        "function_or_module",
         [
             common_utils.subtest(
                 torch.nn.ReLU(),
@@ -11855,19 +11855,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_unary_functions(self, function):
+    def test_quantized_unary_ops(self, function_or_module):
         input = torch.randn(1, 4, 2, 3)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
 
         class Model(torch.nn.Module):
-            def __init__(self, function):
+            def __init__(self, function_or_module):
                 super().__init__()
-                self.function = function
+                self.function_or_module = function_or_module
 
             def forward(self, x):
-                return self.function(x)
+                return self.function_or_module(x)
 
-        self.run_test(Model(function), q_input)
+        self.run_test(Model(function_or_module), q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):

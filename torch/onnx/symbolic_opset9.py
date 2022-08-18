@@ -2298,7 +2298,7 @@ def _layer_norm_returns_normalized_input_mean_rstd(
     return normalized, None, None
 
 
-@symbolic_helper.quantized_args(True, False, True, True)
+@symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
 def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
     return _layer_norm_returns_normalized_input_mean_rstd(
@@ -2306,7 +2306,7 @@ def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
     )
 
 
-@symbolic_helper.quantized_args(True, False, True, True)
+@symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
@@ -4970,7 +4970,7 @@ def gelu(g, self: torch._C.Value, approximate: str = "none"):
         )
 
 
-@symbolic_helper.quantized_args(True, False, True, True)
+@symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if symbolic_helper.is_caffe2_aten_fallback():
