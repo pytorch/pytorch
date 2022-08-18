@@ -490,10 +490,12 @@ class ModelReport:
                     current_options = detector_qconfig_info_compiled[module_fqn]
                     detector_options = detector_info[module_fqn]
 
-                    is_activation_dynamic = current_options.is_activation_dynamic or detector_options.is_activation_dynamic
-                    is_per_channel = current_options.is_weight_per_channel or detector_options.is_weight_per_channel
-                    current_options.is_activation_dynamic = is_activation_dynamic
-                    current_options.is_weight_per_channel = is_per_channel
+                    current_options.is_activation_dynamic = (
+                        current_options.is_activation_dynamic or detector_options.is_activation_dynamic
+                    )
+                    current_options.is_weight_per_channel = (
+                        current_options.is_weight_per_channel or detector_options.is_weight_per_channel
+                    )
                 else:
                     # we just use this for now
                     detector_qconfig_info_compiled[module_fqn] = detector_info[module_fqn]
