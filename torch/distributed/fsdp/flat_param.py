@@ -87,9 +87,9 @@ class FlatParamShardMetadata(NamedTuple):
 # later
 class HandleShardingStrategy(Enum):
     FULL_SHARD = auto()
-    SHARD_GRAD_OPT = (
+    SHARD_GRAD_OP = (
         auto()
-    )  # TODO (awgu): will change to `SHARD_GRAD_OP` if I have to :/
+    )
     NO_SHARD = auto()
 
 
@@ -98,15 +98,15 @@ class HandleTrainingState(Enum):
     FORWARD = auto()
     PRE_BACKWARD = auto()
     POST_BACKWARD = auto()
-    SUMMON_FULL_PARAMS = auto()  # :(
+    SUMMON_FULL_PARAMS = auto()
 
 
 @dataclass
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
-    offload_params: bool = False
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
+    offload_params: bool
+    param_dtype: Optional[torch.dtype]
+    reduce_dtype: Optional[torch.dtype]
 
 
 class FlatParameter(nn.Parameter):
