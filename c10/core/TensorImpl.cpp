@@ -182,7 +182,6 @@ TensorImpl::TensorImpl(
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
-
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
 }
