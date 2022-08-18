@@ -816,7 +816,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 # mean: [2, 1, 4, 1]
 def normalize(input, norm_dims, eps):
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    input_acc = input.to(dtype=computation_dtype)
+    input_acc = prims.convert_element_type(input, computation_dtype)
     biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
     mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
     rstd = torch.rsqrt(biased_var + eps)
@@ -850,15 +850,15 @@ def native_group_norm(
         bias = _unsqueeze_to_dim(bias, out.dim() - 1)
         out = out + bias
 
-    out = out.to(dtype=input.dtype)
-    mean = mean.to(dtype=input.dtype)
-    rstd = rstd.to(dtype=input.dtype)
+    out = prims.convert_element_type(out, input.dtype)
+    mean = prims.convert_element_type(mean, input.dtype)
+    rstd = prims.convert_element_type(rstd, input.dtype)
     return (out, mean, rstd)
 
 
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
-        return x.to(dtype)
+        return prims.convert_element_type(x, dtype)
     return x
 
 
@@ -878,7 +878,7 @@ def native_layer_norm_backward(
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
     grad_out_cast, input_cast, weight_cast, bias_cast = [
-        x.to(computation_dtype) if x is not None else x
+        prims.convert_element_type(x, computation_dtype) if x is not None else x
         for x in (grad_out, input, weight, bias)
     ]
     assert grad_out_cast is not None
@@ -971,8 +971,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype)
-        running_var = running_var.to(dtype=computation_dtype)
+        running_mean = prims.convert_element_type(running_mean, computation_dtype)
+        running_var = prims.convert_element_type(running_var, computation_dtype)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -996,15 +996,15 @@ def native_batch_norm(
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
     output = output * weight + bias
     if input.device.type == "cpu":
-        save_mean = save_mean.to(dtype=input.dtype)
-        save_rstd = save_rstd.to(dtype=input.dtype)
-    return output.to(dtype=input.dtype), save_mean, save_rstd
+        save_mean = prims.convert_element_type(save_mean, input.dtype)
+        save_rstd = prims.convert_element_type(save_rstd, input.dtype)
+    return prims.convert_element_type(output, input.dtype), save_mean, save_rstd
 
 
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
-    mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
+    mask = prims.convert_element_type((torch.rand_like(input) < p), torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
 
@@ -1138,7 +1138,7 @@ def native_batch_norm_backward(
         save_mean_cast,
         save_invstd_cast,
     ) = [
-        x.to(computation_dtype) if x is not None else x
+        prims.convert_element_type(x, computation_dtype) if x is not None else x
         for x in (
             grad_out,
             input,
@@ -1202,7 +1202,7 @@ def native_batch_norm_backward(
         grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
 
     return (
-        grad_input.to(input_dtype),
+        prims.convert_element_type(grad_input, input_dtype),
         _maybe_cast(grad_weight, input_dtype),
         _maybe_cast(grad_bias, input_dtype),
     )
@@ -1349,10 +1349,10 @@ def upsample_bilinear2d_vec(
         x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
         y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
 
-    x_floor = torch.floor(x).to(torch.int64)
-    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
-    y_floor = torch.floor(y).to(torch.int64)
-    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+    x_floor = prims.convert_element_type(torch.floor(x), torch.int64)
+    x_ceil = prims.convert_element_type(torch.ceil(x).clamp(max=in_h - 1), torch.int64)
+    y_floor = prims.convert_element_type(torch.floor(y), torch.int64)
+    y_ceil = prims.convert_element_type(torch.ceil(y).clamp(max=in_w - 1), torch.int64)
 
     x_view = x.unsqueeze(1)
     x_floor_view = x_floor.unsqueeze(1)
@@ -1436,7 +1436,7 @@ def nll_loss_forward(
             wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
     elif ignore_index >= 0:
-        total_weight = (target != ignore_index).sum().to(self)
+        total_weight = prims.convert_element_type((target != ignore_index).sum(), self.dtype)
     else:
         total_weight = self.new_full((), 1.0 * result.numel())
 
