@@ -15,8 +15,7 @@ else:
     try:
         import warnings
 
-        from beartype import beartype
-        from beartype import roar as _roar
+        from beartype import beartype, roar as _roar  # type: ignore[import,no-redef]
 
         warnings.filterwarnings(
             "ignore",
