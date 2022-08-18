@@ -47,7 +47,7 @@ jobs:
           ENV_NAME: env-${{ github.run_id }}
           CUDA_VER: ${{ matrix.cuda_version }}
           PACKAGE_VER: ${{matrix.package_install}}
-        if: ${PACKAGE_VER} == "conda"
+        #if: ${PACKAGE_VER} == "conda"
         run: |
           set -ex
           conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
