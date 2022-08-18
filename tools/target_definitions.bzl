@@ -69,7 +69,7 @@ def add_torch_libs():
     ] + (
         ["-DUSE_C10D_MPI"] if use_mpi else []
     ) + (
-        ["-DUSE_KINETO", "-DUSE_KINETO_UPDATED"] if use_kineto() else []
+        ["-DUSE_KINETO"] if use_kineto() else []
     ) + (
         ["-DENABLE_LIBKINETO_CLIENT"] if native.read_config("kineto", "enable_libkineto_client", "1") == "1" else []
     )
