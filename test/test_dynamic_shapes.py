@@ -7,7 +7,11 @@ import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
+import operator
+import itertools
 from torch.utils._pytree import tree_map
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
+
 aten = torch.ops.aten
 
 try:
@@ -64,68 +68,6 @@ def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
 @register_meta([aten.expand.SymInt])
 def expand_symint_meta(a, size, implicit=False):
     return a.new_empty(size)
-
-
-class PySymInt(object):
-    def __init__(self, expr, shape_env):
-        self.expr = expr
-        self.shape_env = shape_env
-
-    def wrap(self, num):
-        return PySymInt(sympy.Integer(num), self.shape_env)
-
-    def __str__(self):
-        return f"PySymInt({self.expr})"
-
-    def __int__(self):
-        return self.shape_env.evaluate_expr(self.expr)
-
-    def __bool__(self):
-        return bool(self.shape_env.evaluate_expr(self.expr))
-
-
-magic_methods = {
-    'add': lambda a, b: a + b,
-    'radd': lambda a, b: a + b,
-    'sub': lambda a, b: a - b,
-    'mul': lambda a, b: a * b,
-    'div': lambda a, b: a / b,
-    'mod': lambda a, b: a % b,
-    'eq': lambda a, b: sympy.Eq(a, b),
-    'gt': lambda a, b: sympy.Gt(a, b),
-    'lt': lambda a, b: sympy.Lt(a, b),
-}
-
-for method, func in magic_methods.items():
-    method_name = f'{method}'
-
-    def create_magic_impl(func):
-        def magic_impl(self, other):
-            if isinstance(other, PySymInt):
-                other = other.expr
-            return PySymInt(func(self.expr, other), self.shape_env)
-        return magic_impl
-
-    # this should be wrapped transparently into torch._C.SymbolicIntNode
-    setattr(PySymInt, method_name, create_magic_impl(func))
-
-
-class ShapeEnv(object):
-    def __init__(self):
-        self.guards = []
-        self.shape_env = {}
-
-    def create_symint(self, name, val):
-        sympy_expr = sympy.Symbol(name)
-        py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch._C.SymbolicIntNode.new_symint(py_sym_int)
-        self.shape_env[sympy_expr] = val
-        return cpp_sym_int
-
-    def evaluate_expr(self, expr):
-        concrete_val = expr.subs(self.shape_env)
-        self.guards.append((expr, concrete_val))
-        return concrete_val
 
 
 def create_contiguous(shape):
@@ -187,10 +129,36 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymbolicIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
 class TestPySymInt(TestCase):
+
+    @skipIfNoSympy
+    def test_arith_ops(self):
+        shape_env = ShapeEnv()
+        symints = []
+        for i in range(5):
+            symints.append((i, shape_env.create_symint(f"s{i}", i)))
+
+        ops = [operator.add, operator.sub, operator.floordiv, operator.mul, operator.mod]
+
+        for op in ops:
+            for args in itertools.permutations(symints, 2):
+                if not isinstance(args[0][1], int) and ((op != operator.mod or op != operator.floordiv) and args[1][0] != 0):
+                    self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
+
+
+    @skipIfNoSympy
+    def test_reverse_arith_ops(self):
+        shape_env = ShapeEnv()
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 // a == 5 // 2)
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 * a == 5 * 2)
+
 
     @skipIfNoSympy
     def test_roundtrip(self):
@@ -199,18 +167,18 @@ class TestPySymInt(TestCase):
         self.assertTrue(not isinstance(x.shape[0], PySymInt))
         self.assertTrue(isinstance(x.shape[0], CPP_SYMINT_CLASS))
 
-        self.assertEqual(int(x.shape[0]), 5)
-        self.assertEqual(int(x.shape[1]), 4)
-        self.assertEqual(int(x.shape[2]), 3)
+        self.assertTrue(x.shape[0] == 5)
+        self.assertTrue(x.shape[1] == 4)
+        self.assertTrue(x.shape[2], 3)
 
-        self.assertEqual(int(x.size()[0]), 5)
-        self.assertEqual(int(x.size()[1]), 4)
+        self.assertTrue(x.size()[0], 5)
+        self.assertTrue(x.size()[1], 4)
         self.assertTrue(isinstance(x.size()[1], CPP_SYMINT_CLASS))
-        self.assertEqual(int(x.size()[2]), 3)
+        self.assertTrue(x.size()[2] == 3)
 
-        self.assertEqual(int(x.size(0)), 5)
-        self.assertEqual(int(x.size(1)), 4)
-        self.assertEqual(int(x.size(2)), 3)
+        self.assertTrue(x.size(0) == 5)
+        self.assertTrue(x.size(1) == 4)
+        self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), CPP_SYMINT_CLASS))
 
     @skipIfNoSympy
@@ -220,16 +188,16 @@ class TestPySymInt(TestCase):
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3), shape_env)
 
         z = x + y
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # broadcasting
         y = create_symbolic_tensor("y", torch.randn(1, 4, 1), shape_env)
         z = x + y
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
     @skipIfNoSympy
     def test_symint_args(self):
@@ -238,15 +206,15 @@ class TestPySymInt(TestCase):
         y = create_symbolic_tensor("y", torch.randn(5, 4, 1), shape_env)
         LAST_DIM = 2
         z = x.narrow_copy(LAST_DIM, 0, y.shape[LAST_DIM])
-        self.assertEqual(int(z.shape[2]), int(y.shape[2]))
+        self.assertTrue(z.shape[2] == int(y.shape[2]))
 
         # arithmetic expr with two symints
         z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - y.shape[LAST_DIM])
-        self.assertEqual(int(z.shape[2]), 2)
+        self.assertTrue(z.shape[2] == 2)
 
         # arithmetic expr with a symint and python int
         z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - 1)
-        self.assertEqual(int(z.shape[2]), 2)
+        self.assertTrue(z.shape[2] == 2)
 
     @skipIfNoSympy
     def test_symint_vargs(self):
@@ -256,39 +224,42 @@ class TestPySymInt(TestCase):
 
         # varargs
         z = y.expand(x.shape[0], y.shape[1], x.shape[2])
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # shape list
         z = y.expand((x.shape[0], y.shape[1], x.shape[2]))
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # mixed python symints and ints
         z = y.expand(x.shape[0], y.shape[1], 3)
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # mixed python symints and ints in a list
         z = y.expand((x.shape[0], y.shape[1], 3))
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # mixed python symints and ints
         z = y.expand(5, y.shape[1], x.shape[2])
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
 
         # mixed python ints and symints in a list
         z = y.expand((5, y.shape[1], x.shape[2]))
-        self.assertEqual(int(z.shape[0]), 5)
-        self.assertEqual(int(z.shape[1]), 4)
-        self.assertEqual(int(z.shape[2]), 3)
+        self.assertTrue(z.shape[0] == 5)
+        self.assertTrue(z.shape[1] == 4)
+        self.assertTrue(z.shape[2] == 3)
+
+        z = y.expand((y.shape[1],))
+        z = y.expand(y.shape[1])
 
     @skipIfNoSympy
     def test_size_expressions(self):

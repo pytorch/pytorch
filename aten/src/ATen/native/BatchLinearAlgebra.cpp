@@ -1431,17 +1431,81 @@ template<> void blasTriangularSolve<float>(char side, char uplo, char trans, cha
 #endif
 
 void _linalg_check_errors(
-    const Tensor& info,
+    const Tensor& infos,
     const c10::string_view api_name,
     bool is_matrix) {
-  if (info.is_meta()) {
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  if (infos.is_meta()) {
     return;
   }
-  if (is_matrix) {
-    singleCheckErrors(info.item<int64_t>(), api_name);
-  } else {
-    batchCheckErrors(info, api_name);
+
+  // If it's all zeros, we return early.
+  // We optimise for the most likely case.
+  if (C10_LIKELY(!infos.any().item<bool>())) {
+    return;
   }
+
+  int32_t info;
+  std::string batch_str;
+  if (is_matrix) {
+    info = infos.item<int>();
+    // batch_str needn't be set for matrices
+  } else {
+    // Find the first non-zero info
+    auto infos_cpu = infos.to(at::kCPU);
+    auto ptr = infos_cpu.data_ptr<int32_t>();
+    auto n = infos.numel();
+    auto info_ptr = std::find_if(ptr, ptr + n, [](int32_t x) { return x != 0; });
+    info = *info_ptr;
+    batch_str = ": (Batch element " + std::to_string(std::distance(ptr, info_ptr)) + ")";
+  }
+
+  if (info < 0) {
+    // Reference LAPACK 3.10+ changed `info` behavior for inputs with non-finite values
+    // Previously, it would return `info` > 0, but now it returns `info` = -4
+    // OpenBLAS 0.3.15+ uses the Reference LAPACK 3.10+.
+    // MKL 2022.0+ uses the Reference LAPACK 3.10+.
+    // Older version of MKL and OpenBLAS follow the old behavior (return `info` > 0).
+    // Here we check for the case where `info` is -4 and raise an error
+    if (api_name.find("svd") != api_name.npos) {
+      TORCH_CHECK_LINALG(info != -4, api_name, batch_str,
+          ": The algorithm failed to converge because the input matrix contained non-finite values.");
+    }
+    TORCH_INTERNAL_ASSERT(false, api_name, batch_str,
+        ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
+  } else if (info > 0) {
+    if (api_name.find("inv") != api_name.npos) {
+      // inv, inverse, cholesky_inverse, etc.
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
+    } else if (api_name.find("solve") != api_name.npos) {
+      // solve, linalg_solve, cholesky_solve, etc.
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The solver failed because the input matrix is singular.");
+    } else if (api_name.find("cholesky") != api_name.npos) {
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
+    } else if (api_name.find("svd") != api_name.npos) {
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
+    } else if (api_name.find("eig") != api_name.npos || api_name.find("syevd") != api_name.npos) {
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
+    } else if (api_name.find("lstsq") != api_name.npos) {
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else if (api_name.find("lu_factor") != api_name.npos) {
+      TORCH_CHECK(false, api_name, batch_str,
+          ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
+          "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
+          "linalg.lu_factor_ex(A, pivot)");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, api_name, ": Unknown error code: ", info, ".");
+    }
+  }
+  // We should never reach this point as info was non-zero
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 bool _requires_fw_or_bw_grad(const Tensor& input) {
@@ -1671,7 +1735,7 @@ std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos) {
 #if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
@@ -1679,6 +1743,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -1692,7 +1757,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, ldab, b_working_ptr, ldab, &info);
-    infos[i] = info;
+    infos_data[i] = info;
     if (info != 0) {
       return;
     }
@@ -1703,16 +1768,12 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
 Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  std::vector<int64_t> infos(batchCount(self), 0);
+  auto infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_solve_cpu", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos);
   });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_solve_cpu");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_solve_cpu");
-  }
+  at::_linalg_check_errors(infos, "cholesky_solve_cpu", self.dim() == 2);
   return self_working_copy;
 }
 
@@ -1806,15 +1867,28 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
     info.zero_();
     return;
   }
+  const auto cpu = A.device() == kCPU;
 
-  L.copy_(A);
+  // We can perform this optimisation just on CPU as it fails for MAGMA
+  // due to some bug
+  if (cpu) {
+    if (upper) {
+      at::triu_out(const_cast<Tensor&>(L), A);
+    } else {
+      at::tril_out(const_cast<Tensor&>(L), A);
+    }
+  } else {
+    L.copy_(A);
+  }
 
   cholesky_stub(L.device().type(), L, info, upper);
 
-  if (upper) {
-    L.triu_();
-  } else {
-    L.tril_();
+  if (!cpu) {
+    if (upper) {
+      L.triu_();
+    } else {
+      L.tril_();
+    }
   }
 
   if (check_errors) {
@@ -2826,7 +2900,7 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, int* infos) {
 #if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
@@ -2878,7 +2952,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 }
 
 std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvectors, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
+  auto infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
 
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
@@ -2891,14 +2965,10 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cpu", [&]{
-    apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos);
+    apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos.data_ptr<int>());
   });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "symeig_cpu");
-  } else {
-    singleCheckErrors(infos[0], "symeig_cpu");
-  }
+  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
   if (eigenvectors) {
     return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
   } else {

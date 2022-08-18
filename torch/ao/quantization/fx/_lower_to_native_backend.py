@@ -83,6 +83,7 @@ def is_default_node(node, modules):
         torch.nn.InstanceNorm3d,
         torch.nn.LayerNorm,
         torch.nn.Dropout,
+        torch.nn.PReLU,
         torch.nn.BatchNorm2d,
         torch.nn.BatchNorm3d,
         torch.nn.intrinsic.BNReLU2d,
@@ -238,6 +239,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.LayerNorm: nnq.LayerNorm,
     nn.Dropout: nnq.Dropout,
     nn.Softmax: nnq.Softmax,
+    nn.PReLU: nnq.PReLU,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
 }
@@ -531,10 +533,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
             continue
 
         input_dynamic_q_node = dq_node.args[0]
-        # don't support lowering the pattern when the result of quantize is used by
-        # multiple nodes
-        if len(input_dynamic_q_node.users) > 1:
-            continue
 
         if input_dynamic_q_node.op != "call_function" or \
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
@@ -564,8 +562,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
         # remove q - dq node
         dq_node.replace_all_uses_with(input_dynamic_q_node)
         model.graph.erase_node(dq_node)
-        input_dynamic_q_node.replace_all_uses_with(input_dynamic_q_node.args[0])
-        model.graph.erase_node(input_dynamic_q_node)
+        ref_node.replace_input_with(input_dynamic_q_node, input_dynamic_q_node.args[0])
 
 def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
     """
@@ -698,10 +695,6 @@ def _lower_dynamic_weighted_ref_functional(
             continue
 
         input_dynamic_q_node = input_dq_node.args[0]
-        # don't support lowering the pattern when the result of quantize is used by
-        # multiple nodes
-        if len(input_dynamic_q_node.users) > 1:
-            continue
 
         if input_dynamic_q_node.op != "call_function" or \
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
@@ -765,7 +758,6 @@ def _lower_dynamic_weighted_ref_functional(
             dqn_input = dqn.args[0]
             dqn.replace_all_uses_with(dqn_input)
             model.graph.erase_node(dqn)
-        model.graph.erase_node(input_dynamic_q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
 

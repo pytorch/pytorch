@@ -3,6 +3,8 @@
 import unittest
 
 import onnxruntime  # noqa: F401
+
+import torch
 from pytorch_test_common import (
     skipIfNoBFloat16Cuda,
     skipIfNoCuda,
@@ -10,8 +12,6 @@ from pytorch_test_common import (
     skipScriptTest,
 )
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
-
-import torch
 from torch.cuda.amp import autocast
 from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils

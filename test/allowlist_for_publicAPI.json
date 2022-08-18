@@ -1369,8 +1369,7 @@
     "TorchFunctionModeMeta",
     "enable_torch_function_mode",
     "get_default_nowrap_functions",
-    "has_torch_function",
-    "push_torch_function_mode"
+    "has_torch_function"
   ],
   "torch.package.analyze.is_from_package": [
     "Any",
@@ -1853,7 +1852,7 @@
     "QUInt4x2Storage",
     "QUInt8Storage",
     "Storage",
-    "_TypedStorage",
+    "TypedStorage",
     "_adaptive_avg_pool2d",
     "_adaptive_avg_pool3d",
     "_add_batch_dim",

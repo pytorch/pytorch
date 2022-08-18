@@ -744,6 +744,7 @@ class ops(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
+        op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
             dtypes: Union[Set[torch.dtype], Set[None]]
@@ -821,6 +822,9 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
+        if op is check_exhausted_iterator:
+            raise ValueError('An empty op_list was passed to @ops. '
+                             'Note that this may result from reuse of a generator.')
 
 # Decorator that skips a test if the given condition is true.
 # Notes:

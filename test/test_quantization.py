@@ -36,8 +36,14 @@ from quantization.core.test_workflow_module import TestRecordHistogramObserver  
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
+from quantization.core.test_backend_config import TestBackendConfig  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
+try:
+    # This test has extra data dependencies, so in some environments, e.g. Meta internal
+    # Buck, it has its own test runner.
+    from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
+except ImportError:
+    pass
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
@@ -90,6 +96,7 @@ try:
     from quantization.fx.test_model_report_fx import TestFxModelReportClass  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxDetectInputWeightEqualization  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxDetectOutliers  # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportVisualizer  # noqa: F401
 except ImportError:
     pass
 
