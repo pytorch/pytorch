@@ -886,10 +886,12 @@ class NativeFunction:
         # but is not actually random, feel free to amend this to special case
         if (
             "rand" in str(self.func.name)
-            or ("dropout" in str(self.func.name)
+            or (
+                "dropout" in str(self.func.name)
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
-                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"])
+                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
+            )
             or self.func.arguments.has_generator_arg()
         ):
             assert "nondeterministic_seeded" in self.tags, str(self.func.name)
