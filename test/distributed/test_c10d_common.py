@@ -1271,7 +1271,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             pass
 
     @staticmethod
-    def create_dummy(group_id, store, group_rank, group_size, global_ranks_in_group, pg_options, timeout):
+    def create_dummy(store, group_rank, group_size, timeout):
         return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):

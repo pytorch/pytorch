@@ -5,6 +5,7 @@ import os
 import pickle
 import time
 import warnings
+from collections import namedtuple
 from datetime import timedelta
 from typing import Callable, Dict, Optional, Tuple, Union
 
@@ -13,6 +14,7 @@ from torch._C._distributed_c10d import (
     AllreduceCoalescedOptions,
     AllreduceOptions,
     AllToAllOptions,
+    _DistributedBackendOptions,
     BarrierOptions,
     BroadcastOptions,
     GatherOptions,
@@ -114,7 +116,10 @@ class Backend(object):
     UCC = "ucc"
     MPI = "mpi"
     TCP = "tcp"
-    _plugins: Dict[str, Callable] = {}
+
+    BackendPlugin = namedtuple("BackendPlugin", ["creator_fn", "extended_api"])
+
+    _plugins: Dict[str, BackendPlugin] = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -134,7 +139,7 @@ class Backend(object):
         return value
 
     @classmethod
-    def register_backend(cls, name, func):
+    def register_backend(cls, name, func, extended_api=False):
         """
         Registers a new backend with the given name and instantiating function.
 
@@ -148,6 +153,10 @@ class Backend(object):
                              The function should be implemented in the backend
                              extension and takes four arguments, including
                              ``store``, ``rank``, ``world_size``, and ``timeout``.
+            extended_api (bool, optional): Whether the backend supports extended argument structure.
+                                           Default: ``False``. If set to ``True``, the backend
+                                           will get an instance of ``c10d::DistributedBackendOptions``, and
+                                           a process group options object as defined by the backend implementation.
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
@@ -163,7 +172,7 @@ class Backend(object):
         )
 
         setattr(Backend, name.upper(), name.upper())
-        Backend._plugins[name.upper()] = func
+        Backend._plugins[name.upper()] = Backend.BackendPlugin(func, extended_api)
 
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -817,20 +826,31 @@ def _new_process_group_helper(
             _pg_names[pg] = group_name
         else:
             assert backend.upper() in Backend._plugins, (
-                f"unknown c10d backend type {backend.upper()}"
+                f"Unknown c10d backend type {backend.upper()}"
             )
 
-            backend_creator_fn = Backend._plugins[backend.upper()]
+            backend_plugin = Backend._plugins[backend.upper()]
+            creator_fn = backend_plugin.creator_fn
+            extended_api = Backend._plugins[backend.upper()].extended_api
 
             import inspect
             if pg_options is None:
-                backend_module = inspect.getmodule(backend_creator_fn)
+                backend_module = inspect.getmodule(creator_fn)
                 if not 'Options' in dict(inspect.getmembers(backend_module, inspect.isclass)):
                     logger.warn(f"Process group Options not defined in {backend.upper()} implementation")
 
-            pg = backend_creator_fn(
-                prefix_store, group_rank, group_size, timeout, _group_count, global_ranks_in_group, pg_options
-            )
+            if not extended_api:
+                pg = creator_fn(prefix_store, group_rank, group_size, timeout)
+            else:
+                dist_backend_opts = _DistributedBackendOptions()
+                dist_backend_opts.store = prefix_store
+                dist_backend_opts.group_rank = group_rank
+                dist_backend_opts.group_size = group_size
+                dist_backend_opts.timeout = timeout
+                dist_backend_opts.group_id = _group_count
+                dist_backend_opts.global_ranks_in_group = global_ranks_in_group
+
+                pg = creator_fn(dist_backend_opts, pg_options)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
 

@@ -110,6 +110,14 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
 
+class BackendOptions:
+    store: Store
+    group_rank: int
+    group_size: int
+    timeout: timedelta
+    group_id: int
+    global_ranks_in_group: List[int]
+
 class Store:
     def set(self, key: str, value: str): ...
     def get(self, key: str) -> bytes: ...
