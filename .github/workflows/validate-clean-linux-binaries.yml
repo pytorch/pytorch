@@ -48,12 +48,6 @@ jobs:
         run: |
           set -ex
           conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
-          # if [[ $CUDA_VER == "11.6" || $CUDA_VER == "11.7"  ]]; than
-          conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge
-          # conda install -p ${ENV_NAME}  pytorch pytorch-cuda=${{ matrix.cuda_version }} -c pytorch-nightly -c nvidia
-          # else
-          #  conda install pytorch torchvision torchaudio cudatoolkit=${{ matrix.cuda_version }} -c pytorch-nightly
-          #fi
-          # Test torch is importable, by changing cwd and running import commands
+          conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
           conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
           conda env remove -p ${ENV_NAME}
