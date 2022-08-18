@@ -86,6 +86,8 @@ jobs:
               ("11.7") { py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu117"
                        && python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
                        ;;
+             (*) echo "No binary available"
+                   ;;
               esac
           fi
           
@@ -110,5 +112,7 @@ jobs:
               ("11.7") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip
                        && unzip libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip; }
                        ;;
+              (*) echo "No binary available"
+                  ;;
               esac
           fi
