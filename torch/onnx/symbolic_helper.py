@@ -397,23 +397,27 @@ def quantized_args(
                 return fn(g, *args, **kwargs)
 
             # Dequantize arguments that are quantized
-            maybe_dequantized_args = []
+            non_quantized_args = []
             for descriptor, arg in descriptor_args:
-                if descriptor and arg.node().kind() == "prim::TupleConstruct":
+                if (
+                    descriptor
+                    and isinstance(arg, _C.Value)
+                    and arg.node().kind() == "prim::TupleConstruct"
+                ):
                     dequantized_arg, arg_scale, arg_zero_point, _ = dequantize_helper(
                         g, arg
                     )
-                    maybe_dequantized_args.append(dequantized_arg)
+                    non_quantized_args.append(dequantized_arg)
                     # Set scale and zero_point to the first quantized input if not already set
                     if _scale is None:
                         _scale = arg_scale
                     if _zero_point is None:
                         _zero_point = arg_zero_point
                 else:
-                    maybe_dequantized_args.append(arg)
+                    non_quantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
-            output = fn(g, *maybe_dequantized_args, **kwargs)
+            output = fn(g, *non_quantized_args, **kwargs)
 
             assert _scale is not None, "Bug: Scale must be set for quantized operator"
             assert (
