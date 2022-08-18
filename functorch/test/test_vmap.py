@@ -3117,14 +3117,18 @@ def discover_variants(opinfo):
 
 class TestVmapOperatorsOpInfo(TestCase):
 
-    def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False):
+    def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
+                           postprocess_fn=None):
         for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+            if postprocess_fn is not None:
+                loop_out = postprocess_fn(loop_out)
+                vmap_out = postprocess_fn(vmap_out)
             if check_shape_only:
                 self.assertEqual(vmap_out.shape, loop_out.shape)
                 continue
             self.assertEqual(vmap_out, loop_out)
 
-    def vmap_inplace_test(self, func, args, kwargs, in_dims):
+    def vmap_inplace_test(self, func, args, kwargs, in_dims, postprocess_fn=None):
         # NB: This test assumes that the first argument is being modified.
         # This is OK because it's what every other OpInfo-based test assumes,
         # but it is going to need a more robust solution eventually.
@@ -3138,9 +3142,13 @@ class TestVmapOperatorsOpInfo(TestCase):
             return
         for loop_out, vmap_out in compute_quantities_for_vmap_test(
                 func, args, kwargs, in_dims, clone_inputs=True):
+            if postprocess_fn is not None:
+                loop_out = postprocess_fn(loop_out)
+                vmap_out = postprocess_fn(vmap_out)
             self.assertEqual(vmap_out, loop_out)
 
-    def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule, skip_inplace=()):
+    def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule,
+                         skip_inplace=(), postprocess_fn=None):
         def test():
             # Error inputs check
             if op.error_inputs_func is not None:
@@ -3164,13 +3172,13 @@ class TestVmapOperatorsOpInfo(TestCase):
                 for args, in_dims, _ in generate_vmap_inputs(
                         args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
                     for func in aliases:
-                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only)
+                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only, postprocess_fn)
                     if op.name in skip_inplace:
                         continue
                     if not is_valid_inplace_sample_input(sample_input, op, op.inplace_variant):
                         continue
                     for func in inplace_aliases:
-                        self.vmap_inplace_test(func, args, kwargs, in_dims)
+                        self.vmap_inplace_test(func, args, kwargs, in_dims, postprocess_fn)
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
@@ -3213,13 +3221,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
+        xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('svd', device_type='cuda'),  # silent incorrectness
-        xfail('linalg.svd', device_type='cuda'),  # silent incorrectness
         skip('linalg.eigh', ''),  # silent incorrectness; Flaky but is likely a real problem
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
@@ -3473,6 +3481,27 @@ class TestVmapOperatorsOpInfo(TestCase):
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True,
                               skip_inplace=inplace_failures)
+
+    def test_linalg_svd(self, device):
+        # linalg_svd returns a tuple of three tensors, (U, S, Vh).
+        # Given the same input, it may return different tensors,
+        # because svd isn't unique. To test that the svd is correct, we multiply
+        # U @ diag(S) @ Vh and check that that the output from vmap matches the
+        # output from a for-loop.
+        def compute_A(out):
+            U, S, Vh = out
+            m = U.shape[-1]
+            n = Vh.shape[-2]
+            diag_S = S.new_zeros(*S.shape[:-1], m, n)
+            diag_S.diagonal(offset=0, dim1=-2, dim2=-1).copy_(S)
+            return U @ diag_S @ Vh
+
+        opinfos = [op for op in op_db if op.name == 'linalg.svd']
+        assert len(opinfos) > 0
+
+        for op in opinfos:
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
+                                  postprocess_fn=compute_A)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
