@@ -1692,27 +1692,32 @@ def error_inputs_margin_ranking_loss(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4), make_input(5,),)),
                      error_regex='margin_ranking_loss : All input tensors should')
 
-def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
+def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=False, **kwargs):
+    # input_shape, output_shape, strides, kwargs
+    # lengths of output_shape and strides must be equal
     inputs = [
-        ((), (), {}),
-        ((S, S), (2, 0), {}),
-        ((0, S, 0), (3, 2, 2), {}),
-        ((S,), (2, 3), {'dtype': dtype, 'device': device}),
+        ((), (), (), {}),
+        ((S, S), (2, 0), (3, 4), {}),
+        ((0, S, 0), (3, 2, 2), (1, 2, 3), {}),
+        ((S,), (2, 3), (7, 8), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), (10,), {'dtype': torch.double}),
-        ((S,), (1, 1, 12), {'device': 'cpu'}),
-        ((S,), (2, 2, 2), {'dtype': torch.double, 'device': 'cpu'}),
+        ((S,), (10,), (S,), {'dtype': torch.double}),
+        ((S,), (1, 1, 12), (S, L, M), {'device': 'cpu'}),
+        ((S,), (2, 2, 2), (L, M, S), {'dtype': torch.double, 'device': 'cpu'}),
     ]
     if torch.cuda.is_available():
-        inputs.append(((S,), (7, 2), {'device': 'cuda'}))
+        inputs.append(((S,), (7, 2), (3, 4), {'device': 'cuda'}))
 
     samples = []
-    for input_shape, output_shape, kwargs in inputs:
+    for input_shape, output_shape, strides, kwargs in inputs:
         t = make_tensor(input_shape, dtype=dtype, device=device,
                         low=None, high=None,
                         requires_grad=requires_grad)
-        samples.append(SampleInput(t, args=(output_shape,), kwargs=kwargs))
+        if is_strided:
+            samples.append(SampleInput(t, args=(output_shape, strides), kwargs=kwargs))
+        else:
+            samples.append(SampleInput(t, args=(output_shape,), kwargs=kwargs))
 
     return tuple(samples)
 
@@ -11719,7 +11724,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),)),
+               DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
@@ -12192,6 +12199,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # Difference from <type> is larger with decomposition new_empty_strided.default than original on output 0
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),
            ),
            supports_out=False),
     OpInfo('nn.functional.hardswish',
@@ -15396,6 +15405,48 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_complex_half_reference_testing'),
            ),
            supports_autograd=False),
+    OpInfo('new_empty_strided',
+           op=lambda x, *args, **kwargs: x.new_empty_strided(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+           supports_out=False,
+           sample_inputs_func=partial(sample_inputs_new_fns, is_strided=True),
+           supports_autograd=False,
+           skips=(
+               # FX failed to normalize op
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+               # Lazy tensor failures
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestMathBits', 'test_neg_conj_view'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestDecomp', 'test_comprehensive'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestDecomp', 'test_quick'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+           )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_empty,
@@ -19780,6 +19831,30 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: should not compare results of empty_like
             DecorateInfo(unittest.skip("Can't check result for new_empty"), 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.new_empty_strided",
+        torch_opinfo_name="new_empty_strided",
+        skips=(
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_neg_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
