@@ -33,12 +33,12 @@ class ConcreteProp(torch.fx.Interpreter):
 
 # inplace modifies node/inps
 def _convert_node_to_placeholder(node, inps):
-    if node.op == 'output':
+    if node.op == 'output' or node.op == 'placeholder':
         return
     node.op = 'placeholder'
     node.args = ()
     node.target = node.name
-    concrete_val = node.meta['concrete_value']
+    concrete_val = getattr(node.meta, 'concrete_value', None)
     if isinstance(concrete_val, torch.Tensor):
         inps.append(concrete_val)
     else:
