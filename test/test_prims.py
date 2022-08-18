@@ -517,10 +517,13 @@ class TestDecomp(TestCase):
         x = torch.rand(5, device=device).to(dtype)
         y = torch.rand(5, device=device).to(dtype)
 
-        with TorchRefsMode() as mode:
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
+        op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
+
+        with TorchRefsNvfuserCapabilityMode() as mode:
             def fn(*arg):
-                return _is_func_unsupported_nvfuser(mode, torch.ops.aten.leaky_relu_backward.default, arg, {})
-            assert(fn(x, y, 0.3, False))
+                return _is_func_unsupported_nvfuser(mode, op, arg, {})
+            assert(not fn(x, y, 0.3, False))
 
 
 instantiate_device_type_tests(TestDecomp, globals())
