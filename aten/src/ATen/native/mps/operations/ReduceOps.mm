@@ -138,13 +138,15 @@ void set_axes_and_shapes(const Tensor& input_t,
 }
 
 void reduction_out_mps
-   (const Tensor& input_t,
+   (const Tensor& input_tensor,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> dtype,
     const Tensor& output_t,
     MPSReductionType reduction_type,
     const std::string& func_name) {
+
+  auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
 
   IntArrayRef input_shape = input_t.sizes();
 
@@ -391,14 +393,17 @@ TORCH_IMPL_FUNC(mean_out_mps)
 }
 
 TORCH_IMPL_FUNC(norm_out_mps)
-(const Tensor& input_t,
+(const Tensor& input_tensor,
  const OptionalScalarRef opt_p,
  IntArrayRef dim,
  bool keepdim,
  const Tensor& output_t)
 {
-  if (input_t.numel() == 0)
+  if (input_tensor.numel() == 0)
     return;
+
+  auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
+
   IntArrayRef input_shape = input_t.sizes();
 
   for(int i = 0; i < dim.size(); i++) {
