@@ -3477,6 +3477,11 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
 
+    weight = torch.randint(high=10, size=(3, 2, 3, 3))
+    input = torch.randint(high=10, size=(2, 4, 4))
+    bias = make_arg((3,))
+    yield SampleInput(input, args=(weight, bias))
+
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -12403,6 +12408,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: convolution does not support automatic differentiation for outputs with complex dtype
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),

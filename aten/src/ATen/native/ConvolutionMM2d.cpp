@@ -615,16 +615,25 @@ Tensor& slow_conv2d_forward_out_cpu(
 }
 
 Tensor slow_conv2d_forward_cpu(
-    const Tensor& self,
-    const Tensor& weight,
+    const Tensor& self_,
+    const Tensor& weight_,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
+  const Tensor& bias_ = *bias_maybe_owned;
 
-  auto output = at::empty({0}, self.options());
+  // Promote inputs to common dtype
+  ScalarType common_type = at::result_type(self_, weight_);
+  Tensor bias = Tensor();
+  if (bias_.defined()) {
+    common_type = at::promote_types(common_type, bias_.dtype().toScalarType());
+    bias = bias_.to(common_type);
+  }
+  auto self = self_.to(common_type);
+  auto weight = weight_.to(common_type);
+  auto output = at::empty({0}, self.options().dtype(common_type));
   at::native::slow_conv2d_forward_out_cpu(
       self,
       weight,
@@ -633,6 +642,7 @@ Tensor slow_conv2d_forward_cpu(
       stride,
       padding,
       output);
+
 
   return output;
 }
