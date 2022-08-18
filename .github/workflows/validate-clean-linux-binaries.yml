@@ -48,11 +48,11 @@ jobs:
           CUDA_VER: ${{ matrix.cuda_version }}
           PACKAGE_VER: ${{matrix.package_install}}
         run: |
-          if test ${PACKAGE_VER} = 'conda']; then
+          if [ ${PACKAGE_VER} == 'conda' ]; then
+            echo "conda";
             set -ex
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
             conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
             conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
             conda env remove -p ${ENV_NAME}
-            echo "conda";
           fi
