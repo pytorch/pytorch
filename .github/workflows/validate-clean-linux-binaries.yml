@@ -24,7 +24,7 @@ jobs:
     strategy:
       matrix:
         package_install: ["libtorch"]
-        cuda_version: ["11.7", "11.6", "11.3", "10.2", "rocm"]
+        cuda_version: ["11.7"]
         python_version: ["3.7", "3.8", "3.9", "3.10"]
     env:
       GPU_ARCH_TYPE: cuda
@@ -111,7 +111,7 @@ jobs:
               ("11.6") { wget https://download.pytorch.org/libtorch/cu116/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu116.zip;
                        unzip libtorch-cxx11-abi-shared-with-deps-1.12.1+cu116; }
                        ;;
-              ("11.7 test") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
+              ("11.7") { wget https://download.pytorch.org/libtorch/cu117/libtorch-cxx11-abi-shared-with-deps-1.12.1%2Bcu117.zip;
                        unzip libtorch-cxx11-abi-shared-with-deps-1.12.1+cu117; }
                        ;;
               (*) echo "No binary available"
