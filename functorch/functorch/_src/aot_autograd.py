@@ -316,8 +316,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
         if config.debug_joint:
             print(fx_g.code)
-            for node in fx_g.graph.nodes:
-                print(node, node.stack_trace)
 
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
