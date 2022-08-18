@@ -99,6 +99,11 @@ def _generate_sample_data(
         inputs.append(SampleInput(data, kwargs={"mask": mask}))
     return inputs
 
+def _fix_fn_name(fn_name):
+    if fn_name[-1] == "_":
+        fn_name = fn_name[:-1]
+    return fn_name
+
 
 class TestBasics(TestCase):
     def test_add(self):
@@ -300,8 +305,7 @@ class TestUnary(TestCase):
     def _get_test_data(self, fn_name):
         data = torch.randn(10, 10)
         mask = torch.rand(10, 10) > 0.5
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        fn_name = _fix_fn_name(fn_name)
         if fn_name in ["log", "log10", "log1p", "log2", "sqrt"]:
             data = data.mul(0.5).abs()
         if fn_name in ["rsqrt"]:
@@ -317,8 +321,7 @@ class TestUnary(TestCase):
         return data, mask
 
     def _get_sample_kwargs(self, fn_name):
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        fn_name = _fix_fn_name(fn_name)
         kwargs = {}
         if fn_name in ["clamp", "clip"]:
             kwargs["min"] = -0.5
@@ -326,8 +329,7 @@ class TestUnary(TestCase):
         return kwargs
 
     def _get_sample_args(self, fn_name, data, mask):
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        fn_name = _fix_fn_name(fn_name)
         mt = masked_tensor(data, mask)
         t_args = [data]
         mt_args = [mt]
@@ -364,8 +366,7 @@ class TestUnary(TestCase):
 
 class TestBinary(TestCase):
     def _get_test_data(self, fn_name):
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        fn_name = _fix_fn_name(fn_name)
         data0 = torch.randn(10, 10)
         data1 = torch.randn(10, 10)
         mask = torch.rand(10, 10) > 0.5
@@ -378,14 +379,16 @@ class TestBinary(TestCase):
         return data0, data1, mask
 
     def _get_sample_kwargs(self, fn_name):
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        fn_name = _fix_fn_name(fn_name)
         kwargs = {}
         return kwargs
 
     def _yield_sample_args(self, fn_name, data0, data1, mask):
-        if fn_name[-1] == "_":
-            fn_name = fn_name[:-1]
+        """ Returns two sets of Tensor and MaskedTensor args for a binary function to compute.
+            Tensor args are all the same (just the two provided data tensors),
+            while the MaskedTensor args tests both (MaskedTensor, MaskedTensor) and (MaskedTensor, Tensor)
+        """
+        fn_name = _fix_fn_name(fn_name)
         mt0 = masked_tensor(data0, mask)
         mt1 = masked_tensor(data1, mask)
 

@@ -2,6 +2,8 @@
 
 import torch
 
+from .core import _map_mt_args_kwargs, _wrap_result
+
 __all__ = []  # type: ignore[var-annotated]
 
 
@@ -105,15 +107,12 @@ UNARY_NAMES_UNSUPPORTED = [
 
 
 def _unary_helper(fn, args, kwargs, inplace):
-    from .passthrough import _map_mt_args_kwargs, _wrap_result
-
     if len(kwargs) != 0:
-        raise ValueError("MaskedTensor unary ops require that len(kwargs) != 0. "
+        raise ValueError("MaskedTensor unary ops require that len(kwargs) == 0. "
                          "If you need support for this, please open an issue on Github.")
-    if len(args) > 1:
-        for a in args[1:]:
-            if torch.is_tensor(a):
-                raise TypeError("MaskedTensor unary ops do not support Tensor arguments")
+    for a in args[1:]:
+        if torch.is_tensor(a):
+            raise TypeError("MaskedTensor unary ops do not support additional Tensor arguments")
 
     mask_args, mask_kwargs = _map_mt_args_kwargs(
         args, kwargs, lambda x: x._masked_mask

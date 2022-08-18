@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
+import warnings
 
+from .core import is_masked_tensor
 from .creation import masked_tensor
 
 __all__ = [
@@ -13,10 +15,10 @@ __all__ = [
 class MaskedBmm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, attn_mask):
-        from .core import is_masked_tensor
-
-        assert not is_masked_tensor(q)
-        assert is_masked_tensor(k)
+        if is_masked_tensor(q):
+            raise TypeError("q cannot be a MaskedTensor")
+        if not is_masked_tensor(k):
+            raise TypeError("k must be a MaskedTensor")
         k_mask = k.get_mask()
         ctx.mark_non_differentiable(attn_mask, k_mask)
         ctx.save_for_backward(attn_mask, k_mask, q, k)
@@ -47,41 +49,31 @@ def _torch_matmul(func_name):
     func = getattr(torch.ops.aten, func_name)
 
     def matmul(input0, input1):
-        from .core import is_masked_tensor, MaskedTensor
+        if not is_masked_tensor(input0) and not is_masked_tensor(input1):
+            warnings.warn("At least one of input0 or input1 must be a MaskedTensor")
+            return NotImplemented
+
+        data0 = input0.get_data() if is_masked_tensor(input0) else input0
+        data1 = input1.get_data() if is_masked_tensor(input1) else input1
+        mask0 = input0.get_mask() if is_masked_tensor(input0) else torch.ones_like(input0)
+        mask1 = input1.get_mask() if is_masked_tensor(input1) else torch.ones_like(input1)
+
+        input_data0 = data0.masked_fill(~input0.get_mask(), 0) if is_masked_tensor(input0) else data0
+        input_data1 = data1.masked_fill(~input1.get_mask(), 0) if is_masked_tensor(input1) else data1
+
+        result_data = func(input_data0, input_data1)
+        result_mask = func(mask0.float(), mask1.float())
+        result_mask = result_mask > 0
 
         if is_masked_tensor(input0) and is_masked_tensor(input1):
-            data0 = input0.get_data()
-            data1 = input1.get_data()
-            input_mask0 = input0.get_mask()
-            input_mask1 = input1.get_mask()
-            input_data0 = data0.masked_fill(~input_mask0, 0)
-            input_data1 = data1.masked_fill(~input_mask1, 0)
-            result_data = func(input_data0, input_data1)
-            result_mask = func(input_mask0.float(), input_mask1.float())
-            result_mask = result_mask > 0
             if func is torch.ops.aten.mm:
-                assert torch.equal(input_mask0, input_mask1.transpose(0, 1))
+                if not torch.equal(mask0, mask1.transpose(0, 1)):
+                    raise ValueError("for torch.mm, input0_mask must equal input1_mask.transpose(0, 1)")
             if func is torch.ops.aten.bmm:
-                assert torch.equal(input_mask0, input_mask1.transpose(1, 2))
-            return MaskedTensor(result_data, result_mask)
-        if is_masked_tensor(input0) and not is_masked_tensor(input1):
-            data0 = input0.get_data()
-            input_mask0 = input0.get_mask()
-            input_data0 = data0.masked_fill(~input_mask0, 0)
-            result_data = func(input_data0, input1)
-            result_mask = func(input_mask0.float(), torch.ones_like(input1).float())
-            result_mask = result_mask > 0
-            return MaskedTensor(result_data, result_mask)
-        if not is_masked_tensor(input0) and is_masked_tensor(input1):
-            data1 = input1.get_data()
-            input_mask1 = input1.get_mask()
-            input_data1 = data1.masked_fill(~input_mask1, 0)
-            result_data = func(input0, input_data1)
-            result_mask = func(torch.ones_like(input0).float(), input_mask1.float())
-            result_mask = result_mask > 0
-            return MaskedTensor(result_data, result_mask)
+                if not torch.equal(mask0, mask1.transpose(1, 2)):
+                    raise ValueError("for torch.bmm, input0_mask must equal input1_mask.transpose(1, 2)")
 
-        return NotImplemented
+        return masked_tensor(result_data, result_mask)
 
     return matmul
 
