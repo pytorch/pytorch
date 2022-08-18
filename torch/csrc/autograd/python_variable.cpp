@@ -609,7 +609,12 @@ static int THPVariable_clear(THPVariable* self) {
     }
   }
   TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
-  self->cdata = MaybeOwned<Variable>();
+  {
+    // MapAllocator can take significant time to release large tensors;
+    // release the GIL here to avoid impacting main thread perf.
+    pybind11::gil_scoped_release no_gil;
+    self->cdata = MaybeOwned<Variable>();
+  }
   return 0;
 }
 
