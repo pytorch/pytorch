@@ -68,6 +68,7 @@ jobs:
                     
           # install pip
           if [ ${PACKAGE_VER} == 'pip' ]; then
+            apt-get install unzip -y
             case $CUDA_VER in
               ("rocm") { py -${PYTHON_VERSION} -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/rocm5.1.1";
                       python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
