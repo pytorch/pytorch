@@ -428,7 +428,7 @@ class ModelReport:
 
     def _generate_qconfig_mapping_helper(
         self,
-        detector_qconfig_info_compiled: Dict[str, DetectorQConfigInfo],
+        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo],
         generation_function: Callable
     ) -> QConfigMapping:
         r"""
@@ -441,8 +441,8 @@ class ModelReport:
         # loop through each module / fqn and attempt to create QConfigMapping
         for fqn, module in self._model.named_modules():
             # if we have a qconfig info for this module
-            if fqn in detector_qconfig_info_compiled:
-                qconfig_info_compiled = detector_qconfig_info_compiled[fqn]
+            if fqn in detector_qconfig_info_combined:
+                qconfig_info_compiled = detector_qconfig_info_combined[fqn]
 
                 # now generate the qconfig and add it to the mapping
                 generated_qconfig = generation_function(qconfig_info_compiled, module)
@@ -477,7 +477,10 @@ class ModelReport:
         is_equalization_recommended = combined_info.is_equalization_recommended or new_info.is_equalization_recommended
         combined_info.is_equalization_recommended = is_equalization_recommended
 
-    def _generate_qconfig_mapping(self, update_qconfig_info_function: Callable) -> Dict[str, DetectorQConfigInfo]:
+    def _generate_module_fqn_to_detector_info_mapping(
+        self,
+        update_qconfig_info_function: Callable
+    ) -> Dict[str, DetectorQConfigInfo]:
         r"""
         Generates a QConfigMapping based on the suggestions of the
         ModelReport API. The generated mapping encompasses all the
@@ -506,7 +509,7 @@ class ModelReport:
             raise Exception("Cannot generate report on model you already removed observers from")
 
         # keep track of qconfig info for each module across detectors
-        detector_qconfig_info_compiled: Dict[str, DetectorQConfigInfo] = {}
+        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo] = {}
 
         for detector in self._desired_report_detectors:
             # get the info from the detector
@@ -515,17 +518,17 @@ class ModelReport:
             # we go through the modules
             for module_fqn in detector_info:
                 # see if we already have info on it
-                if module_fqn in detector_qconfig_info_compiled:
+                if module_fqn in detector_qconfig_info_combined:
                     # we combine the current options with what is there
-                    current_options = detector_qconfig_info_compiled[module_fqn]
+                    current_options = detector_qconfig_info_combined[module_fqn]
                     detector_options = detector_info[module_fqn]
 
                     update_qconfig_info_function(current_options, detector_options)
                 else:
                     # we just use this for now
-                    detector_qconfig_info_compiled[module_fqn] = detector_info[module_fqn]
+                    detector_qconfig_info_combined[module_fqn] = detector_info[module_fqn]
 
-        return detector_qconfig_info_compiled
+        return detector_qconfig_info_combined
 
     def generate_qconfig_mapping(self) -> QConfigMapping:
         r"""
@@ -544,7 +547,7 @@ class ModelReport:
             Throws exception if we try to generate mapping without preparing for callibration
         """
         # get the mapping info
-        detector_qconfig_info_compiled = self._generate_qconfig_mapping(
+        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
             self._update_detector_quantizaiton_qconfig_info
         )
 
@@ -552,7 +555,7 @@ class ModelReport:
 
         # now we generate the QConfig for each of the options
         mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
-            detector_qconfig_info_compiled,
+            detector_qconfig_info_combined,
             self._quantization_config_generator
         )
 
@@ -589,13 +592,13 @@ class ModelReport:
         Returns a QConfigMapping for the equalization configuration
         """
         # get the mapping info
-        detector_qconfig_info_compiled = self._generate_qconfig_mapping(
+        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
             self._update_detector_equalization_qconfig_info
         )
 
         # now we generate the QConfig for each of the options
         mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
-            detector_qconfig_info_compiled,
+            detector_qconfig_info_combined,
             self._equalization_config_generator
         )
 
