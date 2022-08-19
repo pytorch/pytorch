@@ -1130,5 +1130,3 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
 ]
-
-python_ref_db: List[OpInfo] = []

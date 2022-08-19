@@ -1,6 +1,7 @@
 import collections
 import warnings
 from functools import partial, wraps
+from typing import Sequence
 
 import numpy as np
 
