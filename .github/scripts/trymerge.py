@@ -828,7 +828,13 @@ class GitHubPR:
             return False
         return checks[checkrun_name][0] != "SUCCESS"
 
-    def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None, land_check_commit: str = None) -> None:
+    def merge_ghstack_into(
+        self,
+        repo: GitRepo,
+        force: bool,
+        comment_id: Optional[int] = None,
+        land_check_commit: Optional[str] = None
+    ) -> None:
         assert self.is_ghstack_pr()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
@@ -849,7 +855,12 @@ class GitHubPR:
                     continue
                 commit_msg = pr.gen_commit_message(filter_ghstack=True)
                 # Raises exception if matching rule is not found
-                find_matching_merge_rule(pr, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id), land_check_commit=land_check_commit)
+                find_matching_merge_rule(
+                    pr,
+                    repo,
+                    force=force,
+                    skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                    land_check_commit=land_check_commit)
 
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
@@ -870,9 +881,14 @@ class GitHubPR:
                    force: bool = False,
                    dry_run: bool = False,
                    comment_id: Optional[int] = None,
-                   land_check_commit: str = None) -> None:
+                   land_check_commit: Optional[str] = None) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id), land_check_commit=land_check_commit)
+        find_matching_merge_rule(
+            self,
+            repo,
+            force=force,
+            skip_internal_checks=can_skip_internal_checks(self, comment_id),
+            land_check_commit=land_check_commit)
         self.merge_changes(repo, force, comment_id, land_check_commit=land_check_commit)
 
         repo.push(self.default_branch(), dry_run)
@@ -883,7 +899,7 @@ class GitHubPR:
                       repo: GitRepo,
                       force: bool = False,
                       comment_id: Optional[int] = None,
-                      land_check_commit: str = None,
+                      land_check_commit: Optional[str] = None,
                       branch: Optional[str] = None) -> None:
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
@@ -955,7 +971,7 @@ def find_matching_merge_rule(pr: GitHubPR,
                              repo: Optional[GitRepo] = None,
                              force: bool = False,
                              skip_internal_checks: bool = False,
-                             land_check_commit: str = None,
+                             land_check_commit: Optional[str] = None,
                              ) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
@@ -1058,30 +1074,34 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
-# Combine checks from both the PR and land validation to get a holistic view of all checks. This helps us cover the corner case where
-# certain workflows may have been requested on the PR but are not part of land validation (e.g. nightly builds) or are implicitly run on PRs
-# but not on land validation branches (like CLA Checks).
-# At the same time, we prioritize the signal workflows which do run on land validation. E.g. if a workflow fails on the PR but passes on land validation
-# then we'd use the successful result from the land validation.
-def get_combined_checks_from_pr_and_land_validation(pr: GitHubPR, land_check_commit: str) -> Dict[str, Tuple[str, str]]:
-  pr_checks = pr.get_checkrun_conclusions()
-  land_validation_checks = get_land_checkrun_conclusions(pr.org, pr.project, land_check_commit) if land_check_commit else {}
+# Combine checks from both the PR and land validation to get a holistic view of all checks. This helps us cover the
+# corner case where certain workflows may have been requested on the PR but are not part of land validation
+# (e.g. nightly builds) or are implicitly run on PRs but not on land validation branches (like CLA Checks).
+# At the same time, we prioritize the signal workflows which do run on land validation. E.g. if a workflow fails on
+# the PR but passes on land validation then we'd use the successful result from the land validation.
+def get_combined_checks_from_pr_and_land_validation(pr: GitHubPR, land_check_commit: Optional[str]) -> Dict[str, Tuple[str, str]]:
+    pr_checks = pr.get_checkrun_conclusions()
+    land_validation_checks = get_land_checkrun_conclusions(pr.org, pr.project, land_check_commit) if land_check_commit else {}
 
-  # Merge the two checks together. Land validation check results (if any) overwrite pr check results
-  merged_checks = dict(pr_checks, **land_validation_checks) # explanation: https://stackoverflow.com/a/9819617
+    # Merge the two checks together. Land validation check results (if any) overwrite pr check results
+    merged_checks = dict(pr_checks, **land_validation_checks)  # explanation: https://stackoverflow.com/a/9819617
 
-  return merged_checks
+    return merged_checks
 
-def pr_get_checks_with_lambda(pr: GitHubPR, land_check_commit: str, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
+def pr_get_checks_with_lambda(
+    pr: GitHubPR,
+    land_check_commit: Optional[str],
+    status_check: Callable[[Optional[str]], bool]
+) -> List[Tuple[str, str]]:
     checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
     return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
 
 
-def pr_get_pending_checks(pr: GitHubPR, land_check_commit: str) -> List[Tuple[str, str]]:
+def pr_get_pending_checks(pr: GitHubPR, land_check_commit: Optional[str]) -> List[Tuple[str, str]]:
     return pr_get_checks_with_lambda(pr, land_check_commit, lambda x: x is None)
 
 
-def pr_get_failed_checks(pr: GitHubPR, land_check_commit: str) -> List[Tuple[str, str]]:
+def pr_get_failed_checks(pr: GitHubPR, land_check_commit: Optional[str]) -> List[Tuple[str, str]]:
     return pr_get_checks_with_lambda(pr, land_check_commit, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 
