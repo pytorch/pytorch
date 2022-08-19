@@ -4695,6 +4695,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice
+    NestedTensorCPU, NestedTensorCUDA: slice_nested
 
 - func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function
@@ -4789,7 +4790,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split
 
 - func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
