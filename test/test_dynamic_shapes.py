@@ -2,7 +2,9 @@
 # Owner(s): ["oncall: jit"]
 
 from torch._C import _disabled_torch_function_impl
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch.fx
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, PythonKeyTracer, dispatch_trace, wrap_key
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
@@ -11,6 +13,7 @@ import operator
 import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
+import torch.fx as fx
 
 aten = torch.ops.aten
 
@@ -299,6 +302,39 @@ class TestPySymInt(TestCase):
         # should not TypeError: pad(): argument 'pad' (position 2) must be
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
+
+
+    @skipIfNoSympy
+    def test_autograd(self):
+
+        fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+        shape_env = ShapeEnv()
+
+
+        fx_tracer = PythonKeyTracer()
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer)
+        sym_mode = proxy_mode.sym_mode
+
+        def wrap_fake_symbolic(x, sym_shape):
+            val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device)
+            return val
+
+        def f(x, y):
+            z = x.expand(y.shape[0], y.shape[1])
+            z.sum().backward()
+
+        x = torch.rand(1, 1, requires_grad=True)
+        y = torch.rand(5, 10, requires_grad=True)
+        shapes = shape_env.create_shapes_for_args([x, y])
+        fake_x = wrap_fake_symbolic(x, shapes[0])
+        fake_y = wrap_fake_symbolic(y, shapes[1])
+
+        with fake_tensor_mode, sym_mode, proxy_mode:  # type: ignore[attr-defined]
+            t = dispatch_trace(wrap_key(f, [fake_x, fake_y], fx_tracer), tracer=fx_tracer, concrete_args=(fx.PH, fx.PH))
+
+
+        print(t)
+
 
 
     @skipIfNoSympy
