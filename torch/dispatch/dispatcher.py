@@ -3,6 +3,7 @@ import torch._C as _C
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard  # type: ignore[attr-defined]
 from torch.utils._pytree import tree_flatten
 from torch.overrides import handle_torch_function, has_torch_function
+import functorch
 
 """
 This is a dispatcher (in Python)
@@ -12,6 +13,8 @@ This is a dispatcher (in Python)
 
 class PyDispatcher:
     def call(self, operator, args, kwargs):
+        if is_functorch_enabled():
+            return self.call_functorch(operator, args, kwargs)
         dispatch_key_set = compute_keyset(args, kwargs)
         kernel = operator.lookup(dispatch_key_set)
         return call_kernel(kernel, args, kwargs)
@@ -20,9 +23,19 @@ class PyDispatcher:
         kernel = operator.lookup(dispatch_key_set)
         return call_kernel(kernel, args, kwargs)
 
+    def call_functorch(self, operator, args, kwargs):
+        key = functorch._C.peek_dls()
+        kernel = operator.table[key]
+        return call_kernel(kernel, args, kwargs)
+
 
 dispatcher_singleton = PyDispatcher()
 
+
+def is_functorch_enabled():
+    key_set = _C._dispatch_tls_local_include_set()
+    if key_set.has(DispatchKey.FuncTorchDynamicLayerFrontMode):
+        return True
 
 def compute_keyset(args, kwargs):
     tensors = get_tensors(args, kwargs)

@@ -18,6 +18,7 @@
 #include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
+#include <functorch/csrc/Interpreter.h>
 
 namespace at {
 namespace functorch {
@@ -400,6 +401,24 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
+  m.def("peek_dls", []() -> c10::optional<std::string> {
+    const auto& stack = getDynamicLayerStack();
+    if (stack.size() == 0) {
+      return c10::nullopt;
+    }
+    switch (stack.back().key()) {
+      case TransformType::Jvp:
+        return "jvp";
+      case TransformType::Vmap:
+        return "vmap";
+      case TransformType::Grad:
+        return "grad";
+      default:
+        TORCH_CHECK(false, "meh");
+    }
+  });
+  py::class_<at::functorch::WithoutTop>(m, "WithoutTop")
+    .def(py::init<>());
 
   at::functorch::initCompileCacheBindings(m.ptr());
 

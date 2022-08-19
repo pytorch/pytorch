@@ -88,6 +88,12 @@ std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dyna
 void setInplaceRequiresGradAllowed(bool allowed);
 bool getInplaceRequiresGradAllowed();
 
+struct FUNCTORCH_API WithoutTop {
+  WithoutTop();
+  ~WithoutTop();
+  DynamicLayer layer_;
+};
+
 
 }
 } // namespace at

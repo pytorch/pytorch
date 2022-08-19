@@ -899,6 +899,7 @@ class Tensor(torch._C._TensorBase):
         # NB: We have intentionally skipped __torch_function__ dispatch here.
         # See gh-54457
         if self.dim() == 0:
+            import pdb; pdb.set_trace()
             raise TypeError("iteration over a 0-d tensor")
         if torch._C._get_tracing_state():
             warnings.warn(

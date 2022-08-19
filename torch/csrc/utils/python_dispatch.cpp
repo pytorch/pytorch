@@ -367,6 +367,8 @@ void initDispatchBindings(PyObject* module) {
     .value("AutogradCPU", c10::DispatchKey::AutogradCPU)
     .value("ADInplaceOrView", c10::DispatchKey::ADInplaceOrView)
     .value("AutogradCUDA", c10::DispatchKey::AutogradCUDA)
+    .value("FuncTorchDynamicLayerFrontMode", c10::DispatchKey::FuncTorchDynamicLayerFrontMode)
+    .value("FuncTorchDynamicLayerBackMode", c10::DispatchKey::FuncTorchDynamicLayerBackMode)
     .value("PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot)
     .value("Python", c10::DispatchKey::Python);
 
@@ -381,7 +383,7 @@ void initDispatchBindings(PyObject* module) {
   // py::enum_<c10::DispatchKeySet::FullAfter>(m, "DispatchKeySetFullAfter")
   //   .value("FULL_AFTER", c10::DispatchKeySet::FullAfter::FULL_AFTER);
 
-  m.def("_dispatch_keyset_full_after", [](DispatchKey t) {
+  m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
   });
 
