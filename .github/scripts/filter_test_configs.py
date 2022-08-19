@@ -112,7 +112,7 @@ def main() -> None:
     tag = args.tag
 
     # If the tag matches, we can get the PR number from it
-    tag_regex = re.compile(r"^{CIFLOW_PREFIX}\w+/(?P<pr_number>\d+)$")
+    tag_regex = re.compile(fr"^{CIFLOW_PREFIX}\w+/(?P<pr_number>\d+)$")
 
     if not pr_number and not tag:
         # This can be none or empty like when the workflow is dispatched manually
