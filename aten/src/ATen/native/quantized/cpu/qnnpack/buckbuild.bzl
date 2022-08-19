@@ -4,7 +4,7 @@ load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX")
 
 # Shared by internal and OSS BUCK
-def define_qnnpack(third_party, labels = []):
+def define_qnnpack(third_party, feature = None, labels = []):
     fb_xplat_cxx_library(
         # @autodeps-skip
         name = "ukernels_scalar",
@@ -31,6 +31,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
@@ -94,6 +95,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [
@@ -140,6 +142,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [
@@ -194,6 +197,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [
@@ -237,6 +241,7 @@ def define_qnnpack(third_party, labels = []):
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         visibility = ["PUBLIC"],
@@ -297,6 +302,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = [
             "supermodule:android/default/pytorch",
@@ -394,6 +400,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [
@@ -460,6 +467,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [
@@ -521,6 +529,7 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        feature = feature,
         force_static = True,
         labels = labels,
         platform_compiler_flags = [

@@ -66,6 +66,7 @@ def pt_operator_library(
         ),
         labels = labels + [
             "pt_operator_library",
+            "pfh:PyTorchEdge",
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
         ] + (["pt_train_operator_library"] if train else []),

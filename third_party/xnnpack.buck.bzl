@@ -40,7 +40,7 @@ load(
 # Note that the file path is relative to the BUCK file that called from, not to this bzl file.
 # So for fbsource build it points to xplat/third-party/XNNPACK/XNNPACK,
 # and for OSS it points to pytorch/third_party/XNNPACK
-def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = False):
+def define_xnnpack(third_party, feature = None, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = False):
     WINDOWS_FLAGS = [
         "/D__x86_64__",
         "/EHsc",
@@ -67,6 +67,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "xnnpack.h": "XNNPACK/include/xnnpack.h",
         },
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
@@ -94,6 +95,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         preprocessor_flags = [
@@ -126,6 +128,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         preprocessor_flags = [
@@ -157,6 +160,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         preprocessor_flags = [
@@ -189,6 +193,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preferred_linkage = "static",
@@ -220,6 +225,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         preprocessor_flags = [
@@ -250,6 +256,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -292,6 +299,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -329,6 +337,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -372,6 +381,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -410,6 +420,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -453,6 +464,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -491,6 +503,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -534,6 +547,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -573,6 +587,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -616,6 +631,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -654,6 +670,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -698,6 +715,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -737,6 +755,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_preprocessor_flags = [
             (
@@ -780,6 +799,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_preprocessor_flags = [
             (
@@ -819,6 +839,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -870,6 +891,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -917,6 +939,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -972,6 +995,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1020,6 +1044,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1063,6 +1088,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1105,6 +1131,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1168,6 +1195,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1222,6 +1250,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1262,6 +1291,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1300,6 +1330,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1337,6 +1368,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1390,6 +1422,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1443,6 +1476,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1481,6 +1515,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1519,6 +1554,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1560,6 +1596,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1602,6 +1639,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
         ],
+        feature = feature,
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1628,6 +1666,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "arm64_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -1647,6 +1686,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "x86_and_x86_64_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -1668,6 +1708,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "x86_and_x86_64_lib_ovr_win32",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -1689,6 +1730,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "arm_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -1710,6 +1752,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "armv7_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -1727,6 +1770,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     fb_xplat_cxx_library(
         name = "XNNPACK",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
+        feature = feature,
         labels = labels,
         deps = [
             ":operators",

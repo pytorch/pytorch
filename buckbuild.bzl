@@ -748,6 +748,7 @@ def define_buck_targets(
         aten_default_args = dict(),
         pt_xplat_cxx_library = fb_xplat_cxx_library,
         c2_fbandroid_xplat_compiler_flags = [],
+        feature = None,
         labels = []):
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
@@ -789,6 +790,7 @@ def define_buck_targets(
             ("aten/src", "THNN/generic/*.h"),
             ("aten/src", "THNN/generic/*.c"),
         ]),
+        feature = feature,
         labels = labels,
     )
 
@@ -828,6 +830,7 @@ def define_buck_targets(
             ("aten/src", "ATen/native/mkldnn/*.h"),
         ]),
         visibility = ["PUBLIC"],
+        feature = feature,
         labels = labels,
     )
 
@@ -840,6 +843,7 @@ def define_buck_targets(
             ("aten/src", "ATen/native/vulkan/ops/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
         ]),
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
     )
@@ -848,6 +852,7 @@ def define_buck_targets(
         name = "jit_core_headers",
         header_namespace = "",
         exported_headers = subdir_glob([("", x) for x in jit_core_headers]),
+        feature = feature,
         labels = labels,
     )
 
@@ -875,6 +880,7 @@ def define_buck_targets(
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
         ),
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
@@ -896,6 +902,7 @@ def define_buck_targets(
         exported_headers = subdir_glob([
             ("aten/src", "ATen/native/metal/MetalPrepackOpContext.h"),
         ]),
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
     )
@@ -908,6 +915,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/mobile/*.h"),
             ],
         ),
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
     )
@@ -918,6 +926,7 @@ def define_buck_targets(
         exported_headers = {
             "Config.h": ":generate_aten_config[Config.h]",
         },
+        feature = feature,
         labels = labels,
     )
 
@@ -931,6 +940,7 @@ def define_buck_targets(
             # Don't build python bindings on mobile.
             #"python_functions.h",
         },
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
     )
@@ -941,6 +951,7 @@ def define_buck_targets(
         exported_headers = {
             "version.h": ":generate-version-header[version.h]",
         },
+        feature = feature,
         labels = labels,
     )
 
@@ -985,6 +996,7 @@ def define_buck_targets(
         ],
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = get_pt_compiler_flags(),
+        feature = feature,
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1094,6 +1106,7 @@ def define_buck_targets(
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
         }),
+        feature = feature,
         labels = labels,
     )
 
@@ -1115,6 +1128,7 @@ def define_buck_targets(
         fbobjc_compiler_flags = [
             "-Wno-missing-prototypes",
         ],
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
@@ -1511,6 +1525,7 @@ def define_buck_targets(
             "-Wno-deprecated-declarations",
             "-Wno-global-constructors",
         ],
+        feature = feature,
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
@@ -1841,6 +1856,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/static/te_wrapper.cpp",
         ],
         compiler_flags = ["-fexceptions"],
+        feature = feature,
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1900,6 +1916,7 @@ def define_buck_targets(
                 C10,
                 ROOT_PATH + "aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack",
             ],
+            feature = feature,
             labels = labels,
             **aten_default_args
         )
