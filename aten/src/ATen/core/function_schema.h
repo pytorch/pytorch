@@ -472,6 +472,8 @@ struct TORCH_API FunctionSchema {
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
 
+  FunctionSchema cloneWithRealTypes() const;
+
   // Check that inputs have the correct types and appends any missing default
   // values.
   template <typename T = c10::PlatformType>
