@@ -471,7 +471,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 
 Tensor view_symint_batching_rule(const Tensor& self, c10::SymIntArrayRef size) {
   // TODO: properly support this
-  return self.view(asIntArrayRefSlow(size));
+  return view_batching_rule(self, asIntArrayRefSlow(size));
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
