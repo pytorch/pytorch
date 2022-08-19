@@ -1177,7 +1177,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
-        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        ActiveProfilerType = torch._C._profiler.ActiveProfilerType
         self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
 
         # Autograd profiler
@@ -1247,17 +1247,17 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertIsInstance(
             node.parent.extra_fields,
-            torch._C._autograd._ExtraFields_PyCCall)
+            torch._C._profiler._ExtraFields_PyCCall)
 
         self.assertEqual(node.children[0].name(), "aten::empty")
         self.assertEqual(node.children[0].children[0].name(), "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
-            torch._C._autograd._ExtraFields_Allocation)
+            torch._C._profiler._ExtraFields_Allocation)
 
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
@@ -1272,7 +1272,7 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
         self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])

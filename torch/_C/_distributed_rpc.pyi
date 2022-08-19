@@ -4,8 +4,9 @@ import enum
 import torch
 from torch.types import Device
 from . import Future
-from ._autograd import ProfilerConfig, ProfilerState, ProfilerEvent
+from ._autograd import ProfilerEvent
 from ._distributed_c10d import ProcessGroup, Store
+from ._profiler import ActiveProfilerType, ProfilerConfig, ProfilerState
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
