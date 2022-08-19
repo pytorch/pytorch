@@ -35,6 +35,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <iostream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -654,6 +655,22 @@ PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_attachOutOfMemoryObserver(PyObject* _unused, PyObject* observer) {
+  HANDLE_TH_ERRORS
+  Py_XINCREF(observer);
+  auto obs = [observer](int device) {
+    py::gil_scoped_acquire g;
+    PyObject* result = PyObject_CallFunction(observer, "i", device);
+    if (!result) {
+      throw py::error_already_set();
+    }
+    Py_XDECREF(result);
+  };
+  c10::cuda::CUDACachingAllocator::attachOutOfMemoryObserver(std::move(obs));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_WARN_ONCE(
@@ -914,6 +931,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_recordMemoryHistory,
      METH_O,
      nullptr},
+    {"_cuda_attach_out_of_memory_observer",
+     THCPModule_attachOutOfMemoryObserver,
+     METH_O,
+     nullptr},
+
 
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,

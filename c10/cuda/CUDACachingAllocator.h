@@ -161,6 +161,8 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
+using OutOfMemoryObserver = std::function<void(int device)>;
+C10_CUDA_API void attachOutOfMemoryObserver(OutOfMemoryObserver observer);
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 } // namespace CUDACachingAllocator

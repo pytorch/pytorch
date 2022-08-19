@@ -4449,6 +4449,17 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
+    def test_notifies_oom(self):
+        x = False
+        def cb(device):
+            nonlocal x
+            x = True
+        torch._C._cuda_attach_out_of_memory_observer(cb)
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+        self.assertTrue(x)
+
+
 instantiate_parametrized_tests(TestCuda)
 
 if __name__ == '__main__':

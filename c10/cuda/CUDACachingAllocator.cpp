@@ -551,6 +551,8 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
   std::atomic<CreateContextFn> context_recorder_;
 
+  // XXX - maybe we should generalize and have multiple events
+  std::vector<OutOfMemoryObserver> oom_observers_;
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
@@ -561,6 +563,10 @@ class DeviceCachingAllocator {
 
   void setContextRecorder(CreateContextFn c) {
     context_recorder_.store(c);
+  }
+
+  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
+    oom_observers_.emplace_back(std::move(observer));
   }
 
   // All public methods (except the above) acquire the allocator mutex.
@@ -645,6 +651,9 @@ class DeviceCachingAllocator {
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
+      for (const auto & obs : oom_observers_) {
+        obs(device);
+      }
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -1728,6 +1737,12 @@ class THCCachingAllocator {
     device_allocator[device]->setContextRecorder(std::move(recorder));
   }
 
+  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
+  }
+
   void emptyCache() {
     for (auto& da : device_allocator)
       da->emptyCache();
@@ -1846,6 +1861,10 @@ void setMemoryFraction(double fraction, int device) {
 
 void setContextRecorder(CreateContextFn recorder) {
   caching_allocator.setContextRecorder(std::move(recorder));
+}
+
+void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
+  caching_allocator.attachOutOfMemoryObserver(std::move(observer));
 }
 
 void emptyCache(void) {
