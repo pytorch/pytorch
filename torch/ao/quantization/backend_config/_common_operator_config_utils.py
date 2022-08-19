@@ -326,6 +326,20 @@ def _get_conv_configs(dtype_configs):
 
     return conv_configs
 
+def _get_tensor_info_op_configs(dtype_configs):
+    """
+    These ops work on tensors of different dtypes but return non-tensors
+    containing information about the input tensor.
+    """
+
+    def _get_config(op):
+        return BackendPatternConfig(op) \
+            .set_observation_type(ObservationType.OUTPUT_NOT_OBSERVED) \
+            .set_dtype_configs(dtype_configs)
+
+    return [_get_config(op) for op in ("shape", "size")]
+
+
 def _get_share_qparams_op_configs(dtype_configs):
     """ Get the operator config for the operators that works for both float and quantized input
     if input is quantized, the output Tensor shares the same quantization parameter
@@ -389,8 +403,6 @@ def _get_share_qparams_op_configs(dtype_configs):
         "resize_",
         "relu",
         "relu_",
-        "shape",
-        "size",
         "squeeze",
         "squeeze_",
         "transpose",
@@ -405,4 +417,5 @@ __all__ = [
     "_get_linear_configs",
     "_get_conv_configs",
     "_get_share_qparams_op_configs",
+    "_get_tensor_info_op_configs",
 ]

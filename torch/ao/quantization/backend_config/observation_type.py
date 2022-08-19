@@ -11,3 +11,6 @@ class ObservationType(Enum):
     # on qconfig.activation
     # example: torch.cat, maxpool
     OUTPUT_SHARE_OBSERVER_WITH_INPUT = 1
+    # this means the output is never observed
+    # example: x.shape, x.size
+    OUTPUT_NOT_OBSERVED = 2

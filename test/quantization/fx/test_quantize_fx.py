@@ -4771,6 +4771,28 @@ class TestQuantizeFx(QuantizationTestCase):
         _test(prepare_fx, get_default_qconfig_mapping())
         _test(prepare_qat_fx, get_default_qat_qconfig_mapping())
 
+    @skipIfNoFBGEMM
+    def test_linear_view_size(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 32)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x.view(x.size(0), 1, 4, 8)
+
+
+        with override_quantized_engine('fbgemm'):
+            model_fp32 = M().eval()
+            qconfig_mapping = get_default_qconfig_mapping('fbgemm')
+            x = torch.randn((5, 16))
+            model_fp32(x)
+            prepared_model = prepare_fx(model_fp32, qconfig_mapping, x)
+            prepared_model(x)
+            quantized_model = convert_fx(prepared_model)
+            self.assertTrue(type(quantized_model.linear) == nnq.Linear)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
