@@ -690,7 +690,7 @@ class _ExecOrderData:
 sharding_strategy_map = {
     ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
     ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
-    ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OPT,
+    ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
 }
 
 
