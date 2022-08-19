@@ -4809,7 +4809,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split_with_sizes
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split_with_sizes
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
