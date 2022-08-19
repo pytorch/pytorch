@@ -971,8 +971,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = prims.convert_element_type(running_mean, computation_dtype)
-        running_var = prims.convert_element_type(running_var, computation_dtype)
+        running_mean : Tensor = prims.convert_element_type(running_mean, computation_dtype)
+        running_var : Tensor = prims.convert_element_type(running_var, computation_dtype)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -1436,7 +1436,9 @@ def nll_loss_forward(
             wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
     elif ignore_index >= 0:
-        total_weight = prims.convert_element_type((target != ignore_index).sum(), self.dtype)
+        total_weight = prims.convert_element_type(
+            (target != ignore_index).sum(), self.dtype
+        )
     else:
         total_weight = self.new_full((), 1.0 * result.numel())
 
