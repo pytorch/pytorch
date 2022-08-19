@@ -92,3 +92,32 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'enable_observer',
         ]
         self._test_function_import('fake_quantize', function_list)
+
+
+class TestAOMigrationNNQuantized(AOMigrationTestCase):
+    def test_functional_import(self):
+        function_list = [
+            'avg_pool2d',
+            'avg_pool3d',
+            'adaptive_avg_pool2d',
+            'adaptive_avg_pool3d',
+            'conv1d',
+            'conv2d',
+            'conv3d',
+            'interpolate',
+            'linear',
+            'max_pool1d',
+            'max_pool2d',
+            'celu',
+            'leaky_relu',
+            'hardtanh',
+            'hardswish',
+            'threshold',
+            'elu',
+            'hardsigmoid',
+            'clamp',
+            'upsample',
+            'upsample_bilinear',
+            'upsample_nearest',
+        ]
+        self._test_function_import('functional', function_list, base='nn.quantized')
