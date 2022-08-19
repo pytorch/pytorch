@@ -1545,9 +1545,14 @@ class TestMPS(TestCase):
             self.assertEqual(t, t_mps.cpu())
 
     # See https://github.com/pytorch/pytorch/issues/82427
-    # Test should not crash
-    def test_bool_full(self):
+    # and https://github.com/pytorch/pytorch/issues/83692
+    def test_full_bugs(self):
+        # Test should not crash
         x = torch.full((3, 3), True, device='mps')
+        # torch.full should work for uint8
+        y_mps = torch.full((2, 2), 247, device='mps', dtype=torch.uint8)
+        y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
+        self.assertEqual(y_mps, y_cpu)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):

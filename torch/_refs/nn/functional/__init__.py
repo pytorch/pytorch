@@ -44,6 +44,8 @@ __all__ = [
     "tanhshrink",
     "threshold",
     "glu",
+    "pairwise_distance",
+    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -577,3 +579,36 @@ def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     b, c = torch.tensor_split(a, 2, dim)
 
     return b * torch.sigmoid(c)
+
+
+@register_decomposition(torch.ops.aten.pairwise_distance)
+@out_wrapper()
+def pairwise_distance(
+    x1: TensorLikeType,
+    x2: TensorLikeType,
+    p: NumberType = 2.0,
+    eps: NumberType = 1e-6,
+    keepdim=False,
+) -> TensorLikeType:
+    return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
+
+
+@register_decomposition(torch.ops.aten.pdist)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
+    check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
+    check(p >= 0, lambda: "pdist only supports non-negative p values")
+    # For p == 2 we can use an efficient implementation, but other values of p
+    # require creating a much bigger tensor for an intermediate step
+    if p == 2:
+        aTa = torch.mm(a, a.T)
+        aTa_diag = torch.diag(aTa)
+        t = torch.sqrt(torch.clamp(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa, min=0))
+    else:
+        t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
+    i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
+    return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])
