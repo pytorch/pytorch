@@ -128,8 +128,9 @@ TESTS = discover_tests(
     ]
 )
 
-# Q: Is there a better way to add "doctests" to the list of tests?
-# TESTS = TESTS + ['doctests']
+# The doctests are a special case that don't correspond to a file that discover
+# tests can enable.
+TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
@@ -563,18 +564,30 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    # Determine if we should conditionally enable any of these doctests via
-    # environment variables.
-    if torch.cuda.is_available():
-        os.environ['TORCH_DOCTEST_CUDA'] = '1'
-        if torch.cuda.device_count() > 1:
-            os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+    #
+    enabled = {
+        # Temporary disable all feature-conditional tests
+        # 'lapack': 'auto',
+        # 'cuda': 'auto',
+        # 'cuda1': 'auto',
+        # 'qengine': 'auto',
+        'lapack': 0,
+        'cuda': 0,
+        'cuda1': 0,
+        'qengine': 0,
+    }
 
-    if torch._C.has_lapack:
-        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+    # Resolve "auto" based on a test to determine if the feature is available.
+    if enabled['cuda'] == 'auto' and torch.cuda.is_available():
+        enabled['cuda'] = True
 
-    # Temporary disable qentine tests
-    if 0:
+    if enabled['cuda1'] == 'auto' and torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        enabled['cuda1'] = True
+
+    if enabled['lapack'] == 'auto' and torch._C.has_lapack:
+        enabled['lapack'] = True
+
+    if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
             import torch.nn.quantized as nnq  # NOQA
@@ -583,7 +596,20 @@ def run_doctests(test_module, test_directory, options):
         except (ImportError, RuntimeError):
             ...
         else:
-            os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+            enabled['qengine'] = True
+
+    # Set doctest environment variables
+    if enabled['cuda']:
+        os.environ['TORCH_DOCTEST_CUDA'] = '1'
+
+    if enabled['cuda1']:
+        os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+
+    if enabled['lapack']:
+        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+
+    if enabled['qengine']:
+        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
