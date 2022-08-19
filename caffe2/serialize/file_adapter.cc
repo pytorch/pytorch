@@ -13,6 +13,7 @@ FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
   if (fp_ == nullptr) {
     char buf[1024];
     buf[0] = '\0';
+    int C10_UNUSED err =
 #if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
   strerror_s(buf, sizeof(buf), errno);
 #else
