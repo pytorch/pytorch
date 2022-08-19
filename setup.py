@@ -437,11 +437,6 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
-# the list of runtime dependencies required by this built package
-install_requires = [
-    'typing_extensions',
-]
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -946,6 +941,11 @@ def print_box(msg):
 
 
 def main():
+    # the list of runtime dependencies required by this built package
+    install_requires = [
+        'typing_extensions',
+    ]
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
