@@ -1023,12 +1023,12 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data_ptr<scalar_t>();
+    index_t* result_data = result.data_ptr<index_t>();
     int64_t i = 0;
 
-    scalar_t r = std::max<int64_t>(0, -offset), c = 0;
+    index_t r = std::max<int64_t>(0, -offset), c = 0;
     while (i < tril_size) {
       result_data[i] = r;
       result_data[tril_size + i++] = c;
@@ -1061,14 +1061,14 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data_ptr<scalar_t>();
+    index_t* result_data = result.data_ptr<index_t>();
     int64_t i = 0;
     // not typing std::max with scalar_t as it could be an unsigned type
     // NOTE: no need to check if the returned value of std::max overflows
-    // scalar_t, as i and triu_size act as a guard.
-    scalar_t c = std::max<int64_t>(0, offset), r = 0;
+    // index_t, as i and triu_size act as a guard.
+    index_t c = std::max<int64_t>(0, offset), r = 0;
     while (i < triu_size) {
       result_data[i] = r;
       result_data[triu_size + i++] = c;
