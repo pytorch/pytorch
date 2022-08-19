@@ -15,10 +15,6 @@ from torch.ao.quantization.quantize_jit import (
     _quantize_ondevice_dynamic_jit,
 )
 
-from torch.ao.quantization.quant_type import QuantType
-
-from torch.jit._recursive import wrap_cpp_module
-
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.common_quantization import (
