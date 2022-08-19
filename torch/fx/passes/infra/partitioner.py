@@ -1,7 +1,7 @@
 from typing import Dict, List, Set, Iterable, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-from torch.fx.passes.utils.graph_viewer import GraphViewer
+from torch.fx.passes.utils.dependency_viewer import DependencyViewer, DependencyType
 
 from torch.fx.passes.tools_common import NodeList
 
@@ -43,7 +43,7 @@ class CapabilityBasedPartitioner:
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
 
-        self.graph_viewer = GraphViewer(self.graph_module.graph)
+        self.dependency_viewer = DependencyViewer(self.graph_module.graph)
 
     def __get_supported_nodes(self) -> NodeList:
         logging.debug("Collecting supported nodes...")
@@ -99,10 +99,10 @@ class CapabilityBasedPartitioner:
                 for j in range(i + 1, len(user_partitions_list)):
                     pi = user_partitions_list[i]
                     pj = user_partitions_list[j]
-                    dependency = self.graph_viewer.partition_depends_on(pi.nodes, pj.nodes)
-                    if dependency == 1 and pj in user_partitions:
+                    dependency = self.dependency_viewer.partition_depends_on(pi.nodes, pj.nodes)
+                    if dependency == DependencyType.B_DEPENDS_ON_A and pj in user_partitions:
                         del user_partitions[pj]
-                    elif dependency == -1 and pi in user_partitions:
+                    elif dependency == DependencyType.A_DEPENDS_ON_B and pi in user_partitions:
                         del user_partitions[pi]
 
             # We use the following rules for partition assignment:

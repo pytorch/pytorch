@@ -90,7 +90,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     dst += idx_offset;
 
     if (is_transformer_mask) {
-        mask += (idx_offset / head_chunk_size) * stride + local_idx;
+        mask += ((first_batch * stride) / head_chunk_size) * stride + local_idx;
     } else {
         mask += idx_offset;
     }
@@ -117,13 +117,14 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     acc_t max_value[WARP_BATCH];
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
+        int batch_element_count = (i >= local_batches) ? 0 : element_count;
         bool is_meaningful_max = false;
         max_value[i] = elements[i][0];
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             if (is_masked) {
                 int idx = it*WARP_SIZE;
-                if ((idx + local_idx) < element_count) {
+                if ((idx + local_idx) < batch_element_count) {
                     if (!is_transformer_mask) {
                         idx += i*element_count;
                     }
@@ -147,6 +148,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     acc_t sum[WARP_BATCH] { 0.0f };
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
+        int batch_element_count = (i >= local_batches) ? 0 : element_count;
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             if (!is_masked) {
@@ -158,7 +160,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 }
             } else {
                 int idx = it*WARP_SIZE;
-                bool valid = (idx + local_idx) < element_count;
+                bool valid = (idx + local_idx) < batch_element_count;
                 if (!is_transformer_mask) {
                     idx += i*element_count;
                 }

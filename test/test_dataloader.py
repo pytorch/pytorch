@@ -2221,6 +2221,9 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+# Define a global function for testing purposes since local functions cannot be pickled
+def identity(x):
+    return x
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2232,9 +2235,9 @@ class TestDataLoader2(TestCase):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
         dp = IterableWrapper(list(range(1000))).sharding_filter()
-        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
+        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
