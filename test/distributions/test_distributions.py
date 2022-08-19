@@ -888,9 +888,9 @@ class TestDistributions(DistributionsTestCase):
     def _check_enumerate_support(self, dist, examples):
         for params, expected in examples:
             params = {k: torch.tensor(v) for k, v in params.items()}
-            expected = torch.tensor(expected, dtype=torch.int64)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
+            expected = torch.tensor(expected, dtype=actual.dtype)
             self.assertEqual(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
