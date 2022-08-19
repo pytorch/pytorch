@@ -15,6 +15,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
+import weakref
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -27,6 +28,8 @@ aten = torch.ops.aten
 prim = torch.ops.prim
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+CONSTANT_NUMEL_LIMIT = 1
 
 
 def fake_signature(fn, nargs):
@@ -44,10 +47,44 @@ def decompose(decomposition_table):
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
+# ensure we cannot collide with other properties
+proxy_slot = object()
+no_default = object()
+
+def set_proxy_slot(obj, tracer, proxy):
+    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
+    assert isinstance(d, weakref.WeakKeyDictionary)
+    d[tracer] = proxy
+
+def has_proxy_slot(obj, tracer):
+    return get_proxy_slot(obj, tracer, False, lambda _: True)
+
+# the default argument is what to return if the slot is not set.
+# the transform argument is handy if you need to extract a subfield from
+# the successfully looked up result (but NOT the default.)
+def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
+    d = obj.__dict__.get(proxy_slot)
+    if not d:
+        if default is no_default:
+            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+        return default
+    assert isinstance(d, weakref.WeakKeyDictionary)
+    if tracer not in d:
+        if default is no_default:
+            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+        else:
+            return default
+    return transform(d[tracer])
+
+
+def get_proxy_slots(obj):
+    return obj.__dict__.get(proxy_slot)
+
+
 def track_tensor(tensor, proxy, *, constant, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
-    # the proxy on the __dict__ of the object, keyed on the tracer
+    # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
@@ -57,10 +94,10 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # TODO: improve naming
             # TODO: lazily insert this into the graph only on first
             # use?  Maybe complicated and DCE is a better idea
-            inner_s.__dict__[tracer] = torch.ops.math.size(proxy, i)
+            set_proxy_slot(inner_s, tracer, torch.ops.aten.size(proxy, i))
 
         # TODO: also do stride/numel
-    tensor.__dict__[tracer] = _ProxyTensor(proxy, constant)
+    set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
@@ -108,8 +145,13 @@ def fetch_symint_proxy(tracer):
         if n.constant is not None:
             return n.constant
         else:
-            return n.__dict__[tracer]
+            # NB: we REQUIRE all symints to be tracked
+            return get_proxy_slot(n, tracer)
     return inner
+
+
+def fetch_tensor_proxy(tracer):
+    return lambda t: get_proxy_slot(t, tracer, t)
 
 
 def proxy_call(proxy_mode, func_overload, args, kwargs=None):
@@ -132,13 +174,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     tracer = proxy_mode.tracer
 
-    def fetch(t):
-        if isinstance(t, torch.Tensor) and tracer in t.__dict__:
-            return t.__dict__[tracer]
-        else:
-            return t
-
-    f_args, f_kwargs = pytree.tree_map(fetch, (args, kwargs))
+    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -204,7 +240,12 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     constant = None
     # NB: do NOT include factories as constants
-    if all_constant and any_constant:
+    if (
+        torch.Tag.nondeterministic_seeded not in func_overload.tags  # type: ignore[attr-defined]
+        and all_constant
+        and any_constant
+        and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
+    ):
         with maybe_disable_fake_tensor_mode():
             const_args, const_kwargs = pytree.tree_map_only(
                 _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
@@ -272,7 +313,7 @@ def wrap_key(f, tensors, tracer):
         out = f(*tensors)
         return pytree.tree_map_only(
             torch.Tensor,
-            lambda t: t.__dict__[tracer].proxy if tracer in t.__dict__ else t,
+            lambda t: get_proxy_slot(t, tracer, t, lambda x: x.proxy),
             out
         )
 
@@ -312,9 +353,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device]:
             return func_overload(*args, **kwargs)
 
-        if any(
-            isinstance(arg, torch.Tensor) and self.tracer in arg.__dict__
-            for arg in pytree.tree_flatten(args)[0]
+        if pytree.tree_any_only(
+            torch.Tensor,
+            lambda t: has_proxy_slot(t, self.tracer),
+            (args, kwargs)
         ):
             out = proxy_call(self, func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
@@ -373,7 +415,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             # constant, so we keep a copy of the original argument along so
             # we can query it if we're asked to item() it at some later point
             is_lift = func_overload is torch.ops.aten.lift_fresh_copy.default
-            if is_lift:
+            if is_lift and out.numel() <= CONSTANT_NUMEL_LIMIT:
                 with maybe_disable_fake_tensor_mode():
                     constant = args[0].clone()
             else:
@@ -381,14 +423,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             track_tensor_tree(out, proxy_out, constant=constant, tracer=self.tracer)
 
         def assert_proxy_tensor(e):
-            if isinstance(e, torch.Tensor):
-                assert self.tracer in e.__dict__, \
-                    f"Internal Error: make_fx is incorrectly baking a tensor constant into the graph: {str(e)}"
+            assert has_proxy_slot(e, self.tracer), \
+                f"Internal Error: make_fx is incorrectly baking a tensor constant into the graph: {str(e)}"
 
         # When we trace factory functions, we expect that tensor outputs are *always* tracked.
         # (Except for torch.tensor() constants handled through lift(), which is handled
         # specially further up).
-        pytree.tree_map(assert_proxy_tensor, out)
+        pytree.tree_map_only(torch.Tensor, assert_proxy_tensor, out)
         return out
 
 
@@ -418,7 +459,7 @@ class ProxySymDispatchMode(SymDispatchMode):
             return func(*args, **kwargs)
         p_args, p_kwargs = pytree.tree_map_only(
             PySymInt,
-            lambda s: s.__dict__[self.tracer] if s.constant is None else s.constant,
+            lambda s: get_proxy_slot(s, self.tracer) if s.constant is None else s.constant,
             (args, kwargs)
         )
         # func doesn't have a __torch_function__ that Proxy can interpose, so
@@ -426,7 +467,8 @@ class ProxySymDispatchMode(SymDispatchMode):
         n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))
         import operator
         mapped = {
-            operator.mul: torch.ops.math.mul
+            operator.mul: torch.ops.math.mul,
+            operator.eq: torch.ops.math.eq
         }
         if func not in mapped:
             print(func)
@@ -436,7 +478,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
         assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
-        out.__dict__[self.tracer] = p_out
+        set_proxy_slot(out, self.tracer, p_out)
         return out
 
 
@@ -471,7 +513,7 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         out = super().output(target, args, kwargs)
 
         def unwrap(e):
-            return e.__dict__[self.tracer].proxy.node if self.tracer in e.__dict__ else e
+            return get_proxy_slot(e, self.tracer, e, lambda x: x.proxy.node)
         self.new_graph.output(pytree.tree_map(unwrap, out))
         return out
 
