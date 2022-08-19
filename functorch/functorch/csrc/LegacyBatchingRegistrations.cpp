@@ -502,12 +502,9 @@ Tensor as_strided_batching_rule(
       "same length! Got size ", sizes, " and stride ", strides);
 
   // Sanity checks:
-  // 1. All batch dims are at the front in memory layout (not necessary for
-  // correctness, but we are worried the user might be doing crazy things)
-  // 2. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
+  // 1. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
   // is valid for a slice of the input tensor.
   // See Note: [When will the as_strided batching rule fail?] for details.
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), num_batch_dims);
   checkBasicAsStridedValidForSlice(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
