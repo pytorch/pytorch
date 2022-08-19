@@ -229,7 +229,12 @@ class MetaConverter:
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter or isinstance(t, FakeTensor):
+
+        if (
+            type(t) is torch.Tensor
+            or type(t) is torch.nn.Parameter
+            or isinstance(t, FakeTensor)
+        ):
             if any(
                 [
                     t.is_sparse_csr,
