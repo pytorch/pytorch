@@ -494,7 +494,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[-1], x1)
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
-        self.assertRaises(NotImplementedError, lambda: nt[:])
+        self.assertRaisesRegex(RuntimeError, "Nested tensor dimension 0 cannot be sliced", lambda: nt[:])
         self.assertRaises(NotImplementedError, lambda: nt[None])
         self.assertRaises(NotImplementedError, lambda: nt[...])
         # tuple of indices: only support integer in the batch dimension
@@ -503,7 +503,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[0, 1, :], x0[1, :])
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
-        self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
+        self.assertRaisesRegex(RuntimeError, "Nested tensor dimension 0 cannot be sliced", lambda: nt[:, 1, 1])
         # make sure indexing returns a view
         nt[0].fill_(100.0)
         answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
