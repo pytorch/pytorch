@@ -1408,3 +1408,16 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
 def prod(xs: Sequence[NumberType]) -> NumberType:
     """Product of elements in input sequence. Returns 1 for empty sequence"""
     return reduce(operator.mul, xs, 1)
+
+
+def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
+    """
+    Similar to torch.where(mask, t, 0) but if t is boolean,
+    result is also boolean and not promoted to int.
+    """
+    # torch.where(mask, t, False) is equivalent
+    # but feels hacky and might break in the future
+    if t.dtype is torch.bool:
+        return mask.logical_and(t)
+    else:
+        return torch.where(mask, t, 0)
