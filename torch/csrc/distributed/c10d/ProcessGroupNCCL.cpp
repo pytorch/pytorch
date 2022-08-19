@@ -585,7 +585,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
-                 dist_debug_level_ >= DebugLevel::Detail;
+      dist_debug_level_ >= DebugLevel::Detail;
 
   if (blockingWait_) {
     if (asyncErrorHandling_ || desyncDebug_) {
