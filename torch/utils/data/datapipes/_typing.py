@@ -378,7 +378,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 if len_func is not None:
                     return len_func(*args, **kwargs)
                 else:
-                    raise TypeError(f"object of type '{datapipe}' has no len()")  # TODO: Check what happens to Sized
+                    raise TypeError(f"object of type '{datapipe}' has no len()")
 
         namespace['__len__'] = len_hook
 
