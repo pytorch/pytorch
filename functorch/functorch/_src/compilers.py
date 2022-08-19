@@ -1,18 +1,24 @@
-import torch
-import torch.fx as fx
-import torch.nn as nn
-from functools import partial
-from typing import Callable, Optional, Tuple, Union
-
-from .aot_autograd import aot_function, aot_module, make_boxed_compiler
-from .decompositions import get_decompositions
-from .partitioners import draw_graph, min_cut_rematerialization_partition, default_partition
-from .compile_utils import strip_overloads
+import copy
+import logging
 import os
 import pickle
 import random
-import copy
-import logging
+from contextlib import contextmanager
+from functools import partial
+from typing import Callable, Optional, Tuple, Union
+
+import torch
+import torch.fx as fx
+import torch.nn as nn
+
+from .aot_autograd import aot_function, aot_module, make_boxed_compiler
+from .compile_utils import strip_overloads
+from .decompositions import get_decompositions
+from .partitioners import (
+    default_partition,
+    draw_graph,
+    min_cut_rematerialization_partition,
+)
 
 
 # These canonicalizations are needed here (and not decompositions), as the ops
@@ -25,8 +31,17 @@ def _canonicalize(fx_g):
     return fx_g
 
 
+@contextmanager
+def _disable_jit_autocast():
+    old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
+
+
 @make_boxed_compiler
-def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
+def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
 
@@ -40,32 +55,37 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
         Torch scripted model.
     """
 
-    strip_overloads(fx_g)
+    with _disable_jit_autocast():
+        strip_overloads(fx_g)
 
-    for node in fx_g.graph.nodes:
-        if (node.target == torch.ops.aten._to_copy and len(node.args) == 1
-           and len(node.kwargs) == 1 and 'dtype' in node.kwargs):
-            node.target = torch.ops.aten.to
+        for node in fx_g.graph.nodes:
+            if (
+                node.target == torch.ops.aten._to_copy
+                and len(node.args) == 1
+                and len(node.kwargs) == 1
+                and "dtype" in node.kwargs
+            ):
+                node.target = torch.ops.aten.to
 
-    for node in fx_g.graph.nodes:
-        new_kwargs = {}
-        for k, v in node.kwargs.items():
-            if isinstance(v, torch.device):
-                v = v.type
-            new_kwargs[k] = v
-        node.kwargs = new_kwargs
+        for node in fx_g.graph.nodes:
+            new_kwargs = {}
+            for k, v in node.kwargs.items():
+                if isinstance(v, torch.device):
+                    v = v.type
+                new_kwargs[k] = v
+            node.kwargs = new_kwargs
 
+        fx_g.graph.lint()
 
-    fx_g.graph.lint()
+        fx_g.recompile()
 
-    fx_g.recompile()
+        f = torch.jit.script(fx_g)
 
-    f = torch.jit.script(fx_g)
+        torch._C._jit_pass_remove_mutation(f.graph)
 
-    torch._C._jit_pass_remove_mutation(f.graph)
-
-    f = torch.jit.freeze(f.eval())
-    f = torch.jit.optimize_for_inference(f)
+        f = torch.jit.freeze(f.eval())
+        f = torch.jit.optimize_for_inference(f)
+        f(*inps)
     return f
 
 
@@ -127,19 +147,23 @@ default_decompositions = {
     aten.hardtanh,
     aten.hardswish,
     aten.hardsigmoid,
-    aten.conj_physical
+    aten.conj_physical,
+    aten.is_same_size,
 }
 
 default_decompositions = get_decompositions(default_decompositions)
 
 
+@make_boxed_compiler
 def print_compile(fx_g, _):
     print(fx_g.code)
     return fx_g
 
 
 def memory_efficient_fusion(
-    fn: Union[Callable, nn.Module], static_argnums: Optional[Tuple[int]] = None, **kwargs
+    fn: Union[Callable, nn.Module],
+    static_argnums: Optional[Tuple[int]] = None,
+    **kwargs,
 ):
     """
     Wrapper function over :func:`aot_function` and :func:`aot_module` to perform
@@ -217,7 +241,7 @@ def get_inputs(input_data_path):
     Return a random input for the given inputs meta generated from _save_fx_default.
     """
     inputs = []
-    with (open(input_data_path, 'rb')) as f:
+    with (open(input_data_path, "rb")) as f:
         inputs_meta = pickle.load(f)
         inputs = []
         for meta in inputs_meta:
@@ -226,7 +250,16 @@ def get_inputs(input_data_path):
                 input = type(random.rand())
             else:
                 type, shape, stride, dtype, device = meta
-                if dtype in {torch.int, torch.int32, torch.int64, torch.bool, torch.int, torch.uint8, int, float}:
+                if dtype in {
+                    torch.int,
+                    torch.int32,
+                    torch.int64,
+                    torch.bool,
+                    torch.int,
+                    torch.uint8,
+                    int,
+                    float,
+                }:
                     input = torch.randint(0, 1, shape, dtype=dtype, device=device)
                 else:
                     input = torch.rand(shape, dtype=dtype, device=device)
@@ -259,16 +292,21 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             input_meta += get_input_meta(args[1])
             return input_meta
         for arg in args:
-            if(type(arg) == int or type(arg) == float):
+            if type(arg) == int or type(arg) == float:
                 input_meta.append((type(arg),))
             else:
-                input_meta.append((type(arg), arg.shape, arg.stride(), arg.dtype, arg.device))
+                input_meta.append(
+                    (type(arg), arg.shape, arg.stride(), arg.dtype, arg.device)
+                )
         return input_meta
 
     def graph_saver_helper(gm_to_save, args, type_name):
         global graph_index
         if len(gm_to_save.graph.nodes) == 0:
-            logging.log(logging.WARNING, f"No nodes in graph {current_name}_{type_name}_{graph_index}.")
+            logging.log(
+                logging.WARNING,
+                f"No nodes in graph {current_name}_{type_name}_{graph_index}.",
+            )
             return
 
         gm = copy.deepcopy(gm_to_save)
@@ -280,10 +318,21 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         isExist = os.path.exists(f"{folder_name}/{current_name}")
         if not isExist:
             os.makedirs(f"{folder_name}/{current_name}")
-        gm.to_folder(f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}")
-        pickle.dump(input_meta, open(f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input", "wb"))  # noqa: E501
+        gm.to_folder(
+            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
+        )
+        pickle.dump(
+            input_meta,
+            open(
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",  # noqa: B950
+                "wb",
+            ),
+        )  # noqa: E501
         if dump_example_input:
-            torch.save(args, f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt")  # noqa: E501
+            torch.save(
+                args,
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
+            )  # noqa: E501
 
     def graph_saver_forward(gm, fw_args):
         graph_saver_helper(gm, fw_args, "forward")
@@ -299,10 +348,13 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         graph_saver_helper(gm, joint_args, "joint")
         return default_partition(gm, joint_args)
 
-    return aot_module_simplified(gm, fw_compiler=graph_saver_forward,
-                                 bw_compiler=graph_saver_backward,
-                                 partition_fn=graph_saver_joint,
-                                 decompositions=default_decompositions)
+    return aot_module_simplified(
+        gm,
+        fw_compiler=graph_saver_forward,
+        bw_compiler=graph_saver_backward,
+        partition_fn=graph_saver_joint,
+        decompositions=default_decompositions,
+    )
 
 
 def graph_dumper_aot(current_name, folder_name, dump_example_input=False):
