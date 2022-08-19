@@ -303,7 +303,7 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     AT_DISPATCH_INDEX_TYPES(source_idx.scalar_type(), NAME,
         // Windows does not seem to like these nested captures without explicit names.
-        [&iter, &selected_source, &selected_probably_coalesced, argsort_hash, sdim]() {
+        [&iter, &selected_source, &selected_probably_coalesced, argsort_hash]() {
         auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
         auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
         const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
