@@ -4974,6 +4974,11 @@
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
+# TODO: this function will be replaced once nested expand semantics have been settled on
+- func: _nested_sum_backward(Tensor grad, Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
+  dispatch:
+    NestedTensorCPU: _nested_sum_backward_cpu
+
 - func: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
