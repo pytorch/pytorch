@@ -1237,11 +1237,14 @@ def cudnn_batch_norm_backward(
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
+    # NB: these no-op views force this operator to return a
+    # fresh TensorImpl, which is important for autograd to
+    # work correctly (assert will fail if you don't do it)
     if self.dim() <= 1:
-        return self
+        return self.view(self.shape)
 
     if dim0 == dim1:
-        return self
+        return self.view(self.shape)
     perm = list(range(self.dim()))
     perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
     return torch.permute(self, perm)
