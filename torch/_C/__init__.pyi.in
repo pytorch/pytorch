@@ -261,6 +261,11 @@ def _jit_pass_insert_quant_dequant(module: 'torch.jit.ScriptModule',
                                    inplace: _bool,
                                    debug: _bool,
                                    quant_type: _int): ...
+def _jit_pass_insert_quant_dequant_for_ondevice_ptq(module: 'torch.jit.ScriptModule',
+                                   method_name: str,
+                                   inplace: _bool,
+                                   debug: _bool,
+                                   quant_type: _int): ...
 def _jit_pass_quant_finalize(module: 'torch.jit.ScriptModule',
                              quant_type: _int,
                              preserved_attrs: Sequence[str]): ...
