@@ -112,7 +112,11 @@ static inline void allocate_workspace() {
   constexpr size_t nnpack_memory_alignment_boundary = 64;
 
   // Won't work on Windows, but NNPACK doesn't support Windows either
-  posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
+  int err = posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
+  TORCH_CHECK(
+      err == 0,
+      "Failed to allocate " workspace_size, " bytes of workspace for NNPack. Error code"
+      err, " (", strerror(err), ")");
 }
 
 Tensor _nnpack_spatial_convolution(

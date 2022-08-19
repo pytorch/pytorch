@@ -199,7 +199,7 @@ serialize::InputArchive& operator>>(
   class Name : public torch::nn::ModuleHolder<ImplType> { /* NOLINT */ \
    public:                                                             \
     using torch::nn::ModuleHolder<ImplType>::ModuleHolder;             \
-    using Impl = ImplType;                                             \
+    using Impl C10_UNUSED = ImplType;                                  \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `ImplType` name to `<Name>Impl`.
