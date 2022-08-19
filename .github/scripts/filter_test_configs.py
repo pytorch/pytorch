@@ -38,10 +38,10 @@ def get_labels(pr_number: int) -> Set[str]:
     )
 
     if response.status_code != requests.codes.ok:
-        warnings.warn(f"Failed to get the labels for #{pr_number} with status code {response.status_code}")
+        warnings.warn(f"Failed to get the labels for #{pr_number} (status code {response.status_code})")
         return set()
 
-    return {label.get("name", "") for label in response.json()}
+    return {label.get("name") for label in response.json() if label.get("name")}
 
 
 def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, List[Any]]:
