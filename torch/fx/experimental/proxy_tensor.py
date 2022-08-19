@@ -470,11 +470,12 @@ class ProxySymDispatchMode(SymDispatchMode):
         import operator
         mapped = {
             operator.mul: torch.ops.math.mul,
-            operator.eq: torch.ops.math.eq
+            operator.eq: torch.ops.math.eq,
+            operator.gt: torch.ops.math.gt,
         }
         if func not in mapped:
             print(func)
-            assert False
+            raise RuntimeError(f"Don't support {func} on symints")
 
         n_out = self.tracer.create_node("call_function", mapped[func], n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
