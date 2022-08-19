@@ -380,6 +380,29 @@ fourOutputs linalg_lstsq_batch_rule(
   return std::make_tuple(std::get<0>(res), 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
 }
 
+std::tuple<Tensor, c10::optional<int64_t>>
+matrix_rank_batch_rule(const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
+                      const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
+                      const c10::optional<int64_t> rtol_bdim, bool hermitian) {
+  auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
+  int64_t atol_logical_rank = atol.has_value() ? rankWithoutBatchDim(*atol, atol_bdim) : 0;
+  int64_t rtol_logical_rank = rtol.has_value() ? rankWithoutBatchDim(*rtol, rtol_bdim) : 0;
+  auto max_logical_rank = std::max({input_logical_rank, atol_logical_rank, rtol_logical_rank});
+
+  TORCH_CHECK(input_logical_rank >= 2,
+            "torch.linalg.matrix_rank: The input tensor input must have at least 2 dimensions.");
+
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  auto atol_ = atol.has_value() ? moveBatchDimToFront(*atol, atol_bdim) : atol;
+  auto rtol_ = rtol.has_value() ? moveBatchDimToFront(*rtol, rtol_bdim) : rtol;
+
+  input_ = maybePadToLogicalRank(input_, input_bdim, max_logical_rank);
+  atol_ = atol_.has_value() ? maybePadToLogicalRank(*atol_, atol_bdim, max_logical_rank) : atol_;
+  rtol_ = rtol_.has_value() ? maybePadToLogicalRank(*rtol_, rtol_bdim, max_logical_rank) : rtol_;
+
+  return std::make_tuple(at::linalg_matrix_rank(input_, atol_, rtol_, hermitian), 0);
+}
+
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
   LinalgCheckMatrixUnaryRuleHelper<\
     func_string_##fn,\
@@ -493,6 +516,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
+  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_tensor, matrix_rank_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
