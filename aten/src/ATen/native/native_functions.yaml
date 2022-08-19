@@ -3609,6 +3609,11 @@
     SparseCUDA: sparse_mask_helper_cuda
   autogen: _sparse_mask_helper.out
 
+- func: spmm_sum(Tensor rowptr, Tensor col, Tensor? optional_value, Tensor mat) -> Tensor
+  variants: function
+  dispatch:
+    CPU: spmm_sum_cpu
+
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
