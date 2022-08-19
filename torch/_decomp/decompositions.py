@@ -971,13 +971,13 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean : Tensor = prims.convert_element_type(running_mean, computation_dtype)
-        running_var : Tensor = prims.convert_element_type(running_var, computation_dtype)
-        mean = running_mean
-        invstd = 1 / (torch.sqrt(running_var + eps))
+        running_mean_promoted : Tensor = prims.convert_element_type(running_mean, computation_dtype)
+        running_var_promoted : Tensor = prims.convert_element_type(running_var, computation_dtype)
+        mean = running_mean_promoted
+        invstd = 1 / (torch.sqrt(running_var_promoted + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type != "cpu":
-            save_mean = running_mean
+            save_mean = running_mean_promoted
             save_rstd = invstd
         else:
             save_mean = input.new_zeros((0,))
