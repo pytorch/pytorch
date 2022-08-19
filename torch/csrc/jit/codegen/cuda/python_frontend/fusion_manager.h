@@ -93,8 +93,6 @@ class TORCH_CUDA_CU_API FusionManager {
 
   //! Gets a pointer to the singleton and creates a new one if necessary
   static FusionManager* get(size_t max_fusions);
-  //! Resets the singleton and effectively the cache
-  static void reset();
   //! Executes a fusion if the current cache pointer points at a terminal node
   std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
   //! Prints the nvFuser IR if the current cache pointer is a terminal node

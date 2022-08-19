@@ -556,7 +556,7 @@ struct EndRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const EndRecord*>(&other)) {
+    if (dynamic_cast<const EndRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
     }
     return result;
@@ -919,7 +919,7 @@ struct StartRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const StartRecord*>(&other)) {
+    if (dynamic_cast<const StartRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
     }
     return result;

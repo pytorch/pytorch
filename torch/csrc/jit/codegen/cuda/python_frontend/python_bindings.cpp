@@ -45,7 +45,6 @@ void initNvFuserPythonBindings(PyObject* module) {
           &nvfuser::FusionManager::get,
           py::arg("max_fusions") = int(4096),
           py::return_value_policy::reference)
-      .def_static("reset", &nvfuser::FusionManager::reset)
       .def(
           "execute",
           [](nvfuser::FusionManager& self, const py::iterable& iter) {

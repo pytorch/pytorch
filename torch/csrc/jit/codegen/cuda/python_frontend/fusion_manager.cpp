@@ -23,12 +23,6 @@ FusionManager* FusionManager::get(size_t max_fusions) {
   }
   return singleton_;
 }
-void FusionManager::reset() {
-  if (singleton_ != nullptr) {
-    delete singleton_;
-    singleton_ = nullptr;
-  }
-}
 
 FusionManager::FusionManager(size_t max_fusions)
     : max_fusions_(max_fusions),
@@ -48,7 +42,7 @@ void FusionManager::printIr() const {
 c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) const {
   auto cache_entry = fusionCachePtr()->record_hash_map.find(rec);
-  if (cache_entry == std::end(fusion_cache_ptr_->record_hash_map)) {
+  if (cache_entry == std::end(fusionCachePtr()->record_hash_map)) {
     return c10::nullopt;
   } else {
     if (cache_entry->second) {
@@ -80,7 +74,11 @@ void FusionManager::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
 }
 void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
-  fusion_cache_ptr_ = fusionCachePtr()->record_hash_map[rec].get();
+  auto cache_entry = fusionCachePtr()->record_hash_map.find(rec);
+  TORCH_CHECK(cache_entry != std::end(fusionCachePtr()->record_hash_map),
+      "Cache Entry for Cache Traverse is not found!");
+  TORCH_CHECK(cache_entry->second, "Record in Cache Entry is null!");
+  fusion_cache_ptr_ = cache_entry->second.get();
 }
 
 FusionCacheEntry* FusionManager::fusionCachePtr() const {
