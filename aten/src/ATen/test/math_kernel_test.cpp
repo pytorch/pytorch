@@ -114,6 +114,7 @@ TEST(MathKernelTest, MishBackward) {
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
+#if 0
 TEST(MathKernelTest, NarrowCopy)  {
   auto x = rand({5, 8, 7});
   for (const auto dim : c10::irange(3)) {
@@ -123,6 +124,7 @@ TEST(MathKernelTest, NarrowCopy)  {
     ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
   }
 }
+#endif
 
 TEST(MathKernelTest, Bmm)  {
   auto test_bmm = [](int64_t last_dim) {

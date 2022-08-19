@@ -923,12 +923,8 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
-Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return self.narrow_copy(dim, start, sym_length.expect_int());
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -3114,9 +3110,14 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view(const Tensor& self,
+Tensor view_symint(const Tensor& self,
             at::SymIntArrayRef size) {
   return view_impl(self, c10::asIntArrayRefSlow(size));
+}
+
+Tensor view(const Tensor& self,
+            at::IntArrayRef size) {
+  return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {

@@ -1123,6 +1123,16 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
+Tensor& zeros_concrete_out(IntArrayRef size, Tensor& result) {
+  if (result.is_sparse()) {
+    result.sparse_resize_and_clear_(size, size.size(), 0.);
+    return result;
+  } else {
+    result.resize_(size);
+  }
+  return result.zero_();
+}
+
 Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
   auto size = c10::asIntArrayRefSlow(sym_size);
   if (result.is_sparse()) {

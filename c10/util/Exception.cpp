@@ -83,6 +83,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const std::string& msg) {
+  std::cerr << msg;
   throw ::c10::Error({func, file, line}, msg);
 }
 
