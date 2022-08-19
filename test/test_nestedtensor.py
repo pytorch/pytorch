@@ -1539,6 +1539,59 @@ class TestNestedTensorAutograd(TestCase):
         assert b.grad is None
         assert c.grad is None
 
+    def test_nested_tensor_slicing(self):
+        # Create NT with one regular dimension, one jagged dimension
+        x = torch.nested_tensor([
+            torch.randn(2, 8),
+            torch.randn(3, 8),
+            torch.randn(4, 8)
+        ])
+
+        # Error case: slicing NT dimension 0
+        with self.assertRaisesRegex(RuntimeError, 'Nested tensor dimension 0 cannot be sliced'):
+            x.narrow(0, 1, 2)
+
+        with self.assertRaisesRegex(RuntimeError, 'Nested tensor dimension 0 cannot be sliced'):
+            x.chunk(2)
+
+        # Error case: slicing jagged dimension
+        with self.assertRaisesRegex(RuntimeError, 'dimension 1 is irregular'):
+            x.narrow(1, 1, 2)
+
+        with self.assertRaisesRegex(RuntimeError, 'dimension 1 is irregular'):
+            x.chunk(2, dim=1)
+
+        # Success case: slicing regular dimension
+        NUM_CHUNKS = 4
+        CHUNK_SIZE = x.size(-1) // NUM_CHUNKS
+        output = x.chunk(NUM_CHUNKS, dim=2)
+        self.assertEqual(len(output), NUM_CHUNKS)
+        for chunk_idx, nt_chunk in enumerate(output):
+            self.assertTrue(nt_chunk.is_nested)
+
+            # Ensure same number of underlying tensor components
+            self.assertEqual(nt_chunk.dim(), x.dim())
+            self.assertEqual(nt_chunk.dim(), x.dim())
+
+            for i, component in enumerate(nt_chunk):
+                # Compare to manual slicing
+                start = chunk_idx * CHUNK_SIZE
+                end = start + CHUNK_SIZE
+                expected = x[i][:, start:end]
+                self.assertEqual(component, expected)
+
+
+        # Success case: chunking empty NT results in N chunks of original shape
+        empty = torch.nested_tensor([
+            torch.randn(0, 2),
+            torch.randn(0, 3),
+        ])
+        output = empty.chunk(NUM_CHUNKS, dim=1)
+        self.assertEqual(len(output), NUM_CHUNKS)
+        for nt_chunk in output:
+            self.assertEqual(nt_chunk.numel(), 0)
+            for i, component in enumerate(nt_chunk):
+                self.assertEqual(empty[i].shape, component.shape)
 
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

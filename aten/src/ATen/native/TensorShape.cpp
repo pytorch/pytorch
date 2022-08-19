@@ -2088,33 +2088,12 @@ Tensor slice(
   dim = maybe_wrap_dim(dim, ndim);
   DimVector sizes(self.sizes().begin(), self.sizes().end());
   DimVector strides(self.strides().begin(), self.strides().end());
-  // handle optional parameters
-  int64_t start_val = start.has_value() ? start.value() : 0;
-  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
 
-  // INT64_MAX stands for default value.
-  if (start_val == INT64_MAX) {
-    start_val = 0;
-  }
-  if (start_val < 0) {
-    start_val += sizes[dim];
-  }
-  if (end_val < 0) {
-    end_val += sizes[dim];
-  }
-  if (start_val < 0) {
-    start_val = 0;
-  } else if (start_val >= sizes[dim]) {
-    start_val = sizes[dim];
-  }
-  if (end_val < start_val) {
-    end_val = start_val;
-  } else if (end_val >= sizes[dim]) {
-    end_val = sizes[dim];
-  }
+  int64_t start_val, end_val;
+  std::tie(start_val, end_val) = get_slice_range(start, end, sizes[dim]);
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
   sizes[dim] = (len + step - 1) / step; // round-up

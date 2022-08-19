@@ -6,6 +6,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/layer_norm.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorMath.h>
@@ -1196,32 +1197,7 @@ Tensor slice_nested(
   // will error if the dimension is jagged
   auto dim_size = self.size(dim);
 
-  // handle optional parameters
-  int64_t start_val = start.has_value() ? start.value() : 0;
-  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-
   TORCH_CHECK(step > 0, "slice step must be positive");
-
-  // INT64_MAX stands for default value.
-  if (start_val == INT64_MAX) {
-    start_val = 0;
-  }
-  if (start_val < 0) {
-    start_val += dim_size;
-  }
-  if (end_val < 0) {
-    end_val += dim_size;
-  }
-  if (start_val < 0) {
-    start_val = 0;
-  } else if (start_val >= dim_size) {
-    start_val = dim_size;
-  }
-  if (end_val < start_val) {
-    end_val = start_val;
-  } else if (end_val >= dim_size) {
-    end_val = dim_size;
-  }
 
   auto* nt_impl = get_nested_tensor_impl(self);
   const int64_t ntensors = nt_impl->size(0);
@@ -1237,6 +1213,8 @@ Tensor slice_nested(
 
   // account for the implicit batch dim
   --dim;
+  int64_t start_val, end_val;
+  std::tie(start_val, end_val) = get_slice_range(start, end, dim_size);
   auto len = end_val - start_val;
   for (int64_t i = 0; i < ntensors; i++) {
     int64_t *size_ptr = new_sizes[i].data_ptr<int64_t>();

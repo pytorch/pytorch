@@ -51,6 +51,38 @@ inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t di
   return num_splits;
 }
 
+inline std::tuple<int64_t, int64_t> get_slice_range(
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    const int64_t dim_size) {
+
+  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+
+  // INT64_MAX stands for default value.
+  if (start_val == INT64_MAX) {
+    start_val = 0;
+  }
+  if (start_val < 0) {
+    start_val += dim_size;
+  }
+  if (end_val < 0) {
+    end_val += dim_size;
+  }
+  if (start_val < 0) {
+    start_val = 0;
+  } else if (start_val >= dim_size) {
+    start_val = dim_size;
+  }
+  if (end_val < start_val) {
+    end_val = start_val;
+  } else if (end_val >= dim_size) {
+    end_val = dim_size;
+  }
+
+  return std::make_tuple(start_val, end_val);
+}
+
 ///
 /// For more information, see
 /// https://pytorch.org/docs/master/generated/torch.Tensor.unfold.html#torch.Tensor.unfold
