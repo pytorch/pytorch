@@ -29,6 +29,8 @@ prim = torch.ops.prim
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
+CONSTANT_NUMEL_LIMIT = 1
+
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -237,7 +239,11 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     constant = None
     # NB: do NOT include factories as constants
-    if all_constant and any_constant:
+    if (
+        all_constant
+        and any_constant
+        and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
+    ):
         with maybe_disable_fake_tensor_mode():
             const_args, const_kwargs = pytree.tree_map_only(
                 _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
@@ -407,7 +413,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             # constant, so we keep a copy of the original argument along so
             # we can query it if we're asked to item() it at some later point
             is_lift = func_overload is torch.ops.aten.lift_fresh_copy.default
-            if is_lift:
+            if is_lift and out.numel() <= CONSTANT_NUMEL_LIMIT:
                 with maybe_disable_fake_tensor_mode():
                     constant = args[0].clone()
             else:
