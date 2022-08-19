@@ -2,7 +2,6 @@ from functools import wraps, partial
 from itertools import product, chain, islice
 import itertools
 import functools
-import collections
 import copy
 import operator
 import random
@@ -12,7 +11,6 @@ import math
 import torch
 import numpy as np
 from torch._six import inf
-import collections.abc
 
 from typing import Any, Dict, List, Sequence, Tuple, Union
 from torch.testing import make_tensor
@@ -122,7 +120,6 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_lu,
 )
 from torch.testing._internal.opinfo.definitions.special import (
-    sample_inputs_entr,
     sample_inputs_i0_i1,
     sample_inputs_polygamma,
     reference_polygamma,
