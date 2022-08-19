@@ -1,4 +1,4 @@
-from torch.dispatch._dispatcher import dispatcher_singleton, to_flat_tuple, has_torch_function, compute_keyset
+from torch.dispatch.dispatcher import dispatcher_singleton, to_flat_tuple, has_torch_function, compute_keyset
 from torch._C import DispatchKey, DispatchKeySet
 from torch.nn.functional import handle_torch_function
 
