@@ -121,7 +121,7 @@ from torch.ao.quantization.fx.custom_config import (
     StandaloneModuleConfigEntry,
 )
 
-from torch.ao.quantization.fx.qconfig_utils import (
+from torch.ao.quantization.fx.qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
