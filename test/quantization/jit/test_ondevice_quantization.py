@@ -22,6 +22,8 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 
+from torch.jit.mobile import _load_for_lite_interpreter
+
 from torch.testing import FileCheck
 
 import io
@@ -418,6 +420,17 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         output = m.quantized_forward(*inputs)
         self.assertTrue(torch.allclose(ref_output, output))
 
+        ## check for lite interpreter
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        m = _load_for_lite_interpreter(buffer)  # Error here
+        m.run_method("reset_observers_forward")
+        m.run_method("observe_forward", *inputs)
+        m.run_method("quantize_forward", *inputs)
+        output = m.run_method("quantized_forward", *inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+
         model.eval()
         inputs = model.get_example_inputs()
         ref_m = torch.jit.script(model)
@@ -440,6 +453,17 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         m.observe_forward(*inputs)
         m.quantize_forward(*inputs)
         output = m.quantized_forward(*inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+
+        ## check for lite interpreter
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        m = _load_for_lite_interpreter(buffer)  # Error here
+        m.run_method("reset_observers_forward")
+        m.run_method("observe_forward", *inputs)
+        m.run_method("quantize_forward", *inputs)
+        output = m.run_method("quantized_forward", *inputs)
         self.assertTrue(torch.allclose(ref_output, output))
 
 
