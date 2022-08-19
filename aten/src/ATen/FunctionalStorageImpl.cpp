@@ -2,6 +2,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <vector>
 
@@ -94,9 +95,8 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
       c10::StorageImpl::use_byte_size_t(),
       value.numel() * value.dtype().itemsize(),
       DataPtr{nullptr, value.device()},
-      // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
-      nullptr,
-      /*resizeable=*/false
+      GetAllocator(kMeta),
+      /*resizeable=*/true
     ),
     alias_(Alias(value))
   {}

@@ -3393,6 +3393,26 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index_tensor
     """)
 
+    def test_resize_program_inputs(self, device):
+        def f(x):
+            x.resize_(10)
+            x.fill_(2)
+
+        fn = make_fx(functionalize(f))
+        out = fn(torch.zeros(0, device=device))
+        out = normalize_devices(out)
+        self.assertExpectedInline((out.code), """\
+
+
+
+def forward(self, x_1):
+    resize_default = torch.ops.aten.resize.default(x_1, [10])
+    fill_scalar = torch.ops.aten.fill.Scalar(resize_default, 2);  resize_default = None
+    resize__default = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None
+    copy__default = torch.ops.aten.copy_.default(resize__default, fill_scalar);  resize__default = fill_scalar = None
+    return None
+    """)
+
 
 
 only_for = ("cpu", "cuda")
