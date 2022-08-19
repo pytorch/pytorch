@@ -752,7 +752,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
-        if True:
+        if test_filename not in ['test_nn', 'test_fake_tensor', 'test_cpp_api_parity', 'test_jit_cuda_fuser', 'test_reductions',
+                                 'test_cuda', 'test_indexing', 'test_fx_backends', 'test_linalg', 'test_cpp_extensions_jit',
+                                 'test_torch', 'test_tensor_creation_ops', 'test_sparse_csr', 'test_dispatch']:
             # exclude linux cuda tests because we run into memory issues when running in parallel
             import pytest
             os.environ["NO_COLOR"] = "1"
