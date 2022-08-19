@@ -88,6 +88,22 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     }
 
     // Add a cache entry and check methods
+    fm->createFusionCacheEntry(test_record);
+
+    try {
+      auto cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      ASSERT_FALSE(cache_entry_ptr == c10::nullopt);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "An unexpected assert on cache lookup!";
+    }
+
+    try {
+      fm->traverseFusionCache(test_record);
+      SUCCEED();
+    } catch (...) {
+      FAIL() << "An unexpected assert during Cache Traverse!";
+    } 
   }
 }
 
