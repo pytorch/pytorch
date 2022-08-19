@@ -235,11 +235,7 @@ class TestNestedTensor(TestCase):
 
         # Test non_contiguous case
         assert not nt_noncontiguous.is_contiguous()
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"clone_nested only supports memory format Preserve, but got Contiguous instead.",
-            lambda: nt_noncontiguous.contiguous()
-        )
+        self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
     @torch.inference_mode()
     def test_repr_string(self):
@@ -494,7 +490,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[-1], x1)
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
-        self.assertRaises(NotImplementedError, lambda: nt[:])
+        self.assertRaisesRegex(RuntimeError, "Nested tensor dimension 0 cannot be sliced", lambda: nt[:])
         self.assertRaises(NotImplementedError, lambda: nt[None])
         self.assertRaises(NotImplementedError, lambda: nt[...])
         # tuple of indices: only support integer in the batch dimension
@@ -503,7 +499,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[0, 1, :], x0[1, :])
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
-        self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
+        self.assertRaisesRegex(RuntimeError, "Nested tensor dimension 0 cannot be sliced", lambda: nt[:, 1, 1])
         # make sure indexing returns a view
         nt[0].fill_(100.0)
         answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
@@ -669,7 +665,7 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertNotEqual(ub1[i], ub2[i])
 
         nt1.clone(memory_format=torch.preserve_format)
-        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        msg = "nested tensor clone supports"
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
