@@ -1302,7 +1302,7 @@ class TestDistributions(DistributionsTestCase):
 
         # sample check for extreme value of probs
         self.assertEqual(Multinomial(total_count, s).sample(),
-                         torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float))
+                         torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64))
 
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
