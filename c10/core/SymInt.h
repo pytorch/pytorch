@@ -4,7 +4,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-
 #include <memory>
 
 namespace c10 {
@@ -116,6 +115,10 @@ class C10_API SymInt {
 
   int64_t as_int_unchecked() const {
     return data_;
+  }
+
+  void unsafeReset() {
+    data_ = 0;
   }
 
   // Return whether the integer is representable as a SymInt.

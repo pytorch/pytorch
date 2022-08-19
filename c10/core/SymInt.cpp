@@ -1,7 +1,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
-
 namespace c10 {
 
 std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
