@@ -888,7 +888,7 @@ class TestDistributions(DistributionsTestCase):
     def _check_enumerate_support(self, dist, examples):
         for params, expected in examples:
             params = {k: torch.tensor(v) for k, v in params.items()}
-            expected = torch.tensor(expected)
+            expected = torch.tensor(expected, dtype=torch.float64)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
             self.assertEqual(actual, expected)
@@ -1302,7 +1302,7 @@ class TestDistributions(DistributionsTestCase):
 
         # sample check for extreme value of probs
         self.assertEqual(Multinomial(total_count, s).sample(),
-                                   torch.tensor([[total_count, 0], [0, total_count]], dtype=torchfloat))
+                                   torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float))
 
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
