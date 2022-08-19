@@ -86,15 +86,6 @@ def _binary_helper(fn, args, kwargs, inplace):
             "Input masks must match. If you need support for this, please open an issue on Github."
         )
 
-    if (
-        is_masked_tensor(args[0])
-        and is_masked_tensor(args[1])
-        and args[0].layout() != args[1].layout()
-    ):
-        raise ValueError(
-            "Inputs should match sparsity/density. If you need support this, please open an issue on Github."
-        )
-
     data_args, data_kwargs = _map_mt_args_kwargs(
         args, kwargs, lambda x: x.get_data()
     )
@@ -102,11 +93,8 @@ def _binary_helper(fn, args, kwargs, inplace):
         args, kwargs, lambda x: x.get_mask()
     )
 
-    args0_layout = args[0].layout() if is_masked_tensor(args[0]) else args[0].layout
-    same_layout = (
-        (is_masked_tensor(args[1]) and args[1].layout() != args0_layout)
-        or (torch.is_tensor(args[1]) and args[1].layout != args0_layout)
-    )
+    args0_layout = data_args[0].layout
+    same_layout = args0_layout == data_args[1].layout
 
     if args0_layout == torch.sparse_coo:
         if same_layout:
