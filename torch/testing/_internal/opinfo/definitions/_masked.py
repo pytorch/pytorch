@@ -471,8 +471,7 @@ op_db: List[OpInfo] = [
         supports_sparse=True,
         supports_sparse_csr=True,
         promotes_int_to_int64=True,
-        # FIXME: "prod_cpu" not implemented for 'BFloat16'
-        # FIXME: "prod_cpu" not implemented for 'Half'
+        # FIXME: "prod_cpu" not implemented for 'Half' or 'BFloat16'
         dtypes=all_types_and_complex_and(torch.bool),
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.float16, torch.bfloat16
@@ -506,11 +505,7 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 device_type="cuda",
-                dtypes=(
-                    torch.bool,
-                    *integral_types(),
-                    *complex_types(),
-                ),
+                dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
         ),
         decorators=[
@@ -615,11 +610,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestMasked",
                 "test_mask_layout",
-                dtypes=(
-                    torch.bool,
-                    *integral_types(),
-                    *complex_types(),
-                ),
+                dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -658,13 +649,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestMasked",
                 "test_mask_layout",
-                dtypes=(
-                    torch.bool,
-                    *integral_types(),
-                    *complex_types(),
-                    torch.complex64,
-                    torch.complex128,
-                ),
+                dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -785,11 +770,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestMasked",
                 "test_mask_layout",
-                dtypes=(
-                    torch.bool,
-                    *integral_types(),
-                    *complex_types(),
-                ),
+                dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
         ),
         decorators=[
