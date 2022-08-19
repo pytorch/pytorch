@@ -293,6 +293,48 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
   return std::make_tuple(at::matrix_exp(self_), 0);
 }
 
+ fourOutputs solve_ex_batch_rule(
+    const Tensor& A, optional<int64_t> A_bdim,
+    const Tensor& B, optional<int64_t> B_bdim,
+    bool left, bool check_errors) {
+  auto batch_size = get_bdim_size2(A, A_bdim, B, B_bdim);
+  const auto A_logical_rank = rankWithoutBatchDim(A, A_bdim);
+  const auto B_logical_rank = rankWithoutBatchDim(B, B_bdim);
+  const auto max_logical_rank = std::max(A_logical_rank, B_logical_rank);
+
+  TORCH_CHECK(A_logical_rank >= 2,
+            "linalg.solve: The input tensor A must have at least 2 dimensions.");
+
+  int b_logical_rank = max_logical_rank;
+  if (A_logical_rank > B_logical_rank) {  // vector case: B was a vector or batched vector
+    // not accurate but matches linalg error message
+    TORCH_CHECK(B_logical_rank >= 1, "linalg.solve: The input tensor B must have at least 2 dimensions.");
+    b_logical_rank = max_logical_rank - 1;
+  } else {  // matrix case: A and B are both matrices or batches of matrices
+    TORCH_CHECK(B_logical_rank >= 2, "linalg.solve: The input tensor B must have at least 2 dimensions.");
+  }
+
+  // basically binary pointwise helper but if B was a vector incoming, we must pad it to be 1 dim smaller than A
+  auto A_ = moveBatchDimToFront(A, A_bdim);
+  auto B_ = moveBatchDimToFront(B, B_bdim);
+  A_ = maybePadToLogicalRank(A_, A_bdim, max_logical_rank);
+  B_ = maybePadToLogicalRank(B_, B_bdim, b_logical_rank);
+
+  A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
+  B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
+
+  // NOTE [ solve_ex Batch Rule Contiguity ]
+  // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
+  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
+  // differs based on whether or not the optimized path was taken
+  const auto batched_A_was_contiguous = A_bdim.has_value() ? at::select(A, *A_bdim, 0).is_contiguous() : A.is_contiguous();
+  if (batched_A_was_contiguous && !A.is_complex()) {
+    A_ = A_.contiguous();
+  }
+  const auto res = _linalg_solve_ex(A_, B_, left, check_errors);
+  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
+}
+
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
   LinalgCheckMatrixUnaryRuleHelper<\
     func_string_##fn,\
@@ -403,6 +445,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
+  VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
