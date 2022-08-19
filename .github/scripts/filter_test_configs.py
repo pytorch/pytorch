@@ -9,6 +9,24 @@ import warnings
 
 CIFLOW_PREFIX = "ciflow/"
 
+# Same as shard names
+VALID_TEST_CONFIG_LABELS = {f"{CIFLOW_PREFIX}{label}" for label in {
+    "backwards_compat",
+    "crossref",
+    "default",
+    "deploy",
+    "distributed",
+    "docs_tests",
+    "dynamo",
+    "force_on_cpu",
+    "functorch",
+    "jit_legacy",
+    "multigpu",
+    "nogpu_AVX512",
+    "nogpu_NO_AVX2",
+    "slow",
+    "xla",
+}}
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -45,6 +63,17 @@ def get_labels(pr_number: int) -> Set[str]:
 
 
 def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, List[Any]]:
+    """
+    Select the list of test config to run from the test matrix. The logic works
+    as follows:
+
+    If the PR has one or more labels as specified in the VALID_TEST_CONFIG_LABELS set, only
+    these test configs will be selected.  Note that regular ciflow labels like ciflow/trunk
+    don't count here, only test configs.
+
+    If the PR has none of the ciflow label, all tests are run as usual.
+    """
+
     filtered_test_matrix: Dict[str, List[Any]] = {
         "include": []
     }
@@ -59,8 +88,16 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
             print(f"Select {config_name} because label {label} is presented in the pull request by the time the test starts")
             filtered_test_matrix["include"].append(entry)
 
-    # If no matching label is found, the default is to run everything as normal
-    return filtered_test_matrix if filtered_test_matrix["include"] else test_matrix
+    valid_test_config_labels = labels.intersection(VALID_TEST_CONFIG_LABELS)
+
+    if filtered_test_matrix["include"] or valid_test_config_labels:
+        # When the filter test matrix contain matches or if a valid test config label
+        # is found in the PR, return the filtered test matrix
+        return filtered_test_matrix
+    else:
+        # Found no valid label, return the same test matrix as before so that all
+        # tests can be run normally
+        return test_matrix
 
 
 def main() -> None:

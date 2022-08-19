@@ -4,7 +4,7 @@ import os
 import yaml
 import json
 from unittest import TestCase, main, mock
-from filter_test_configs import get_labels, filter, CIFLOW_PREFIX
+from filter_test_configs import get_labels, filter, CIFLOW_PREFIX, VALID_TEST_CONFIG_LABELS
 import requests
 from requests.models import Response
 from typing import Any, Dict
@@ -39,7 +39,7 @@ class TestConfigFilter(TestCase):
         self.assertFalse(labels)
 
     def test_filter(self) -> None:
-        mocked_labels = {f"{CIFLOW_PREFIX}foo", "bar"}
+        mocked_labels = {f"{CIFLOW_PREFIX}cfg", f"{CIFLOW_PREFIX}trunk", "cfg-no-ciflow"}
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
@@ -47,15 +47,31 @@ class TestConfigFilter(TestCase):
                 "description": "No match, keep the same test matrix",
             },
             {
-                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "bar"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "bar"}]}',
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg-no-ciflow"}]}',
+                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "cfg-no-ciflow"}]}',
                 "description": "No match because there is no ciflow prefix, keep the same test matrix",
             },
             {
-                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "foo", dummy: true}]}',
-                "expected": '{"include": [{"config": "foo", "dummy": true}]}',
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", shard: 1}]}',
+                "expected": '{"include": [{"config": "cfg", "shard": 1}]}',
                 "description": "Found a match, only keep that",
             },
+        ]
+
+        for case in testcases:
+            filtered_test_matrix = filter(yaml.safe_load(case["test_matrix"]), mocked_labels)
+            self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+    def test_filter_with_valid_label(self) -> None:
+        mocked_labels = {f"{CIFLOW_PREFIX}cfg", f"{CIFLOW_PREFIX}trunk"}
+        VALID_TEST_CONFIG_LABELS.add(f"{CIFLOW_PREFIX}cfg")
+
+        testcases = [
+            {
+                "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
+                "expected": '{"include": []}',
+                "description": "Found a valid label in the PR body, return the filtered test matrix",
+            }
         ]
 
         for case in testcases:
