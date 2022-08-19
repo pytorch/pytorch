@@ -129,6 +129,7 @@ struct AllocFreeEvent {
       false; // if served with a new block after freeing one cached block of
              // sufficient size
   bool defrag = false; // if allocated after defragmentation
+  bool planned = false; // if allocated after defragmentation
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);

@@ -670,7 +670,9 @@ static void bindGetAllocFreeEvents(PyObject* module) {
           &c10::cuda::CUDACachingAllocator::AllocFreeEvent::
               served_by_new_block_retry)
       .def_readwrite(
-          "defrag", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::defrag);
+          "defrag", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::defrag)
+      .def_readwrite(
+          "planned", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::planned);
   m.def(
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,
