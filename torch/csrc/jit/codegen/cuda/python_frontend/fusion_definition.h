@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
@@ -13,7 +14,7 @@ class FusionManager;
 //! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
 
-const char* dtypeToPyString(Nvf::DataType t);
+TORCH_CUDA_CU_API const char* dtypeToPyString(Nvf::DataType t);
 
 //! The State, child classes Tensor and Scalar, and the StateType enum
 //! are used to define state objects to encapsulate the recording of state
@@ -66,7 +67,7 @@ struct Scalar : State {
 //!
 //! Example:
 //!   help(FusionDefinition.Operators)
-class FusionDefinition {
+class TORCH_CUDA_CU_API FusionDefinition {
  public:
   FusionDefinition(FusionManager* fusion_manager, size_t max_length);
 

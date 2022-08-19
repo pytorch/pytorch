@@ -1,4 +1,3 @@
-#ifdef USE_CUDA
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
@@ -106,5 +105,3 @@ Nvf::Fusion* FusionManager::fusionPtr() const {
 }
 
 } // namespace nvfuser
-
-#endif // USE_CUDA

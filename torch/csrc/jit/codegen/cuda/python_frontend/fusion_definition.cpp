@@ -1,4 +1,3 @@
-#ifdef USE_CUDA
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
@@ -165,5 +164,3 @@ void FusionDefinition::setFusionState(size_t index, Nvf::Val* val) {
 }
 
 } // namespace nvfuser
-
-#endif // USE_CUDA

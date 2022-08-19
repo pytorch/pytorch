@@ -1,8 +1,10 @@
 #pragma once
-#include <memory>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
+
+#include <memory>
 
 //! nvFuser Fusion IR namespace abbreviation
 namespace Nvf = torch::jit::fuser::cuda;
@@ -15,7 +17,7 @@ struct RecordFunctor;
 //! \brief Is the container for a Node in the cache contained in the
 //! FusionManager that is organized as a prefix tree.
 
-struct FusionCacheEntry {
+struct TORCH_CUDA_CU_API FusionCacheEntry {
   FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
   FusionCacheEntry();
 
@@ -77,7 +79,7 @@ struct FusionCacheEntry {
 //! \todo Add the ability to evict a fusion.  There is currently a max number
 //! of fusions that is checked to prevent a runaway case.
 
-class FusionManager {
+class TORCH_CUDA_CU_API FusionManager {
   //! The constructor is private given the FusionManager is only constructed
   //! as a singleton.
   FusionManager(size_t max_fusions);
