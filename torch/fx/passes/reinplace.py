@@ -1,5 +1,4 @@
 import torch
-from torch._C import _get_torch_dispatch_mode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
@@ -111,7 +110,6 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
     def propagate(self, *args):
         self.multi_output_view_nodes = {}
         self.node_counter = -1
-        curr_mode = _get_torch_dispatch_mode()
 
         with FakeTensorMode(allow_meta=True) as mode:
             fake_args = [mode.from_tensor(a) for a in args]
