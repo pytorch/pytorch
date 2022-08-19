@@ -9,8 +9,9 @@ examine their input shapes and stack traces, study device kernel activity and vi
 '''
 from .profiler import profile, _KinetoProfile, \
     schedule, supported_activities, tensorboard_trace_handler, ProfilerAction, \
-    _ExperimentalConfig, ExecutionGraphObserver
-from torch._C._autograd import ProfilerActivity, kineto_available, _supported_activities, DeviceType
+    ExecutionGraphObserver
+from torch._C._autograd import kineto_available, _supported_activities, DeviceType
+from torch._C._profiler import ProfilerActivity, _ExperimentalConfig
 from torch.autograd.profiler import record_function
 
 __all__ = ['profile', 'schedule', 'supported_activities',
