@@ -390,15 +390,15 @@ This module implements the quantized versions of the nn layers such as
     InstanceNorm2d
     InstanceNorm3d
 
-torch.nn.quantized.functional
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized.functional
+torch.ao.nn.quantized.functional
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.quantized.functional
 
 This module implements the quantized versions of the functional layers such as
 ~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
 :meth:`~torch.nn.functional.relu` supports quantized inputs.
 
-.. currentmodule:: torch.nn.quantized.functional
+.. currentmodule:: torch.ao.nn.quantized.functional
 
 .. autosummary::
     :toctree: generated

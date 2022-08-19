@@ -325,6 +325,10 @@ def match_differentiability_info(
     def find_info(
         f: NativeFunction,
     ) -> Tuple[Optional[Dict[str, DifferentiabilityInfo]], bool]:
+        # Don't bother matching info to generated out= variants
+        if "generated" in f.tags and f.func.kind() == SchemaKind.out:
+            return None, False
+
         # (1) Check for an exact match
         if f.func in differentiability_infos:
             return differentiability_infos[f.func], True
