@@ -87,9 +87,7 @@ class FlatParamShardMetadata(NamedTuple):
 # later
 class HandleShardingStrategy(Enum):
     FULL_SHARD = auto()
-    SHARD_GRAD_OP = (
-        auto()
-    )
+    SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
 
 
@@ -998,8 +996,14 @@ class FlatParamHandle:
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
-            for (param_name, module, module_name, _, _, _)
-            in self.flat_param._shared_param_infos
+            for (
+                param_name,
+                module,
+                module_name,
+                _,
+                _,
+                _,
+            ) in self.flat_param._shared_param_infos
         ]
         for param_name, _, module_name in chain(
             self.flat_param._param_infos, shared_param_infos
