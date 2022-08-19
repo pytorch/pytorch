@@ -197,7 +197,7 @@ class TestProfilerTree(TestCase):
                     raise
 
     @ProfilerTree.test
-    def test_profiler_experimental_tree(self):
+    def test_profiler_experimental_tree_force_enable(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile() as p:
             z = torch.add(t1, t2)
@@ -250,7 +250,7 @@ class TestProfilerTree(TestCase):
         )
 
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_record_function(self):
+    def test_profiler_experimental_tree_force_enable_with_record_function(self):
         with torch.profiler.profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
                 with torch.autograd.profiler.record_function("First Annotation"):
@@ -316,7 +316,7 @@ class TestProfilerTree(TestCase):
         )
 
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_memory(self):
+    def test_profiler_experimental_tree_force_enable_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(profile_memory=True) as p:
             z = torch.add(t1, t2)
@@ -389,7 +389,7 @@ class TestProfilerTree(TestCase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_memory_and_stack(self):
+    def test_profiler_experimental_tree_force_enable_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
             z = torch.add(t1, t2)
@@ -400,7 +400,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(...): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(...): test_profiler_experimental_tree_force_enable_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 ...
               <built-in method add of type object at 0xXXXXXXXXXXXX>
@@ -488,7 +488,7 @@ class TestProfilerTree(TestCase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_stack_and_modules(self):
+    def test_profiler_experimental_tree_force_enable_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -511,7 +511,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(...): test_profiler_experimental_tree_force_enable_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 ...
               <built-in method ones of type object at 0xXXXXXXXXXXXX>
@@ -611,7 +611,7 @@ class TestProfilerTree(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda(self):
+    def test_profiler_experimental_tree_force_enable_cuda(self):
         with torch.profiler.profile(profile_memory=True) as p:
             weight = torch.ones(1, device="cuda", requires_grad=True)
             x = torch.ones(1, device="cuda")
@@ -708,7 +708,7 @@ class TestProfilerTree(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_with_stream(self):
+    def test_profiler_experimental_tree_force_enable_cuda_with_stream(self):
         streams = [torch.cuda.Stream() for _ in range(3)]
         results = []
         with torch.profiler.profile(profile_memory=True) as p:
@@ -766,7 +766,7 @@ class TestProfilerTree(TestCase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_detailed(self):
+    def test_profiler_experimental_tree_force_enable_cuda_detailed(self):
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -787,7 +787,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(...): test_profiler_experimental_tree_cuda_detailed
+            test_profiler_tree.py(...): test_profiler_experimental_tree_force_enable_cuda_detailed
               torch/profiler/profiler.py(...): __enter__
                 ...
               test_profiler_tree.py(...): step
