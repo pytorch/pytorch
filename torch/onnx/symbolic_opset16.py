@@ -20,7 +20,6 @@ Updated operators:
     Where
     GreaterOrEqual
     LessOrEqual
-    SequenceMap
 """
 
 # EDITING THIS FILE? READ THIS FIRST!
