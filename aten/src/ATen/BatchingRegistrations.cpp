@@ -186,6 +186,7 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 }
 
 Tensor expand_symint_batching_rule(const Tensor& self, SymIntArrayRef psize, bool implicit) {
+  // TODO: properly support this
   return self.expand(asIntArrayRefSlow(psize), implicit);
 }
 
@@ -469,6 +470,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor view_symint_batching_rule(const Tensor& self, c10::SymIntArrayRef size) {
+  // TODO: properly support this
   return self.view(asIntArrayRefSlow(size));
 }
 
@@ -1009,6 +1011,7 @@ Tensor new_empty_symint_batching_rule(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  // TODO: properly support this
   return new_empty_batching_rule(self, asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
