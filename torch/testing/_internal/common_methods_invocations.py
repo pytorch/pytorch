@@ -16296,6 +16296,11 @@ op_db: List[OpInfo] = [
                    ),
                    # lgamma have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
+    OpInfo('multigammaln',
+           dtypes=floating_and_complex_types(),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     OpInfo(
         'logdet',
         dtypes=floating_and_complex_types(),
