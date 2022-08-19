@@ -15,6 +15,7 @@
 namespace torch {
 namespace jit {
 
+#if ENABLE_FLATBUFFERS
 Module parse_and_initialize_jit_module(
     std::shared_ptr<char> data,
     size_t size,
@@ -84,6 +85,8 @@ void save_jit_module_to_write_func(
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
 }
+
+#endif
 
 } // namespace jit
 } // namespace torch

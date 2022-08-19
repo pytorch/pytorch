@@ -699,6 +699,7 @@ def get_pt_operator_registry_dict(
         template_select = True,
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
+        enable_flatbuffer = False,
         **kwargs):
     code_gen_files = pt_operator_query_codegen(
         name,
@@ -738,7 +739,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":flatbuffers_mobile"]),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 

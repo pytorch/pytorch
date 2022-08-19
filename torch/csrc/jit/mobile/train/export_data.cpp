@@ -132,9 +132,16 @@ void _save_parameters(
   };
 
   if (use_flatbuffer) {
+#if ENABLE_FLATBUFFERS
     save_mobile_module_to_func(
       mobile::tensor_dict_to_mobile(dict), write_func
     );
+#else
+    TORCH_CHECK(
+        false,
+        "ENABLE_FLATBUFFERS is configured as false but _save_parameters gets use_flatbuffer=True. "
+        "It's an intermediate stage and ENABLE_FLATBUFFERS=True will be rulled out as True very soon. ");
+#endif
   } else {
     // For Pickle, we only serialize the dict itself.
     mobile::IValuePickler pickler(write_func);

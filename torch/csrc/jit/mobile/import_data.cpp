@@ -248,9 +248,16 @@ std::map<std::string, at::Tensor> _load_parameters_bytes(
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
+#if USE_FLATBUFFERS
       auto m = parse_flatbuffer_no_object(data, size, device);
       map = mobile_module_to_parameter_map(m);
       break;
+#else
+    TORCH_CHECK(
+        false,
+        "ENABLE_FLATBUFFERS is configured as false but _load_parameters_bytes gets use_flatbuffer=True. "
+        "It's an intermediate stage and ENABLE_FLATBUFFERS=True will be rulled out as True very soon. ");
+#endif
     }
 
     case FileFormat::ZipFileFormat: {

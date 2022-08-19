@@ -449,8 +449,15 @@ Module _load_jit_module_from_bytes(
   auto format = getFileFormat(data.get());
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
+#if ENABLE_FLATBUFFERS
       return parse_and_initialize_jit_module(
             data, size, extra_files, device);
+#else
+    TORCH_CHECK(
+        false,
+        "ENABLE_FLATBUFFERS is configured as false but _save_parameters gets use_flatbuffer=True. "
+        "It's an intermediate stage and ENABLE_FLATBUFFERS=True will be rulled out as True very soon. ");
+#endif
     }
     case FileFormat::ZipFileFormat: {
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);

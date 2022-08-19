@@ -886,9 +886,16 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
+#if USE_FLATBUFFERS
     save_jit_module_to_write_func(
           module, extra_files, save_mobile_debug_info, writer_func
     );
+#else
+    TORCH_CHECK(
+        false,
+        "ENABLE_FLATBUFFERS is configured as false but ExportModule gets use_flatbuffer=True. "
+        "It's an intermediate stage and ENABLE_FLATBUFFERS=True will be rulled out as True very soon. ");
+#endif
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);

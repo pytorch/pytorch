@@ -173,6 +173,7 @@ TEST(MobileTest, SaveParametersDefaultsToZip) {
   EXPECT_EQ(ss_data.str()[3], '\x04');
 }
 
+#if USER_FLATBUFFERS
 TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   // Save some empty parameters using flatbuffer.
   std::map<std::string, at::Tensor> empty_parameters;
@@ -188,7 +189,9 @@ TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   EXPECT_EQ(ss_data.str()[6], 'M');
   EXPECT_EQ(ss_data.str()[7], 'F');
 }
+#endif
 
+#if USER_FLATBUFFERS
 TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
   // Create some simple parameters to save.
   std::map<std::string, at::Tensor> input_params;
@@ -219,6 +222,7 @@ TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
         output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
   }
 }
+#endif
 
 TEST(MobileTest, LoadParametersUnexpectedFormatShouldThrow) {
   // Manually create some data that doesn't look like a ZIP or Flatbuffer file.

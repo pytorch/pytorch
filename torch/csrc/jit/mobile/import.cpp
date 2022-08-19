@@ -608,11 +608,13 @@ mobile::Module _load_mobile_from_bytes(
       return _load_for_mobile_impl(
           std::move(rai), device, extra_files, module_load_options);
     }
+#if ENABLE_FLATBUFFERS
     case FileFormat::FlatbufferFileFormat: {
       return parse_and_initialize_mobile_module(
         data, size, device, &extra_files
       );
     }
+#endif
     default: {
       TORCH_CHECK(false, "Format error");
     }

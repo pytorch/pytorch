@@ -28,9 +28,9 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 // Tests go in torch::jit
+#if ENABLE_FLATBUFFERS
 namespace torch {
 namespace jit {
-
 namespace {
 mobile::Module parse_mobile_module(
     void* data,
@@ -1796,6 +1796,7 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 
 } // namespace jit
 } // namespace torch
+
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 namespace torch {
 namespace jit {
@@ -1915,6 +1916,6 @@ TEST(FlatbufferTest, DetachedBufferNullOwner) {
 // Do not add tests here unless they require flatbuffers types. See comment at
 // the beginning of this section.
 //
-
 } // namespace jit
 } // namespace torch
+#endif

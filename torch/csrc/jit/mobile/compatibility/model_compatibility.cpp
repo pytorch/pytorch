@@ -112,7 +112,14 @@ uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
   auto format = getFileFormat(data);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
+#if USE_FLATBUFFERS
       return get_bytecode_version_from_bytes(data);
+#else
+    TORCH_CHECK(
+        false,
+        "ENABLE_FLATBUFFERS is configured as false but _get_model_bytecode_version_from_bytes gets use_flatbuffer=True. "
+        "It's an intermediate stage and ENABLE_FLATBUFFERS=True will be rulled out as True very soon. ");
+#endif
     }
     case FileFormat::ZipFileFormat: {
       auto rai =
