@@ -1059,15 +1059,15 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 # Combine checks from both the PR and land validation to get a holistic view of all checks. This helps us cover the corner case where
-# certain workflows may have been requested on the PR but are not part of land validation (e.g. nightly builds) or are implicitly run on PRs 
-# but not on land validation branches (like CLA Checks).  
+# certain workflows may have been requested on the PR but are not part of land validation (e.g. nightly builds) or are implicitly run on PRs
+# but not on land validation branches (like CLA Checks).
 # At the same time, we prioritize the signal workflows which do run on land validation. E.g. if a workflow fails on the PR but passes on land validation
 # then we'd use the successful result from the land validation.
 def get_combined_checks_from_pr_and_land_validation(pr: GitHubPR, land_check_commit: str) -> Dict[str, Tuple[str, str]]:
   pr_checks = pr.get_checkrun_conclusions()
   land_validation_checks = get_land_checkrun_conclusions(pr.org, pr.project, land_check_commit) if land_check_commit else {}
 
-  # Merge the two checks together. Land validation check results (if any) overwrite pr check results 
+  # Merge the two checks together. Land validation check results (if any) overwrite pr check results
   merged_checks = dict(pr_checks, **land_validation_checks) # explanation: https://stackoverflow.com/a/9819617
 
   return merged_checks
