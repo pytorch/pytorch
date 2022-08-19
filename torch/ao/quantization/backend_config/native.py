@@ -1,4 +1,3 @@
-from typing import List
 import torch
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
@@ -111,16 +110,17 @@ def get_test_only_legacy_native_backend_config() -> BackendConfig:
         weight_only_quint8_dtype_config,
         weight_only_quint4x2_dtype_config,
     ]
-    return _get_native_backend_config_helper(
-        "_native_and_fp16",
-        conv_dtype_configs,
-        linear_dtype_configs,
-        binary_op_dtype_configs,
-        default_op_dtype_configs,
-        fixed_qparams_op_dtype_configs,
-        share_qparams_op_dtype_configs,
-        rnn_op_dtype_configs,
-        embedding_op_dtype_configs)
+    return BackendConfig("_native_and_fp16") \
+        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs)) \
+        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
 
 def get_native_backend_config() -> BackendConfig:
     """
@@ -145,31 +145,7 @@ def get_native_backend_config() -> BackendConfig:
         weight_only_quint8_dtype_config,
         weight_only_quint4x2_dtype_config,
     ]
-    return _get_native_backend_config_helper(
-        "native",
-        conv_dtype_configs,
-        linear_dtype_configs,
-        binary_op_dtype_configs,
-        default_op_dtype_configs,
-        fixed_qparams_op_dtype_configs,
-        share_qparams_op_dtype_configs,
-        rnn_op_dtype_configs,
-        embedding_op_dtype_configs)
-
-def _get_native_backend_config_helper(
-        name: str,
-        conv_dtype_configs: List[DTypeConfig],
-        linear_dtype_configs: List[DTypeConfig],
-        binary_op_dtype_configs: List[DTypeConfig],
-        default_op_dtype_configs: List[DTypeConfig],
-        fixed_qparams_op_dtype_configs: List[DTypeConfig],
-        share_qparams_op_dtype_configs: List[DTypeConfig],
-        rnn_op_dtype_configs: List[DTypeConfig],
-        embedding_op_dtype_configs: List[DTypeConfig]) -> BackendConfig:
-    """
-    Helper method to return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack).
-    """
-    return BackendConfig(name) \
+    return BackendConfig("native") \
         .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs)) \
         .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
         .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
