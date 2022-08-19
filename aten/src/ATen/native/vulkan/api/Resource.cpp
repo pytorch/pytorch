@@ -515,6 +515,7 @@ VkSampler SamplerCache::retrieve(const SamplerCache::Key& key) {
 }
 
 void SamplerCache::purge() {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
   cache_.clear();
 }
 
