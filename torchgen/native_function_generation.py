@@ -340,7 +340,7 @@ def generate_function(
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
-            tags=set(["generated"]),
+            tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
             namespace=f.namespace,
         ),
         backend_metadata,
