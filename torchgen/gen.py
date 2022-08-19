@@ -179,7 +179,13 @@ def parse_native_yaml_struct(
             # Which dispatch keys natively support symint
             # Note: DispatchKey.CompositeExplicitAutograd has to match out
             # composites; I think there's some factoring problem here
-            symint=k in [DispatchKey.Meta, DispatchKey.CompositeImplicitAutograd, DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeExplicitAutogradNonFunctional],
+            symint=k
+            in [
+                DispatchKey.Meta,
+                DispatchKey.CompositeImplicitAutograd,
+                DispatchKey.CompositeExplicitAutograd,
+                DispatchKey.CompositeExplicitAutogradNonFunctional,
+            ],
         )
     return ParsedYaml(rs, indices)
 
@@ -974,7 +980,9 @@ def dynamic_type(t: Type) -> str:
     if str(t) == "Tensor":
         return "at::Tensor"
     # This is a legacy concept, so never report SymInt
-    return cpp.argumenttype_type(t, mutable=False, binds="__placeholder__", symint=False).cpp_type()
+    return cpp.argumenttype_type(
+        t, mutable=False, binds="__placeholder__", symint=False
+    ).cpp_type()
 
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:

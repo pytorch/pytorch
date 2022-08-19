@@ -2474,7 +2474,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
     const auto layout = p_node->Input(2).toOptional<c10::Layout>();
     if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
       // TODO fix
-      //p_node->Output(0) = at::zeros(size, dtype, layout);
+      // p_node->Output(0) = at::zeros(size, dtype, layout);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();

@@ -187,7 +187,7 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 
 Tensor expand_symint_batching_rule(const Tensor& self, SymIntArrayRef psize, bool implicit) {
   // TODO: properly support this
-  return self.expand(asIntArrayRefSlow(psize), implicit);
+  return expand_batching_rule(self, asIntArrayRefSlow(psize), implicit);
 }
 
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {

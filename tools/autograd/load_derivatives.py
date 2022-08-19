@@ -184,7 +184,9 @@ def create_derivative(
     ]
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r, symint=True).remove_const_ref() for r in f.func.returns)
+    return_types = tuple(
+        cpp.return_type(r, symint=True).remove_const_ref() for r in f.func.returns
+    )
 
     named_returns = [
         NamedCType(name, type) for name, type in zip(return_names, return_types)

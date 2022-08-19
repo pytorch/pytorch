@@ -849,7 +849,9 @@ def gen_variable_type_func(
             if not fn.info:
                 key = "Default"
                 type_definition = METHOD_DEFINITION.substitute(
-                    return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
+                    return_type=cpp.returns_type(
+                        f.func.returns, symint=True
+                    ).cpp_type(),
                     type_wrapper_name=type_wrapper_name(f, key),
                     type_definition_body=emit_body(fn, key),
                     formals=formals,
@@ -860,7 +862,9 @@ def gen_variable_type_func(
             else:
                 for key, _ in fn.info.items():
                     type_definition = METHOD_DEFINITION.substitute(
-                        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
+                        return_type=cpp.returns_type(
+                            f.func.returns, symint=True
+                        ).cpp_type(),
                         type_wrapper_name=type_wrapper_name(f, key),
                         type_definition_body=emit_body(fn, key),
                         formals=formals,

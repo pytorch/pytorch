@@ -64,7 +64,12 @@ from torchgen.utils import assert_never
 # collisions, but functions are fair game to collide
 
 
-def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False, symint_overload: bool = False) -> str:
+def name(
+    func: FunctionSchema,
+    *,
+    faithful_name_for_out_overloads: bool = False,
+    symint_overload: bool = False,
+) -> str:
     name = str(func.name.name)
     if symint_overload:
         name += "_symint"
@@ -118,11 +123,19 @@ def valuetype_type(
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
-    t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False, symint: bool
+    t: Type,
+    *,
+    mutable: bool,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool,
 ) -> NamedCType:
     # If it's a value type, do the value type translation
     r = valuetype_type(
-        t, binds=binds, symint=symint, remove_non_owning_ref_types=remove_non_owning_ref_types
+        t,
+        binds=binds,
+        symint=symint,
+        remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
         return r
@@ -403,7 +416,12 @@ def argument(
 
 
 def arguments(
-    arguments: Arguments, *, faithful: bool, symint: bool, method: bool, cpp_no_default_args: Set[str]
+    arguments: Arguments,
+    *,
+    faithful: bool,
+    symint: bool,
+    method: bool,
+    cpp_no_default_args: Set[str],
 ) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if faithful:

@@ -307,7 +307,13 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  at::Tensor t = empty(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory, c10::nullopt);
+  at::Tensor t = empty(
+      c10::SymIntArrayRef::fromIntArrayRef(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      c10::nullopt);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
@@ -404,7 +410,8 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   TORCH_INTERNAL_ASSERT(false, "NYI");
-  //return LazyNativeFunctions::view_copy(self, at::SymIntArrayRef::fromIntArrayRef(size));
+  // return LazyNativeFunctions::view_copy(self,
+  // at::SymIntArrayRef::fromIntArrayRef(size));
 }
 
 // This is needed by the torch.tensor constructor.

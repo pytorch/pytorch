@@ -646,7 +646,10 @@ inline IValue argumentToIValue(
     py::handle object) {
   const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.real_type() ? argument.real_type() : argument.type(), argument.N());
+    return toIValue(
+        object,
+        argument.real_type() ? argument.real_type() : argument.type(),
+        argument.N());
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(

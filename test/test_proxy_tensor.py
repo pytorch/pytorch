@@ -666,7 +666,7 @@ class TestSymbolicTracing(TestCase):
 def forward(self, a_1):
     size = a_1.size(0);  a_1 = None
     mul = size * 2;  size = None
-    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     size_1 = empty.size(0)
     return empty""")
 

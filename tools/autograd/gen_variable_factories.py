@@ -97,7 +97,9 @@ def process_function(f: NativeFunction) -> Optional[str]:
                 # it is ignored anyways (and we actually have an assertion that it isn't set
                 # which would fail otherwise). We handle requires_grad explicitly here
                 # instead of passing it through to the kernel.
-                exprs.append(f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)")
+                exprs.append(
+                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                )
                 # Manually set the requires_grad bit on the result tensor.
                 requires_grad = f"{arg.name}.requires_grad()"
             else:

@@ -52,7 +52,9 @@ def name(func: FunctionSchema) -> str:
     return name
 
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, symint: bool) -> NamedCType:
+def argumenttype_type(
+    t: Type, *, mutable: bool, binds: ArgName, symint: bool
+) -> NamedCType:
     if str(t) == "Tensor?":
         tensor_type: OptionalCType = OptionalCType(BaseCType(tensorT))
         if mutable and not local.use_const_ref_for_mutable_tensors():
@@ -79,7 +81,10 @@ def argument_type(a: Argument, *, binds: ArgName, symint: bool) -> NamedCType:
 
 
 def argument(
-    a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool, symint: bool
+    a: Union[Argument, SelfArgument, TensorOptionsArguments],
+    *,
+    is_out: bool,
+    symint: bool,
 ) -> List[Binding]:
     # Ideally, we NEVER default native functions.  However, there are a number
     # of functions that call native:: directly and rely on the defaulting
@@ -143,4 +148,6 @@ def arguments(func: FunctionSchema, *, symint: bool) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(func.arguments.non_out)
     args.extend(func.arguments.out)
-    return [r for arg in args for r in argument(arg, symint=symint, is_out=func.is_out_fn())]
+    return [
+        r for arg in args for r in argument(arg, symint=symint, is_out=func.is_out_fn())
+    ]

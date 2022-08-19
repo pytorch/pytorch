@@ -540,7 +540,9 @@ def gen_differentiable_outputs(
         DifferentiableOutput(
             # TODO: symint=False is probably wrong; autograd entries should
             # be dealing in symint
-            name=name, type=ret.type, cpp_type=cpp.return_type(ret, symint=False).cpp_type()
+            name=name,
+            type=ret.type,
+            cpp_type=cpp.return_type(ret, symint=False).cpp_type(),
         )
         for name, ret in zip(cpp.return_names(f), f.func.returns)
     ]

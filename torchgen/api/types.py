@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Sequence, Set, TypeVar, Union, Iterator
+from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
 from torchgen.model import (
     Argument,
@@ -444,7 +444,11 @@ class CppSignature:
         )
 
     def name(self) -> str:
-        n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful, symint_overload=self.symint)
+        n = cpp.name(
+            self.func,
+            faithful_name_for_out_overloads=self.faithful,
+            symint_overload=self.symint,
+        )
         if self.fallback_binding:
             n = f"__dispatch_{n}"
         return n
@@ -457,7 +461,9 @@ class CppSignature:
         prefix: str = "",
         is_redispatching_fn: bool = False,
     ) -> str:
-        returns_type = cpp.returns_type(self.func.returns, symint=self.symint).cpp_type()
+        returns_type = cpp.returns_type(
+            self.func.returns, symint=self.symint
+        ).cpp_type()
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ["c10::DispatchKeySet dispatchKeySet"] + cpp_args
@@ -475,7 +481,9 @@ class CppSignature:
         prefix: str = "",
         is_redispatching_fn: bool = False,
     ) -> str:
-        returns_type = cpp.returns_type(self.func.returns, symint=self.symint).cpp_type()
+        returns_type = cpp.returns_type(
+            self.func.returns, symint=self.symint
+        ).cpp_type()
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ["c10::DispatchKeySet dispatchKeySet"] + cpp_args
@@ -527,7 +535,7 @@ class CppSignatureGroup:
     ) -> "CppSignatureGroup":
         func = f.func
 
-        def make_sigs(symint: bool):
+        def make_sigs(symint: bool) -> Tuple[CppSignature, Optional[CppSignature]]:
             faithful_signature: Optional[CppSignature]
             if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
                 faithful_signature = CppSignature(
