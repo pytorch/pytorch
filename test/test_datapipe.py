@@ -278,7 +278,7 @@ class TestIterableDataPipeBasic(TestCase):
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
     def test_iterdatapipe_set_length(self):
-        datapipe = dp.iter.IterableWrapper(range(10))
+        datapipe: IterDataPipe = dp.iter.IterableWrapper(range(10))
 
         # Functional Test: results are expected prior to `set_length()`
         self.assertEqual(list(range(10)), list(datapipe))
@@ -287,6 +287,17 @@ class TestIterableDataPipeBasic(TestCase):
         # Functional Test: ensure only length changes after `set_length()`, not the content
         datapipe.set_length(20)
         self.assertEqual(list(range(10)), list(datapipe))
+        self.assertEqual(20, len(datapipe))
+
+
+        # Functional Test: raises `TypeError` when the underlying DataPipe doesn't have `__len__` and
+        #                  `set_length` has not been used
+        datapipe = dp.iter.IterableWrapper(range(10)).filter(lambda _: True)
+        with self.assertRaises(TypeError):
+            len(datapipe)
+
+        # Functional Test: no error after `set_length` has been used
+        datapipe.set_length(20)
         self.assertEqual(20, len(datapipe))
 
     def test_listdirfiles_iterable_datapipe(self):
