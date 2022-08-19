@@ -181,7 +181,7 @@ def maybe_partition_graph(gm: GraphModule):
             )
         partitioned_graph = partitioner.fuse_partitions(partitions)
 
-        # Overwriting graph's fused submodules with a wrapper module with
+        # Replacing graph's fused submodules with a wrapper module with
         # __call__() method that calls nvfuser_execute.
         # This avoids the need to call the interpreter on the graph
         for node in partitioned_graph.graph.nodes:
