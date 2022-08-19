@@ -7212,22 +7212,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_TOO_HARD)
 
     def test_allow_tensor_metadata_change(self):
-        def do_test(t):
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_sizes_contiguous is not allowed on a Tensor created from .data or .detach()"):
-                t.resize_((2, 1))
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_storage is not allowed on a Tensor created from .data or .detach()"):
-                t.set_()
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_storage_offset is not allowed on a Tensor created from .data or .detach()"):
-                t.set_(t.storage(), 0, t.size(), list(t.stride()))
-
-        do_test(torch.tensor([[1, 2]]).data)
-        do_test(torch.tensor([[1, 2]]).detach())
+        a = torch.ones(2, 3)
+        # Metadata changes are allowed on view tensors that are created from detach().
 
     @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
     def test_c10_layer_norm(self):
