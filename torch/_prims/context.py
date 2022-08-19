@@ -181,7 +181,11 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     with torch.overrides.enable_torch_function_mode(
         torch_function_mode, replace=torch_function_mode.inner
     ):
-        gm = get_isolated_graphmodule(func, args, kwargs)
+        g = torch._C._AutoDispatchBelowAutograd()
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        finally:
+            del g
 
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
     any_unsupported = any(

@@ -51,6 +51,12 @@ def to_nvfuser_template_args(args):
     return tree_map(to_nvfuser, args)
 
 
+_skip_nvfuser_constant_conversion = [
+    torch.ops.nvprims.split_dim.default,
+    torch.ops.nvprims.collapse_view.default,
+]
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
@@ -77,6 +83,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         class FusionInterpreter(torch.fx.Interpreter):
             def call_function(self, target, args, kwargs):
+                if target in _skip_nvfuser_constant_conversion:
+                    return target.impl_nvfuser(fd, *args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
                 target = target.impl_nvfuser
                 args = (fd,) + args

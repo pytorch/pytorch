@@ -5,7 +5,7 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import torch
 
@@ -84,6 +84,9 @@ nvprim_names = [
     "var",
     "amax",
     "amin",
+    "split_dim",
+    "collapse_view",
+    "reshape",
 ]
 
 _nvfuser_impls: Dict[str, Any] = {}
@@ -199,6 +202,47 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
     )
 
 
+def _split_dim_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    a_shape: List[int],
+    dim: int,
+    outer_length: int,
+):
+    inner_length = a_shape[dim] // outer_length
+    new_shape = a_shape[0:dim] + [outer_length, inner_length] + a_shape[dim + 1 :]
+    return fd.ops.view(a, a_shape, new_shape)
+
+
+def _collapse_view_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    a_shape: List[int],
+    start: int,
+    end: int,
+):
+    dim_length = 1
+    for idx in range(start, end):
+        dim_length = dim_length * a_shape[idx]
+    new_shape = (
+        a_shape[0:start]
+        + [
+            dim_length,
+        ]
+        + a_shape[end:]
+    )
+    return fd.ops.view(a, a_shape, new_shape)
+
+
+def _reshape_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    a_shape: List[int],
+    new_shape: List[int],
+):
+    return fd.ops.view(a, a_shape, new_shape)
+
+
 def _broadcast_in_dim_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -253,6 +297,9 @@ def _amin_nvfuser(
 
 
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
+_nvfuser_impls["split_dim"] = _split_dim_nvfuser
+_nvfuser_impls["collapse_view"] = _collapse_view_nvfuser
+_nvfuser_impls["reshape"] = _reshape_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser

@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/complex.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 
@@ -162,6 +163,31 @@ struct BroadcastOpRecord : RecordFunctor {
   //! For instance, for output [2, 3, 4] and input [3]. This vector would
   //! contain [1].
   std::vector<int64_t> broadcast_dims_;
+};
+
+struct ViewOpRecord : RecordFunctor {
+  ViewOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int64_t>& original_sizes,
+      std::vector<int64_t>& new_sizes)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        original_sizes_(std::move(original_sizes)),
+        new_sizes_(std::move(new_sizes)) {}
+  virtual ~ViewOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto output =
+        torch::jit::fuser::cuda::view(arg, original_sizes_, new_sizes_);
+    fd.setFusionState(outputs.at(0), output);
+  }
+
+ private:
+  //! Represents the tensor dimensions of the input tensor.
+  std::vector<int64_t> original_sizes_;
+  //! Represents the tensor dimensions of the output tensor.
+  std::vector<int64_t> new_sizes_;
 };
 
 template <class OutType, class ArgType>
