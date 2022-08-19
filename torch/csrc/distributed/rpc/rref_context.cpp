@@ -110,6 +110,14 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
   if (jitFuture.hasError()) {
     auto errMsg = jitFuture.tryRetrieveErrorMessage();
     VLOG(1) << "Got exception: " << errMsg;
+    TORCH_CHECK(false, errMsg);
+  }
+}
+
+void RRefContext::handleExceptionSilent(const JitFuture& jitFuture) {
+  if (jitFuture.hasError()) {
+    auto errMsg = jitFuture.tryRetrieveErrorMessage();
+    VLOG(1) << "Got exception: " << errMsg;
     TORCH_CHECK_MSG(false, errMsg);
   }
 }
@@ -219,7 +227,7 @@ void RRefContext::delUser(
           RRefUserDelete(rrefId, forkId).toMessage());
 
       jitFuture->addCallback([this](JitFuture& future) {
-        handleException(future);
+        handleExceptionSilent(future);
         --numPendingFutures_;
       });
     }
@@ -507,7 +515,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     auto jitFuture = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
     jitFuture->addCallback([this](JitFuture& future) {
-      handleException(future);
+      handleExceptionSilent(future);
       --numPendingFutures_;
     });
   } else {
@@ -706,7 +714,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
   jitFuture->addCallback([this](JitFuture& future) {
-    handleException(future);
+    handleExceptionSilent(future);
     --numPendingFutures_;
   });
 }
