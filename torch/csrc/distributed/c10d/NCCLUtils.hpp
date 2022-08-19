@@ -21,22 +21,23 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
   if (processGroupFailureReason != c10::nullopt) {
     return (*processGroupFailureReason).c_str();
   }
+  std::string err = std::string(ncclGetLastError(NULL));
   switch (error) {
     case ncclUnhandledCudaError:
-      return "ncclUnhandledCudaError: Call to CUDA function failed.";
+      return std::string("ncclUnhandledCudaError: Call to CUDA function failed. Last error: " + err).c_str();
     case ncclSystemError:
-      return "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
-        "It can be also caused by unexpected exit of a remote peer, you can check NCCL warnings for failure reason and see if there is connection closure by a peer.";
+      return std::string("ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer. Last error: " + err).c_str();
     case ncclInternalError:
-      return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
+      return std::string("ncclInternalError: Internal check failed. Last error: " + err).c_str();
     case ncclInvalidArgument:
-      return "ncclInvalidArgument: Invalid value for an argument (such as invalid pointer, device count, ip:host pair, etc).";
+      return std::string("ncclInvalidArgument: Invalid value for an argument. Last error: " + err).c_str();
     case ncclInvalidUsage:
-      return "ncclInvalidUsage: This usually reflects invalid usage of NCCL library (such as too many async ops, too many collectives at once, mixing streams in a group, etc).";
+      return std::string("ncclInvalidUsage: This usually reflects invalid usage of NCCL library. Last error: " + err).c_str();
     default:
       break;
   }
-  return "Unknown NCCL error";
+  return std::string("Unknown NCCL error: " + err).c_str();
 }
 } // namespace
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
