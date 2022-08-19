@@ -1593,10 +1593,6 @@ def get_native_function_schema_registrations(
         if namespace == "aten":
             aten_schema_registrations = schema_registrations_body
         else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
@@ -2476,7 +2472,7 @@ def gen_source_files(
             + [
                 "\n".join(
                     f"#include <ATen/ops/{f.root_name}_ops.h>"
-                    for f in [g.inplace, g.mutable]
+                    for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions

@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -895,15 +895,18 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
@@ -2767,9 +2770,9 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     p.grad = grad
     opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
     opt = opt_class([p], **kwargs)
-    opt.state.update(opt_differentiable_state)
+    opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(opt_differentiable_state.values())
+    return (p,) + tuple(v for v in opt_differentiable_state.values() if v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2780,6 +2783,23 @@ class TestDifferentiableOptimizer(TestCase):
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
         gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
+    def test_adam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adam,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
 
 
 if __name__ == '__main__':
