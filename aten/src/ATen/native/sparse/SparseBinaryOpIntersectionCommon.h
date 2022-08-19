@@ -135,6 +135,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
   // non-const because of gcc-5/clang-5 issues
   auto sparse_dim = probably_coalesced.sparse_dim();
+  // non-const because of gcc-5/clang-5 issues
+  auto sdim = static_cast<uint32_t>(sparse_dim);
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
@@ -151,11 +153,11 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       .add_input(probably_coalesced_nnz_arange)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME, [&]() {
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME,
+        // Windows does not seem to like these nested captures without explicit names.
+        [&iter, &indices, &hash_coeffs, indices_dim_stride, indices_nnz_stride, sdim]() {
         const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
         const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
-        // non-const because of gcc-5/clang-5 issues
-        auto sdim = static_cast<uint32_t>(sparse_dim);
 
         KernelLauncher::launch(iter,
             // Windows does not seem to like these nested captures without explicit names.
@@ -215,15 +217,16 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       .add_input(source_arange)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(source_arange.scalar_type(), NAME, [&]() {
+    AT_DISPATCH_INDEX_TYPES(source_arange.scalar_type(), NAME,
+        // Windows does not seem to like these nested captures without explicit names.
+        [&iter, &source_indices, &sorted_hash, &hash_coeffs, &intersection_count, &intersection_first_idx,
+          indices_dim_stride, indices_nnz_stride, sdim]() {
         const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
         const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
         const auto sorted_hash_len = sorted_hash.numel();
         const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
         auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
-        // non-const because of gcc-5/clang-5 issues
-        auto sdim = static_cast<uint32_t>(sparse_dim);
 
         // Fusing hash computation with hash intersection.
         KernelLauncher::launch(iter,
@@ -298,7 +301,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       .add_input(shifted_offset) // offset_t
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(source_idx.scalar_type(), NAME, [&]() {
+    AT_DISPATCH_INDEX_TYPES(source_idx.scalar_type(), NAME,
+        // Windows does not seem to like these nested captures without explicit names.
+        [&iter, &selected_source, &selected_probably_coalesced, argsort_hash, sdim]() {
         auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
         auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
         const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();

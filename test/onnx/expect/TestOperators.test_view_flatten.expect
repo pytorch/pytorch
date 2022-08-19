@@ -22,6 +22,11 @@ graph {
     output: "8"
     name: "Reshape_1"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   name: "torch_jit"
   input {
@@ -64,5 +69,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }
