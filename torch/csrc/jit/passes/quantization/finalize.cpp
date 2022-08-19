@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
-#include "ATen/core/interned_strings.h"
 
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
