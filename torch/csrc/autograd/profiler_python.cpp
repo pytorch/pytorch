@@ -495,7 +495,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void stop() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)> time_converter,
-      std::vector<python_tracer::CompressedEvent>& enters) override;
+      std::vector<python_tracer::CompressedEvent>& enters,
+      time_t end_time_ns) override;
   void clear() override;
 
  private:
@@ -666,9 +667,9 @@ class PostProcess {
   PostProcess(
       std::function<time_t(approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
-      const ValueCache& value_cache)
-      : end_time_{time_converter(getApproximateTime())},
-        time_converter_{time_converter} {
+      const ValueCache& value_cache,
+      time_t end_time_ns)
+      : end_time_{end_time_ns}, time_converter_{time_converter} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);
@@ -790,9 +791,11 @@ struct PythonIDVisitor {
 
 std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     std::function<time_t(approx_time_t)> time_converter,
-    std::vector<python_tracer::CompressedEvent>& enters) {
+    std::vector<python_tracer::CompressedEvent>& enters,
+    time_t end_time_ns) {
   value_cache_.trimPrefixes();
-  PostProcess post_process(time_converter, thread_local_results_, value_cache_);
+  PostProcess post_process(
+      time_converter, thread_local_results_, value_cache_, end_time_ns);
   auto out = post_process.run(enters);
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {

@@ -399,7 +399,8 @@ struct TORCH_API PythonTracerBase {
   virtual void stop() = 0;
   virtual std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)> time_converter,
-      std::vector<CompressedEvent>& enters) = 0;
+      std::vector<CompressedEvent>& enters,
+      time_t end_time_ns) = 0;
   virtual void clear() = 0;
 };
 
