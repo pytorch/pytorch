@@ -47,6 +47,7 @@ ALLOW_LIST = [
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
+    ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -119,6 +120,7 @@ ALLOW_LIST = [
     ("aten::nanmean.out", datetime.date(2022, 8, 30)),
     ("aten::nansum", datetime.date(2022, 8, 30)),
     ("aten::nansum.out", datetime.date(2022, 8, 30)),
+    ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]

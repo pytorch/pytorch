@@ -15,6 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -23,11 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
 )
 
 from torch.testing._internal.common_device_type import ops
-from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
@@ -55,8 +55,14 @@ except ImportError:
 
 # NB: numpy is a testing dependency!
 
+class AOTTestCase(TestCase):
+    def setUp(self):
+        super().setUp()
+        # NB: We cache on function id, which is unreliable
+        # Can fix by using weakrefs, but not sure if it matters
+        clear_compile_cache()
 
-class TestPythonKey(TestCase):
+class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
             return torch.sin(x)
@@ -205,7 +211,7 @@ def _outs_and_grads(fn, inps):
     return outs, grads
 
 
-class TestAOTAutograd(TestCase):
+class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(self, f, inp):
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
@@ -257,19 +263,22 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         graph_size = None
 
-        def assert_graph_empty(fx_g, _):
+        def get_graph_size(fx_g, _):
             nonlocal graph_size
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
         start_recompilations = num_of_recompilations()
-        f = aot_function(foo, nop, assert_graph_empty)
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
-        self.assertEqual(graph_size, 2)
+        self.assertIsNone(graph_size)
+
         with torch.set_grad_enabled(True):
-            f(*inps)
-        self.assertTrue(graph_size > 2)
+            out = f(*inps)
+            self.assertIsNone(graph_size)
+            out.sum().backward()
+            self.assertTrue(graph_size > 2)
         self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
@@ -308,9 +317,23 @@ class TestAOTAutograd(TestCase):
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
 
+    def test_list_codegen(self):
+        def list_nop(f, _):
+            def g(inps):
+                return f(*inps)
+            g._boxed_call = True
+            return g
 
-class TestEagerFusionOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+        def f(a, b, c):
+            return a.sin() * b.cos() * c.sin()
+        f = aot_function(f, list_nop)
+        inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
+        f(*inp).sum().backward()
+
+
+
+class TestEagerFusionOpInfo(AOTTestCase):
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
@@ -328,6 +351,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapz'),
         xfail('corrcoef'),
         xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
@@ -411,11 +435,11 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
                  partition_fn=partitioner,
-                 decompositions=default_decompositions)(*inps)
+                 decompositions=default_decompositions)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
-class TestPartitioning(TestCase):
+class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -503,8 +527,6 @@ class TestPartitioning(TestCase):
         ins, outs = get_ins_outs(fw_graph)
         self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
 
-
-class TestContiguous(TestCase):
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -516,8 +538,36 @@ class TestContiguous(TestCase):
         out = aot_function(f, nop)(inp)
         torch.autograd.grad(out, inp, torch.randn(3, 2))
 
+    def test_preserve_random(self):
+        def fn(x):
+            return torch.nn.functional.dropout(x, 0.5) + x
 
-class TestAOTModuleSimplified(TestCase):
+        x = torch.randn(4)
+
+        torch.manual_seed(0)
+        ref = fn(x)
+
+        torch.manual_seed(0)
+        aot_fn = aot_function(fn, nop)
+        res = aot_fn(x)
+
+        assert torch.allclose(ref, res)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self):
+        mod = torchvision.models.resnet18().cuda()
+        mod.train()
+
+        x = torch.randn(16, 3, 32, 32, device="cuda")
+        aot_mod = memory_efficient_fusion(mod)
+
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
+
+class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -547,39 +597,41 @@ class TestAOTModuleSimplified(TestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    def test_aot_module_simplified_preserves_stack_trace(self):
 
-class TestRandom(TestCase):
-    def test_preserve_random(self):
-        def fn(x):
-            return torch.nn.functional.dropout(x, 0.5) + x
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
 
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
 
-        x = torch.randn(4)
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule())
+        mod = torch.fx.GraphModule(tracer.root, graph)
 
-        torch.manual_seed(0)
-        ref = fn(x)
+        for node in mod.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_pythonkey.py' in node.stack_trace
 
-        torch.manual_seed(0)
-        aot_fn = aot_function(fn, nop)
-        res = aot_fn(x)
+        def assert_compiler(gm: torch.fx.GraphModule, _):
+            for node in gm.graph.nodes:
+                if node.op == 'output' or node.op == 'placeholder':
+                    continue
+                self.assertTrue(node.stack_trace is not None)
+                assert 'test_pythonkey.py' in node.stack_trace
+            return gm.forward  # return a python callable
 
-        assert torch.allclose(ref, res)
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
 
-
-class TestAutocast(TestCase):
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
-        mod.train()
-
-        x = torch.randn(16, 3, 32, 32, device="cuda")
-        aot_mod = memory_efficient_fusion(mod)
-
-        # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
-            res = aot_mod(x)
-        res.sum().backward()
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+        inputs = [x, y]
+        res = aot_mod(*inputs)
 
 
 only_for = ("cpu")
