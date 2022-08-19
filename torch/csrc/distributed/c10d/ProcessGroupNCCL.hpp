@@ -306,6 +306,11 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
+  c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const BroadcastOptions& opts = BroadcastOptions());
+
   c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
