@@ -14,16 +14,15 @@ FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
     char buf[1024];
     buf[0] = '\0';
 #if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
-    int C10_UNUSED err = strerror_s(buf, sizeof(buf), errno);
-    char *msg = &buf;
+  strerror_s(buf, sizeof(buf), errno);
 #else
-    char *msg = strerror_r(errno, buf, sizeof(buf));
+  strerror_r(errno, buf, sizeof(buf));
 #endif
     AT_ERROR(
         "open file failed because of errno ",
         errno,
         " on fopen: ",
-        msg,
+        buf,
         ", file path: ",
         file_name);
   }

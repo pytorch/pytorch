@@ -450,6 +450,7 @@ function(torch_compile_options libname)
         -Wextra
         -Wno-unused-parameter
         -Wno-unused-function
+        -Wno-unused-result
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
