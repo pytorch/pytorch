@@ -521,8 +521,8 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
 }
 
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
-    const at::Tensor & self, 
-    bool upper) { 
+    const at::Tensor& self,
+    bool upper) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
