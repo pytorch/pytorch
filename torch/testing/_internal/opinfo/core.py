@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
     TEST_WITH_ROCM,
+    torch_to_numpy_dtype_dict,
 )
 from torch.testing._internal.opinfo import utils
 
