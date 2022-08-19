@@ -32,7 +32,7 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Filter all test configurations and keep only requested ones")
     parser.add_argument("--test-matrix", type=str, required=True, help="the original test matrix")
-    parser.add_argument("--pr-number", type=int, required=True, help="the pull request number")
+    parser.add_argument("--pr-number", type=str, help="the pull request number")
     return parser.parse_args()
 
 
@@ -108,10 +108,15 @@ def main() -> None:
     test_matrix = yaml.safe_load(args.test_matrix)
     pr_number = args.pr_number
 
-    # First, query all the labels from the pull requests
-    labels = get_labels(pr_number)
-    # Then filter the test matrix and keep only the selected ones
-    filtered_test_matrix = filter(test_matrix, labels)
+    if not pr_number:
+        # This can be none or empty like when the workflow is dispatched manually
+        filtered_test_matrix = test_matrix
+
+    else:
+        # First, query all the labels from the pull requests
+        labels = get_labels(int(pr_number))
+        # Then filter the test matrix and keep only the selected ones
+        filtered_test_matrix = filter(test_matrix, labels)
 
     # Set the filtered test matrix as the output
     print(f"::set-output name=test-matrix::{json.dumps(filtered_test_matrix)}")
