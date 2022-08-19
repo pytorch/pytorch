@@ -92,6 +92,12 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     ShapeFuncInfo,
     sample_inputs_foreach,
     ForeachFuncInfo,
+    gradcheck_wrapper_hermitian_input,
+    gradcheck_wrapper_triangular_input,
+    gradcheck_wrapper_triangular_input_real_positive_diagonal,
+    gradcheck_wrapper_masked_operation,
+    gradcheck_wrapper_masked_pointwise_operation,
+    clone_sample,
 )
 from torch.testing._internal import opinfo
 
@@ -2002,28 +2008,6 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
             a = make_tensor((*batch, m, k), dtype=dtype, device=device, requires_grad=requires_grad)
             b = make_tensor((*batch, n, k), dtype=dtype, device=device, requires_grad=requires_grad)
             yield SampleInput(a, args=(b,), kwargs=kwargs)
-
-
-def clone_sample(sample, **kwargs):
-    """
-    Given a SampleInput, this function analyzes its input, args and kwargs,
-    and produces a copy with each non-Tensor entry being copied by reference,
-    and with each Tensor entry cloned with `t.clone().requires_grad_(t.requires_grad)`
-    """
-
-    def clone_tensor(t):
-        if isinstance(t, torch.Tensor):
-            return t.detach().clone().requires_grad_(t.requires_grad)
-        else:
-            return t
-
-    sample_kwargs = kwargs if kwargs else sample.kwargs
-
-    return SampleInput(
-        clone_tensor(sample.input),
-        args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items()))
-    )
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -6738,13 +6722,35 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((M, M), ()),
              ((M, M), (2,),),
-             ((S, M, M), ()),
-             ((S, M, M), (2,)),
+             ((M, S), ()),
+             ((M, S), (-1,)),
+             ((M, M), (2,),),
+             ((S, M, S), ()),
+             ((S, M, S), (2,)),
              ((3, 3, S, S), ()),)
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
 
+def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
+    # (row, col, offset)
+    args_list = ((0, 0),
+                 (20, 0),
+                 (0, 20),
+                 (20, 21, 0),
+                 (20, 21, 7),
+                 (20, 21, -7),
+                 # Large test cases below are deliberately commented out to speed up CI
+                 # tests and to avoid OOM error. When modifying implementations of
+                 # tril_indices and triu_indices, please enable these tests and make sure
+                 # they pass.
+                 # (2, 68435455, 3),
+                 # (5000, 5000),
+                 # (5000, 5000, 1234),
+                 # (5000, 5000, -1233),
+                 )
+    for args in args_list:
+        yield SampleInput(args[0], args=args[1:], kwargs={"dtype": dtype, "device": device})
 
 def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -8519,79 +8525,6 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
                      for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
-
-
-def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
-    """Gradcheck wrapper for functions that take Hermitian matrices as input.
-
-    They require a modified function because the finite-difference algorithm
-    for calculating derivatives does not preserve the Hermitian property of the input.
-    """
-    return op(input + input.mH, *args, **kwargs)
-
-
-def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
-    """Gradcheck wrapper for functions that take lower or upper triangular matrices as input.
-
-    They require a modified function because the finite-difference algorithm
-    for calculating derivatives does not preserve the triangular property of the input.
-    `idx` is used to specific which `args[idx]` is to be triangularized.
-    """
-    triangular_arg = args[idx].triu() if upper else args[idx].tril()
-    return op(*args[:idx], triangular_arg, *args[idx + 1:], upper, **kwargs)
-
-
-def gradcheck_wrapper_triangular_input_real_positive_diagonal(op, *args, upper=False, idx=0, **kwargs):
-    """Gradcheck wrapper for functions that take lower/upper triangular matrices
-    with real and positive diagonals, for example, cholesky-like operations.
-    """
-    arg = args[idx]
-    arg_diag = arg.diagonal(0, -2, -1)
-    arg_diag_embed = torch.diag_embed(arg_diag)
-    id_diag_tensor = torch.ones_like(arg_diag)
-    id_tensor = torch.diag_embed(id_diag_tensor)
-    # new_arg = arg - diag(arg) + I
-    new_arg = arg - arg_diag_embed + id_tensor
-    return gradcheck_wrapper_triangular_input(
-        op, *args[:idx], new_arg, *args[idx + 1:],
-        upper=upper, idx=idx, **kwargs
-    )
-
-
-def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
-    """Gradcheck wrapper for masked operations.
-
-    When mask is specified, replaces masked-out elements with zeros.
-
-    Use for operations that produce non-finite masked-out elements,
-    for instance, for minimum and maximum reductions.
-    """
-    output = op(input, *args, **kwargs)
-    mask = kwargs.get('mask')
-    if mask is not None:
-        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
-        output = torch.where(output_mask, output, output.new_zeros([]))
-    return output
-
-
-def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
-    """Gradcheck wrapper for masked pointwise operations. Assumes that the result
-    will be masked iff both tensors are masked at a specific index
-
-    When mask is specified, replaces masked-out elements with zeros.
-
-    Use for operations that produce non-finite masked-out elements,
-    for instance, for minimum and maximum reductions.
-    """
-    output = op(input, *args, **kwargs)
-    input_mask = kwargs.get('input_mask')
-    other_mask = kwargs.get('other_mask')
-    if input_mask is not None and other_mask is not None:
-        combined_mask = torch.logical_and(input_mask, other_mask)
-        new_kwargs = dict(mask=combined_mask, **kwargs)
-        output_mask = torch._masked._input_mask(input, *args, **new_kwargs)
-        output = torch.where(output_mask, output, output.new_zeros([]))
-    return output
 
 
 def reference_reduction_numpy(f, supports_keepdims=True):
@@ -15889,11 +15822,8 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    skips=(
-                        # nan vs nan comparisons
-                        # https://github.com/pytorch/pytorch/issues/74279
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                    )),
+                    # We don't test 0 as the gradient will be NaN and it'll break
+                    rhs_make_tensor_kwargs=dict(low=0.01)),
     OpInfo('zero_',
            op=lambda x: torch.zero_(x.clone()),
            method_variant=None,
@@ -15912,17 +15842,12 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('special.xlog1py',
                     aten_name='special_xlog1py',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                    backward_dtypes=all_types_and(torch.bool, torch.bfloat16),
-                    backward_dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    skips=(
-                        # nan vs 0 comparisons
-                        # https://github.com/pytorch/pytorch/issues/74279
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                    )),
+                    # We don't test -1 as the gradient will be NaN and it'll break
+                    rhs_make_tensor_kwargs=dict(low=-0.99)),
     BinaryUfuncInfo('special.zeta',
                     aten_name='special_zeta',
                     dtypes=all_types_and(torch.bool),
@@ -16044,6 +15969,32 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
+    OpInfo('triu_indices',
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.triu_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+           )),
+    OpInfo('tril_indices',
+           dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
+           sample_inputs_func=sample_inputs_trilu_indices,
+           ref=lambda h, w, ofs=0, dtype=torch.long, device='cpu' : np.array(np.tril_indices(h, ofs, w), dtype=dtype),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+           )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18501,6 +18452,42 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.triu",
+        torch_opinfo_name="triu",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.tril",
+        torch_opinfo_name="tril",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.triu_indices",
+        torch_opinfo_name="triu_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+        )),
+    PythonRefInfo(
+        "_refs.tril_indices",
+        torch_opinfo_name="tril_indices",
+        supports_nvfuser=False,
+        # the implementation uses torch.stack that violates view consistency
+        validate_view_consistency=False,
+        skips=(
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+        )),
+    PythonRefInfo(
         "_refs.meshgrid",
         torch_opinfo_name="meshgrid",
         torch_opinfo_variant_name="list_of_tensors",
@@ -18833,6 +18820,20 @@ python_ref_db = [
         supports_nvfuser=False,
         supports_out=True,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.pairwise_distance",
+        torch_opinfo_name="nn.functional.pairwise_distance",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.pdist",
+        torch_opinfo_name="nn.functional.pdist",
+        supports_out=True,
+        supports_nvfuser=False,
+        skips=(
+            # RunTimeError: no _refs support for torch.Tensor.index_select
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
@@ -19955,14 +19956,9 @@ tri_tests_args = [
     (6, 3, -1),
     (6, 3, -3),
     (6, 3, -9),
-    (258, 253, 1, torch.float32),
-    (257, 258, 1, torch.float64),
-    (258, 258, 1, torch.short),
     (3, 513, 1, torch.long),
     (513, 3, 1, torch.int),
-    (513, 0, 1, torch.double),
     (1024, 1024),
-    (1024, 1024, 500, torch.float32),
     (1024, 1024, 1023),
     (1024, 1024, -500),
     (1023, 1025),
