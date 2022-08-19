@@ -90,8 +90,7 @@ def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
 
 
-def prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name='forward', inplace=False):
-    torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_ondevice_dynamic_jit")
+def _prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name='forward', inplace=False):
     return _prepare_ondevice_jit(model, qconfig_dict, method_name, inplace, quant_type=QuantType.DYNAMIC)
 
 def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
@@ -118,8 +117,9 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     return model
 
 
-def _convert_ondevice_dynamic_jit(model, method_name, inplace=False, debug=False, quant_type=QuantType.STATIC):
+def _convert_ondevice_jit(model, method_name, inplace=False, debug=False, quant_type=QuantType.STATIC):
     _check_is_script_module(model)
+    assert quant_type == QuantType.DYNAMIC, "This API, while should work for static quant, is only tested for dynamic quant."
     assert not method_name.startswith("observe_"), "Pass in valid method to be quantized, e.g. forward"
     observe_method_name = "observe_" + method_name
     quantize_method_name = "quantize_" + method_name
@@ -142,9 +142,8 @@ def convert_dynamic_jit(model, inplace=False, debug=False, preserved_attrs=None)
     return _convert_jit(model, inplace, debug, quant_type=QuantType.DYNAMIC, preserved_attrs=preserved_attrs)
 
 
-def convert_ondevice_dynamic_jit(model, method_name, inplace=False, debug=False):
-    torch._C._log_api_usage_once("quantization_api.quantize_jit.convert_ondevice_dynamic_jit")
-    return _convert_ondevice_dynamic_jit(model, method_name, inplace, debug, quant_type=QuantType.DYNAMIC)
+def _convert_ondevice_dynamic_jit(model, method_name, inplace=False, debug=False):
+    return _convert_ondevice_jit(model, method_name, inplace, debug, quant_type=QuantType.DYNAMIC)
 
 def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
     # Always do inplace convert because the Tensor is already

@@ -3,9 +3,13 @@
 
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
@@ -227,6 +231,17 @@ Module FinalizeOnDevicePTQ(
 
   const std::string quantized_method_name = "quantized_" + orig_method_name;
   auto graph = module.get_method(method_name).graph();
+  // Doing some AOT optimizations here
+  // Of all CSE seeems to be required otherwise in some experiments
+  // serialized model is incorrect. As in it cannot be deserialized
+  // Rest are included as canonical optimizations that are not for inference
+  EliminateCommonSubexpression(graph);
+  EliminateDeadCode(graph);
+  PeepholeOptimize(graph);
+  ConstantPropagation(graph);
+  UnrollConstantLoops(graph);
+  ConstantPooling(graph);
+
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);

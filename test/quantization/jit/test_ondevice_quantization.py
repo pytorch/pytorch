@@ -11,8 +11,8 @@ from torch.ao.quantization import (
 from torch.ao.quantization.quantize_jit import (
     prepare_dynamic_jit,
     convert_dynamic_jit,
-    prepare_ondevice_dynamic_jit,
-    convert_ondevice_dynamic_jit,
+    _prepare_ondevice_dynamic_jit,
+    _convert_ondevice_dynamic_jit,
 )
 
 from torch.ao.quantization.quant_type import QuantType
@@ -66,15 +66,15 @@ class OnDevicePTQUtils(object):
     def insert_observers(model, qconfig_dict):
         inputs = model.get_example_inputs()
         scripted_model = get_script_module(model, False, inputs)
-        scripted_model = prepare_ondevice_dynamic_jit(scripted_model, qconfig_dict)
+        scripted_model = _prepare_ondevice_dynamic_jit(scripted_model, qconfig_dict)
         return scripted_model
 
     @staticmethod
     def ptq_dynamic_quantize(model, qconfig_dict):
         inputs = model.get_example_inputs()
         m = get_script_module(model, False, inputs)
-        m = prepare_ondevice_dynamic_jit(m, qconfig_dict)
-        m = convert_ondevice_dynamic_jit(m, 'forward', True, False)
+        m = _prepare_ondevice_dynamic_jit(m, qconfig_dict)
+        m = _convert_ondevice_dynamic_jit(m, 'forward', True, False)
         return m
 
     @staticmethod
@@ -120,22 +120,22 @@ class OnDevicePTQUtils(object):
 
 class TestOnDeviceDynamicPTQInsertObservers(TestCase):
     def _check_num_and_type_of_observers(self, model, num_observers):
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
             self.assertTrue(observer.original_name == 'MinMaxObserver')
-        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+
+        qconfig_dict = {"": per_channel_dynamic_qconfig}
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
             self.assertTrue(observer.original_name == 'PerChannelMinMaxObserver')
 
-
     def _check_observer_method(self, model, num_observers):
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         inputs = model.get_example_inputs()
         orig_scripted_model = get_script_module(model, False, inputs)
         orig_forward_graph = orig_scripted_model.graph.str()
@@ -145,8 +145,11 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         # instead of implementing graph matching
         self.assertEqual(len(orig_forward_graph.splitlines()), len(quant_forward_graph.splitlines()))
         observe_method = scripted_model.observe_forward.graph
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"](%_observer", num_observers, exactly=True).run(observe_method)
-
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"](%_observer",
+                                num_observers, exactly=True).run(observe_method)
+        reset_observers_method = scripted_model.reset_observers_forward.graph
+        FileCheck().check_count(
+            "prim::CallMethod[name=\"reset_min_max_vals\"](%_observer", num_observers, exactly=True).run(reset_observers_method)
 
     def _observer_is_weight_only(self, node):
         if (node.kind() == "prim::CallMethod") and node.s("name") == "forward":
@@ -154,22 +157,19 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
                 return (node.inputsAt(1).node().kind() == "prim::GetAttr")
         return False
 
-
     def test_num_observers(self):
         model = LinearAddModel()
         self._check_num_and_type_of_observers(model, 2)
         model = MyConvLinearModule()
         self._check_num_and_type_of_observers(model, 3)
 
-
     def test_observe_method(self):
         model = MyConvLinearModule()
         self._check_observer_method(model, 3)
 
-
     def test_weight_only_observers(self):
         model = MyConvLinearModule()
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         inputs = model.get_example_inputs()
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observe_forward_graph = scripted_model.observe_forward.graph
@@ -191,7 +191,6 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
                 quantize_per_channel += 1
         self.assertEqual(quantize_per_tensor + quantize_per_channel, num_nodes)
 
-
     def _validate_calculate_qparams(self, model, num_nodes):
         quantize_forward_graph = model.quantize_forward.graph
         num_calculate_qparams = 0
@@ -200,7 +199,6 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
                 num_calculate_qparams += 1
         self.assertEqual(num_calculate_qparams, num_nodes)
 
-
     def _validate_no_observer_forward(self, model):
         quantize_forward_graph = model.quantize_forward.graph
         for n in quantize_forward_graph.nodes():
@@ -208,7 +206,6 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
                 if (OnDevicePTQUtils.is_value_type_observer(n.inputsAt(0))):
                     return False
         return True
-
 
     def _check_quant_dequant_and_calc_qparams(self, model, num_nodes):
         qconfig_dict = {"" : default_dynamic_qconfig}
@@ -222,7 +219,6 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
         self._validate_quant_dequant_nodes(m, num_nodes, num_nodes)
         self._validate_calculate_qparams(m, num_nodes)
         self._validate_no_observer_forward(m)
-
 
     def _check_quantize_forward_runs(self, model):
         inputs = model.get_example_inputs()
@@ -238,13 +234,11 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
         m.observe_forward(*inputs)
         m.quantize_forward(*inputs)
 
-
     def test_num_quant_dequant_nodes(self):
         model = LinearAddModel()
         self._check_quant_dequant_and_calc_qparams(model, 2)
         model = MyConvLinearModule()
         self._check_quant_dequant_and_calc_qparams(model, 3)
-
 
     def test_quantize_forward_runs(self):
         model = LinearAddModel()
@@ -409,6 +403,30 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         inputs = model.get_example_inputs()
         ref_m = torch.jit.script(model)
         torch._C._jit_pass_inline(ref_m.graph)
+        qconfig_dict = {"" : default_dynamic_qconfig}
+        ref_m = prepare_dynamic_jit(ref_m, qconfig_dict)
+        ref_m = convert_dynamic_jit(ref_m)
+        buffer = io.BytesIO()
+        torch.jit.save(ref_m, buffer)
+        buffer.seek(0)
+        ref_m = torch.jit.load(buffer)
+        ref_output = ref_m(*inputs)
+
+        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        m.reset_observers_forward()
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
+        output = m.quantized_forward(*inputs)
+        self.assertTrue(torch.allclose(ref_output, output))
+
+        model.eval()
+        inputs = model.get_example_inputs()
+        ref_m = torch.jit.script(model)
+        torch._C._jit_pass_inline(ref_m.graph)
         qconfig_dict = {"" : per_channel_dynamic_qconfig}
         ref_m = prepare_dynamic_jit(ref_m, qconfig_dict)
         ref_m = convert_dynamic_jit(ref_m)
@@ -419,12 +437,13 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         ref_output = ref_m(*inputs)
 
         m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-        m.observe_forward(*inputs)
-        m.quantize_forward(*inputs)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
         m = torch.jit.load(buffer)
+        m.reset_observers_forward()
+        m.observe_forward(*inputs)
+        m.quantize_forward(*inputs)
         output = m.quantized_forward(*inputs)
         self.assertTrue(torch.allclose(ref_output, output))
 
