@@ -36,11 +36,19 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
       - name: Select all requested test configurations
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         id: filter
-        run: .github/scripts/filter_test_configs.py --test-matrix "${{ inputs.test-matrix }}" --pr-number "${{ github.event.pull_request.number }}"
+        run: |
+          .github/scripts/filter_test_configs.py \
+            --test-matrix "${{ inputs.test-matrix }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --tag "${{ steps.parse-ref.outputs.tag }}"
 
       - name: Print the filtered test matrix
         run: |

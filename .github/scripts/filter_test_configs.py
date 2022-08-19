@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import re
 import json
 import os
 import requests
@@ -33,6 +34,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Filter all test configurations and keep only requested ones")
     parser.add_argument("--test-matrix", type=str, required=True, help="the original test matrix")
     parser.add_argument("--pr-number", type=str, help="the pull request number")
+    parser.add_argument("--tag", type=str, help="the associated tag if it exists")
     return parser.parse_args()
 
 
@@ -107,12 +109,25 @@ def main() -> None:
     # its more relaxed syntax
     test_matrix = yaml.safe_load(args.test_matrix)
     pr_number = args.pr_number
+    tag = args.tag
 
-    if not pr_number:
+    # If the tag matches, we can get the PR number from it
+    tag_regex = re.compile(r"^{CIFLOW_PREFIX}\w+/(?P<pr_number>\d+)$")
+
+    if not pr_number and not tag:
         # This can be none or empty like when the workflow is dispatched manually
         filtered_test_matrix = test_matrix
 
-    else:
+    elif not pr_number:
+        m = tag_regex.match(tag)
+
+        if m:
+            pr_number = m.group("pr_number")
+        else:
+            # There is a tag but it isn't ciflow, so there is nothing left to do
+            filtered_test_matrix = test_matrix
+
+    if pr_number:
         # First, query all the labels from the pull requests
         labels = get_labels(int(pr_number))
         # Then filter the test matrix and keep only the selected ones
