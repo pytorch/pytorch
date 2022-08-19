@@ -611,29 +611,19 @@ class ComputeFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             # See Note [The ATen Operators API]
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
-
         return result
 
 
@@ -657,35 +647,27 @@ class ComputeTensorMethod:
         )
 
         if self.target is Target.DECLARATION:
-            result = f"{sig_group.signature.decl()} const;\n"
-            if sig_group.faithful_signature is not None:
-                result += f"{sig_group.faithful_signature.decl()} const;\n"
+            result = ""
+            for sig in sig_group.signatures():
+                result += f"{sig.decl()} const;\n"
             return result
 
         if self.target is not Target.DEFINITION:
             assert_never(self.target)
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
+        result = ""
 
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(faithful=False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(faithful=True)
 
         return result
 
@@ -703,27 +685,18 @@ class ComputeRedispatchFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join(["dispatchKeySet"] + [a.expr for a in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl(is_redispatching_fn=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
 
         return result
 
@@ -1593,10 +1566,6 @@ def get_native_function_schema_registrations(
         if namespace == "aten":
             aten_schema_registrations = schema_registrations_body
         else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
@@ -2476,7 +2445,7 @@ def gen_source_files(
             + [
                 "\n".join(
                     f"#include <ATen/ops/{f.root_name}_ops.h>"
-                    for f in [g.inplace, g.mutable]
+                    for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions
