@@ -1,5 +1,7 @@
 {
-  "being_migrated": {},
+  "being_migrated": {
+    "torch.nn.quantized.functional": "torch.ao.nn.quantized.functional"
+  },
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -1469,7 +1471,6 @@
     "no_observer_set",
     "prepare",
     "prepare_dynamic_jit",
-    "prepare_ondevice_dynamic_jit",
     "prepare_jit",
     "prepare_qat",
     "propagate_qconfig_",
@@ -1588,7 +1589,6 @@
     "convert_jit",
     "fuse_conv_bn_jit",
     "prepare_dynamic_jit",
-    "prepare_ondevice_dynamic_jit",
     "prepare_jit",
     "quantize_dynamic_jit",
     "quantize_jit",

@@ -9,7 +9,7 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization.quantize_jit import (
-    prepare_ondevice_dynamic_jit,
+    _prepare_ondevice_dynamic_jit,
 )
 
 from torch.testing._internal.common_utils import TestCase
@@ -20,6 +20,7 @@ from torch.testing._internal.common_quantization import (
 )
 
 from torch.testing import FileCheck
+
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
@@ -55,7 +56,7 @@ class OnDevicePTQUtils(object):
 
     @staticmethod
     def insert_observers(m, qconfig_dict):
-        m = prepare_ondevice_dynamic_jit(m, qconfig_dict)
+        m = _prepare_ondevice_dynamic_jit(m, qconfig_dict)
         return m
 
     @staticmethod
@@ -82,24 +83,22 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         scripted_model = OnDevicePTQUtils.insert_observers(scripted_model, qconfig_dict)
         return scripted_model
 
-
     def _check_num_and_type_of_observers(self, model, num_observers):
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         scripted_model = self._insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
             self.assertTrue(observer.original_name == 'MinMaxObserver')
-        qconfig_dict = {"" : per_channel_dynamic_qconfig}
+        qconfig_dict = {"": per_channel_dynamic_qconfig}
         scripted_model = self._insert_observers(model, qconfig_dict)
         observer_modules = OnDevicePTQUtils.find_observer_modules(scripted_model)
         self.assertTrue(len(observer_modules) == num_observers)
         for observer in observer_modules:
             self.assertTrue(observer.original_name == 'PerChannelMinMaxObserver')
 
-
     def _check_observer_method(self, model, num_observers):
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         inputs = model.get_example_inputs()
         orig_scripted_model = get_script_module(model, False, inputs)
         orig_forward_graph = orig_scripted_model.graph.str()
@@ -109,8 +108,11 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         # instead of implementing graph matching
         self.assertEqual(len(orig_forward_graph.splitlines()), len(quant_forward_graph.splitlines()))
         observe_method = scripted_model.observe_forward.graph
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"](%_observer", num_observers, exactly=True).run(observe_method)
-
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"](%_observer",
+                                num_observers, exactly=True).run(observe_method)
+        reset_observers_method = scripted_model.reset_observers_forward.graph
+        FileCheck().check_count(
+            "prim::CallMethod[name=\"reset_min_max_vals\"](%_observer", num_observers, exactly=True).run(reset_observers_method)
 
     def _observer_is_weight_only(self, node):
         if (node.kind() == "prim::CallMethod") and node.s("name") == "forward":
@@ -118,22 +120,19 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
                 return (node.inputsAt(1).node().kind() == "prim::GetAttr")
         return False
 
-
     def test_num_observers(self):
         model = LinearAddModel()
         self._check_num_and_type_of_observers(model, 2)
         model = MyConvLinearModule()
         self._check_num_and_type_of_observers(model, 3)
 
-
     def test_observe_method(self):
         model = MyConvLinearModule()
         self._check_observer_method(model, 3)
 
-
     def test_weight_only_observers(self):
         model = MyConvLinearModule()
-        qconfig_dict = {"" : default_dynamic_qconfig}
+        qconfig_dict = {"": default_dynamic_qconfig}
         inputs = model.get_example_inputs()
         scripted_model = self._insert_observers(model, qconfig_dict)
         observe_forward_graph = scripted_model.observe_forward.graph

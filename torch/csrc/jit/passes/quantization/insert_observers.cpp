@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
+#include <memory>
 #include <regex>
 #include <stack>
 #include <string>
@@ -338,6 +339,13 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
+  void setInsertResetObserverMethod(
+      bool insert_reset_observer_method,
+      const std::string& method_name) {
+    insert_reset_observer_method_ = insert_reset_observer_method;
+    reset_observer_method_name_ = "reset_observers_" + method_name;
+  }
+
  private:
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
   insertObserversFor(
@@ -384,6 +392,10 @@ class InsertObserversHelper {
       Module& module,
       const Module& observer_module,
       NameModuleVector& observer_name_and_modules);
+
+  void insertObserverResetMinMax(
+      Module& module,
+      const NameModuleVector& observer_name_and_modules);
 
   // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
   // to return an observer configured for a value, if it is needed.
@@ -436,6 +448,10 @@ class InsertObserversHelper {
   // Fill the map from values to the list of values that can pass the observed
   // property to it
   void fillPassThroughValueMap(const std::shared_ptr<Graph>& graph);
+
+  bool insertResetObserverMethod() {
+    return insert_reset_observer_method_;
+  }
 
   const ModuleQConfigMap& module_qconfig_map_;
 
@@ -888,6 +904,9 @@ graph(%self, %a, %b):
           mul_aten_relu,         mul_aten_relu_,
           inplace_mul_aten_relu, inplace_mul_aten_relu_,
   };
+
+  bool insert_reset_observer_method_{false};
+  std::string reset_observer_method_name_;
 };
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
@@ -965,6 +984,52 @@ void InsertObserversHelper::insertObserverFor(
     call->replaceInput(1, v);
     observer_nodes_.emplace(call);
     observed_values_.insert(call->output());
+  }
+}
+
+void InsertObserversHelper::insertObserverResetMinMax(
+    Module& module,
+    const NameModuleVector& observer_name_and_modules) {
+  if (observer_name_and_modules.empty()) {
+    return;
+  }
+  auto reset_min_max_opt = module.find_method(reset_observer_method_name_);
+  if (!reset_min_max_opt.has_value()) {
+    std::shared_ptr<Graph> reset_observer_graph = std::make_shared<Graph>();
+    Value* module_value = reset_observer_graph->addInput("self");
+    Node* output_node = reset_observer_graph->createNone();
+    reset_observer_graph->insertNode(output_node);
+    reset_observer_graph->registerOutput(output_node->output());
+    module_value->setType(module._ivalue()->type());
+    const auto method_name = c10::QualifiedName(
+        *(module.type()->name()), reset_observer_method_name_);
+    auto reset_observer_fn =
+        module._ivalue()->compilation_unit()->create_function(
+            method_name, reset_observer_graph);
+    auto self_arg = c10::Argument("self", module.type());
+    auto output_arg = c10::Argument("none", output_node->output()->type());
+    auto schema = c10::FunctionSchema(
+        reset_observer_method_name_, "", {self_arg}, {output_arg});
+    reset_observer_fn->setSchema(std::move(schema));
+    module.type()->addMethod(reset_observer_fn);
+  }
+  auto reset_min_max_graph =
+      module.get_method(reset_observer_method_name_).graph();
+  Value* self = reset_min_max_graph->inputs()[0];
+
+  for (const auto& pair : observer_name_and_modules) {
+    const auto& observer_name = pair.first;
+    const auto& observer = pair.second;
+    Value* observer_value =
+        reset_min_max_graph->insertGetAttr(self, observer_name);
+    MatchedSchema reset_minmax_schema = matchSchema(
+        observer.get_method("reset_min_max_vals").function().getSchema(),
+        observer_value->node()->sourceRange(),
+        *reset_min_max_graph,
+        {observer_value},
+        {});
+    reset_min_max_graph->insertMethodCall(
+        "reset_min_max_vals", reset_minmax_schema);
   }
 }
 
@@ -1547,6 +1612,9 @@ InsertObserversHelper::insertObserversFor(
           "supported right now");
       insertObserverFor(v, module, observer, observer_name_and_modules);
     }
+    if (insertResetObserverMethod()) {
+      insertObserverResetMinMax(module, observer_name_and_modules);
+    }
     block_observer_map_[block] = observer_name_and_modules;
   }
   return std::make_tuple(
@@ -1598,7 +1666,6 @@ Module InsertObservers(
   // since we need to know the boundary value mapping to trace
   // through the calls
   helper.analyze(module, method_name);
-  // helper.removeActivationObservers();
   helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
 }
@@ -1645,6 +1712,7 @@ Module InsertObserversForOnDevicePTQ(
   if (quant_type == QuantType::DYNAMIC) {
     helper.removeActivationObservers();
   }
+  helper.setInsertResetObserverMethod(true, method_name);
   helper.insertObservers(
       cloned_module, observer_method_name, /* is_entry_point */ true);
   return cloned_module;
