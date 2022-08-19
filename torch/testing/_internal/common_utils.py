@@ -128,6 +128,8 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+if os.getenv("USING_PYTEST", ""):
+    torch.cuda.set_per_process_memory_fraction(0.13)
 
 class _TestParametrizer(object):
     """
@@ -750,9 +752,7 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
-        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
-            "cuda" in build_environment and "linux" in build_environment
-        ):
+        if True:
             # exclude linux cuda tests because we run into memory issues when running in parallel
             import pytest
             os.environ["NO_COLOR"] = "1"
@@ -763,12 +763,12 @@ def run_tests(argv=UNITTEST_ARGS):
             pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
             print(f'Test results will be stored in {pytest_report_path}')
             # mac slower on 4 proc than 3
-            num_procs = 3 if "macos" in build_environment else 4
+            num_procs = 3
             # f = failed
             # E = error
             # X = unexpected success
             exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
-                                    '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
+                                    '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}', '-k=not ldl and not lu'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
             print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
