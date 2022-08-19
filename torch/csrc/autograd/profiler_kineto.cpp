@@ -152,6 +152,7 @@ struct AddKinetoMetadata {
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
             [&](const auto& j) { parent_id = std::to_string(j.id_); });
+        parent = parent->parent_.lock();
       }
       this->addMetadata("Python parent id", parent_id.value_or("null"));
     });
