@@ -116,6 +116,11 @@ def main() -> None:
     # Set the filtered test matrix as the output
     print(f"::set-output name=test-matrix::{json.dumps(filtered_test_matrix)}")
 
+    filtered_test_matrix_len = len(filtered_test_matrix.get("include", []))
+    # and also put a flag if the test matrix is empty, so subsequent jobs can
+    # quickly check it without the need to parse the JSON string
+    print(f"::set-output name=is-test-matrix-empty::{filtered_test_matrix_len == 0}")
+
 
 if __name__ == "__main__":
     main()
