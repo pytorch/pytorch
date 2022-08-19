@@ -12,7 +12,7 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(FT_DIR functorch/csrc)
+set(FT_DIR csrc)
 file(GLOB_RECURSE FT_SOURCES ${FT_DIR}/*.cpp)
 
 Python3_add_library(${PROJECT_NAME} MODULE ${FT_SOURCES})
@@ -24,6 +24,10 @@ if(BUILD_FUNCTORCH)
   target_compile_options(${PROJECT_NAME} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
   target_link_libraries(${PROJECT_NAME} PRIVATE torch torch_python)
   target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
+
+  set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+        ${CMAKE_BINARY_DIR}/functorch)
+  install(TARGETS ${PROJECT_NAME} DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}")
 else()
   target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
 endif()

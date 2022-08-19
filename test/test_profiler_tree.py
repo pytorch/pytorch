@@ -10,7 +10,7 @@ import unittest
 import expecttest
 
 import torch
-from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
+from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
 
@@ -762,6 +762,7 @@ class TestProfilerTree(TestCase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test

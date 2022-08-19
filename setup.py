@@ -437,11 +437,6 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
-# the list of runtime dependencies required by this built package
-install_requires = [
-    'typing_extensions',
-]
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -619,6 +614,19 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
                 i += 1
+
+        # Copy functorch extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "functorch._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, filename))
+                self.copy_file(src, filename)
+                del self.extensions[i]
         setuptools.command.build_ext.build_ext.build_extensions(self)
 
 
@@ -904,6 +912,12 @@ def configure_extension_build():
                     name=str('caffe2.python.caffe2_pybind11_state_hip'),
                     sources=[]),
             )
+    if cmake_cache_vars['BUILD_FUNCTORCH']:
+            extensions.append(
+                Extension(
+                    name=str('functorch._C'),
+                    sources=[]),
+            )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
@@ -946,6 +960,11 @@ def print_box(msg):
 
 
 def main():
+    # the list of runtime dependencies required by this built package
+    install_requires = [
+        'typing_extensions',
+    ]
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
