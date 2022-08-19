@@ -19,6 +19,10 @@ from torch.ao.quantization.observer import (
     default_observer,
     default_weight_observer,
 )
+from torch.ao.quantization.fx._equalize import (
+    default_equalization_qconfig,
+    EqualizationQConfig,
+)
 from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
@@ -51,13 +55,16 @@ class DetectorQConfigInfo():
         self.is_activation_dynamic = False
         self.is_weight_per_channel = False
 
-    def generate_qconfig(self, module: torch.nn.Module) -> QConfig:
+        # equalization related options
+        self.is_equalization_recommended = False
+
+    def generate_quantization_qconfig(self, module: torch.nn.Module) -> QConfig:
         r"""
         Args:
             module (torch.nn.Module) The module we are generating
             the qconfig for
 
-        Returns the generated QConfig according to what a valid configuration is
+        Returns the generated quantization QConfig according to what a valid configuration is
         """
         # Apply suggestions to new qconfig
         module_qconfig = default_qconfig
@@ -86,6 +93,21 @@ class DetectorQConfigInfo():
 
         # return the QConfig chosen
         return module_qconfig
+
+    def generate_equalization_qconfig(self) -> EqualizationQConfig:
+        r"""
+        This returns the equalization configuration for a module.
+
+        For now, it just returns the default, but as more equalization options become
+        possible, this method can get more fleshed out with more nuanced granularity.
+
+
+        Returns the generated equalization QConfig according to what a valid configuration is
+        """
+        # in this case, we just return default equalization config
+        # we know this is valid because only valid modules would even
+        # have this option
+        return default_equalization_qconfig
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -781,8 +803,32 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
             A DetectorQConfigInfo with the information to generate a QConfig for a specific module
         """
-        # currently doesn't do anything for input-weight equalization detector
-        return {}
+        # run the helper function to populate the dictionary
+        # find the range of inputs
+        input_values: Dict[str, Dict] = self._extract_input_info(model)
+
+        # find the range of weights
+        weight_values: Dict[str, Dict] = self._extract_weight_info(model)
+
+        # calculate per_channel comparision statistic s_c
+        comp_stats: Dict[str, torch.Tensor] = self._generate_comparision_values(input_values, weight_values)
+
+        # generate the return dictionary
+        input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(input_values, weight_values, comp_stats)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in input_weight_equalization_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            input_weight_recommended: bool = input_weight_equalization_info[module_fqn][self.RECOMMENDED_KEY]
+            detector_qconfig_info.is_equalization_recommended = input_weight_recommended
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
