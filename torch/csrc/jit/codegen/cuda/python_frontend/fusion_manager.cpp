@@ -41,25 +41,23 @@ void FusionManager::printIr() const {
 
 c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) const {
+  TORCH_CHECK(rec, "Record is null!");
   auto cache_entry = fusionCachePtr()->record_hash_map.find(rec);
   if (cache_entry == std::end(fusionCachePtr()->record_hash_map)) {
     return c10::nullopt;
   } else {
-    if (cache_entry->second) {
-      return c10::optional<FusionCacheEntry*>(cache_entry->second.get());
-    } else {
-      TORCH_INTERNAL_ASSERT(false, "The looked up cache entry is null.");
-      return c10::nullopt;
-    }
+    return c10::optional<FusionCacheEntry*>(cache_entry->second.get());
   }
 }
 void FusionManager::createFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
+  TORCH_CHECK(rec, "Record is null!");
   fusion_cache_ptr_->record_hash_map[rec] =
       std::make_unique<FusionCacheEntry>(rec);
 }
 void FusionManager::createTerminalFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
+  TORCH_CHECK(rec, "Record is null!");
   ++num_fusions_;
   TORCH_CHECK(
       num_fusions_ <= max_fusions_,

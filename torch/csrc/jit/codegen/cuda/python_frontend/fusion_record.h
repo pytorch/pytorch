@@ -1031,6 +1031,7 @@ using namespace nvfuser;
 template <>
 struct hash<std::shared_ptr<RecordFunctor>> {
   size_t operator()(const std::shared_ptr<RecordFunctor>& p) const {
+    TORCH_CHECK(p, "The RecordFunctor Pointer for hashing is null!");
     return p->hash();
   }
 };
@@ -1043,6 +1044,10 @@ struct equal_to<std::shared_ptr<RecordFunctor>>
   bool operator()(
       const std::shared_ptr<RecordFunctor>& p,
       const std::shared_ptr<RecordFunctor>& q) const {
+    TORCH_CHECK(p, 
+        "The RecordFunctor Pointer on the lhs of an equality check is null!");
+    TORCH_CHECK(q, 
+        "The RecordFunctor Pointer on the rhs of an equality check is null!");
     return p->operator==(*q);
   }
 };

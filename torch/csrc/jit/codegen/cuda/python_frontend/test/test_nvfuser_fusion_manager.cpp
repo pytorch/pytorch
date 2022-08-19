@@ -4,7 +4,6 @@
 
 #include <torch/torch.h>
 
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
@@ -32,25 +31,63 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     SUCCEED();
   }
 
+  // Check that cache methods all assert when presented with a null record.
   {
-    std::shared_ptr<RecordFunctor> bad_record(nullptr);
-    std::shared_ptr<RecordFunctor> good_record(new TensorRecord(
+    std::shared_ptr<RecordFunctor> null_record(nullptr);
+
+    try {
+      auto bad_cache_entry_ptr = fm->lookupFusionCacheEntry(null_record);
+      FAIL() << "Should trigger an assert when the record is looked up!";
+    } catch(...) {
+      SUCCEED();
+    }
+    
+    try {
+      fm->traverseFusionCache(null_record);
+      FAIL() << "Should trigger an assert when the record is looked up!";
+    } catch(...) {
+      SUCCEED();
+    }
+    
+    try {
+      fm->createFusionCacheEntry(null_record);
+      FAIL() << "Should trigger an assert when the record is looked up!";
+    } catch(...) {
+      SUCCEED();
+    }
+    
+    try {
+      fm->createTerminalFusionCacheEntry(null_record);
+      FAIL() << "Should trigger an assert when the record is looked up!";
+    } catch(...) {
+      SUCCEED();
+    }
+  }
+
+  // Check that cache methods act appropriately when presenting a new
+  // record to an empty cache. 
+  {
+    std::shared_ptr<RecordFunctor> test_record(new TensorRecord(
         {State(StateType::Tensor, 0)}, 
         {3},
         {true},
         Nvf::DataType::Float));
 
+    // Check Methods prior to adding an entry to the cache
+
     // Cache Lookup should not succeed becase no records are in the cache
-    auto cache_entry_ptr = fm->lookupFusionCacheEntry(good_record);
-    ASSERT_TRUE(cache_entry_ptr == c10::nullopt);
+    auto empty_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+    ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
     
     // Traversal of the cache should fail because there is nothing to traverse
     try {
-      fm->traverseFusionCache(good_record);
+      fm->traverseFusionCache(test_record);
       FAIL() << "Expected the cache traversal to fail!";
     } catch(...) {
       SUCCEED();
     }
+
+    // Add a cache entry and check methods
   }
 }
 
