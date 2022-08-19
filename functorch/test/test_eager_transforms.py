@@ -19,6 +19,7 @@ import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import IS_WINDOWS
+from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
@@ -3214,6 +3215,19 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         out1 = vmap(jvp_wrapper)(x, t)
         out2 = vmap(functionalize(jvp_wrapper))(x, t)
         self.assertEqual(out1, out2)
+
+    # TODO: move this test into test_fake_tensor.py
+    # once functionalize() can be used in core tests.
+    def test_functionalize_fake_tensors(self, device):
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            y = x.detach()
+            return y + y
+
+        with FakeTensorMode() as mode:
+            x = torch.ones(2, device=device, requires_grad=True)
+            out = functionalize(f)(x)
+        self.assertEqual(x.size(), (2,))
 
     def test_functionalize_fx_simple(self, device):
 
