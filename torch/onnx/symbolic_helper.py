@@ -212,7 +212,7 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
 
 def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
-    if tuple_node.kind() != "prim::TupleConstruct":
+    if not _is_tuple_construct(tuple_value):
         raise errors.SymbolicValueError(
             f"ONNX symbolic expected node type 'prim::TupleConstruct', "
             f"got '{tuple_node.kind()}'.",
@@ -230,7 +230,7 @@ def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     """
     tuple_node = tuple_value.node()
     # A quantized tensor is represented as tuple of the form (tensor, scale, zero_point, <axis>)
-    if tuple_node.kind() != "prim::TupleConstruct":
+    if not _is_tuple_construct(tuple_value):
         raise errors.SymbolicValueError(
             f"ONNX symbolic expected the output of `{tuple_node}` to be a quantized "
             f"tensor. Is this likely due to missing support for quantized "
@@ -391,7 +391,7 @@ def quantized_args(
 
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
-                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                (descriptor and _is_value(arg) and _is_tuple_construct(arg))
                 for descriptor, arg in descriptor_args
             ):
                 return fn(g, *args, **kwargs)
@@ -399,11 +399,8 @@ def quantized_args(
             # Dequantize arguments that are quantized
             non_quantized_args = []
             for descriptor, arg in descriptor_args:
-                if (
-                    descriptor
-                    and isinstance(arg, _C.Value)
-                    and arg.node().kind() == "prim::TupleConstruct"
-                ):
+                if descriptor and _is_value(arg) and _is_tuple_construct(arg):
+                    # Quantized arg is a tuple of (value, scale, zero_point)
                     dequantized_arg, arg_scale, arg_zero_point, _ = dequantize_helper(
                         g, arg
                     )
@@ -414,6 +411,7 @@ def quantized_args(
                     if _zero_point is None:
                         _zero_point = arg_zero_point
                 else:
+                    # Non-quantized arg
                     non_quantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
@@ -506,6 +504,10 @@ def _is_scalar_list(x: _C.Value) -> bool:
         _type_utils.valid_torch_name(element_type)
         and _type_utils.JitScalarType.from_name(element_type).onnx_compatible()
     )
+
+
+def _is_tuple_construct(x: _C.Value) -> bool:
+    return x.node().kind() == "prim::TupleConstruct"
 
 
 def is_caffe2_aten_fallback() -> bool:
