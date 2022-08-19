@@ -710,7 +710,7 @@ def get_pt_operator_registry_dict(
         compatible_with = kwargs.get("compatible_with", []),
         apple_sdks = kwargs.get("apple_sdks"),
     )
-
+    enable_flatbuffer = True
     return dict(
         srcs = code_gen_files["srcs"],
         linker_flags = [

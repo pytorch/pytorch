@@ -4,7 +4,7 @@
 namespace caffe2 {
 namespace serialize {
 
-#define ENABLE_FLATBUFFERS false
+#define ENABLE_FLATBUFFERS true
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 

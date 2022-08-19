@@ -143,7 +143,7 @@ def add_torch_libs():
     # Add the Gloo and TensorPipe backends specific to Facebook networking.
     _libtorch_sources.append("torch/csrc/distributed/c10d/fb/GlooDeviceFactory.cpp")
     _libtorch_sources.append("torch/csrc/distributed/rpc/fb/tensorpipe_agent.cpp")
-    # enable_flatbuffer = True
+    enable_flatbuffer = True
     cpp_library(
         name = "libtorch",
         srcs = _libtorch_sources,
