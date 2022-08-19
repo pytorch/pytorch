@@ -25,6 +25,8 @@ PRUNE_FUNCTIONS = {
     "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
+    "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
+    "<built-in method __exit__ of torch._C.DisableTorchFunction object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "cudaStreamIsCapturing": PRUNE_ALL,
     "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
 }
@@ -523,11 +525,7 @@ class TestProfilerTree(TestCase):
                 [memory]
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ..."""
+                  ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
@@ -646,11 +644,7 @@ class TestProfilerTree(TestCase):
                             aten::clamp_min
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ..."""
+                  ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
@@ -689,11 +683,7 @@ class TestProfilerTree(TestCase):
                       <built-in function isinstance>
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ..."""
+                  ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
@@ -724,11 +714,7 @@ class TestProfilerTree(TestCase):
                     ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ...""")
+                  ...""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
