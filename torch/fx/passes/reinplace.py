@@ -3,7 +3,7 @@ from torch._C import _get_torch_dispatch_mode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map, tree_flatten, tree_map_only
+from torch.utils._pytree import tree_map, tree_flatten
 from torch.multiprocessing.reductions import StorageWeakRef
 
 import _operator
