@@ -368,16 +368,15 @@ fourOutputs linalg_lstsq_batch_rule(
   const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, false);
   const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
   const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
-  const auto res = at::linalg_lstsq(self_, b_, rcond, driver);
+
+  Tensor res, res_1, res_2, res_3;
+  std::tie(res, res_1, res_2, res_3) = at::linalg_lstsq(self_, b_, rcond, driver);
 
   // everything but the 0th output are only sometimes computed. When they aren't, they're empty tensors without a bdim
-  const auto res_1 = std::get<1>(res);
   const auto res_1_bdim = batch_dim_if_not_empty(res_1);
-  const auto res_2 = std::get<2>(res);
   const auto res_2_bdim = batch_dim_if_not_empty(res_2);
-  const auto res_3 = std::get<3>(res);
   const auto res_3_bdim = batch_dim_if_not_empty(res_3);
-  return std::make_tuple(std::get<0>(res), 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
+  return std::make_tuple(res, 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
 }
 
 std::tuple<Tensor, c10::optional<int64_t>>
