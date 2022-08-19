@@ -882,6 +882,20 @@ class NativeFunction:
                 "device_check not allowed to be enabled"
             )
 
+        # NB: if your function accidentally has rand/dropout/... in its name
+        # but is not actually random, feel free to amend this to special case
+        if (
+            "rand" in str(self.func.name)
+            or (
+                "dropout" in str(self.func.name)
+                # Backwards of dropout is typically deterministic
+                and "backward" not in str(self.func.name)
+                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
+            )
+            or self.func.arguments.has_generator_arg()
+        ):
+            assert "nondeterministic_seeded" in self.tags, str(self.func.name)
+
     @property
     def has_composite_kernel(self) -> bool:
         return (
@@ -1668,6 +1682,9 @@ class Type:
     def is_tensor_like(self) -> bool:
         raise NotImplementedError
 
+    def is_generator_like(self) -> bool:
+        raise NotImplementedError
+
     def is_nullable(self) -> bool:
         raise NotImplementedError
 
@@ -1714,6 +1731,9 @@ class BaseType(Type):
     def is_tensor_like(self) -> bool:
         return self.name == BaseTy.Tensor
 
+    def is_generator_like(self) -> bool:
+        return self.name == BaseTy.Generator
+
     def is_nullable(self) -> bool:
         return False
 
@@ -1736,6 +1756,9 @@ class OptionalType(Type):
 
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+
+    def is_generator_like(self) -> bool:
+        return self.elem.is_generator_like()
 
     def is_nullable(self) -> bool:
         return True
@@ -1762,6 +1785,9 @@ class CustomClassType(Type):
         """
         Assume a custom class is not a tensor.
         """
+        return False
+
+    def is_generator_like(self) -> bool:
         return False
 
     def is_nullable(self) -> bool:
@@ -1795,6 +1821,9 @@ class ListType(Type):
 
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+
+    def is_generator_like(self) -> bool:
+        return self.elem.is_generator_like()
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
@@ -2100,6 +2129,9 @@ class Arguments:
 
     def has_tensor_arg(self) -> bool:
         return any(a.type.is_tensor_like() for a in self.flat_non_out)
+
+    def has_generator_arg(self) -> bool:
+        return any(a.type.is_generator_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less

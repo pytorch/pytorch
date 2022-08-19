@@ -13,6 +13,9 @@ namespace native {
 inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
+} // namespace CPU_CAPABILITY
+
+namespace {
 
 void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   auto strides_out = iter.strides(0);
@@ -269,7 +272,7 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   }
 }
 
-} // namespace CPU_CAPABILITY
+} // anonymous namespace
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
