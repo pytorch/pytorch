@@ -2,7 +2,9 @@ import sys
 from typing import Optional, Tuple
 
 import torch
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, utils
+from torch._C import _onnx as _C_onnx
+from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9, utils
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -17,7 +19,6 @@ __all__ = [
     "cross_entropy_loss",
     "dropout",
     "einsum",
-    "einsum_helper",
     "ge",
     "le",
     "native_dropout",
@@ -31,19 +32,19 @@ __all__ = [
 ]
 
 
-def einsum_helper(g, equation, tensors):
+def _einsum_helper(g, equation, tensors):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
     # ONNX does not support bool for Einsum inputs.
     if tensors[0].type().scalarType() == "Bool":
         tensors = [
-            g.op("Cast", tensor, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+            g.op("Cast", tensor, to_i=_C_onnx.TensorProtoDataType.INT64)
             for tensor in tensors
         ]
         return g.op(
             "Cast",
             g.op("Einsum", *tensors, equation_s=equation),
-            to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"],
+            to_i=_C_onnx.TensorProtoDataType.BOOL,
         )
     else:
         return g.op("Einsum", *tensors, equation_s=equation)
@@ -52,7 +53,7 @@ def einsum_helper(g, equation, tensors):
 @symbolic_helper.parse_args("s", "v")
 def einsum(g, equation, tensor_list):
     tensors = symbolic_helper._unpack_list(tensor_list)
-    return einsum_helper(g, equation, tensors)
+    return _einsum_helper(g, equation, tensors)
 
 
 @symbolic_helper.parse_args("v", "v")
@@ -62,9 +63,11 @@ def outer(g, input, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[input.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                input.type().scalarType()
+            ).onnx_type(),
         )
-    return einsum_helper(g, "i,j->ij", [input, other])
+    return _einsum_helper(g, "i,j->ij", [input, other])
 
 
 def _dropout_returns_masked_input_and_mask(
@@ -215,43 +218,21 @@ def celu(g, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
     # if the input is of type double cast it to float
     if self.type().scalarType() == "Double":
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         out = g.op("Celu", self, alpha_f=alpha)
-        return g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Double"])
+        return g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
 
     return g.op("Celu", self, alpha_f=alpha)
 
 
-def argmax(g, input, dim, keepdim):
-    if symbolic_helper._is_none(dim):
-        flattened = symbolic_helper._reshape_helper(
-            g, input, g.op("Constant", value_t=torch.tensor([-1]))
-        )
-        return g.op(
-            "ArgMax", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False
-        )
-    else:
-        dim = symbolic_helper._parse_arg(dim, "i")
-        keepdim = symbolic_helper._parse_arg(keepdim, "i")
-        return g.op(
-            "ArgMax", input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False
-        )
+@symbolic_helper.parse_args("v", "v", "i")
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
-def argmin(g, input, dim, keepdim):
-    if symbolic_helper._is_none(dim):
-        flattened = symbolic_helper._reshape_helper(
-            g, input, g.op("Constant", value_t=torch.tensor([-1]))
-        )
-        return g.op(
-            "ArgMin", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False
-        )
-    else:
-        dim = symbolic_helper._parse_arg(dim, "i")
-        keepdim = symbolic_helper._parse_arg(keepdim, "i")
-        return g.op(
-            "ArgMin", input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False
-        )
+@symbolic_helper.parse_args("v", "v", "i")
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+    return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
 def pow(g, self, exponent):
@@ -293,6 +274,7 @@ def unfold(g, input, dimension, size, step):
         )
 
         ndim = symbolic_helper._get_tensor_rank(input)
+        assert ndim is not None
         perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
 

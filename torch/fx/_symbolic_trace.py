@@ -1,8 +1,10 @@
 import builtins
+import copy
 import functools
 import inspect
 import math
 import os
+import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -496,7 +498,7 @@ class Tracer(TracerBase):
                         )
                         self.create_proxy("call_function", _assert_is_none, args, {})
                     else:
-                        torch.warnings.warn(
+                        warnings.warn(
                             f"Was not able to add assertion to guarantee correct input {name} to "
                             f"specialized function. It is up to the user to make sure that your inputs match the "
                             f"inputs you specialized the function with."
@@ -720,6 +722,20 @@ class Tracer(TracerBase):
         finally:
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
+
+    def __deepcopy__(self, memo):
+        # _autowrap_search contains modules, which cannot be deepcopied.
+        new_tracer = Tracer.__new__(Tracer)
+
+        for k, v in self.__dict__.items():
+            if k in {'_autowrap_search'}:
+                new_obj = copy.copy(v)
+            else:
+                new_obj = copy.deepcopy(v, memo)
+
+            new_tracer.__dict__[k] = new_obj
+
+        return new_tracer
 
 
 # List of pairs of (global dict, function name) functions

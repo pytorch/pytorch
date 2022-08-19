@@ -86,7 +86,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     const c10::Dict<IValue, IValue> model_dict = processed.toGenericDict();
     const std::string& extra = model_dict.at("extra").toStringRef();
     const std::string& model = model_dict.at("model").toStringRef();
-    const std::string& sha256 = model_dict.at("hash").toStringRef();
+    const std::string& modelID = model_dict.at("hash").toStringRef();
 
     const int32_t load_id = std::rand();
     const int32_t instance_key = std::rand();
@@ -121,14 +121,20 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       TORCH_CHECK(false, "Compiling model failed, only float type tensors supported");
     }
 
-    NSURL *modelURL = [PTMCoreMLCompiler compileModel:model modelID:sha256];
-    MLModel *cpuModel = modelURL ? [PTMCoreMLCompiler loadCPUModelAtURL:modelURL] : nil;
+    if (![PTMCoreMLCompiler compileModel:model modelID:modelID]) {
+      if (observer) {
+        observer->onExitCompileModel(instance_key, false, true);
+      }
+      TORCH_CHECK(false, "Compiling MLModel failed");
+    }
+
+    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO];
 
     if (!cpuModel) {
       if (observer) {
         observer->onExitCompileModel(instance_key, false, true);
       }
-      TORCH_CHECK(false, "Compiling MLModel for CPU failed!");
+      TORCH_CHECK(false, "Loading MLModel failed");
     }
 
     NSMutableArray *orderedFeatures = [NSMutableArray array];
@@ -142,7 +148,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     [executor autorelease];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-      MLModel *configuredModel = [PTMCoreMLCompiler loadModelAtURL:modelURL backend:config.backend allowLowPrecision:config.allow_low_precision];
+      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision];
       executor.model = configuredModel ?: cpuModel;
     });
 
