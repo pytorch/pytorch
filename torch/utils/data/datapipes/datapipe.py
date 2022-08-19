@@ -111,6 +111,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     getstate_hook: Optional[Callable] = None
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
+    _length: Optional[int] = None  # Manually set via ``set_length``
     _valid_iterator_id: Optional[int] = None
     _number_of_samples_yielded: int = 0
     _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
@@ -189,12 +190,22 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
+    def set_length(self, length: int) -> None:
+        r"""
+        Set the length attribute of the DataPipe, which is returned by ``__len__``.
+        This can be used after DataPipes whose final length cannot be known in advance (e.g. ``filter``). If you
+        know the final length with certainty, you can manually set it for usages by DataLoader or other DataPipes.
+
+        Note: this doesn't restrict the number of elements that can be yielded from the DataPipe.
+        """
+        self._length = length
+
     def reset(self) -> None:
         r"""
-        Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
+        Reset the ``IterDataPipe`` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
         depending on their functionalities, they may want to override this method with implementations that
         may clear the buffers and reset pointers of the DataPipe.
-        The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
+        The ``reset`` method is always called when ``__iter__`` is called as part of ``hook_iterator``.
         """
         pass
 

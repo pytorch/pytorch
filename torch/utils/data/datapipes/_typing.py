@@ -365,6 +365,19 @@ class _IterDataPipeMeta(_DataPipeMeta):
 
             namespace['reset'] = conditional_reset
 
+        if '__len__' in namespace:
+            len_func = namespace['__len__']
+
+            @functools.wraps(len_func)
+            def len_hook(*args, **kwargs):
+                datapipe = args[0]
+                if datapipe._length is not None:
+                    return datapipe._length
+                else:
+                    return len_func(*args, **kwargs)
+
+            namespace['__len__'] = len_hook
+
         if '__iter__' in namespace:
             hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]

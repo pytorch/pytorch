@@ -277,6 +277,18 @@ class TestIterableDataPipeBasic(TestCase):
         except Exception as e:
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
+    def test_iterdatapipe_set_length(self):
+        datapipe = dp.iter.IterableWrapper(range(10))
+
+        # Functional Test: results are expected prior to `set_length()`
+        self.assertEqual(list(range(10)), list(datapipe))
+        self.assertEqual(10, len(datapipe))
+
+        # Functional Test: ensure only length changes after `set_length()`, not the content
+        datapipe.set_length(20)
+        self.assertEqual(list(range(10)), list(datapipe))
+        self.assertEqual(20, len(datapipe))
+
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         datapipe: IterDataPipe = dp.iter.FileLister(temp_dir, '')
