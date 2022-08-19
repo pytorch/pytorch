@@ -116,6 +116,11 @@ graph {
     output: "onnx::Transpose_16"
     name: "Reshape_9"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Transpose_16"
@@ -195,6 +200,11 @@ graph {
     output: "25"
     name: "Reshape_16"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   name: "torch_jit"
   input {
@@ -237,5 +247,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }
