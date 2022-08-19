@@ -128,7 +128,8 @@ TESTS = discover_tests(
     ]
 )
 
-TESTS = TESTS + ['doctests']
+# Q: Is there a better way to add "doctests" to the list of tests?
+# TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
