@@ -153,7 +153,6 @@ def get_tests(
         # Parse the reports and transform them to JSON
         test_cases = []
         for xml_report in Path(".").glob("**/*.xml"):
-            job_id = get_job_id(xml_report)
             test_cases.extend(
                 parse_xml_report(
                     "testcase",
