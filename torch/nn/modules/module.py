@@ -1069,7 +1069,7 @@ class Module:
 
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
-            if not (isinstance(result, tuple) and all([isinstance(r, torch.Tensor) for r in result])):
+            if not (isinstance(result, tuple) and all(isinstance(r, torch.Tensor) for r in result)):
                 warnings.warn("Using non-full backward hooks on a Module that does not return a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_output. "
@@ -1079,7 +1079,7 @@ class Module:
             result = (result,)
 
         if not isinstance(inputs, torch.Tensor):
-            if not (isinstance(inputs, tuple) and all([isinstance(i, torch.Tensor) for i in inputs])):
+            if not (isinstance(inputs, tuple) and all(isinstance(i, torch.Tensor) for i in inputs)):
                 warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_input. "
