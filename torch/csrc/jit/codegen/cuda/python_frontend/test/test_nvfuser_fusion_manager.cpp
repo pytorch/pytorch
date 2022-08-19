@@ -19,6 +19,12 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   // Create a fusion manager with a maximum of 1 Fusion
   FusionManager* fm = FusionManager::get(1);
 
+  ASSERT_FALSE(fm == nullptr);
+
+  fm->reset();
+
+  ASSERT_FALSE(fm == nullptr);
+
   try {
     fm->fusionPtr();
     FAIL() << "Expected a Fusion ptr check to fail!";
