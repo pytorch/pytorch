@@ -598,14 +598,16 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
     def test_aot_module_simplified_preserves_stack_trace(self):
-
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
             def forward(self, x, y):
-                return (self.linear(x) + y, )
+                z = self.linear(x)
+                z = z + y
+                z = z.relu()
+                return (z, )
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
@@ -626,7 +628,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_pythonkey.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
 
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
