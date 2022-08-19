@@ -12,7 +12,7 @@ from torch.ao.quantization.quantize_jit import (
     prepare_dynamic_jit,
     convert_dynamic_jit,
     _prepare_ondevice_dynamic_jit,
-    _convert_ondevice_dynamic_jit,
+    _quantize_ondevice_dynamic_jit,
 )
 
 from torch.ao.quantization.quant_type import QuantType
@@ -73,8 +73,7 @@ class OnDevicePTQUtils(object):
     def ptq_dynamic_quantize(model, qconfig_dict):
         inputs = model.get_example_inputs()
         m = get_script_module(model, False, inputs)
-        m = _prepare_ondevice_dynamic_jit(m, qconfig_dict)
-        m = _convert_ondevice_dynamic_jit(m, 'forward', True, False)
+        m = _quantize_ondevice_dynamic_jit(m, qconfig_dict, 'forward', True)
         return m
 
     @staticmethod
