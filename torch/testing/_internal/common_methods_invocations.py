@@ -58,6 +58,7 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     SampleInput,
     ErrorInput,
     AliasInfo,
+    NumericsFilter,
     OpInfo,
     _generate_reduction_inputs,
     _generate_reduction_kwargs,
@@ -104,6 +105,9 @@ from torch.testing._internal.opinfo.refs import (  # NOQA: F401
     ElementwiseUnaryPythonRefInfo,
     ElementwiseBinaryPythonRefInfo,
 )
+from torch.testing._internal.opinfo.utils import (
+    np_unary_ufunc_integer_promotion_wrapper,
+)
 from torch.testing._internal import opinfo
 from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_cholesky,
@@ -116,6 +120,12 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_svd,
     sample_inputs_linalg_det_logdet_slogdet,
     sample_inputs_linalg_lu,
+)
+from torch.testing._internal.opinfo.definitions.special import (
+    sample_inputs_entr,
+    sample_inputs_i0_i1,
+    sample_inputs_polygamma,
+    reference_polygamma,
 )
 
 if TEST_SCIPY:
@@ -131,9 +141,6 @@ def close_to_int(x, eps=0.1):
     else:
         y = torch.abs(torch.frac(x))
     return (y < eps) | (y > (1 - eps))
-
-
-NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_val'])
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
@@ -4368,34 +4375,6 @@ def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
     for sample in nn_samples:
         yield drop_mode_argument(sample.input, *sample.args, **sample.kwargs)
 
-
-def np_unary_ufunc_integer_promotion_wrapper(fn):
-    # Wrapper that passes PyTorch's default scalar
-    #   type as an argument to the wrapped NumPy
-    #   unary ufunc when given an integer input.
-    #   This mimicks PyTorch's integer->floating point
-    #   type promotion.
-    #
-    # This is necessary when NumPy promotes
-    #   integer types to double, since PyTorch promotes
-    #   integer types to the default scalar type.
-
-    # Helper to determine if promotion is needed
-    def is_integral(dtype):
-        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
-
-    @wraps(fn)
-    def wrapped_fn(x):
-        # As the default dtype can change, acquire it when function is called.
-        # NOTE: Promotion in PyTorch is from integer types to the default dtype
-        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-
-        if is_integral(x.dtype):
-            return fn(x.astype(np_dtype))
-        return fn(x)
-
-    return wrapped_fn
-
 def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5489,14 +5468,6 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
                                          kwargs=dict(indexing=indexing)))
     return sample_inputs
 
-def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    tensor_shapes = ((S, S), ())
-    ns = (1, 2, 3, 4, 5)
-
-    for shape, n in product(tensor_shapes, ns):
-        yield SampleInput(make_arg(shape), args=(n,))
-
 
 def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5561,47 +5532,6 @@ class MvlGammaInfo(UnaryUfuncInfo):
             skips=skips,
             sample_kwargs=sample_kwargs)
 
-
-def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
-    low, _ = op_info.domain
-
-    if requires_grad:
-        low = 0 + op_info._domain_eps
-
-    return (SampleInput(make_tensor((L,), dtype=dtype, device=device,
-                                    low=low,
-                                    requires_grad=requires_grad)),
-            SampleInput(make_tensor((), dtype=dtype, device=device,
-                                    low=low,
-                                    requires_grad=requires_grad)))
-
-# TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
-#       supports `exclude` argument.
-#       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
-def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
-
-    samples = (SampleInput(make_tensor((S,), dtype=dtype, device=device,
-                                       requires_grad=requires_grad)),
-               SampleInput(make_tensor((), dtype=dtype, device=device,
-                                       requires_grad=requires_grad)))
-
-    if requires_grad and op_info.op == torch.special.i0e:
-        # NOTE: `i0e`'s first-order gradient is not continous
-        # at `0`, hence we don't test `i0e` with any input being `0`.
-        # TODO: Remove this when `make_tensor` supports excluding `0`.
-        for sample in samples:
-            t = sample.input
-            t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
-    elif requires_grad and op_info.op != torch.special.i0e:
-        # Special Case for gradient
-        # Sample with `0` in the input
-        t = make_tensor((S,), dtype=dtype, device=device,
-                        requires_grad=requires_grad)
-        t[0] = 0
-
-        samples += (SampleInput(t),)  # type: ignore[assignment]
-
-    return samples
 
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -7589,19 +7519,6 @@ def reference_lgamma(x):
 
     return out
 
-def reference_polygamma(x, n):
-    # WEIRD `scipy.special.polygamma` behavior
-    # >>> scipy.special.polygamma(0, np.array(501, dtype=np.float32)).dtype
-    # dtype('float64')
-    # >>> scipy.special.polygamma(0, np.array([501], dtype=np.float32)).dtype
-    # dtype('float32')
-    #
-    # Thus we cast output to the default torch dtype or preserve double
-    result_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-    if x.dtype == np.double:
-        result_dtype = np.double
-    return scipy.special.polygamma(n, x).astype(result_dtype)
-
 
 def reference_mvlgamma(x, d):
     if x.dtype == np.float16:
@@ -9432,57 +9349,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=(torch.int8,)),
                    )),
-    UnaryUfuncInfo('special.i0e',
-                   aten_name='special_i0e',
-                   ref=scipy.special.i0e if TEST_SCIPY else None,
-                   decorators=(precisionOverride({torch.bfloat16: 3e-1,
-                                                  torch.float16: 3e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   backward_dtypes=floating_types(),
-                   sample_inputs_func=sample_inputs_i0_i1,
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
-    UnaryUfuncInfo('special.i1',
-                   aten_name='special_i1',
-                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1) if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool),
-                   dtypesIfCUDA=all_types_and(torch.bool),
-                   sample_inputs_func=sample_inputs_i0_i1,
-                   decorators=(
-                       DecorateInfo(toleranceOverride({
-                           torch.float32: tol(atol=1e-4, rtol=0),
-                           torch.bool: tol(atol=1e-4, rtol=0)})),
-                   ),
-                   skips=(
-                       DecorateInfo(unittest.skip("Incorrect result!"),
-                                    'TestUnaryUfuncs',
-                                    'test_reference_numerics_large',
-                                    dtypes=(torch.int8,)),
-                   ),
-                   supports_fwgrad_bwgrad=True,
-                   supports_forward_ad=True),
-    UnaryUfuncInfo('special.i1e',
-                   aten_name='special_i1e',
-                   ref=scipy.special.i1e if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool),
-                   dtypesIfCUDA=all_types_and(torch.bool),
-                   sample_inputs_func=sample_inputs_i0_i1,
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
-    UnaryUfuncInfo('special.ndtr',
-                   aten_name='special_ndtr',
-                   decorators=(precisionOverride({torch.bfloat16: 5e-3,
-                                                  torch.float16: 5e-4}),),
-                   ref=scipy.special.ndtr if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   skips=(
-                       # Dispatch stub: unsupported device typemeta
-                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-                   )),
     BinaryUfuncInfo('floor_divide',
                     ref=_floor_divide_np,
                     dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -9531,6 +9397,25 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     active_if=IS_WINDOWS),
                    )),
+    UnaryUfuncInfo('log1p',
+                   ref=np.log1p,
+                   aliases=('special.log1p',),
+                   domain=(-1, None),
+                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
+                   skips=(
+                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
+                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                   ),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
+                   assert_autodiffed=True),
     BinaryUfuncInfo('ge',
                     ref=np.greater_equal,
                     aliases=('greater_equal',),
@@ -9740,25 +9625,6 @@ op_db: List[OpInfo] = [
                    ),
                    # log10(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
-    UnaryUfuncInfo('log1p',
-                   ref=np.log1p,
-                   aliases=('special.log1p',),
-                   domain=(-1, None),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   skips=(
-                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
-                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   ),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   supports_sparse=True,
-                   supports_sparse_csr=True,
-                   supports_sparse_csc=True,
-                   supports_sparse_bsr=True,
-                   supports_sparse_bsc=True,
-                   assert_autodiffed=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, None),
@@ -13190,25 +13056,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                    ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
-    # A separate OpInfo entry for special.polygamma is needed to reorder the arguments
-    # for the alias. See the discussion here: https://github.com/pytorch/pytorch/pull/59691#discussion_r650261939
-    UnaryUfuncInfo('special.polygamma',
-                   op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
-                   variant_test_name='special_polygamma_n_0',
-                   ref=reference_polygamma if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   sample_inputs_func=sample_inputs_polygamma,
-                   skips=(
-                       # lambda impl
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-                       DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0}),
-                   # polygamma functions have multiple singularities at x <= 0
-                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
@@ -14401,41 +14248,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_zero_),
-    BinaryUfuncInfo('special.xlog1py',
-                    aten_name='special_xlog1py',
-                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                    promotes_int_to_float=True,
-                    supports_forward_ad=True,
-                    supports_fwgrad_bwgrad=True,
-                    supports_one_python_scalar=True,
-                    # We don't test -1 as the gradient will be NaN and it'll break
-                    rhs_make_tensor_kwargs=dict(low=-0.99)),
-    BinaryUfuncInfo('special.zeta',
-                    aten_name='special_zeta',
-                    dtypes=all_types_and(torch.bool),
-                    promotes_int_to_float=True,
-                    supports_autograd=False,
-                    supports_one_python_scalar=True),
-    # TODO: FIXME
-    # OpInfo entry to verify the gradient formula of `other`/`q`
-    # BinaryUfuncInfo('special.zeta',
-    #                 op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
-    #                 aten_name='special_zeta',
-    #                 variant_test_name='grad',
-    #                 dtypes=all_types_and(torch.bool),
-    #                 promotes_int_to_float=True,
-    #                 supports_autograd=True,
-    #                 supports_rhs_python_scalar=False,
-    #                 decorators=[
-    #                     # Derivative wrt first tensor not implemented
-    #                     DecorateInfo(unittest.expectedFailure, "TestCommon",
-    #                                  "test_floating_inputs_are_differentiable")
-    #                 ],
-    #                 skips=(
-    #                     # Lambda doesn't work in JIT test
-    #                     # AssertionError: JIT Test does not execute any logic
-    #                     DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
-    #                 )),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -14668,35 +14480,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
-    UnaryUfuncInfo('special.entr',
-                   ref=scipy.special.entr if TEST_SCIPY else None,
-                   aten_name='special_entr',
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   decorators=(precisionOverride({torch.float16: 1e-1,
-                                                  torch.bfloat16: 1e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   skips=(
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=[torch.bfloat16, torch.float16]),
-                   ),
-                   supports_inplace_autograd=False,
-                   sample_inputs_func=sample_inputs_entr),
-    UnaryUfuncInfo('special.ndtri',
-                   ref=scipy.special.ndtri if TEST_SCIPY else None,
-                   domain=(0, 1),
-                   aten_name='special_ndtri',
-                   dtypes=all_types_and(torch.bool),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
-    UnaryUfuncInfo('special.log_ndtr',
-                   aten_name='special_log_ndtr',
-                   ref=scipy.special.log_ndtr if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   ),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else None,
                    aliases=('special.erf', ),
@@ -15144,13 +14927,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            error_inputs_func=error_inputs_t),
-    UnaryUfuncInfo('special.erfcx',
-                   ref=scipy.special.erfcx if TEST_SCIPY else None,
-                   aten_name='special_erfcx',
-                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
-                   dtypes=all_types_and(torch.bool),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
     OpInfo(
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
@@ -16477,320 +16253,6 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    UnaryUfuncInfo(
-        'special.airy_ai',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_large',
-            ),
-        ),
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.bessel_j0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j0 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.bessel_j1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.j1 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.bessel_y0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y0 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.bessel_y1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.y1 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.chebyshev_polynomial_t',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.chebyshev_polynomial_u',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.chebyshev_polynomial_v',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.chebyshev_polynomial_w',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.hermite_polynomial_h',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.hermite_polynomial_he',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.laguerre_polynomial_l',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.legendre_polynomial_p',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.modified_bessel_i0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i0 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.modified_bessel_i1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.i1 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.modified_bessel_k0',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.modified_bessel_k1',
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1 if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.scaled_modified_bessel_k0',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k0e if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.scaled_modified_bessel_k1',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.k1e if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.shifted_chebyshev_polynomial_t',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.shifted_chebyshev_polynomial_u',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.shifted_chebyshev_polynomial_v',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    BinaryUfuncInfo(
-        'special.shifted_chebyshev_polynomial_w',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.spherical_bessel_j0',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1e-03),
-                    torch.float64: tol(atol=1e-05, rtol=1e-03),
-                }
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
-        supports_autograd=False,
-    ),
 ]
 op_db += opinfo.definitions.op_db
 
@@ -17191,21 +16653,6 @@ python_ref_db = [
     #
     # Elementwise Unary Special OpInfos
     #
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.special.i0e",
-        torch_opinfo_name="special.i0e",
-        supports_nvfuser=False,
-    ),
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.special.i1",
-        torch_opinfo_name="special.i1",
-        supports_nvfuser=False,
-    ),
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.special.i1e",
-        torch_opinfo_name="special.i1e",
-        supports_nvfuser=False,
-    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.logit",
         torch_opinfo_name="logit",
@@ -17716,15 +17163,6 @@ python_ref_db = [
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
         ),
-    ),
-    #
-    # Elementwise Binary Special OpInfos
-    #
-    ElementwiseBinaryPythonRefInfo(
-        "_refs.special.zeta",
-        torch_opinfo_name="special.zeta",
-        supports_one_python_scalar=True,
-        supports_nvfuser=False,
     ),
     #
     # Elementwise Ternary Reference OpInfos
