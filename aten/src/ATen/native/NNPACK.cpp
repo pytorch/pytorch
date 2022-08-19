@@ -115,7 +115,7 @@ static inline void allocate_workspace() {
   int err = posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
   TORCH_CHECK(
       err == 0,
-      "Failed to allocate " workspace_size, " bytes of workspace for NNPack. Error code"
+      "Failed to allocate ", workspace_size, " bytes of workspace for NNPack. Error code",
       err, " (", strerror(err), ")");
 }
 
