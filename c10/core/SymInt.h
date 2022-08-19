@@ -117,10 +117,6 @@ class C10_API SymInt {
     return data_;
   }
 
-  void unsafeReset() {
-    data_ = 0;
-  }
-
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
     return i > MIN_INT;
@@ -148,7 +144,7 @@ class C10_API SymInt {
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
   static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
-  int64_t data_;
+  int64_t data_ = 0;
 };
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);

@@ -37,8 +37,8 @@ void SizesAndStrides::resizeSlowPath(
             inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + i]);
       }
       for (size_t i = 0; i < elemsToZero; i++) {
-        tempStorage[oldSize + i].unsafeReset();
-        tempStorage[newSize + oldSize + i].unsafeReset();
+        tempStorage[oldSize + i] = 0;
+        tempStorage[newSize + oldSize + i] = 0;
       }
       outOfLineStorage_ = tempStorage;
     } else {
@@ -68,8 +68,8 @@ void SizesAndStrides::resizeSlowPath(
         // Zero the end of the sizes portion.
         const auto elemsToZero = newSize - oldSize;
         for (size_t i = 0; i < elemsToZero; i++) {
-          outOfLineStorage_[oldSize + i].unsafeReset();
-          outOfLineStorage_[newSize + oldSize + i].unsafeReset();
+          outOfLineStorage_[oldSize + i] = 0;
+          outOfLineStorage_[newSize + oldSize + i] = 0;
         }
       }
     }
