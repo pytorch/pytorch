@@ -193,8 +193,8 @@ MemoryMap::~MemoryMap() {
   if (access_ & MemoryAccessType::WRITE) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
-    // we want.
-    VK_CHECK(vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE));
+    // we want. Don't check the result here as the destructor cannot throw.
+    vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE);
   }
 
   vmaUnmapMemory(allocator_, allocation_);
