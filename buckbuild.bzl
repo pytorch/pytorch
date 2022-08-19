@@ -1307,7 +1307,8 @@ def define_buck_targets(
             ":torch_mobile_module",
             ":torch_mobile_observer",
             ":torch_mobile_deserialize_common",
-            ":flatbuffers_mobile",
+            # ":flatbuffers_mobile",
+            ":flatbuffer_loader",
             C10,
         ]
     )
@@ -1438,6 +1439,7 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             ":torch_mobile_deserialize",
+            ":flatbuffers_serializer_mobile",
             C10,
         ],
     )
@@ -1771,7 +1773,7 @@ def define_buck_targets(
             third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":torch_mobile_deserialize",
+            # ":torch_mobile_deserialize",
             C10,
         ],
     )
@@ -1805,6 +1807,15 @@ def define_buck_targets(
             ":flatbuffer_loader",
             ":flatbuffers_serializer_mobile",
             ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 

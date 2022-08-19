@@ -164,8 +164,8 @@ def add_torch_libs():
                 "//gloo/fb/transport/tls:tls",
                 "//gloo/transport/tcp:tcp",
                 "//tensorpipe:tensorpipe_cpu",
-            ] + (["//kineto/libkineto:kineto"] if use_kineto() else ["//kineto/libkineto:kineto_activity_header"]) +
-            (["//caffe2:mobile_bytecode"] if enable_flatbuffer else [])
+            ] + (["//kineto/libkineto:kineto"] if use_kineto() else ["//kineto/libkineto:kineto_activity_header"])
+            + (["fbsource//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//caffe2:mobile_bytecode"] if enable_flatbuffer else [])
         ),
         exported_external_deps = [
             ("nanopb", None, "protobuf-nanopb"),
