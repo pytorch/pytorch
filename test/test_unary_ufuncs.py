@@ -704,9 +704,7 @@ class TestUnaryUfuncs(TestCase):
                 # Tests complex out (resized out)
                 complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
-                self.assertEqual(
-                    torch.from_numpy(np_complex_out), complex_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests long out behavior (expected failure)
                 long_out = torch.empty(0, device=device, dtype=torch.long)
