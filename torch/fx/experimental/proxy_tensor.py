@@ -57,7 +57,8 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # TODO: improve naming
             # TODO: lazily insert this into the graph only on first
             # use?  Maybe complicated and DCE is a better idea
-            inner_s.__dict__[tracer] = proxy.size(i)
+            inner_s.__dict__[tracer] = torch.ops.math.size(proxy, i)
+
         # TODO: also do stride/numel
     tensor.__dict__[tracer] = _ProxyTensor(proxy, constant)
 
@@ -423,7 +424,15 @@ class ProxySymDispatchMode(SymDispatchMode):
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
         n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))
-        n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
+        import operator
+        mapped = {
+            operator.mul: torch.ops.math.mul
+        }
+        if func not in mapped:
+            print(func)
+            assert False
+
+        n_out = self.tracer.create_node("call_function", mapped[func], n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
         assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
@@ -518,7 +527,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         # todo: Figure out a more informative name for symints
         def wrap_fake_symbolic(x, sym_shape):
             if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device)
+                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta", requires_grad=x.requires_grad), x.device)
                 return val
             return x
 

@@ -211,6 +211,10 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
+@register_meta(aten._to_copy.default)
+def _to_copy(self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None):
+    return self.new_empty(self.shape, dtype=dtype, device=device)
+
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
