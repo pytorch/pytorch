@@ -552,8 +552,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
-  m.impl("expand.SymInt", expand_symint_decomp_hack);
-  m.impl("view.SymInt", view_symint_decomposition);
 }
 
 }}

@@ -535,33 +535,26 @@ class CppSignatureGroup:
     ) -> "CppSignatureGroup":
         func = f.func
 
-        def make_sigs(symint: bool) -> Tuple[CppSignature, Optional[CppSignature]]:
-            faithful_signature: Optional[CppSignature]
-            if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-                faithful_signature = CppSignature(
-                    func=func,
-                    faithful=True,
-                    symint=symint,
-                    method=method,
-                    fallback_binding=fallback_binding,
-                    cpp_no_default_args=f.cpp_no_default_args,
-                )
-            else:
-                faithful_signature = None
-            signature = CppSignature(
+        def make_sig(*, faithful: bool, symint: bool) -> CppSignature:
+            return CppSignature(
                 func=func,
-                faithful=False,
+                faithful=faithful,
                 symint=symint,
                 method=method,
                 fallback_binding=fallback_binding,
                 cpp_no_default_args=f.cpp_no_default_args,
             )
+
+        def make_sigs(*, symint: bool) -> Tuple[CppSignature, Optional[CppSignature]]:
+            faithful_signature: Optional[CppSignature] = None
+            if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+                faithful_signature = make_sig(faithful=True, symint=symint)
+            signature = make_sig(faithful=False, symint=symint)
             return signature, faithful_signature
 
-        signature, faithful_signature = make_sigs(False)
-        symint_signature, symint_faithful_signature = None, None
-        if func.has_symint():
-            symint_signature, symint_faithful_signature = make_sigs(True)
+        signature, faithful_signature = make_sigs(symint=False)
+        symint_signature, symint_faithful_signature = make_sigs(symint=True)
+
         return CppSignatureGroup(
             func=func,
             signature=signature,
