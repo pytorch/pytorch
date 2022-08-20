@@ -17372,6 +17372,13 @@ python_ref_db = [
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.soft_margin_loss",
+        torch_opinfo_name="nn.functional.soft_margin_loss",
+        # TestCommonCUDA::test_python_ref_executor__refs_nn_functional_soft_margin_loss_executor_nvfuser_cuda_float32
+        # - RuntimeError: No reduction axis specified
+        supports_nvfuser=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",

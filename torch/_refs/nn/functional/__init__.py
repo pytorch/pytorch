@@ -39,6 +39,7 @@ __all__ = [
     "relu",
     "relu6",
     "selu",
+    "soft_margin_loss",
     "softplus",
     "softshrink",
     "tanhshrink",
@@ -230,6 +231,30 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     rhs = alpha * torch.expm1(a)
 
     return scale * torch.where(a > 0, a, rhs)
+
+
+@register_decomposition(torch.ops.aten.soft_margin_loss)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def soft_margin_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.soft_margin_loss
+    """
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    loss = torch.log(1.0 + torch.exp(-input * target))
+    return _apply_loss_reduction(loss, reduction)
 
 
 # softplus is implemented specially because it has beta and threshold arguments
