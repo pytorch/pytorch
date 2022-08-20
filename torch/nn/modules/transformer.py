@@ -236,6 +236,8 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "NestedTensor input is not supported"
         elif mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
+        elif first_layer.self_attn.num_heads % 2 == 1:
+            why_not_sparsity_fast_path = "num_head is odd"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -463,6 +465,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
         elif src.is_nested and src_key_padding_mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+        elif self.self_attn.num_heads % 2 == 1:
+            why_not_sparsity_fast_path = "num_head is odd"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
