@@ -102,7 +102,7 @@ class SavePlanner(abc.ABC):
     Rewriting state_dict. This is the simplest way to extend the save process as it
     doesn't requite understanding the intrincacies of how SavePlan works:
 
-    >>> class RenamePlanner(DefaultSavePlanner)
+    >>> class RenamePlanner(DefaultSavePlanner):
     >>>     def init(self, state_dict, is_coordinator):
     >>>         # prefix all keys with `foo_``
     >>>         super().init(self, {"foo_" + k, v for k, v in state_dict.items()}, is_coordinator)
