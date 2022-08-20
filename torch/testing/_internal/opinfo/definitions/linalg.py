@@ -1634,11 +1634,6 @@ op_db: List[OpInfo] = [
         check_batched_grad=False,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
         sample_inputs_func=sample_inputs_linalg_matrix_power,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-        skips=(
-            # Strides are not the same!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
-        ),
     ),
     OpInfo(
         "linalg.multi_dot",
