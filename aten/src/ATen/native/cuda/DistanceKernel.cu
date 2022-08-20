@@ -221,22 +221,18 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const dim3 block(kCUDANumThreads);
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
+    auto impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p>;
     if (p == 0.0) {
-      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero>;
     } else if (p == 1.0) {
-      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one>;
     } else if (p == 2.0) {
-      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two>;
     } else if (std::isinf(p)) {
-      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -251,22 +247,18 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   const double n2_squared_minus_1 = n2 * n2 - 1;
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_cuda", [&] {
+    auto impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p>;
     if (p == 0.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero>;
     } else if (p == 1.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one>;
     } else if (p == 2.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two>;
     } else if (std::isinf(p)) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -293,22 +285,18 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
   Tensor buffer = at::empty({n - 1, result.size(0), result.size(1)}, result.options());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_cuda_backward", [&] {
+    auto impl_fptr = pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p>;
     if (p == 1.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one>;
     } else if (p < 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two>;
     } else if (p == 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two>;
     } else if (std::isinf(p)) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   at::sum_out(result, buffer, 0);
@@ -346,32 +334,20 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
   Tensor buffer = at::empty({batch, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
+    auto impl_fptr = cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p>;
     if (p == 1.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
-      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
-      p, r1, r2, m, count, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      impl_fptr = cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one>;
     } else if (p < 2.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
-      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
-      p, r1, r2, m, count, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+       impl_fptr = cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two>;
     } else if (p == 2.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
-      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
-      p, r1, r2, m, count, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+       impl_fptr = cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two>;
     } else if (std::isinf(p)) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
-      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
-      p, r1, r2, m, count, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
-      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
-      p, r1, r2, m, count, r_size, l1_size, l2_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+       impl_fptr = cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      p, r1, r2, m, count, r_size, l1_size, l2_size);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   at::sum_out(result, buffer, 1);
