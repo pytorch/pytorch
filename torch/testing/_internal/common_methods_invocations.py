@@ -109,7 +109,6 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_cholesky,
     sample_inputs_linalg_cholesky_inverse,
     sample_inputs_cross,
-    error_inputs_cross,
     sample_inputs_linalg_qr_geqrf,
     sample_inputs_linalg_invertible,
     sample_inputs_lu_solve,
