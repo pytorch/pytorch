@@ -29,6 +29,13 @@ namespace impl {
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+// ============================================================================
+// == PyTorch Ops =============================================================
+// ============================================================================
+
+// ----------------------------
+// |  Input / Output encoder  |
+// ----------------------------
 void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
     if (value.isTensor()) {
@@ -147,6 +154,169 @@ void InputOutputEncoder::clear() {
   tensor_metadata_.clear();
   tensor_sizes_strides_.clear();
   ivalues_.clear();
+}
+
+// ---------------------------------------------------
+// |  Correlation ID tracking (OpList & EventBlock)  |
+// ---------------------------------------------------
+template <typename T, size_t ChunkSize>
+ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::EventBlock() {
+  static std::atomic<uint64_t> counter_{0};
+  id_start_ = 1 + ChunkSize * counter_++;
+}
+
+template <class... Args>
+std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::
+    TorchOpStorage::OpList::emplace_back(Args&&... args) {
+  maybe_grow();
+  *next_ = {std::forward<Args>(args)...};
+  auto corr_id = buffer_last_->correlation_id(next_);
+  return {next_++, corr_id};
+}
+
+uint64_t ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(
+    const OpList::Iterator& e) {
+  return e.address().first->correlation_id(&*e);
+}
+
+template <typename T, size_t ChunkSize>
+uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
+    correlation_id(const T* ptr) const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      ptr >= this->data() && ptr < this->data() + ChunkSize);
+  return id_start_ + (ptr - this->data());
+}
+
+// ---------------------------------
+// |  Collection (Observer logic)  |
+// ---------------------------------
+std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
+    const at::RecordFunction& fn) {
+  KinetoObserverContext::Event* event;
+  uint64_t corr_id;
+  std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
+      fn.seqNr(),
+      fn.forwardThreadId(),
+      fn.scope(),
+      fn.isAsync(),
+      fn.debugHandle(),
+      fn.name());
+  if (config_.report_input_shapes) {
+    torch_ops_.inputs_outputs_.push(fn.inputs());
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  }
+
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
+  // backward nodes source range corresponds to the forward node
+  // TODO: consider using C++ stack trace
+  if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+    auto cs = torch::profiler::impl::prepareCallstack(jit::currentCallstack());
+    torch_ops_.jit_stack_.emplace_back(callstackStr(cs));
+  }
+  if (config_.with_modules &&
+      fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+    torch_ops_.jit_modules_.emplace_back(jit::currentModuleHierarchy());
+  }
+#endif
+  if (config_.with_flops) {
+    torch_ops_.extra_args_.emplace_back(
+        torch::profiler::impl::saveExtraArgs(fn));
+  }
+
+  auto out = std::make_unique<KinetoObserverContext>(event);
+
+  if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    try {
+      out->fallback_ = torch_ops_.gpu_fallback_.emplace_back();
+      torch::profiler::impl::cudaStubs()->record(
+          nullptr, &out->fallback_->cuda_event_start_, nullptr);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to record CUDA event. " << e.what();
+    }
+  }
+
+  event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  return out;
+}
+
+// ---------------
+// |  Collation  |
+// ---------------
+namespace {
+template <typename T>
+struct StealOrDefault {
+  StealOrDefault(T& container)
+      : container_{container}, it_{container.begin()} {}
+
+  ~StealOrDefault() {
+    container_.get().clear();
+  }
+
+  typename T::Iterator::value_type operator()() {
+    if (it_.exhausted()) {
+      return typename T::Iterator::value_type();
+    } else {
+      auto result = std::move(*it_);
+      ++it_;
+      return result;
+    }
+  }
+
+  std::reference_wrapper<T> container_;
+  typename T::Iterator it_;
+};
+} // namespace
+
+void ThreadLocalSubqueue::TorchOpStorage::materialize(
+    std::vector<std::shared_ptr<Result>>& out,
+    const std::function<time_t(approx_time_t)> time_converter,
+    const uint64_t tid,
+    const kineto::DeviceAndResource& kineto_info) {
+  // Plumb Autograd info to the top level annotation.
+  auto it = op_events_.begin();
+  for (C10_UNUSED const auto _ :
+       c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
+    auto& first = it->basic_fields_;
+    auto& second = (++it)->basic_fields_;
+    if (first.scope_ == at::RecordScope::FUNCTION &&
+        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
+        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+      first.sequence_number_ = second.sequence_number_;
+      first.forward_tid_ = second.forward_tid_;
+    }
+  }
+
+  auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
+
+  // TODO: CTAD will take care of template args when we move to C++17
+  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
+  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
+  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
+  auto gpu_fallback = StealOrDefault<decltype(gpu_fallback_)>(gpu_fallback_);
+
+  for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
+    ExtraFields<EventType::TorchOp> e{
+        std::move(event->basic_fields_),
+        ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
+        time_converter(event->end_time_),
+        input_getter(),
+        jit_stack(),
+        jit_module(),
+        extra_args(),
+        gpu_fallback(),
+        event->allow_tf32_cublas_};
+
+    out.emplace_back(Result::create(
+        time_converter(event->start_time_), tid, kineto_info, std::move(e)));
+  }
+
+  op_events_.clear();
+  inputs_outputs_.clear();
 }
 
 namespace {
@@ -302,81 +472,11 @@ c10::DeviceType Result::deviceType() const {
 }
 #undef ATTRIBUTE
 
-template <typename T, size_t ChunkSize>
-ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
-  static std::atomic<uint64_t> counter_{0};
-  id_start_ = 1 + ChunkSize * counter_++;
-}
-template <class... Args>
-std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::OpList::
-    emplace_back(Args&&... args) {
-  maybe_grow();
-  *next_ = {std::forward<Args>(args)...};
-  auto corr_id = buffer_last_->correlation_id(next_);
-  return {next_++, corr_id};
-}
-uint64_t ThreadLocalSubqueue::OpList::correlationID(const OpList::Iterator& e) {
-  return e.address().first->correlation_id(&*e);
-}
-
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
-}
-
-std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
-    const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event;
-  uint64_t corr_id;
-  std::tie(event, corr_id) = op_events_.emplace_back(
-      fn.seqNr(),
-      fn.forwardThreadId(),
-      fn.scope(),
-      fn.isAsync(),
-      fn.debugHandle(),
-      fn.name());
-  if (config_.report_input_shapes) {
-    inputs_outputs_.push(fn.inputs());
-  }
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
-  }
-
-#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
-  // backward nodes source range corresponds to the forward node
-  // TODO: consider using C++ stack trace
-  if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-    auto cs = torch::profiler::impl::prepareCallstack(jit::currentCallstack());
-    jit_stack_.emplace_back(callstackStr(cs));
-  }
-  if (config_.with_modules &&
-      fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-    jit_modules_.emplace_back(jit::currentModuleHierarchy());
-  }
-#endif
-  if (config_.with_flops) {
-    extra_args_.emplace_back(torch::profiler::impl::saveExtraArgs(fn));
-  }
-
-  auto out = std::make_unique<KinetoObserverContext>(event);
-
-  if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
-    try {
-      out->fallback_ = gpu_fallback_.emplace_back();
-      torch::profiler::impl::cudaStubs()->record(
-          nullptr, &out->fallback_->cuda_event_start_, nullptr);
-    } catch (const std::exception& e) {
-      LOG(WARNING) << "Failed to record CUDA event. " << e.what();
-    }
-  }
-
-  event->start_time_ = torch::profiler::impl::getApproximateTime();
-  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
-  return out;
 }
 
 RecordQueue::RecordQueue(
@@ -425,17 +525,6 @@ void RecordQueue::stop() {
 }
 
 namespace {
-template <typename T>
-auto steal_or_default(T& it) {
-  if (it.exhausted()) {
-    return typename T::value_type();
-  } else {
-    auto result = std::move(*it);
-    ++it;
-    return result;
-  }
-}
-
 void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
   r->finished_ = true;
@@ -742,34 +831,6 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-struct EvaluateFunctionVisitor {
-  void operator()(
-      ExtraFields<EventType::TorchOp>& first,
-      ExtraFields<EventType::TorchOp>& second) {
-    if (first.scope_ == at::RecordScope::FUNCTION &&
-        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
-      first.sequence_number_ = second.sequence_number_;
-      first.forward_tid_ = second.forward_tid_;
-    }
-  }
-
-  template <typename T0, typename T1>
-  void operator()(T0&, T1&) {}
-};
-
-void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
-  auto end = results.size() > 2 ? results.end() - 1 : results.begin();
-  for (auto it = results.begin(); it < end; ++it) {
-    if ((*it)->start_tid_ == (*(it + 1))->start_tid_) {
-      c10::visit(
-          EvaluateFunctionVisitor(),
-          (*it)->extra_fields_,
-          (*(it + 1))->extra_fields_);
-    }
-  }
-}
-
 using result_ptr_t = std::shared_ptr<Result>;
 struct ResultGreater {
   bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
@@ -778,7 +839,6 @@ struct ResultGreater {
 };
 
 void build_tree(std::vector<std::shared_ptr<Result>>& events) {
-  set_autograd_evaluate(events);
   std::stable_sort(
       events.begin(), events.end(), [](const auto& a, const auto& b) {
         return a->start_time_ns_ < b->start_time_ns_;
@@ -891,66 +951,26 @@ RecordQueue::getRecords(
   std::vector<python_tracer::CompressedEvent> python_enters;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
-    for (auto& i : queue.backend_events_) {
-      auto start_time = i.start_time_us_;
-      out.emplace_back(Result::create(
-          /*start_time_ns_=*/start_time * 1000,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
-    }
-    queue.backend_events_.clear();
+    auto materialize = [&](auto& events) {
+      for (auto& i : events) {
+        out.emplace_back(Result::create(
+            /*start_time_ns_=*/c10::guts::if_constexpr<std::is_same<
+                typename std::remove_reference<decltype(i)>::type,
+                ExtraFields<EventType::Backend>>::value>(
+                [&](auto _) { return _(i).start_time_us_ * 1000; },
+                [&](auto _) { return converter(_(i).start_time_); }),
+            /*start_tid_=*/queue.tid(),
+            /*kineto_info_=*/queue.kineto_info(),
+            /*extra_fields_=*/std::move(i)));
+      }
+      events.clear();
+    };
 
-    auto input_getter = queue.inputs_outputs_.getNextShapesAndDtypes();
-    auto jit_stack_it = queue.jit_stack_.begin();
-    auto jit_module_it = queue.jit_modules_.begin();
-    auto extra_args_it = queue.extra_args_.begin();
-    auto gpu_fallback_it = queue.gpu_fallback_.begin();
-    for (auto event = queue.op_events_.begin(); event != queue.op_events_.end();
-         ++event) {
-      auto& i = *event;
-      auto start_time = converter(i.start_time_);
-      out.emplace_back(Result::create(
-          start_time,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/
-          ExtraFields<EventType::TorchOp>(
-              std::move(i.basic_fields_),
-              ThreadLocalSubqueue::OpList::correlationID(event),
-              converter(i.end_time_),
-              input_getter(),
-              steal_or_default(jit_stack_it),
-              steal_or_default(jit_module_it),
-              steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it),
-              i.allow_tf32_cublas_)));
-    }
-    queue.op_events_.clear();
-    queue.inputs_outputs_.clear();
-    queue.jit_stack_.clear();
-    queue.jit_modules_.clear();
-    queue.extra_args_.clear();
-    queue.gpu_fallback_.clear();
-
-    for (auto& i : queue.allocations_) {
-      auto start_time = converter(i.start_time_);
-      out.emplace_back(Result::create(
-          start_time,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
-    }
-    queue.allocations_.clear();
-    for (auto& i : queue.ooms_) {
-      auto start_time = converter(i.start_time_);
-      out.emplace_back(Result::create(
-          start_time,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
-    }
-    queue.ooms_.clear();
+    queue.torch_ops_.materialize(
+        out, converter, queue.tid(), queue.kineto_info());
+    materialize(queue.backend_events_);
+    materialize(queue.allocations_);
+    materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(
