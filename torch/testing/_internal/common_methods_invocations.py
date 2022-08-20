@@ -15193,8 +15193,7 @@ op_db: List[OpInfo] = [
             # RuntimeError: "fused_dropout" not implemented for 'ComplexDouble', and 'ComplexFloat'
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          device_type='cuda',
-                         dtypes=(torch.complex64, torch.complex128)),
-        ),
+                         dtypes=(torch.complex64, torch.complex128)),),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
@@ -15271,11 +15270,10 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
-        "nn.functional.feature_alpha_dropout",
+        "nn.functional.alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="without_train",
-        ref=_NOTHING,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         skips=(
             # lambda impl
