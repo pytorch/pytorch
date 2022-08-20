@@ -93,6 +93,8 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
                 for i in range(0, len(a)):
                     recursive_compare_same(a[i], b[i])
 
+        recursive_compare_same(true_result, false_result)
+        
     args = (pred, true_graph, false_graph, operands)
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
