@@ -611,6 +611,57 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    def sigmoid(g, x, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.sigmoid(g, x)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.leaky_relu(g, x, negative_slope, inplace)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def layer_norm(g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.layer_norm(g, x, normalized_shape, weight, bias, eps, False)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.group_norm(g, x, num_groups, weight, bias, eps, False)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
+    def instance_norm(
+        g,
+        q_input,
+        weight,
+        bias,
+        eps,
+        op_scale,
+        op_zero_point,
+    ):
+        input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+
+        output = opset9.instance_norm(
+            g, input, weight, bias, None, None, False, 0, eps, False
+        )
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
     def conv2d_relu(
         g,
         q_input,
