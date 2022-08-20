@@ -196,7 +196,7 @@ class ShapeEnv(object):
         # Currently we don't put 0/1 specialization in guards but perhaps we should
         if val == 0 or val == 1:
             return val
-        sympy_expr = sympy.Symbol(name, positive=True)
+        sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         shape_env[sympy_expr] = val
@@ -204,7 +204,7 @@ class ShapeEnv(object):
 
     def try_constantify(self, expr):
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
-        new_shape_env = {k: sympy.Symbol(f'shape_{idx}', positive=True) + 1 for idx, k in enumerate(self.shape_env.keys())}
+        new_shape_env = {k: sympy.Symbol(f'shape_{idx}', positive=True, integer=True) + 1 for idx, k in enumerate(self.shape_env.keys())}
         new_expr = expr.subs(new_shape_env)
         new_expr = new_expr.simplify()
         if len(list(new_expr.free_symbols)) == 0:
