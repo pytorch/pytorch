@@ -351,7 +351,8 @@ struct NoOpPythonTracer : public PythonTracerBase {
   void clear() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)>,
-      std::vector<CompressedEvent>&) override {
+      std::vector<CompressedEvent>&,
+      time_t) override {
     return {};
   }
   ~NoOpPythonTracer() = default;
@@ -447,13 +448,21 @@ uint64_t Result::correlationID() const {
 }
 
 int64_t Result::endTimeNS() const {
-  return visit(c10::overloaded(
+  auto end_time_ns = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
+
+  // In rare cases we're willing to tolerate ops which are missing an end time
+  // so long as they can borrow their parent's end time. A consequence of this,
+  // however, is that `endTimeNS` may not make sense until tree construction is
+  // complete.
+  auto end_time_is_valid =
+      !finished_ || SOFT_ASSERT(end_time_ns >= start_time_ns_, name());
+  return end_time_is_valid ? end_time_ns : start_time_ns_;
 }
 
 uint64_t Result::endTID() const {
@@ -980,7 +989,8 @@ RecordQueue::getRecords(
 
   if (tracePython()) {
     auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i : tracer.getEvents(converter, python_enters)) {
+    for (auto i :
+         tracer.getEvents(converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
     tracer.clear();
