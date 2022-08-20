@@ -36,7 +36,7 @@ class C10_API SymInt {
   /*implicit*/ SymInt(int64_t d) : data_(d) {
     TORCH_CHECK(!is_symbolic());
   };
-  SymInt() = default;
+  SymInt() : data_(0) {}
 
   // unchecked c-tor accepting raw `data_`
   SymInt(Unchecked, int64_t d) : data_(d) {}
