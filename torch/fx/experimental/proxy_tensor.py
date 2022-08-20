@@ -102,7 +102,8 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(e)
+            if not e.is_sparse:
+                proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(e)
 
     def get_constant(idx):
         if constant is None:
@@ -160,7 +161,9 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode.restore():
-            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+            r = CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+            if r is not NotImplemented:
+                return r
 
     # Some of these are not "real" aten ops and will fail if we
     # call _dispatch_has_kernel_for_dispatch_key on them.
