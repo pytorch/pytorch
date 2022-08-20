@@ -1096,15 +1096,15 @@ def get_combined_checks_from_pr_and_land_validation(
     """
     Combines checks from both the PR and land validation to get a holistic view
     of all checks.
-    
-    This helps us cover the corner case where certain workflows may have been 
+
+    This helps us cover the corner case where certain workflows may have been
     requested on the PR but are not part of land validation (e.g. nightly
-    builds) or are implicitly run on PRs but not on land validation branches 
+    builds) or are implicitly run on PRs but not on land validation branches
     (like CLA Checks).
-    
-    At the same time, we prioritize the signal workflows which do run on land 
+
+    At the same time, we prioritize the signal workflows which do run on land
     validation. 
-    
+
     E.g. if a workflow fails on the PR but passes on land validation then we'd
     use the successful result from the land validation.
     """
