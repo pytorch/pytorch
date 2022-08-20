@@ -20,6 +20,7 @@ from typing import (
     Tuple,
     Union,
     cast,
+    NamedTuple
 )
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -36,6 +37,11 @@ from trymerge_explainer import (
     get_land_check_troubleshooting_message,
     get_revert_message,
 )
+
+class WorkflowCheckState(NamedTuple):
+    status: Optional[str]
+    url: str
+    name: str
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
@@ -485,12 +491,11 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
     else:
         return f'{workflow_run["workflow"]["name"]} / '
 
-
 def add_workflow_conclusions(
     checksuites: Any,
     get_next_checkruns_page: Callable[[List[Dict[str, Dict[str, Any]]], int, Any], Any],
     get_next_checksuites: Callable[[Any], Any]
-) -> Dict[str, Tuple[str, str]]:
+) -> Dict[str, WorkflowCheckState]:
     conclusions = {}
 
     def add_conclusions(edges: Any) -> None:
@@ -504,7 +509,10 @@ def add_workflow_conclusions(
                 # Do not override existing status with cancelled
                 if workflow_conclusion == "CANCELLED" and workflow_name in conclusions:
                     continue
-                conclusions[workflow_name] = (workflow_conclusion, node["url"])
+                conclusions[workflow_name] = WorkflowCheckState(
+                    name=workflow_name,
+                    status=workflow_conclusion,
+                    url=node["url"])
             has_failing_check = False
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
@@ -513,8 +521,11 @@ def add_workflow_conclusions(
                         continue
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
-                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    workflow_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
+                    conclusions[workflow_name] = WorkflowCheckState(
+                        name=workflow_name,
+                        status=checkrun_node["conclusion"],
+                        url=checkrun_node["detailsUrl"]
                     )
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
                     checkruns = get_next_checkruns_page(edges, edge_idx, checkruns)
@@ -522,7 +533,11 @@ def add_workflow_conclusions(
                     checkruns = None
             # Github doesn't set conclusion to failure if a job is still pending
             if workflow_run is not None and has_failing_check:
-                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+                workflow_name = workflow_run["workflow"]["name"]
+                conclusions[workflow_name] = WorkflowCheckState(
+                    name=workflow_name,
+                    status="FAILURE",
+                    url=node["url"])
 
     add_conclusions(checksuites["edges"])
     while bool(checksuites["pageInfo"]["hasNextPage"]):
@@ -573,7 +588,7 @@ class GitHubPR:
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
         self.labels: Optional[List[str]] = None
-        self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
+        self.conclusions: Optional[Dict[str, WorkflowCheckState]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
@@ -701,7 +716,7 @@ class GitHubPR:
         self.labels = labels
         return self.labels
 
-    def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
+    def get_checkrun_conclusions(self) -> Dict[str, WorkflowCheckState]:
         """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
@@ -826,7 +841,7 @@ class GitHubPR:
         checks = self.get_checkrun_conclusions()
         if checks is None or checkrun_name not in checks:
             return False
-        return checks[checkrun_name][0] != "SUCCESS"
+        return checks[checkrun_name].status != "SUCCESS"
 
     def merge_ghstack_into(
         self,
@@ -1045,7 +1060,7 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, Tuple[str, str]]:
+def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, WorkflowCheckState]:
 
     def get_commit_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
         rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
@@ -1074,12 +1089,26 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
-# Combine checks from both the PR and land validation to get a holistic view of all checks. This helps us cover the
-# corner case where certain workflows may have been requested on the PR but are not part of land validation
-# (e.g. nightly builds) or are implicitly run on PRs but not on land validation branches (like CLA Checks).
-# At the same time, we prioritize the signal workflows which do run on land validation. E.g. if a workflow fails on
-# the PR but passes on land validation then we'd use the successful result from the land validation.
-def get_combined_checks_from_pr_and_land_validation(pr: GitHubPR, land_check_commit: Optional[str]) -> Dict[str, Tuple[str, str]]:
+def get_combined_checks_from_pr_and_land_validation(
+    pr: GitHubPR,
+    land_check_commit: Optional[str]
+) -> Dict[str, WorkflowCheckState]:
+    """
+    Combines checks from both the PR and land validation to get a holistic view
+    of all checks.
+    
+    This helps us cover the corner case where certain workflows may have been 
+    requested on the PR but are not part of land validation (e.g. nightly
+    builds) or are implicitly run on PRs but not on land validation branches 
+    (like CLA Checks).
+    
+    At the same time, we prioritize the signal workflows which do run on land 
+    validation. 
+    
+    E.g. if a workflow fails on the PR but passes on land validation then we'd
+    use the successful result from the land validation.
+    """
+
     pr_checks = pr.get_checkrun_conclusions()
     land_validation_checks = get_land_checkrun_conclusions(pr.org, pr.project, land_check_commit) if land_check_commit else {}
 
@@ -1088,22 +1117,21 @@ def get_combined_checks_from_pr_and_land_validation(pr: GitHubPR, land_check_com
 
     return merged_checks
 
-def pr_get_checks_with_lambda(
-    pr: GitHubPR,
-    land_check_commit: Optional[str],
-    status_check: Callable[[Optional[str]], bool]
-) -> List[Tuple[str, str]]:
-    checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-    return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
+def filter_checks_with_lambda(
+    checks: Dict[str, WorkflowCheckState],
+    status_filter: Callable[[Optional[str]], bool]
+) -> List[WorkflowCheckState]:
+    return [check for check in checks.values() if status_filter(check.status)]
 
+def filter_pending_checks(
+    checks: Dict[str, WorkflowCheckState]
+) -> List[WorkflowCheckState]:
+    return filter_checks_with_lambda(checks, lambda x: x is None)
 
-def pr_get_pending_checks(pr: GitHubPR, land_check_commit: Optional[str]) -> List[Tuple[str, str]]:
-    return pr_get_checks_with_lambda(pr, land_check_commit, lambda x: x is None)
-
-
-def pr_get_failed_checks(pr: GitHubPR, land_check_commit: Optional[str]) -> List[Tuple[str, str]]:
-    return pr_get_checks_with_lambda(pr, land_check_commit, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
-
+def filter_failed_checks(
+    checks: Dict[str, WorkflowCheckState]
+) -> List[WorkflowCheckState]:
+    return filter_checks_with_lambda(checks, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 def validate_revert(repo: GitRepo, pr: GitHubPR, *,
                     comment_id: Optional[int] = None) -> Tuple[str, str]:
@@ -1201,19 +1229,17 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
-def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
+def categorize_checks(check_runs: Dict[str, WorkflowCheckState],
                       required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []
     for checkname in required_checks:
         if checkname not in check_runs:
             pending_checks.append((checkname, None))
-        elif check_runs[checkname][0] is None:
-            pending_checks.append((checkname, check_runs[checkname][1]))
-        elif (check_runs[checkname][0].upper() != 'SUCCESS'
-              and check_runs[checkname][0].upper() != 'SKIPPED'
-              and check_runs[checkname][0].upper() != 'NEUTRAL'):
-            failed_checks.append((checkname, check_runs[checkname][1]))
+        elif check_runs[checkname].status is None:
+            pending_checks.append((checkname, check_runs[checkname].url))
+        elif (str(check_runs[checkname].status).upper() not in ['SUCCESS', 'SKIPPED', 'NEUTRAL']):
+            failed_checks.append((checkname, check_runs[checkname].url))
     return (pending_checks, failed_checks)
 
 def merge(pr_num: int, repo: GitRepo,
@@ -1260,22 +1286,25 @@ def merge(pr_num: int, repo: GitRepo,
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo, land_check_commit=land_check_commit)
-            pending = pr_get_pending_checks(pr, land_check_commit)
-            failing = pr_get_failed_checks(pr, land_check_commit)
+
+            checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
+
+            pending = filter_pending_checks(checks)
+            failing = filter_failed_checks(checks)
 
             # HACK until GitHub will be better about surfacing those
-            startup_failures = pr_get_checks_with_lambda(pr, land_check_commit, lambda x: x == "STARTUP_FAILURE")
+            startup_failures = filter_checks_with_lambda(checks, lambda status: status == "STARTUP_FAILURE")
             if len(startup_failures) > 0:
                 raise RuntimeError(f"{len(failing)} STARTUP failures reported, please check workflows syntax! " +
-                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in startup_failures[:5]))
+                                   ' ,'.join(f"[{x.name}]({x.url})" for x in startup_failures[:5]))
             # END of HACK
 
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
-                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
+                                   ' ,'.join(f"[{x.name}]({x.url})" for x in failing[:5]))
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
-                                                  f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
+                                                  f"first few of them are: {' ,'.join(x.name for x in pending[:5])}")
             if land_checks and land_check_commit is not None:
                 validate_land_time_checks(org, project, land_check_commit)
 
