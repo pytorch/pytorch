@@ -8,14 +8,19 @@ namespace vulkan {
 namespace ops {
 namespace {
 //
-// input_vk: input tensor of shape (L, N, H_in) when batch_first=False
-//                                 (N, L, H_in) when batch_first=True containing
-//                                 the features of the input sequence
-// hx_vk: initial hidden state for each element in the batch. tensor of shape (D
-// * num_layers, N, H_out) output: tensor of shape (N, L, D * H_out)) when
-// batch_first=True h_n: tensor of shape (D * num_layers, N, H_out)
+// input_vk: input tensor containing the features of the input sequence
+//           tensor of shape (N, L, H_in) when batch_first=True
+//                           (L, N, H_in) when batch_first=False
 //
-//  where
+// hx_vk: initial hidden state for each element in the batch.
+//        tensor of shape (D * num_layers, N, H_out)
+//
+// output: tensor of shape (N, L, D * H_out) when batch_first=True
+//                         (L, N, D * H_out) when batch_first=False
+//
+// h_n: tensor of shape (D * num_layers, N, H_out)
+//
+// where
 //    L = sequence length
 //    N = batch size
 //    D = 2 if bidirectional=True otherwise 1
@@ -46,17 +51,21 @@ std::tuple<Tensor, Tensor> gru_input(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan gru expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan gru expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan gru expects 'dropout' to be 0.0.");
+
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
 
   const auto hidden_size = hx_vk.size(2);
   std::vector<at::Tensor> h_n_list; // hidden output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   for (int64_t i = 0; i < num_layers; ++i) {
     // extract each hidden state and squeeze into 2D dim
@@ -99,6 +108,7 @@ std::tuple<Tensor, Tensor> gru_input(
   }
 
   auto h_n = at::cat(h_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   return std::tuple<Tensor, Tensor>(x, h_n);
 }
@@ -118,7 +128,11 @@ std::vector<c10::intrusive_ptr<LinearPackedContext>> pack_linear_op_contexts(
     int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
-      "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+      "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'."
+      " But 'params_cpu' has size: ",
+      params_cpu.size(),
+      " and 'num_layers' is: ",
+      num_layers);
   std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 6);
 
@@ -170,8 +184,6 @@ GruPackedContext::GruPackedContext(
   TORCH_INTERNAL_ASSERT(!train, "Vulkan gru expects 'train' to be false.");
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan gru expects 'bidirectional' to be false.");
-  TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan gru expects 'batch_first' to be true.");
   TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan gru expects 'dropout' to be 0.0.");
@@ -262,10 +274,19 @@ std::tuple<Tensor, Tensor> run_gru_context(
   TORCH_INTERNAL_ASSERT(
       hx_vk.sizes().size() == 3, "Vulkan gru expects 'hx_vk' dims to be 3.");
 
-  const c10::List<c10::IValue> packed_linear_contexts =
-      gru_context->get_val(GruPackedContext::Packed::LinearContexts).toList();
   const int64_t num_layers =
       gru_context->get_val(GruPackedContext::Packed::NumLayers).toInt();
+  const bool batch_first =
+      gru_context->get_val(GruPackedContext::Packed::BatchFirst).toBool();
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
+
+  const c10::List<c10::IValue> packed_linear_contexts =
+      gru_context->get_val(GruPackedContext::Packed::LinearContexts).toList();
 
   const int64_t linear_contexts_per_layer = 6;
   // (b_ir, w_ir), (b_hr, w_hr), (b_iz, w_iz),
@@ -273,8 +294,7 @@ std::tuple<Tensor, Tensor> run_gru_context(
   std::vector<at::Tensor> h_n_list; // hidden output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   for (int64_t i = 0; i < num_layers; ++i) {
     // extract each hidden state and squeeze into 2D dim
@@ -316,6 +336,7 @@ std::tuple<Tensor, Tensor> run_gru_context(
   }
 
   auto h_n = at::cat(h_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   return std::tuple<Tensor, Tensor>(x, h_n);
 }
