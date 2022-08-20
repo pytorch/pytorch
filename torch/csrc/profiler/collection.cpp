@@ -456,7 +456,12 @@ int64_t Result::endTimeNS() const {
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
 
-  auto end_time_is_valid = SOFT_ASSERT(end_time_ns >= start_time_ns_, name());
+  // In rare cases we're willing to tolerate ops which are missing an end time
+  // so long as they can borrow their parent's end time. A consequence of this,
+  // however, is that `endTimeNS` may not make sense until tree construction is
+  // complete.
+  auto end_time_is_valid =
+      !finished_ || SOFT_ASSERT(end_time_ns >= start_time_ns_, name());
   return end_time_is_valid ? end_time_ns : start_time_ns_;
 }
 
