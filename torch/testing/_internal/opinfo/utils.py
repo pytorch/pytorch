@@ -5,6 +5,8 @@ from typing import Sequence
 
 import numpy as np
 
+import numpy as np
+
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_dtype import (
