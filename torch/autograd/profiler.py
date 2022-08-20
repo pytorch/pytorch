@@ -3,7 +3,7 @@ from warnings import warn
 
 import torch
 import torch.cuda
-from torch._C._autograd import _ExperimentalConfig
+from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
     _disable_profiler,
