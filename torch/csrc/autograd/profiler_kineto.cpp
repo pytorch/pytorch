@@ -61,17 +61,10 @@ using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::ProfilerThreadLocalStateBase;
+using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
-
-template <typename T>
-constexpr bool is_py_fields() {
-  return std::is_base_of<
-      torch::profiler::impl::PyExtraFieldsBase,
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type>::
-      value;
-}
 
 struct AddKinetoMetadata {
   AddKinetoMetadata(std::shared_ptr<Result>& result, KinetoEvent& kineto_event)
@@ -150,31 +143,18 @@ struct AddKinetoMetadata {
   }
 
   void setPythonMetadata(std::shared_ptr<Result> result) {
-    result->visit([&, this](const auto& i) -> void {
-      c10::guts::if_constexpr<is_py_fields<decltype(i)>()>(
-          [&, this](auto _) -> void {
-            this->addMetadata(
-                "Python thread", std::to_string(_(i).python_tid_));
-            this->addMetadata("Python id", std::to_string(_(i).id_));
+    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
+      this->addMetadata("Python thread", std::to_string(i.python_tid_));
+      this->addMetadata("Python id", std::to_string(i.id_));
 
-            std::string parent_id = "null";
-            auto update_parent_id = [&](const auto& j) -> bool {
-              // Update parent_id the first time we see a Python Result
-              constexpr bool is_python_parent = is_py_fields<decltype(j)>();
-              c10::guts::if_constexpr<is_python_parent>([&](auto _) -> void {
-                parent_id = std::to_string(_(j).id_);
-              });
-
-              // And then break out of the update loop.
-              return !is_python_parent;
-            };
-
-            std::shared_ptr<Result> parent = result->parent_.lock();
-            while (parent && parent->visit(update_parent_id)) {
-              parent = parent->parent_.lock();
-            }
-            this->addMetadata("Python parent id", parent_id);
-          });
+      c10::optional<std::string> parent_id;
+      std::shared_ptr<Result> parent = result->parent_.lock();
+      while (parent && !parent_id.has_value()) {
+        parent->visit_if_base<PyExtraFieldsBase>(
+            [&](const auto& j) { parent_id = std::to_string(j.id_); });
+        parent = parent->parent_.lock();
+      }
+      this->addMetadata("Python parent id", parent_id.value_or("null"));
     });
   }
 
@@ -630,18 +610,16 @@ KinetoEvent::KinetoEvent(
   // Populate Python stack
   auto parent = result_->parent_.lock();
   while (parent != nullptr) {
-    parent->visit([&](const auto& i) {
-      if (is_py_fields<decltype(i)>()) {
-        python_stack_.push_back(parent->name());
-      }
-    });
+    parent->visit_if_base<PyExtraFieldsBase>(
+        [&](const auto& i) { python_stack_.push_back(parent->name()); });
     parent = parent->parent_.lock();
   }
 }
 
 bool KinetoEvent::isPythonFunction() const {
-  return result_->visit(
-      [](const auto& i) { return is_py_fields<decltype(i)>(); });
+  bool out{false};
+  result_->visit_if_base<PyExtraFieldsBase>([&](const auto&) { out = true; });
+  return out;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {
