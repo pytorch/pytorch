@@ -950,7 +950,7 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-@symbolic_helper.parse_args("v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
@@ -960,7 +960,6 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if split_val.dim() > 0:
         return split_with_sizes(g, self, split_size_or_sizes, dim, _outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
-    dim = symbolic_helper._get_const(dim, "i", "dim")
 
     size = symbolic_helper._get_tensor_dim_size(self, dim)
     if size is None:
@@ -1216,6 +1215,7 @@ def leaky_relu(g, input: _C.Value, negative_slope: float, inplace: bool = False)
     return g.op("LeakyRelu", input, alpha_f=negative_slope)
 
 
+@symbolic_helper.parse_args("v", "i")
 def glu(g, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
