@@ -497,6 +497,14 @@ Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
   }
 }
 
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
+  // masked_select does not work well with functorch, as its shape is
+  // data-dependent
+  return areAnyTensorSubclassLike({grad, mask})
+      ? at::where(mask, grad, 0).sum()
+      : grad.masked_select(mask).sum();
+}
+
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, out);
