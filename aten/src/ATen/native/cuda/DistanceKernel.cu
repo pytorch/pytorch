@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <math.h>
 
+#include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/Distance.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,19 +23,6 @@ namespace at { namespace native {
 namespace {
 
 static const int forward_threads = 256;
-
-template <typename scalar_t>
-static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
-
-template <>
-__forceinline__ __device__ float device_sqrt(float val) {
-  return ::sqrtf(val);
-}
-
-template <>
-__forceinline__ __device__ double device_sqrt(double val) {
-  return ::sqrt(val);
-}
 
 template <typename scalar_t>
 struct dists {
