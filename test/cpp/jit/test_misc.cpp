@@ -1414,6 +1414,20 @@ TEST(TestSymInt, AddSymbolicInt) {
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
+TEST(TestSymInt, TestIntrusive) {
+  auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
+  auto b = c10::make_intrusive<c10::SymIntNodeImpl>();
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(b.use_count(), 1);
+  auto as = a->toSymInt();
+  auto bs = b->toSymInt();
+  ASSERT_EQ(a.use_count(), 2);
+  ASSERT_EQ(b.use_count(), 2);
+  as = bs;
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(b.use_count(), 3);
+}
+
 TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
