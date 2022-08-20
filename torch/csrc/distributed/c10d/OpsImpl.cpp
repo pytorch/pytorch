@@ -33,6 +33,32 @@ c10::intrusive_ptr<Work> broadcast_cuda_(
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> allreduce_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->allreduce(
+      tensor_vec,
+      AllreduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> allreduce_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->allreduce(
+      tensor_vec,
+      AllreduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          std::chrono::milliseconds(timeout)});
+}
+
 // register functions to dispatcher
 namespace {
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -41,6 +67,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("broadcast_", broadcast_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("allreduce_", allreduce_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("allreduce_", allreduce_cuda_);
 }
 } // namespace
 

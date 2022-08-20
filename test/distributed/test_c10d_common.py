@@ -1337,7 +1337,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         except OSError:
             pass
 
-    def _call_collective_with_varying_tensors(self, collective_func, *args):
+    def _call_collective_with_varying_tensors(self, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
         # correctly dispatched
 
@@ -1345,10 +1345,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         nonsupported_device = torch.device("meta")
         tensor = torch.zeros(2, 2, device=nonsupported_device)
         with self.assertRaisesRegex(NotImplementedError, "Could not run .* with arguments from the 'AutogradMeta' backend."):
-            collective_func(tensor, *args)
+            collective(tensor, *args)
 
     # TODO: backend will be replaced with a non specified backend
-    def _test_broadcast(self, backend):
+    def _test_collectives(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
@@ -1356,7 +1356,13 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        self._call_collective_with_varying_tensors(dist.broadcast, self.rank)
+        collectives_and_args = [
+            (dist.broadcast, self.rank),
+            (dist.all_reduce,)
+        ]
+        for collective, *args in collectives_and_args:
+            with self.subTest(collective=collective, args=args):
+                self._call_collective_with_varying_tensors(collective, *args)
 
 if __name__ == "__main__":
     assert (

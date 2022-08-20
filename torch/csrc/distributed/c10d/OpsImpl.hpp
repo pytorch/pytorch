@@ -21,5 +21,18 @@ c10::intrusive_ptr<Work> broadcast_cuda_(
     int64_t root_tensor,
     int64_t timeout);
 
+c10::intrusive_ptr<Work> allreduce_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t timeout);
+
+c10::intrusive_ptr<Work> allreduce_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t timeout);
+
+
 } // namespace ops
 } // namespace c10d

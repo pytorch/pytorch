@@ -2749,8 +2749,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_nccl()
-    def test_broadcast(self):
-        self._test_broadcast(backend="nccl")
+    def test_collectives(self):
+        self._test_collectives(backend="nccl")
 
 if __name__ == "__main__":
     assert (

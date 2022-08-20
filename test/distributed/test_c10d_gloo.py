@@ -2340,8 +2340,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
-    def test_broadcast(self):
-        self._test_broadcast(backend="gloo")
+    def test_collectives(self):
+        self._test_collectives(backend="gloo")
 
 if __name__ == "__main__":
     assert (
