@@ -3223,12 +3223,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
+        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        skip('linalg.eigh', ''),  # silent incorrectness; Flaky but is likely a real problem
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
 
@@ -3499,6 +3499,28 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
+                                  postprocess_fn=compute_A)
+
+    def test_linalg_eigh(self, device):
+        # linalg_svd returns two tensors, (Q, L).
+        # Given the same input, it may return different tensors,
+        # because the eig decomposition isn't unique.
+        # To test that eigh is correct, we multiply
+        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # output from a for-loop.
+        def compute_A(out):
+            L, Q = out
+            n = Q.shape[-1]
+            diag_L = L.new_zeros(*L.shape[:-1], n, n)
+            diag_L.diagonal(offset=0, dim1=-2, dim2=-1).copy_(L)
+            Qh = Q.transpose(-2, -1).conj()
+            return Q @ diag_L @ Qh
+
+        opinfos = [op for op in op_db if op.name == 'linalg.eigh']
+        assert len(opinfos) > 0
+
+        for op in opinfos:
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
 
     def test_conv_double_backward(self, device):
