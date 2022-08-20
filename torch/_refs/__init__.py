@@ -3226,6 +3226,34 @@ def new_empty(
     )
 
 
+@register_decomposition(torch.ops.aten.new_empty_strided)
+def new_empty_strided(
+    a: TensorLikeType,
+    size: ShapeType,
+    stride: StrideType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.Tensor.new_empty_strided
+    """
+
+    dtype = a.dtype if dtype is None else dtype
+    device = a.device if device is None else device
+
+    return torch.empty_strided(
+        size,
+        stride,
+        dtype=dtype,
+        device=device,
+        pin_memory=pin_memory,
+        layout=layout,
+    )
+
+
 @register_decomposition(torch.ops.aten.new_zeros)
 def new_zeros(
     a: TensorLikeType,

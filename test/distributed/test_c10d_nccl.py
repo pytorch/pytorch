@@ -2747,6 +2747,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
 
+class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_nccl()
+    def test_broadcast(self):
+        self._test_broadcast(backend="nccl")
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized

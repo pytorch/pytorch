@@ -1347,18 +1347,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         with self.assertRaisesRegex(NotImplementedError, "Could not run .* with arguments from the 'AutogradMeta' backend."):
             collective_func(tensor, *args)
 
-        # TODO: positive test to make sure a supported device succeeds during dispatch call
-        # This will be enabled after we add full support for backend dispatching
-        # supported_devices = [
-        #     torch.device("cpu"),
-        #     torch.device("cuda")
-        # ]
-
-    def test_broadcast(self):
+    # TODO: backend will be replaced with a non specified backend
+    def _test_broadcast(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
-        # TODO: This will be replaced with a non specified backend
         dist.init_process_group(
-            "nccl",
+            backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,

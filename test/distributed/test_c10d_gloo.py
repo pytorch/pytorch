@@ -284,7 +284,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = 1
             pg.broadcast([t1], opts)
 
-        with self.assertRaisesRegex(RuntimeError, "invalid root tensor"):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 0
@@ -2338,6 +2338,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
 
+class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_gloo()
+    def test_broadcast(self):
+        self._test_broadcast(backend="gloo")
 
 if __name__ == "__main__":
     assert (
