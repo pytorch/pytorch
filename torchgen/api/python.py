@@ -426,7 +426,7 @@ class PythonSignature:
             vararg_type = args[0].type
             if (
                 isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) == "int"
+                and str(vararg_type.elem) in ["int", "SymInt"]
                 and num_positionalargs == 1
             ):
                 have_vararg_version = True
