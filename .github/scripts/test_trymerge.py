@@ -348,7 +348,7 @@ class TestGitHubPR(TestCase):
             WorkflowCheckState(name="check3", status=None, url="url3"),
         ]
 
-        checks_dict = { check.name : check for check in checks }
+        checks_dict = {check.name : check for check in checks}
 
         pending_checks = filter_pending_checks(checks_dict)
         failing_checks = filter_failed_checks(checks_dict)

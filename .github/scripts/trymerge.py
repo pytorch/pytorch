@@ -521,9 +521,9 @@ def add_workflow_conclusions(
                         continue
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    workflow_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
-                    conclusions[workflow_name] = WorkflowCheckState(
-                        name=workflow_name,
+                    checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
+                    conclusions[checkrun_name] = WorkflowCheckState(
+                        name=checkrun_name,
                         status=checkrun_node["conclusion"],
                         url=checkrun_node["detailsUrl"]
                     )
