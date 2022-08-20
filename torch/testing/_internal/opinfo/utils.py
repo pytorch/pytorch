@@ -2,6 +2,8 @@ import collections
 import warnings
 from functools import partial, wraps
 
+import numpy as np
+
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_dtype import (
