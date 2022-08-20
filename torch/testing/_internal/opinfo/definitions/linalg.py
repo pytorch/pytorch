@@ -1828,7 +1828,7 @@ op_db: List[OpInfo] = [
         "linalg.inv",
         aten_name="linalg_inv",
         op=torch.linalg.inv,
-        aliases=('inverse',),
+        aliases=("inverse",),
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
