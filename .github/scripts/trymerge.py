@@ -1114,7 +1114,6 @@ def get_combined_checks_from_pr_and_land_validation(
 
     # Merge the two checks together. Land validation check results (if any) overwrite pr check results
     merged_checks = dict(pr_checks, **land_validation_checks)  # explanation: https://stackoverflow.com/a/9819617
-
     return merged_checks
 
 def filter_checks_with_lambda(
@@ -1123,14 +1122,10 @@ def filter_checks_with_lambda(
 ) -> List[WorkflowCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
 
-def filter_pending_checks(
-    checks: Dict[str, WorkflowCheckState]
-) -> List[WorkflowCheckState]:
+def filter_pending_checks(checks: Dict[str, WorkflowCheckState]) -> List[WorkflowCheckState]:
     return filter_checks_with_lambda(checks, lambda x: x is None)
 
-def filter_failed_checks(
-    checks: Dict[str, WorkflowCheckState]
-) -> List[WorkflowCheckState]:
+def filter_failed_checks(checks: Dict[str, WorkflowCheckState]) -> List[WorkflowCheckState]:
     return filter_checks_with_lambda(checks, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 def validate_revert(repo: GitRepo, pr: GitHubPR, *,
@@ -1285,8 +1280,8 @@ def merge(pr_num: int, repo: GitRepo,
         if initial_commit_sha != pr.last_commit()['oid']:
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
+            find_matching_merge_rule(pr, repo)
             checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-
             pending = filter_pending_checks(checks)
             failing = filter_failed_checks(checks)
 
