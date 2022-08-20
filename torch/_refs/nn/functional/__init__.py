@@ -333,6 +333,10 @@ def _get_string_reduction_arg(
 
 
 @register_decomposition(torch.ops.aten.l1_loss)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -340,6 +344,9 @@ def l1_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.l1_loss
+    """
     if size_average is not None or reduce is not None:
         # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."

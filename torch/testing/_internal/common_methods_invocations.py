@@ -17379,6 +17379,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.l1_loss",
         torch_opinfo_name="nn.functional.l1_loss",
+        # TestCommonCUDA::test_python_ref_executor__refs_nn_functional_l1_loss_executor_nvfuser_cuda_float32
+        # - RuntimeError: No reduction axis specified
         supports_nvfuser=False,
     ),
     PythonRefInfo(
