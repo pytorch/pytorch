@@ -211,7 +211,7 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
-@register_meta(aten._to_copy.default)
+@register_meta(aten._to_copy.default, False)
 def _to_copy(self: torch.Tensor, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None):
     dtype = self.dtype if dtype is None else dtype
     device = self.device if device is None else device
