@@ -341,35 +341,20 @@ class TestGitHubPR(TestCase):
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
 
     def test_checks_filter(self) -> None:
-        # setup checks
-        check1 = WorkflowCheckState(name="check1", status="SUCCESS", url="url1")
-        check2 = WorkflowCheckState(name="check2", status="FAILURE", url="url2")
-        check3 = WorkflowCheckState(name="check3", status="STARTUP_FAILURE", url="url3")
-        check4 = WorkflowCheckState(name="check4", status=None, url="url4")
-        check5 = WorkflowCheckState(name="check5", status="SUCCESS", url="url5")
-        check6 = WorkflowCheckState(name="check6", status="FAILURE", url="url6")
-        check7 = WorkflowCheckState(name="check7", status="STARTUP_FAILURE", url="url7")
-        check8 = WorkflowCheckState(name="check8", status=None, url="url8")
+        checks = [
+            WorkflowCheckState(name="check0", status="SUCCESS", url="url0"),
+            WorkflowCheckState(name="check1", status="FAILURE", url="url1"),
+            WorkflowCheckState(name="check2", status="STARTUP_FAILURE", url="url2"),
+            WorkflowCheckState(name="check3", status=None, url="url3"),
+        ]
 
-        checks = {
-            "check1" : check1,
-            "check2" : check2,
-            "check3" : check3,
-            "check4" : check4,
-            "check5" : check5,
-            "check6" : check6,
-            "check7" : check7,
-            "check8" : check8,
-        }
+        checks_dict = { check.name : check for check in checks }
 
-        # get pending
-        pending_checks = filter_pending_checks(checks)
+        pending_checks = filter_pending_checks(checks_dict)
+        failing_checks = filter_failed_checks(checks_dict)
 
-        # get failing
-        failing_checks = filter_failed_checks(checks)
-
-        self.assertListEqual(failing_checks, [check2, check3, check6, check7])
-        self.assertListEqual(pending_checks, [check4, check8])
+        self.assertListEqual(failing_checks, [checks[1], checks[2]])
+        self.assertListEqual(pending_checks, [checks[3]])
 
 if __name__ == "__main__":
     main()

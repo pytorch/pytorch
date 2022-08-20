@@ -1103,7 +1103,7 @@ def get_combined_checks_from_pr_and_land_validation(
     (like CLA Checks).
 
     At the same time, we prioritize the signal workflows which do run on land
-    validation. 
+    validation.
 
     E.g. if a workflow fails on the PR but passes on land validation then we'd
     use the successful result from the land validation.
@@ -1285,8 +1285,6 @@ def merge(pr_num: int, repo: GitRepo,
         if initial_commit_sha != pr.last_commit()['oid']:
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
-            find_matching_merge_rule(pr, repo, land_check_commit=land_check_commit)
-
             checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
 
             pending = filter_pending_checks(checks)
