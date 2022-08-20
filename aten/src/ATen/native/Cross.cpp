@@ -9,17 +9,22 @@
 namespace at {
 namespace meta {
 
-TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
-(const Tensor & input, const Tensor & other, const int64_t dimension) {
-  auto out_size = infer_size(input.sizes(), other.sizes());
-  Tensor input_broadcasted = input.expand(out_size);
-  Tensor other_broadcasted = other.expand(out_size);
+TORCH_META_FUNC(linalg_cross)
+(const Tensor & input, const Tensor & other, int64_t dim) {
+  auto x_d = input.dim();
+  auto y_d = other.dim();
+  // This is to avoid things like:
+  // linalg.cross(torch.randn(2, 3), torch.randn(5, 2, 3), dim=2)
+  // This would be very odd. This will still be possible by doing
+  // linalg.cross(torch.randn(2, 3).unsqueeze(0), torch.randn(5, 2, 3), dim=2)
+  TORCH_CHECK(x_d == y_d, "linalg.cross: inputs must have the same number of dimensions. Got ");
+  TORCH_CHECK(input.size(dim) == 3 && other.size(dim) == 3, "linalg.cross: inputs dimension ", dim, " must have length 3. Got ", input.size(dim), " and ", other.size(dim));
 
-  int64_t dim = maybe_wrap_dim(dimension, input.dim()); // default dim = -1
-  TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
+  // Broadcast the batch dimension of input and other.
+  // Since the non-batch dimensions agree, this is the same as broadcast all the inputs
+  auto out_size = infer_size(input.sizes(), other.sizes());
 
   set_output_raw_strided(0, out_size, {}, input.options());
-  return TORCH_PRECOMPUTE_STRUCT(linalg_cross)().set_dim(dim);
 }
 
 }
@@ -56,8 +61,9 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
 
 
 TORCH_IMPL_FUNC(linalg_cross_out)
-(const Tensor & input, const Tensor & other, const int64_t dim, const Tensor & out) {
-  auto out_size = infer_size(input.sizes(), other.sizes());
+(const Tensor & input, const Tensor & other, int64_t dim, const Tensor & out) {
+  dim = maybe_wrap_dim(dim, input.dim());
+  auto out_size = out.sizes();
   Tensor input_broadcasted = input.expand(out_size);
   Tensor other_broadcasted = other.expand(out_size);
 

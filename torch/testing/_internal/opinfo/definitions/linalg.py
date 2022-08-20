@@ -118,33 +118,21 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
-    yield SampleInput(
-        make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
-    )
-    yield SampleInput(
-        make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
-        kwargs={"dim": 1},
-    )
-    yield SampleInput(
-        make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
-        kwargs={"dim": -1},
-    )
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(make_arg((S, 3)), args=(make_arg((S, 3)),))
+    yield SampleInput(make_arg((S, 3, S)), args=(make_arg((S, 3, S)),), kwargs=dict(dim=1))
+    yield SampleInput(make_arg((1, 3)), args=(make_arg((S, 3)),), kwargs=dict(dim=-1))
 
+def error_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sample = SampleInput(input=make_arg((S, 3)), args=(make_arg((S, 1)),))
+    err = "inputs dimension -1 must have length 3"
+    yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+
+    sample = SampleInput(input=make_arg((5, S, 3)), args=(make_arg((S, 3)),))
+    err = "inputs must have the same number of dimensions"
+    yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
     """

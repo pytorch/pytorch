@@ -12177,8 +12177,6 @@
 - func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   structured: True
-  precomputed:
-  - dim -> int dim
   dispatch:
     CPU, CUDA: linalg_cross_out
 

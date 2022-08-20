@@ -109,6 +109,7 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_cholesky,
     sample_inputs_linalg_cholesky_inverse,
     sample_inputs_cross,
+    error_inputs_cross,
     sample_inputs_linalg_qr_geqrf,
     sample_inputs_linalg_invertible,
     sample_inputs_lu_solve,
@@ -4924,7 +4925,6 @@ def _clamp_numpy(a, min=None, max=None):
         return np.maximum(a, min)
 
     return np.minimum(max, np.maximum(a, min))
-
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
