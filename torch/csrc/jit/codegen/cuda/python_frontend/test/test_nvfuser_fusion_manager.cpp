@@ -127,7 +127,14 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
       fm->createTerminalFusionCacheEntry(end_record);
       SUCCEED();
     } catch(...) {
-      FAIL() << "An unexpected assert on Temrinal Cache Entry creation!";
+      FAIL() << "An unexpected assert on Terminal Cache Entry creation!";
+    }
+
+    try {
+      fm->traverseFusionCache(end_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "An unexpected assert while traversing to a Terminal Entry!";
     }
   }
 }
