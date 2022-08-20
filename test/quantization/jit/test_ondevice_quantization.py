@@ -420,7 +420,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         output = m.quantized_forward(*inputs)
         self.assertTrue(torch.allclose(ref_output, output))
 
-        ## check for lite interpreter
+        # check for lite interpreter
         m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
@@ -455,7 +455,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         output = m.quantized_forward(*inputs)
         self.assertTrue(torch.allclose(ref_output, output))
 
-        ## check for lite interpreter
+        # check for lite interpreter
         m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
         buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
