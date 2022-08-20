@@ -161,7 +161,9 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode.restore():
-            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+            r = CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+            if r is not NotImplemented:
+                return r
 
     # Some of these are not "real" aten ops and will fail if we
     # call _dispatch_has_kernel_for_dispatch_key on them.

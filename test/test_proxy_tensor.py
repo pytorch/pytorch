@@ -570,7 +570,28 @@ def forward(self, x_1):
             return y
 
         inp = [torch.randn(5)]
-        self._test(f, [torch.randn(5)])
+        self._test(f, inp)
+
+    def test_partial_decomp(self):
+        def f(a, b, c):
+            x = torch.addmm(a, b, c)
+            y = torch.addmm(a, b, c, beta=2, alpha=1)
+            return x + y
+        inps = [torch.randn(5, 5), torch.randn(5, 5), torch.randn(5, 5)]
+        fx_g = make_fx(f)(*inps)
+
+        def addmm(a, b, c, beta=1, alpha=1):
+            if beta == 1 and alpha == 1:
+                return NotImplemented
+            return beta * a + alpha * (b @ c)
+
+        decomposed_fx = make_fx(f, {aten.addmm.default: addmm})(*inps)
+
+        self.assertEqual(fx_g(*inps), decomposed_fx(*inps))
+        self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
+        self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
+
+
 
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
