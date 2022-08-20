@@ -210,6 +210,7 @@ __all__ = [
     "flip",
     "fliplr",
     "flipud",
+    "kron",
     "hsplit",
     "hstack",
     "meshgrid",
@@ -2398,6 +2399,26 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError("Input must be >= 1-d.")
 
     return flip(a, (0,))
+
+
+@register_decomposition(torch.ops.aten.kron)
+@out_wrapper()
+def kron(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    maxdim = max(a.ndim, b.ndim)
+    pad_a = maxdim - a.ndim
+    pad_b = maxdim - b.ndim
+    a_reshape = [0] * 2 * maxdim
+    b_reshape = [0] * 2 * maxdim
+    result_reshape = [0] * maxdim
+    for i in range(maxdim):
+        a_reshape[2 * i] = a.shape[i - pad_a] if i >= pad_a else 1
+        a_reshape[2 * i + 1] = 1
+        b_reshape[2 * i] = 1
+        b_reshape[2 * i + 1] = b.shape[i - pad_b] if i >= pad_b else 1
+        result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1]
+    a_view = reshape(a, a_reshape)
+    b_view = reshape(b, b_reshape)
+    return reshape(mul(a_view, b_view), result_reshape)
 
 
 # CompositeImplicitAutograd - don't register decomp

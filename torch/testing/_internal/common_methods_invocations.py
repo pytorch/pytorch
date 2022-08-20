@@ -19435,6 +19435,12 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.kron",
+        torch_opinfo_name="kron",
+        supports_nvfuser=False,
+        validate_view_consistency=False
+    ),
+    PythonRefInfo(
         "_refs.hstack",
         torch_opinfo_name="hstack",
         supports_nvfuser=False,
