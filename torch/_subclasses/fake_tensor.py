@@ -567,9 +567,13 @@ class FakeTensorMode(TorchDispatchMode):
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
         flat_symints = [
-            i for i in tree_flatten((args, kwargs))[0] if isinstance(i, torch._C.SymIntNode)
+            i
+            for i in tree_flatten((args, kwargs))[0]
+            if isinstance(i, torch._C.SymIntNode)
         ]
-        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        has_symbolic_sizes = (
+            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        )
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
@@ -596,7 +600,6 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
-
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
