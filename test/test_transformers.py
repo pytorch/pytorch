@@ -66,11 +66,11 @@ class TestTransformers(NNTestCase):
             self.assertEqual(output_mask_4d, output_mask_TxT)
 
     @parametrize("device", device_list)
-    def test_transformerencoderlayer_src_mask(self, device):
+    @parametrize("nhead", [1, 4, 8])
+    def test_transformerencoderlayer_src_mask(self, device, nhead):
         batch_size = 2
         seqlen = 4
         d_model = 8
-        nhead = 8
         dim_feedforward = 32
 
         model = torch.nn.TransformerEncoderLayer(
