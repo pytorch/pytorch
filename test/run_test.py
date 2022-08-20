@@ -566,6 +566,7 @@ def run_doctests(test_module, test_directory, options):
 
     #
     enabled = {
+        # TODO: expose these options to the user
         # Temporary disable all feature-conditional tests
         # 'lapack': 'auto',
         # 'cuda': 'auto',
@@ -624,7 +625,7 @@ def run_doctests(test_module, test_directory, options):
     xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
-        command='all', argv=[])
+        command=options.xdoctest_command, argv=[])
     result = 1 if run_summary['n_failed'] else 0
     return result
 
@@ -803,6 +804,15 @@ def parse_args():
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
+    )
+    parser.add_argument(
+        "--xdoctest-command",
+        default='list',
+        help=(
+            "Control the specific doctest action. "
+            "Use 'list' to simply parse doctests and check syntax. "
+            "Use 'all' to execute all doctests or specify a specific "
+            "doctest to run")
     )
     return parser.parse_args()
 
