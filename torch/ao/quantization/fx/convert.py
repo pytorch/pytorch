@@ -26,7 +26,7 @@ from ..qconfig_mapping import QConfigMapping
 from ..qconfig_mapping_utils import (
     update_qconfig_for_qat,
 )
-from .qconfig_utils import (
+from .qconfig_mapping_utils import (
     generate_qconfig_map,
     compare_prepare_convert_qconfig_mappings,
     update_qconfig_for_fusion,
