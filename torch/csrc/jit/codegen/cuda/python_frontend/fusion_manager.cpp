@@ -78,6 +78,7 @@ void FusionManager::createTerminalFusionCacheEntry(
 }
 void FusionManager::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
+  TORCH_CHECK(fusion_cache_ptr_->record->recordType() == RecordType::Start);
 }
 void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
   TORCH_CHECK(!fusionCachePtr()->is_terminal,

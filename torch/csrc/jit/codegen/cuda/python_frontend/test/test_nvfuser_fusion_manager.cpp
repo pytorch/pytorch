@@ -165,13 +165,24 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     }
   }
 
+  // Setup cache for a new cache lookup
+  try {
+    fm->resetFusionCachePtr();
+    SUCCEED();
+  } catch(...) {
+    FAIL() << "Did not properly set cache to pointer to top of tree!";
+  }
+
   // Check that cache methods act appropriately when presenting a new
   // record to a cache with 1 fusion. 
   {
-    std::shared_ptr<RecordFunctor> test_record(new TensorRecord(
+    std::shared_ptr<RecordFunctor> cached_record(new TensorRecord(
         {State(StateType::Tensor, 0)}, 
         {3},
         {true},
+        Nvf::DataType::Float));
+    std::shared_ptr<RecordFunctor> new_record(new ScalarRecord(
+        {State(StateType::Scalar, 1)}, 
         Nvf::DataType::Float));
   }
 }
