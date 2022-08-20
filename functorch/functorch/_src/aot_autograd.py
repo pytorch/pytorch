@@ -184,7 +184,8 @@ def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
 
-graph_being_compiled: str = None
+# This is a list since looking forward, we can have this arbitrarily nested.
+graph_being_compiled: List[str] = []
 nth_graph: int = 0
 model_name: str = "model"
 
@@ -194,23 +195,30 @@ def set_model_name(name):
     model_name = name
 
 
-def get_graph_being_compiled() -> str:
+def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+    return list(graph_being_compiled), model_name, nth_graph
+
+
+def get_aot_graph_name() -> str:
     """
     Returns the name of the graph being compiled.
     """
     global model_name, graph_being_compiled, nth_graph
-    return f"{model_name}_{graph_being_compiled}_{nth_graph}"
+    return f"{model_name}_{'_'.join(graph_being_compiled)}_{nth_graph}"
+
+
+get_graph_being_compiled = get_aot_graph_name
 
 
 @contextmanager
 def track_graph_compiling(graph_name, increment_index=False):
     global graph_being_compiled
-    graph_being_compiled = graph_name
+    graph_being_compiled = [graph_name]
     yield
     if increment_index:
         global nth_graph
         nth_graph += 1
-    graph_being_compiled = None
+    graph_being_compiled = []
 
 
 def make_boxed_func(f):
@@ -264,7 +272,7 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
-    with track_graph_compiling("forward"):
+    with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
