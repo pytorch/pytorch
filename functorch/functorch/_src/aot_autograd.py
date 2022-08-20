@@ -183,6 +183,7 @@ aot_autograd_decompositions = {}
 def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
+
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
 nth_graph: int = 0
@@ -193,8 +194,10 @@ def set_model_name(name):
     global model_name
     model_name = name
 
+
 def get_aot_compilation_context() -> Tuple[List[str], str, int]:
     return list(graph_being_compiled), model_name, nth_graph
+
 
 def get_aot_graph_name() -> str:
     """
@@ -203,7 +206,9 @@ def get_aot_graph_name() -> str:
     global model_name, graph_being_compiled, nth_graph
     return f"{model_name}_{'_'.join(graph_being_compiled)}_{nth_graph}"
 
+
 get_graph_being_compiled = get_aot_graph_name
+
 
 @contextmanager
 def track_graph_compiling(graph_name, increment_index=False):
