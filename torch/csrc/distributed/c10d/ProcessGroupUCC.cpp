@@ -110,15 +110,14 @@ struct torch_ucc_config_t {
 
 std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
     // TORCH_UCC_BLOCKING_WAIT allowed syntax:
-    // - TORCH_UCC_BLOCKING_WAIT=0 --> blocking wait completely disabled
-    // - TORCH_UCC_BLOCKING_WAIT=1 --> blocking wait completely enabled
+    // - TORCH_UCC_BLOCKING_WAIT=none --> blocking wait completely disabled
     // - TORCH_UCC_BLOCKING_WAIT=all --> blocking wait completely enabled
     // - TORCH_UCC_BLOCKING_WAIT=allreduce,send,recv --> blocking wait enabled
     //                                                   on selected operations
     // Supported operations:
     // [allgather,allgather_base,allreduce,alltoall,broadcast,
     //  gather,reduce,reduce_scatter,scatter,send,recv]
-    {"TORCH_UCC_BLOCKING_WAIT", "0"},
+    {"TORCH_UCC_BLOCKING_WAIT", "none"},
 
     {"TORCH_UCC_USE_FUTURE", "1"},
     {"TORCH_UCC_PROFILING_ENABLE", "0"},
@@ -128,7 +127,7 @@ std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
     {"TORCH_UCC_ENABLE_COMMS_LOGGER", "0"},
 };
 
-std::unordered_set<OpType> parse_blocking_wait(std::string s) {
+std::vector<OpType> parse_blocking_wait(std::string op_list_string) {
   const static std::unordered_map<std::string, OpType> str2op = {
       {"allgather", OpType::ALLGATHER},
       {"allgather_base", OpType::_ALLGATHER_BASE},
@@ -142,25 +141,19 @@ std::unordered_set<OpType> parse_blocking_wait(std::string s) {
       {"send", OpType::SEND},
       {"recv", OpType::RECV},
   };
-  std::unordered_set<OpType> result;
-  s = tolower(trim(s));
-  if (s == "0") {
-    return result;
+  auto op_list = parse_list(op_list_string);
+  if (op_list == std::vector<std::string>{"none"}) {
+    return {};
   }
-  if (s == "1" || s == "all") {
-    result.reserve(str2op.size());
-    for (auto item : str2op) {
-      result.insert(item.second);
+  std::vector<OpType> result;
+  if (op_list == std::vector<std::string>{"all"}) {
+    for (auto entry : str2op) {
+      result.push_back(entry.second);
     }
-    return result;
-  }
-  while (!s.empty()) {
-    const auto end_pos = s.find_first_of(',');
-    const auto token = trim(s.substr(0, end_pos));
-    const auto it = str2op.find(std::string(token));
-    TORCH_CHECK(it != str2op.end(), "Invalid blocking wait option: '", token);
-    result.insert(it->second);
-    s = (end_pos != c10::string_view::npos) ? s.substr(end_pos + 1) : "";
+  } else {
+    for (auto op_string : op_list) {
+      result.push_back(str2op.at(op_string));
+    }
   }
   return result;
 }

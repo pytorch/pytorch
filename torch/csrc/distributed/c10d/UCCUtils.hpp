@@ -209,6 +209,18 @@ inline std::string tolower(c10::string_view s) {
   return result;
 }
 
+inline std::vector<std::string> parse_list(std::string list) {
+  std::vector<std::string> result;
+  list = tolower(trim(list));
+  while (!list.empty()) {
+    const auto end_pos = list.find_first_of(',');
+    const auto token = trim(list.substr(0, end_pos));
+    result.push_back(std::string(token));
+    list = (end_pos != c10::string_view::npos) ? list.substr(end_pos + 1) : "";
+  }
+  return result;
+}
+
 } // namespace c10d
 
 #endif // USE_C10D_UCC
