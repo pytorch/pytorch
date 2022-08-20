@@ -25,7 +25,7 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   // If you are not pointed to a terminal node, accessing a fusion pointer
   // should result in an assert.
   try {
-    fm->fusionPtr();
+    auto ptr = fm->fusionPtr();
     FAIL() << "Expected a Fusion ptr check to fail!";
   } catch (...) {
     SUCCEED();
@@ -76,8 +76,13 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     // Check Methods prior to adding an entry to the cache
 
     // Cache Lookup should not succeed becase no records are in the cache
-    auto empty_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
-    ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
+    try {
+      auto empty_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "Unexpected assert during cache lookup!";
+    }
     
     // Traversal of the cache should fail because there is nothing to traverse
     try {
@@ -136,6 +141,38 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     } catch(...) {
       FAIL() << "An unexpected assert while traversing to a Terminal Entry!";
     }
+    
+    try {
+      auto no_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      FAIL() << "Expected an assert from a terminal entry!";
+    } catch(...) {
+      SUCCEED();
+    }
+    
+    try {
+      fm->traverseFusionCache(test_record);
+      FAIL() << "Expected an assert from a terminal entry!";
+    } catch(...) {
+      SUCCEED();
+    }
+
+    try {
+      auto ptr = fm->fusionPtr();
+      ASSERT_FALSE(ptr == nullptr);
+      SUCCEED();
+    } catch (...) {
+      FAIL() << "An unexpected assert occurred while getting fusion ptr!";
+    }
+  }
+
+  // Check that cache methods act appropriately when presenting a new
+  // record to a cache with 1 fusion. 
+  {
+    std::shared_ptr<RecordFunctor> test_record(new TensorRecord(
+        {State(StateType::Tensor, 0)}, 
+        {3},
+        {true},
+        Nvf::DataType::Float));
   }
 }
 
