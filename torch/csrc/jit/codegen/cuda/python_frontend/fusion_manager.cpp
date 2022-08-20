@@ -58,6 +58,8 @@ void FusionManager::createFusionCacheEntry(
 void FusionManager::createTerminalFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
   TORCH_CHECK(rec, "Record is null!");
+  TORCH_CHECK(rec->recordType() == RecordType::End,
+      "A Terminal Cache Entry can only be created with an EndRecord!");
   ++num_fusions_;
   TORCH_CHECK(
       num_fusions_ <= max_fusions_,

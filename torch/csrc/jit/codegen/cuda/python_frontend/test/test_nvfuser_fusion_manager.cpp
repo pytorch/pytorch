@@ -88,7 +88,13 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     }
 
     // Add a cache entry and check methods
-    fm->createFusionCacheEntry(test_record);
+
+    try {
+      fm->createFusionCacheEntry(test_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "An unexpected assert on Cache Entry creation!";
+    }
 
     try {
       auto cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
@@ -104,6 +110,25 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     } catch (...) {
       FAIL() << "An unexpected assert during Cache Traverse!";
     } 
+    
+    // Try to add terminal cache entry with a record that is not of End Type.
+
+    try {
+      fm->createTerminalFusionCacheEntry(test_record);
+      FAIL() << "Terminal Cache Entries should only accept EndRecords!";
+    } catch(...) {
+      SUCCEED();
+    }
+    
+    // Add a terminal cache entry and check methods
+
+    std::shared_ptr<RecordFunctor> end_record(new EndRecord());
+    try {
+      fm->createTerminalFusionCacheEntry(end_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "An unexpected assert on Temrinal Cache Entry creation!";
+    }
   }
 }
 

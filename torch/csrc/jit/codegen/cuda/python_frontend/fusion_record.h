@@ -146,6 +146,10 @@ struct RecordFunctor {
     }
   }
 
+  RecordType recordType() const {
+    return record_type_;
+  }
+
  protected:
   //! Inputs that are indices into the FusionDefinition's Recorded State.
   std::vector<State> args_;
