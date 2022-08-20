@@ -66,18 +66,78 @@ using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
 
-struct AddKinetoMetadata {
-  AddKinetoMetadata(std::shared_ptr<Result>& result, KinetoEvent& kineto_event)
+struct MetadataBase {
+  MetadataBase(const std::shared_ptr<Result>& result)
       : kineto_activity_{result->kineto_activity_} {
-    result->visit(*this);
+    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+            result->extra_fields_)) {
+      // In order to add metadata we have to downcast from
+      // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
+      // know that all activities provided by PyTorch are of the correct type,
+      // however Kineto profilers can (and do) add events that inherit directly
+      // from ITraceActivity. As a result, any Result which was constructed from
+      // an event that Kineto provided is unsafe to cast.
+      if (!(SOFT_ASSERT(!hasKinetoActivity()))) {
+        result->kineto_activity_ = nullptr;
+      }
+      kineto_activity_ = result->kineto_activity_;
+    }
+  }
 
-    setPythonMetadata(result);
+  void addMetadata(const std::string& key, const std::string& value) {
+    if (kineto_activity_ && !value.empty()) {
+      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
+    }
+  }
+
+  bool hasKinetoActivity() const {
+    return kineto_activity_ != nullptr;
+  }
+
+ private:
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
+};
+
+struct AddTensorboardFields : public MetadataBase {
+  AddTensorboardFields(
+      const std::shared_ptr<Result>& result,
+      KinetoEvent& kineto_event)
+      : MetadataBase(result) {
+    result->visit(*this);
     const auto module_hierarchy = kineto_event.moduleHierarchy();
     addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
     addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
 
-    // It is not safe to use the activity after post processing.
-    result->kineto_activity_ = nullptr;
+    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
+      this->addMetadata("Python id", std::to_string(i.id_));
+
+      c10::optional<std::string> parent_id;
+      std::shared_ptr<Result> parent = result->parent_.lock();
+      while (parent && !parent_id.has_value()) {
+        parent->visit_if_base<PyExtraFieldsBase>(
+            [&](const auto& j) { parent_id = std::to_string(j.id_); });
+        parent = parent->parent_.lock();
+      }
+      this->addMetadata("Python parent id", parent_id.value_or("null"));
+    });
+  }
+
+  void operator()(const ExtraFields<EventType::PyCall>& py_call) {
+    if (py_call.module_.has_value()) {
+      addMetadata("Python module id", std::to_string(py_call.module_->id_));
+    }
+  }
+
+  template <typename T>
+  void operator()(const T&) {}
+};
+
+struct AddGenericMetadata : public MetadataBase {
+  AddGenericMetadata(std::shared_ptr<Result>& result) : MetadataBase(result) {
+    result->visit(*this);
+    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
+      this->addMetadata("Python thread", std::to_string(i.python_tid_));
+    });
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
@@ -130,41 +190,8 @@ struct AddKinetoMetadata {
     }
   }
 
-  void operator()(const ExtraFields<EventType::PyCall>& py_call) {
-    if (py_call.module_.has_value()) {
-      addMetadata("Python module id", std::to_string(py_call.module_->id_));
-    }
-  }
-
-  void operator()(const ExtraFields<EventType::PyCCall>& py_call) {}
-
-  void operator()(const ExtraFields<EventType::Kineto>& e) {
-    TORCH_INTERNAL_ASSERT(kineto_activity_ == nullptr);
-  }
-
-  void setPythonMetadata(std::shared_ptr<Result> result) {
-    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
-      this->addMetadata("Python thread", std::to_string(i.python_tid_));
-      this->addMetadata("Python id", std::to_string(i.id_));
-
-      c10::optional<std::string> parent_id;
-      std::shared_ptr<Result> parent = result->parent_.lock();
-      while (parent && !parent_id.has_value()) {
-        parent->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto& j) { parent_id = std::to_string(j.id_); });
-        parent = parent->parent_.lock();
-      }
-      this->addMetadata("Python parent id", parent_id.value_or("null"));
-    });
-  }
-
-  void addMetadata(const std::string& key, const std::string& value) {
-    if (kineto_activity_ && !value.empty()) {
-      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
-    }
-  }
-
-  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  template <typename T>
+  void operator()(const T&) {}
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
@@ -281,7 +308,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             [](auto&) {}));
 
         kineto_events_.emplace_back(e);
-        AddKinetoMetadata add_kineto_metadata(e, kineto_events_.back());
+        AddTensorboardFields add_tb(e, kineto_events_.back());
+        AddGenericMetadata add_generic(e);
+
+        // It is not safe to use the activity after post processing.
+        e->kineto_activity_ = nullptr;
       }
     }
   }
