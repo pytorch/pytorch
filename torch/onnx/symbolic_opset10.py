@@ -653,36 +653,11 @@ class Quantized:
         op_scale,
         op_zero_point,
     ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+        input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
 
-        # Duplicated from opset9.instance_norm
-        channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
-        if weight is None or symbolic_helper._is_none(weight):
-            if channel_size is None:
-                raise RuntimeError(
-                    "Unsupported: ONNX export of instance_norm for unknown channel size."
-                )
-            weight_value = torch.tensor(
-                [1.0] * channel_size,
-                dtype=_type_utils.JitScalarType.from_name(
-                    input.type().scalarType()
-                ).dtype(),
-            )
-            weight = g.op("Constant", value_t=weight_value)
-        if bias is None or symbolic_helper._is_none(bias):
-            if channel_size is None:
-                raise RuntimeError(
-                    "Unsupported: ONNX export of instance_norm for unknown channel size."
-                )
-            bias_value = torch.tensor(
-                [0.0] * channel_size,
-                dtype=_type_utils.JitScalarType.from_name(
-                    input.type().scalarType()
-                ).dtype(),
-            )
-            bias = g.op("Constant", value_t=bias_value)
-
-        output = g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
+        output = opset9.instance_norm(
+            g, input, weight, bias, None, None, False, 0, eps, False
+        )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
