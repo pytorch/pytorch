@@ -2,9 +2,12 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from functorch.experimental.ops import PyOperator
 from torch.utils._pytree import tree_flatten
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, disable_proxy_modes_tracing
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, disable_proxy_modes_tracing, get_proxy_slot
 import torch.utils._pytree as pytree
 from torch.dispatch.dispatcher import dispatcher_singleton
+from torch.utils._mode_utils import no_dispatch
+import random
+import string
 
 """
 We're going to define a `cond` operation.
@@ -37,10 +40,8 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
     pred, true_fn, false_fn, operands = args
 
     def _unwrap_proxy(e):
-        if hasattr(e, "__dict__") and proxy_mode.tracer in e.__dict__:
-            proxy_out = e.__dict__[proxy_mode.tracer]
-            return proxy_out.proxy
-        return e
+        proxy_or_e = get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy )
+        return proxy_or_e
 
 
     if isinstance(operands, torch.Tensor):
@@ -50,29 +51,47 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
-    true_name = "true_graph"
-    false_name = "false_graph"
+
+    # There are probably better ways - I know that create_arg has some self incrementing name
+    # magic to it, but since we explicitly have to get the name for register_module,
+    # I was not sure how to do that. This kinda simulates it.
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"true_graph_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+
+    random_slug = ''.join(random.choices(string.digits, k=5))
+    true_name = next_name
+    false_name = f"false_graph_{i}"
+
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    true_args = []
-    for node in true_graph.graph.nodes:
-        if node.op == 'output':
-            true_args.extend(*node.args)
-
-    false_args = []
-    for node in false_graph.graph.nodes:
-        if node.op == 'output':
-            false_args.extend(*node.args)
-
-    assert(len(true_args) == len(false_args))
-    for i in range(len(true_args)):
-        t_arg_meta = true_args[i]
-        f_arg_meta = false_args[i]
-        # WIP don't look at this yet
-        # print(t_arg_meta.meta)
-        # print(f_arg_meta.meta)
-        # assert(t_arg_meta.meta == f_arg_meta.meta)
+    with no_dispatch():
+        # This is not amazing.
+        # However, if we have nested operators that have a call_function
+        # in their graph that is not a torch op (ex: see conditional below, nested cond)
+        # we cannot get metadata for it from just looking at out vars.
+        # The reason is that an operation on the output of such an op is not
+        # evalauted as a torch.Tensor.
+        # So we execute the real true and false fn here and compare metadata
+        true_result = true_fn(*operands)
+        false_result = false_fn(*operands)
+        def recursive_compare_same(a, b):
+            assert(type(a) == type(b))
+            if isinstance(a, torch.Tensor):
+                assert(a.dtype == b.dtype)
+                assert(a.size() == b.size())
+                assert(a.stride() == b.stride())
+                assert(a.device == b.device)
+            elif isinstance(a, (list, tuple)):
+                assert(len(a) == len(b))
+                for i in range(0, len(a)):
+                    recursive_compare_same(a[i], b[i])
 
     args = (pred, true_graph, false_graph, operands)
 

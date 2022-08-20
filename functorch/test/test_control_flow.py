@@ -47,7 +47,6 @@ class TestControlFlowTraced(TestCase):
 
         def true_fn(x, pred2):
             z = cond(pred2, true_nested, false_nested, x)
-            print("Z is?", z)
             return x + z
 
         def false_fn(x, _):
@@ -73,3 +72,83 @@ class TestControlFlowTraced(TestCase):
         self.assertTrue(torch.allclose(result_true_false, x + x + x))
 
         self.assertTrue(torch.allclose(result_false_true, torch.cos(x)))
+
+    def test_cond_nested_traced_other_inputs(self):
+        def true_nested(y):
+            return y * y
+
+        def false_nested(y):
+            return y + y
+
+        def true_fn(k, pred2):
+            z = cond(pred2, true_nested, false_nested, k)
+            return torch.add(torch.tensor([.25, .25]), z)
+
+        def false_fn(k, _):
+            return k.cos()
+
+        def f(k, pred, pred2):
+            return cond(pred, true_fn, false_fn, (k, pred2))
+
+        x = torch.tensor([0.5, 0.5])
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        a = torch.tensor([1.0, 1.0])
+        result_true_true = graph.forward(a, torch.tensor(True), torch.tensor(True))
+        self.assertTrue(torch.allclose(result_true_true, (a * a) + torch.tensor([0.25, 0.25])))
+
+        b = torch.tensor([2.0, 2.0])
+        result_true_true = graph.forward(b, torch.tensor(True), torch.tensor(True))
+        self.assertTrue(torch.allclose(result_true_true, (b * b) + torch.tensor([0.25, 0.25])))
+
+    def test_cond_nested_traced_multi(self):
+        def true_a(y):
+            return y * y
+
+        def false_a(y):
+            return y + y
+
+        def true_b(y, z):
+            return y + z
+
+        def false_b(y, z):
+            return y * z
+
+        def f(x, pred, pred2):
+            a_out = cond(pred, true_a, false_a, (x))
+            b_out = cond(pred2, true_b, false_b, (x, x))
+            return a_out + b_out
+
+        x = torch.randn(4)
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        # Brittle, yet, delicious
+        out = """
+        def forward(self, x_1, pred_1, pred2_1):
+            true_graph_0 = self.true_graph_0
+            false_graph_0 = self.false_graph_0
+            conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+            true_graph_1 = self.true_graph_1
+            false_graph_1 = self.false_graph_1
+            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, (x_1, x_1));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            add = conditional + conditional_1;  conditional = conditional_1 = None
+            return add
+        """
+        code = graph.code
+
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
+
+        code = graph.true_graph_0.code
+        out = """
+        def forward(self, flat_args):
+            flat_args_1, = fx_pytree.tree_flatten_spec([flat_args], self._in_spec)
+            mul_tensor = torch.ops.aten.mul.Tensor(flat_args_1, flat_args_1);  flat_args_1 = None
+            return pytree.tree_unflatten([mul_tensor], self._out_spec)
+        """
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
