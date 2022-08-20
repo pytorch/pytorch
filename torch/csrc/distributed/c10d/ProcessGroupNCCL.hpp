@@ -140,6 +140,8 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
     bool timedOut();
+    // Overloaded version of the timed out function.
+    bool timedOut(std::chrono::milliseconds timeout);
 
     std::vector<at::Tensor> result() override;
 

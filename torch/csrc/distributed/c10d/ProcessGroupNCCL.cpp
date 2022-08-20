@@ -447,7 +447,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   if (blockingWait_) {
     // Wait for the operation to complete.
     while (!isCompleted()) {
-      if (timedOut()) {
+      if (timedOut(timeout)) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -533,6 +533,13 @@ bool ProcessGroupNCCL::WorkNCCL::timedOut() {
   return (
       std::chrono::duration_cast<std::chrono::milliseconds>(
           currentTimepoint - workStartTime_) >= opTimeout_);
+}
+
+bool ProcessGroupNCCL::WorkNCCL::timedOut(std::chrono::milliseconds timeout) {
+  auto currentTimepoint = std::chrono::steady_clock::now();
+  return (
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          currentTimepoint - workStartTime_) >= timeout);
 }
 
 ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
