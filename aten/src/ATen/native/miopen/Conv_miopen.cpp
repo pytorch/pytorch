@@ -1661,7 +1661,7 @@ Tensor miopen_convolution_relu(
 
     auto _bias = bias.has_value()
             ? bias.value()
-            : at::native::zeros(
+            : at::zeros(
                   {contig_output.size(1)},
                   optTypeMetaToScalarType(contig_output.options().dtype_opt()),
                   contig_output.options().layout_opt(),

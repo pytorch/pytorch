@@ -105,28 +105,28 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
-      if (!THPLayout_Check(obj.ptr())) {
-        throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to Layout"));
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
-      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
-      return static_cast<int8_t>(layout->layout);
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
     }
     case TypeKind::ScalarTypeType: {
-      if (!THPDtype_Check(obj.ptr())) {
-        throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to Dtype"));
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
       }
-      auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-      return static_cast<int64_t>(dtype->scalar_type);
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
     }
     case TypeKind::MemoryFormatType: {
-      if (!THPMemoryFormat_Check(obj.ptr())) {
-        throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to MemoryFormat"));
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
       }
-      auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
-      return static_cast<int8_t>(memory_format->memory_format);
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
     }
     case TypeKind::SymIntType:
       if (torch::is_symint_node(obj.ptr())) {
