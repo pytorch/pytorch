@@ -271,24 +271,21 @@ class TestProfilerTree(TestCase):
             ProfilerTree.format(p.profiler, 12),
             """\
             aten::zeros
-              aten::zeros
-                aten::empty
-                aten::zero_
+              aten::empty
+              aten::zero_
             Top level Annotation
               aten::empty
               aten::zeros
-                aten::zeros
-                  aten::empty
-                  aten::zero_
+                aten::empty
+                aten::zero_
               First Annotation
                 aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
               aten::zeros
-                aten::zeros
-                  aten::empty
-                  aten::zero_
+                aten::empty
+                aten::zero_
               Second Annotation
                 aten::empty
                 aten::add
@@ -297,9 +294,8 @@ class TestProfilerTree(TestCase):
                       aten::empty_strided
                       aten::copy_
                 aten::zeros
-                  aten::zeros
-                    aten::empty
-                    aten::zero_
+                  aten::empty
+                  aten::zero_
                 Third Annotation
                   aten::empty
                   aten::ones_like
