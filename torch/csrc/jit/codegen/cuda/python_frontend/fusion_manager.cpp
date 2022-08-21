@@ -41,7 +41,8 @@ void FusionManager::printIr() const {
 
 c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) const {
-  TORCH_CHECK(!fusionCachePtr()->is_terminal,
+  TORCH_CHECK(
+      !fusionCachePtr()->is_terminal,
       "There should be no children from a Terminal Cache Entry!");
   TORCH_CHECK(rec, "Record is null!");
   auto cache_entry = fusionCachePtr()->record_hash_map.find(rec);
@@ -53,7 +54,8 @@ c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
 }
 void FusionManager::createFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
-  TORCH_CHECK(!fusionCachePtr()->is_terminal,
+  TORCH_CHECK(
+      !fusionCachePtr()->is_terminal,
       "Cannot create a cache entryfrom a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
   fusion_cache_ptr_->record_hash_map[rec] =
@@ -61,10 +63,12 @@ void FusionManager::createFusionCacheEntry(
 }
 void FusionManager::createTerminalFusionCacheEntry(
     std::shared_ptr<RecordFunctor>& rec) {
-  TORCH_CHECK(!fusionCachePtr()->is_terminal,
+  TORCH_CHECK(
+      !fusionCachePtr()->is_terminal,
       "Cannot create a cache entryfrom a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
-  TORCH_CHECK(rec->recordType() == RecordType::End,
+  TORCH_CHECK(
+      rec->recordType() == RecordType::End,
       "A Terminal Cache Entry can only be created with an EndRecord!");
   ++num_fusions_;
   TORCH_CHECK(
@@ -81,10 +85,12 @@ void FusionManager::resetFusionCachePtr() {
   TORCH_CHECK(fusion_cache_ptr_->record->recordType() == RecordType::Start);
 }
 void FusionManager::traverseFusionCache(std::shared_ptr<RecordFunctor>& rec) {
-  TORCH_CHECK(!fusionCachePtr()->is_terminal,
+  TORCH_CHECK(
+      !fusionCachePtr()->is_terminal,
       "Cannot traverse cache from a terminal entry!");
   auto cache_entry = fusionCachePtr()->record_hash_map.find(rec);
-  TORCH_CHECK(cache_entry != std::end(fusionCachePtr()->record_hash_map),
+  TORCH_CHECK(
+      cache_entry != std::end(fusionCachePtr()->record_hash_map),
       "Cache Entry for Cache Traverse is not found!");
   TORCH_CHECK(cache_entry->second, "Record in Cache Entry is null!");
   fusion_cache_ptr_ = cache_entry->second.get();
