@@ -344,8 +344,6 @@ Check this module for more information.
                 return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(SymIntT):
             return direct_solve(NamedCType(goal.name, BaseCType(longT)))
-        # elif goal.type == BaseCType(symIntArrayRefT):
-        #     return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(longT):
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
             return f"{symInt_type}.expect_int()"

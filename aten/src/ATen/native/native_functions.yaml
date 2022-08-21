@@ -2042,11 +2042,11 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
   autogen: _embedding_bag_per_sample_weights_backward.out
 
-- func: empty.names(SymInt[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: empty
+    CompositeExplicitAutograd: empty_names
   autogen: empty.names_out
 
 - func: empty.memory_format(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -2066,7 +2066,6 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: new_empty
-    Meta: new_empty_symint
   autogen: new_empty.out
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -5581,7 +5580,7 @@
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: zeros_out
-    SparseCPU, SparseCUDA, SparseMeta: zeros_concrete_out
+    SparseCPU, SparseCUDA, SparseMeta: zeros_sparse_out
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:

@@ -429,15 +429,13 @@ std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
 std::tuple<Tensor, optional<int64_t>> view_batching_rule(
     const Tensor &self, optional<int64_t> self_bdim, SymIntArrayRef sym_size)
 {
-  // TODO: properly support this
-  auto size = c10::asIntArrayRefSlow(sym_size);
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  VmapDimVector size_(size.size() + 1);
+  c10::SmallVector<c10::SymInt> size_(sym_size.size() + 1);
   // copy batch size
   size_[0] = self_.size(0);
-  std::copy(size.cbegin(), size.cend(), size_.begin() + 1);
-  return std::make_tuple(self_.view(size_), 0);
+  std::copy(sym_size.cbegin(), sym_size.cend(), size_.begin() + 1);
+  return std::make_tuple(self_.view_symint(size_), 0);
 }
 
 Tensor view_symint_decomposition(const Tensor& self,
@@ -459,7 +457,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
   auto self_sizes = self_.sizes();
   auto batch_size = self_sizes[0];
 
-  std::vector<c10::SymInt> size_(size.size() + 1);
+  c10::SmallVector<c10::SymInt> size_(size.size() + 1);
   size_[0] = batch_size;
   std::copy(size.cbegin(), size.cend(), size_.begin() + 1);
 
@@ -473,8 +471,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
   // so the strategy here is to view it first as a tensor of size [B0, 1, 3] and
   // then expand.
   auto extra_dims = size.size() - (self_dim - 1);
-  // TODO: optimize to small vec
-  std::vector<c10::SymInt> view_shape(size_.size(), /*init_value*/1);
+  c10::SmallVector<c10::SymInt> view_shape(size_.size(), /*init_value*/1);
   view_shape[0] = batch_size;
   std::copy(self_sizes.cbegin() + 1, self_sizes.cend(),
             view_shape.begin() + 1 + extra_dims);

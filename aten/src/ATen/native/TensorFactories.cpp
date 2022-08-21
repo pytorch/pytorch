@@ -191,16 +191,14 @@ Tensor empty_symint_concrete(c10::SymIntArrayRef size, c10::optional<ScalarType>
   return at::empty(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty(
-    SymIntArrayRef sym_size,
+Tensor empty_name(
+    IntArrayRef size,
     c10::optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     optional<MemoryFormat> optional_memory_format) {
-  auto size = c10::asIntArrayRefSlow(sym_size);
-
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -224,6 +222,8 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
 Tensor& empty_out(SymIntArrayRef sym_size,
     c10::optional<c10::MemoryFormat> optional_memory_format,
     Tensor& result) {
+  // TODO: support empty_out properly (I was forced to change this immediately
+  // with empty so that empty/empty.out had the same type signature)
   auto size = c10::asIntArrayRefSlow(sym_size);
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
@@ -391,22 +391,6 @@ Tensor empty_like_quantized(
   }
 }
 
-// TODO: dedupe
-Tensor new_empty_symint(
-    const Tensor& self,
-    SymIntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt
-    ) {
-  auto dtype = dtype_opt.has_value() ? dtype_opt : optTypeMetaToScalarType(self.options().dtype_opt());
-  auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
-  auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
-  auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::_ops::empty_memory_format::call(size, dtype, layout, device, pin_memory, c10::nullopt);
-}
-
 Tensor new_empty(
     const Tensor& self,
     SymIntArrayRef size,
@@ -419,7 +403,7 @@ Tensor new_empty(
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
   auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::_ops::empty_memory_format::call(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor new_empty_strided(
@@ -1123,19 +1107,17 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
-Tensor& zeros_concrete_out(IntArrayRef size, Tensor& result) {
-  if (result.is_sparse()) {
-    result.sparse_resize_and_clear_(size, size.size(), 0.);
-    return result;
-  } else {
-    result.resize_(size);
-  }
-  return result.zero_();
+Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
+  result.sparse_resize_and_clear_(size, size.size(), 0.);
+  return result;
 }
 
 Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
   auto size = c10::asIntArrayRefSlow(sym_size);
   if (result.is_sparse()) {
+    // TODO: I think this branch should be dead, but we don't have an easy
+    // way to cover all sparse kernels with zeros_sparse_out, so retian this
+    // for now
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
   } else {

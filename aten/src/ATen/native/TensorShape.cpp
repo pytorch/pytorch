@@ -844,6 +844,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 }
 
 Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
+  // TODO: properly support SymInt expand
   auto size = asIntArrayRefSlow(sym_size);
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
@@ -924,6 +925,7 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  // TODO: properly support SymInt narrow_copy
   return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
 }
 
@@ -3112,6 +3114,7 @@ Tensor adjoint(const Tensor &self) {
 
 Tensor view_symint(const Tensor& self,
             at::SymIntArrayRef size) {
+  // TODO: Properly support SymInt view
   return view_impl(self, c10::asIntArrayRefSlow(size));
 }
 

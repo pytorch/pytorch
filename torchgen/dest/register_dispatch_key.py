@@ -753,9 +753,9 @@ resize_out(out, sizes, strides, options);
         )
 
         if self.target is Target.NAMESPACED_DECLARATION:
-            result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
-            if cpp_sig_group.faithful_signature is not None:
-                result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+            result = ""
+            for cpp_sig in cpp_sig_group.signatures():
+                result += f"TORCH_API {cpp_sig.decl()};\n"
             return result
 
         elif self.target is Target.NAMESPACED_DEFINITION:
@@ -767,9 +767,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-            result = generate_defn(cpp_sig_group.signature)
-            if cpp_sig_group.faithful_signature is not None:
-                result += generate_defn(cpp_sig_group.faithful_signature)
+            result = ""
+            for cpp_sig in cpp_sig_group.signatures():
+                result += generate_defn(cpp_sig)
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:

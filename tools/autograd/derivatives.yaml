@@ -622,6 +622,7 @@
   self: grad * (result + 1)
   result: auto_element_wise
 
+# TODO: this derivative is not SymInt safe, need sum_to support
 - name: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
   self: at::sum_to(grad, self.sizes())
   result: auto_linear
@@ -1734,6 +1735,7 @@
   # linear
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
+# TODO: this derivative is not SymInt safe, need reshape_symint
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear

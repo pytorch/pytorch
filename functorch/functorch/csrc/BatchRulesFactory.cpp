@@ -20,8 +20,7 @@ struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
       SymIntArrayRef shape,
       T... extra_args) {
     const auto bdim_size = tensor.sym_size(batch_dim.value());
-    // TODO: optimize this
-    std::vector<c10::SymInt> new_shape;
+    c10::SmallVector<c10::SymInt> new_shape;
     new_shape.reserve(shape.size() + 1);
     new_shape.emplace_back(bdim_size);
     new_shape.insert(new_shape.end(), shape.begin(), shape.end());
