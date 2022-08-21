@@ -409,9 +409,7 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  TORCH_INTERNAL_ASSERT(false, "NYI");
-  // return LazyNativeFunctions::view_copy(self,
-  // at::SymIntArrayRef::fromIntArrayRef(size));
+  return LazyNativeFunctions::view_copy(self, c10::SymIntArrayRef::fromIntArrayRef(size));
 }
 
 // This is needed by the torch.tensor constructor.
@@ -450,6 +448,14 @@ at::Tensor LazyNativeFunctions::new_empty_strided(
           self, size, stride, dtype, layout, device, pin_memory);
 }
 
+at::Tensor LazyNativeFunctions::narrow_copy(
+    const at::Tensor& self,
+    int64_t dim,
+    c10::SymInt start,
+    c10::SymInt length) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      narrow_copy)>::call(self, dim, start, length);
+}
 at::Tensor LazyNativeFunctions::pixel_shuffle(
     const at::Tensor& self,
     int64_t upscale_factor) {
