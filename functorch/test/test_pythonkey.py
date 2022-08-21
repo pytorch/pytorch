@@ -23,8 +23,10 @@ from functorch import (
 from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
+    min_cut_rematerialization_partition, aot_function, aot_module,
+    decomposition_table, nop,
+    num_of_recompilations, default_partition, default_decompositions,
+    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -330,6 +332,22 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
+    def test_compilation_context(self):
+        def f(x):
+            return x.sin().sin()
+        count = []
+
+        def compiler(fx_g, _):
+            context = get_aot_compilation_context()
+            count.append((context[0], len(fx_g.graph.nodes)))
+            return fx_g
+
+        f = aot_function(f, compiler)
+        out = f(torch.randn(5, requires_grad=True))
+        f(torch.randn(5))
+        out.sum().backward()
+        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
@@ -598,14 +616,16 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
     def test_aot_module_simplified_preserves_stack_trace(self):
-
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
             def forward(self, x, y):
-                return (self.linear(x) + y, )
+                z = self.linear(x)
+                z = z + y
+                z = z.relu()
+                return (z, )
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
@@ -626,7 +646,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_pythonkey.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=nop)
+        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
 
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
