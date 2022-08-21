@@ -913,11 +913,11 @@ def configure_extension_build():
                     sources=[]),
             )
     if cmake_cache_vars['BUILD_FUNCTORCH']:
-            extensions.append(
-                Extension(
-                    name=str('functorch._C'),
-                    sources=[]),
-            )
+        extensions.append(
+            Extension(
+                name=str('functorch._C'),
+                sources=[]),
+        )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,

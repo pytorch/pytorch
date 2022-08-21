@@ -681,7 +681,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  install_functorch
   test_functorch
 else
   install_torchvision
