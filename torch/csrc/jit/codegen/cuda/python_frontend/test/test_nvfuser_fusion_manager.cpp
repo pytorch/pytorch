@@ -184,6 +184,51 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     std::shared_ptr<RecordFunctor> new_record(new ScalarRecord(
         {State(StateType::Scalar, 1)}, 
         Nvf::DataType::Float));
+
+    try {
+      auto hit_cache_entry = fm->lookupFusionCacheEntry(cached_record);
+      ASSERT_FALSE(hit_cache_entry == c10::nullopt);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "Cache lookup unexpectedly asserted!";
+    }
+    
+    try {
+      fm->traverseFusionCache(cached_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "Fusion cache traverse unexpectedly asserted!";
+    }
+    
+    try {
+      auto miss_cache_entry = fm->lookupFusionCacheEntry(new_record);
+      ASSERT_TRUE(miss_cache_entry == c10::nullopt);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "Cache lookup unexpectedly asserted!";
+    }
+    
+    try {
+      fm->createFusionCacheEntry(new_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "An unexpected assert on Cache Entry creation!";
+    }
+    
+    try {
+      fm->traverseFusionCache(new_record);
+      SUCCEED();
+    } catch(...) {
+      FAIL() << "Fusion cache traverse unexpectedly asserted!";
+    }
+    
+    std::shared_ptr<RecordFunctor> end_record(new EndRecord());
+    try {
+      fm->createTerminalFusionCacheEntry(end_record);
+      FAIL() << "Expected the cache to assert because it is full!";
+    } catch(...) {
+      SUCCEED();
+    }
   }
 }
 
