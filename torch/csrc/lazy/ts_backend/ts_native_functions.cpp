@@ -409,7 +409,8 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  return LazyNativeFunctions::view_copy(self, c10::SymIntArrayRef::fromIntArrayRef(size));
+  return LazyNativeFunctions::view_copy(
+      self, c10::SymIntArrayRef::fromIntArrayRef(size));
 }
 
 // This is needed by the torch.tensor constructor.
