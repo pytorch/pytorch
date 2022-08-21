@@ -2505,46 +2505,15 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    # NOTE: Reshape may be given a shape with a -1 length
-    # This indicates that the dimension's length should be inferred
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
-
-    for idx in range(len(shape)):
-        if shape[idx] == -1:
-            # Verifies there's only one dimension of length -1 in the shape
-            if shape.count(-1) > 1:
-                msg = "Can only infer the length of one dimension, but got shape {0}!".format(
-                    str(shape)
-                )
-                raise ValueError(msg)
-
-            # TODO: improve error message
-            if a.numel() > 0:
-                length = reduce(
-                    operator.floordiv, (x for x in shape if x != -1), a.numel()
-                )
-            else:
-                msg = "Cannot reshape a tensor of zero elements into shape {0} because the unspecified length is ambiguous!".format(
-                    str(shape)
-                )
-                raise ValueError(msg)
-
-            shape = list(shape)  # type: ignore[assignment]
-            shape[idx] = length  # type: ignore[index]
-            break
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
 
     # Short-circuits if shape is the same
-    utils.validate_shape(shape)
     if tuple(a.shape) == tuple(shape):
         return prims.view_of(a)
-
-    numel = reduce(operator.mul, shape) if len(shape) > 0 else 1
-    if a.numel() != numel:
-        msg = "Attempting to reshape a tensor with shape {0} and {1} elements to a shape {2} with {3} elements!".format(
-            str(a.shape), a.numel(), str(shape), numel
-        )
-        raise ValueError(msg)
 
     # Special-cases tensors with no elements
     if a.numel() == 0:
@@ -2794,14 +2763,8 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
 # CompositeImplicitAutograd - don't register decomp
 def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
-    if not sizes:
-        raise RuntimeError("unflatten: sizes must be non-empty")
-    if -1 not in sizes and utils.prod(sizes) != a.shape[dim]:
-        raise RuntimeError(
-            f"unflatten: Provided sizes {sizes} don't multiply up to the size of dim {dim} ({a.shape[dim]}) in the input tensor"
-        )
-    out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
-    return torch.reshape(a, out_shape)
+    utils.check(len(sizes) != 0, lambda: "unflatten: sizes must be non-empty")
+    return a.view(tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :]))
 
 
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
