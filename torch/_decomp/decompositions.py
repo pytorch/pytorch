@@ -620,7 +620,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.col2im_backward)
@@ -631,7 +631,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -1378,6 +1378,11 @@ def upsample_bilinear2d_vec(
 @register_decomposition(aten.is_same_size.default)
 def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
+
+
+@register_decomposition(aten._reshape_alias)
+def _reshape_alias(x, shape, strides):
+    return aten.view(x, shape)
 
 
 @register_decomposition(aten.nll_loss_forward)
