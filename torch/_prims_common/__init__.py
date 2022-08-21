@@ -669,7 +669,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     for i, d in enumerate(shape):
         if d == -1:
             check(dim is None, lambda: "only one dimension can be inferred")
-            dim = d
+            dim = i
         elif d >= 0:
             newsize *= d
         else:
