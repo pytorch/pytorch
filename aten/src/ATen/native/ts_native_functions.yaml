@@ -144,7 +144,7 @@ full_codegen:
   - alias_copy
   - as_strided_copy
   - diagonal_copy
-  # - expand_copy
+  - expand_copy
   - permute_copy
   - _reshape_alias_copy
   - select_copy.int
@@ -160,7 +160,7 @@ full_codegen:
   - t_copy
   - transpose_copy.int
   - unsqueeze_copy
-  # - view_copy
+  - view_copy
   - view_copy.dtype
   - unfold_copy
   - select_scatter
@@ -192,7 +192,7 @@ supported:
   - diagonal_backward
   - slice_backward
   - new_empty_strided
-  # - narrow_copy
+  - narrow_copy
   - pixel_shuffle
   - pixel_unshuffle
   - select_backward

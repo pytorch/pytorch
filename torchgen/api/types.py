@@ -553,7 +553,10 @@ class CppSignatureGroup:
             return signature, faithful_signature
 
         signature, faithful_signature = make_sigs(symint=False)
-        symint_signature, symint_faithful_signature = make_sigs(symint=True)
+        symint_signature: Optional[CppSignature] = None
+        symint_faithful_signature: Optional[CppSignature] = None
+        if func.has_symint():
+            symint_signature, symint_faithful_signature = make_sigs(symint=True)
 
         return CppSignatureGroup(
             func=func,
