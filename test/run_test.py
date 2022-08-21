@@ -626,7 +626,7 @@ def run_doctests(test_module, test_directory, options):
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
         command=options.xdoctest_command, argv=[])
-    result = 1 if run_summary['n_failed'] else 0
+    result = 1 if run_summary.get('n_failed', 0) else 0
     return result
 
 
