@@ -1806,6 +1806,15 @@ def define_buck_targets(
         ],
     )
 
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
+        ],
+    )
+
     pt_xplat_cxx_library(
         name = "torch_supported_mobile_models",
         srcs = [

@@ -13,14 +13,22 @@ import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
+from torch.utils._pytree import tree_map
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
+PRUNE_ALL = 1
+KEEP_ELLIPSES = 2
+KEEP_NAME_AND_ELLIPSES = 3
+
 PRUNE_FUNCTIONS = {
-    "torch/profiler/profiler.py(...): start": True,
-    "torch/profiler/profiler.py(...): stop_trace": True,
-    "cudaStreamIsCapturing": False,
-    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": False,
+    "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
+    "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
+    "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
+    "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
+    "<built-in method __exit__ of torch._C.DisableTorchFunction object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
+    "cudaStreamIsCapturing": PRUNE_ALL,
+    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We
@@ -32,6 +40,38 @@ PRUNE_FUNCTIONS = {
 #
 # TODO: We also fail to capture events for Windows on some platforms.
 ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
+
+
+class TorchFunctionTensor(torch.Tensor):
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class TorchDispatchTensor(torch.Tensor):
+
+    @staticmethod
+    def __new__(cls, elem):
+        t = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+        t.elem = elem
+        return t
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+
+        def unwrap(x):
+            return x.elem if isinstance(x, TorchDispatchTensor) else x
+
+        def wrap(x):
+            return TorchDispatchTensor(x) if isinstance(x, torch.Tensor) else x
+
+        args = tree_map(unwrap, args)
+        kwargs = tree_map(unwrap, kwargs or {})
+
+        return tree_map(wrap, func(*args, **kwargs))
 
 
 class ProfilerTree:
@@ -70,12 +110,18 @@ class ProfilerTree:
             for node in nodes:
                 cls.validate_node(node)
                 name = cls.fmt_name(node.name())
-                add_ellipses = PRUNE_FUNCTIONS.get(name.strip(), None)
-                if add_ellipses is None:
+                prune_level = PRUNE_FUNCTIONS.get(name.strip(), None)
+                if prune_level is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
-                elif add_ellipses:
+                elif prune_level == KEEP_NAME_AND_ELLIPSES:
+                    out.append((depth, name))
+                    if node.children:
+                        out.append((depth + 1, "..."))
+                elif prune_level == KEEP_ELLIPSES:
                     out.append((depth, "..."))
+                else:
+                    assert prune_level == PRUNE_ALL
 
             return out
 
@@ -479,11 +525,7 @@ class TestProfilerTree(TestCase):
                 [memory]
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ..."""
+                  ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
@@ -602,12 +644,77 @@ class TestProfilerTree(TestCase):
                             aten::clamp_min
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  torch/profiler/profiler.py(...): _transit_action
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                      enum.py(...): __hash__
-                        <built-in function hash>
-                    ..."""
+                  ..."""
         )
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_with_stack_and_torch_function(self):
+        x = TorchFunctionTensor(torch.ones((1,)))
+        y = torch.ones((1,))
+
+        # There's some lazy initialization in __torch_function__. If we don't
+        # run this the first run won't match the replicates.
+        torch.add(x, y)
+
+        with torch.profiler.profile(with_stack=True) as p:
+            torch.add(x, y)
+
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_torch_function
+              torch/profiler/profiler.py(...): __enter__
+                ...
+              <built-in method add of type object at 0xXXXXXXXXXXXX>
+                test_profiler_tree.py(...): __torch_function__
+                  torch/_tensor.py(...): __torch_function__
+                    <built-in function all>
+                      torch/_tensor.py(...): <genexpr>
+                        <built-in function issubclass>
+                      torch/_tensor.py(...): <genexpr>
+                    <built-in method add of type object at 0xXXXXXXXXXXXX>
+                      aten::add
+                    torch/_tensor.py(...): _convert
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in method as_subclass of Tensor object at 0xXXXXXXXXXXXX>
+                        aten::alias
+                      <built-in function isinstance>
+              torch/profiler/profiler.py(...): __exit__
+                torch/profiler/profiler.py(...): stop
+                  ..."""
+        )
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_with_stack_and_torch_dispatch(self):
+        x = TorchDispatchTensor(torch.ones((1,)))
+        y = torch.ones((1,))
+
+        with torch.profiler.profile(with_stack=True) as p:
+            x + y
+
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_torch_dispatch
+              torch/profiler/profiler.py(...): __enter__
+                ...
+              aten::add
+                test_profiler_tree.py(...): __torch_dispatch__
+                  torch/utils/_pytree.py(...): tree_map
+                    ...
+                  torch/utils/_pytree.py(...): tree_map
+                    ...
+                  torch/_ops.py(...): __call__
+                    <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
+                      aten::add
+                  torch/utils/_pytree.py(...): tree_map
+                    ...
+              torch/profiler/profiler.py(...): __exit__
+                torch/profiler/profiler.py(...): stop
+                  ...""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
