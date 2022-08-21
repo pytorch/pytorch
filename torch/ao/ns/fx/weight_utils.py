@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.intrinsic as nni
