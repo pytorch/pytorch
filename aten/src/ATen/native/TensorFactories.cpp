@@ -191,7 +191,7 @@ Tensor empty_symint_concrete(c10::SymIntArrayRef size, c10::optional<ScalarType>
   return at::empty(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty_name(
+Tensor empty_names(
     IntArrayRef size,
     c10::optional<DimnameList> names,
     c10::optional<ScalarType> dtype,

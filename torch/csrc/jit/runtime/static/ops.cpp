@@ -2528,7 +2528,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
     const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
     const auto layout = p_node->Input(2).toOptional<c10::Layout>();
     if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
-      p_node->Output(0) = at::compositeexplicitautograd::zeros(size, dtype, layout, c10::nullopt, c10::nullopt);
+      p_node->Output(0) = at::compositeexplicitautograd::zeros(
+          size, dtype, layout, c10::nullopt, c10::nullopt);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
