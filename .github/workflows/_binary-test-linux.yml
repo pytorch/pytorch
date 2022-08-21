@@ -139,7 +139,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: ${{ inputs.build_name }}
