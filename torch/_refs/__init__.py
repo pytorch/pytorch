@@ -175,11 +175,13 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "diff",
     "mean",
     "std_mean",
     "var_mean",
     "sum",
     "prod",
+    "trapezoid",
     "var",
     #
     # Linear algebra ops
@@ -1772,6 +1774,74 @@ def any(
     return result
 
 
+@register_decomposition(torch.ops.aten.diff)
+@out_wrapper()
+def diff(
+    a: TensorLikeType,
+    n: Optional[int] = 1,
+    dim: Optional[int] = -1,
+    prepend: Optional[TensorLikeType] = None,
+    append: Optional[TensorLikeType] = None,
+) -> TensorLikeType:
+    check(
+        a.ndim >= 1,
+        lambda: "diff expects input to be at least one-dimensional",
+    )
+
+    if prepend is not None:
+        wrapped_dim = dim + a.ndim * (dim < 0)
+        check(
+            prepend.ndim == a.ndim,
+            lambda: "diff expects prepend to be the same dimension as input",
+        )
+        for i in range(prepend.ndim):
+            check(
+                prepend.size(i) == a.size(i) or i == wrapped_dim,
+                lambda: f"diff expects the shape of tensor to prepend to match that of"
+                f" input except along the differencing dimension;"
+                f" input.size({i}) = {a.size(i)}, but got"
+                f" tensor.size({i}) = {prepend.size(i)}",
+            )
+
+    if append is not None:
+        wrapped_dim = dim + a.ndim * (dim < 0)
+        check(
+            append.ndim == a.ndim,
+            lambda: "diff expects append to be the same dimension as input",
+        )
+        for i in range(append.ndim):
+            check(
+                append.size(i) == a.size(i) or i == wrapped_dim,
+                lambda: f"diff expects the shape of tensor to append to match that of"
+                f" input except along the differencing dimension;"
+                f" input.size({i}) = {a.size(i)}, but got"
+                f" tensor.size({i}) = {append.size(i)}",
+            )
+
+    if n == 0:
+        return clone(a)
+    elif prepend is None and append is not None:
+        a = cat((a, append), dim)
+    elif prepend is not None and append is None:
+        a = cat((prepend, a), dim)
+    elif prepend is not None and append is not None:
+        a = cat((prepend, a, append), dim)
+
+    out_len = a.size(dim) - 1
+    result = clone(a)
+    is_bool = utils.is_boolean_dtype(a.dtype)
+    n = min(a.size(dim), n)
+
+    for _ in range(n):
+        if is_bool:
+            result = logical_xor(narrow(result, dim, 1, out_len), narrow(result, dim, 0, out_len))
+        else:
+            result = narrow(result, dim, 1, out_len) - narrow(result, dim, 0, out_len)
+        out_len -= 1
+
+    return result
+
+
 @register_decomposition(torch.ops.aten.sum)
 def sum(
     a: TensorLikeType,
@@ -1826,6 +1896,34 @@ def prod(
         out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+
+@register_decomposition(torch.ops.aten.trapezoid)
+def trapezoid(
+    y: TensorLikeType,
+    x: Optional[TensorLikeType] = None,
+    *,
+    dx: Optional[float] = 1.0,
+    dim: Optional[int] = -1,
+) -> TensorLikeType:
+    check(
+        not prims.utils.is_boolean_dtype(y.dtype),
+        lambda: "trapezoid: received a bool input for `y`, but bool is not supported",
+    )
+    check(
+        not isinstance(dx, (complex, bool,)),
+        lambda: "trapezoid: Currently, we only support dx as a real number.",
+    )
+    dim = dim + y.ndim * (dim < 0)
+    if x is not None:
+        check(
+            not prims.utils.is_boolean_dtype(x.dtype),
+            lambda: "trapezoid: received a bool input for `x`, but bool is not supported",
+        )
+        dx = torch.diff(x, dim=dim)
+    left = prims.slice_in_dim(y, 1, y.size(dim), axis=dim)
+    right = prims.slice_in_dim(y, 0, y.size(dim) - 1, axis=dim)
+    return 0.5 * (dx * (left + right)).sum(dim)
 
 
 @register_decomposition(torch.ops.aten.amin)

@@ -18092,7 +18092,11 @@ python_ref_db = [
         torch_opinfo_name="std",
         supports_out=True,
     ),
-    # std_mean and var_mean are not ReductionInfos
+    # diff, std_mean and var_mean are not ReductionInfos
+    PythonRefInfo(
+        "_refs.diff",
+        torch_opinfo_name="diff",
+    ),
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
@@ -18108,6 +18112,10 @@ python_ref_db = [
         torch_opinfo_name="prod",
         supports_out=True,
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.trapezoid",
+        torch_opinfo_name="trapezoid",
     ),
     ReductionPythonRefInfo(
         "_refs.var",
