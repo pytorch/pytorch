@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.quantization import default_dynamic_qconfig
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,

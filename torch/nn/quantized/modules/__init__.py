@@ -1,95 +1,38 @@
-import torch
-from torch.nn.modules.pooling import MaxPool2d
+r"""Quantized Modules
 
-from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention, PReLU
-from .dropout import Dropout
-from .batchnorm import BatchNorm2d, BatchNorm3d
-from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
-    InstanceNorm2d, InstanceNorm3d
-from .conv import Conv1d, Conv2d, Conv3d
-from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from .linear import Linear
-from .embedding_ops import Embedding, EmbeddingBag
-from .rnn import LSTM
+Note::
+    The `torch.nn.quantized` namespace is in the process of being deprecated.
+    Please, use `torch.ao.nn.quantized` instead.
+"""
 
-from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
+from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention, PReLU
+from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d
+from torch.ao.nn.quantized.modules.conv import Conv1d, Conv2d, Conv3d
+from torch.ao.nn.quantized.modules.conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
+from torch.ao.nn.quantized.modules.dropout import Dropout
+from torch.ao.nn.quantized.modules.embedding_ops import Embedding, EmbeddingBag
+from torch.ao.nn.quantized.modules.functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
+from torch.ao.nn.quantized.modules.linear import Linear
+from torch.ao.nn.quantized.modules.normalization import LayerNorm, GroupNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
+from torch.ao.nn.quantized.modules.rnn import LSTM
 
+from torch.ao.nn.quantized.modules import MaxPool2d
+from torch.ao.nn.quantized.modules import Quantize, DeQuantize
 
-class Quantize(torch.nn.Module):
-    r"""Quantizes an incoming tensor
-
-    Args:
-     `scale`: scale of the output Quantized Tensor
-     `zero_point`: zero_point of output Quantized Tensor
-     `dtype`: data type of output Quantized Tensor
-     `factory_kwargs`: Dictionary of kwargs used for configuring initialization
-         of internal buffers. Currently, `device` and `dtype` are supported.
-         Example: `factory_kwargs={'device': 'cuda', 'dtype': torch.float64}`
-         will initialize internal buffers as type `torch.float64` on the current CUDA device.
-         Note that `dtype` only applies to floating-point buffers.
-
-    Examples::
-        >>> t = torch.tensor([[1., -1.], [1., -1.]])
-        >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
-        >>> qm = Quantize(scale, zero_point, dtype)
-        >>> # xdoctest: +SKIP
-        >>> qt = qm(t)
-        >>> print(qt)
-        tensor([[ 1., -1.],
-                [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
-    """
-
-    scale: torch.Tensor
-    zero_point: torch.Tensor
-
-    def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
-        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(Quantize, self).__init__()
-        self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
-        self.register_buffer('zero_point',
-                             torch.tensor([zero_point], dtype=torch.long,
-                                          **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
-        self.dtype = dtype
-
-    def forward(self, X):
-        return torch.quantize_per_tensor(X, float(self.scale),
-                                         int(self.zero_point), self.dtype)
-
-    @staticmethod
-    def from_float(mod):
-        assert hasattr(mod, 'activation_post_process')
-        scale, zero_point = mod.activation_post_process.calculate_qparams()
-        return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
-
-    def extra_repr(self):
-        return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
-
-
-class DeQuantize(torch.nn.Module):
-    r"""Dequantizes an incoming tensor
-
-    Examples::
-        >>> input = torch.tensor([[1., -1.], [1., -1.]])
-        >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
-        >>> qm = Quantize(scale, zero_point, dtype)
-        >>> # xdoctest: +SKIP
-        >>> quantized_input = qm(input)
-        >>> dqm = DeQuantize()
-        >>> dequantized = dqm(quantized_input)
-        >>> print(dequantized)
-        tensor([[ 1., -1.],
-                [ 1., -1.]], dtype=torch.float32)
-    """
-
-    def __init__(self):
-        super(DeQuantize, self).__init__()
-
-    def forward(self, Xq):
-        return Xq.dequantize()
-
-    @staticmethod
-    def from_float(mod):
-        return DeQuantize()
+# The following imports are needed in case the user decides
+# to import the files directly,
+# s.a. `from torch.nn.quantized.modules.conv import ...`.
+# No need to add them to the `__all__`.
+from torch.ao.nn.quantized.modules import activation
+from torch.ao.nn.quantized.modules import batchnorm
+from torch.ao.nn.quantized.modules import conv
+from torch.ao.nn.quantized.modules import dropout
+from torch.ao.nn.quantized.modules import embedding_ops
+from torch.ao.nn.quantized.modules import functional_modules
+from torch.ao.nn.quantized.modules import linear
+from torch.ao.nn.quantized.modules import normalization
+from torch.ao.nn.quantized.modules import rnn
+from torch.ao.nn.quantized.modules import utils
 
 __all__ = [
     'BatchNorm2d',
