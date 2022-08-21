@@ -91,19 +91,6 @@ def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
 
-@register_decomposition(aten.elu)
-@pw_cast_for_opmath
-def elu(
-    self: Tensor, alpha: float = 1, scale: float = 1, input_scale: float = 1
-) -> Tensor:
-    negcoef = alpha * scale
-    poscoef = scale
-    negiptcoef = input_scale
-    return torch.where(
-        self > 0, self * poscoef, (torch.exp(self * negiptcoef) - 1) * negcoef
-    )
-
-
 @register_decomposition(aten.elu_backward)
 @pw_cast_for_opmath
 def elu_backward(
@@ -1231,23 +1218,6 @@ def cudnn_batch_norm_backward(
         epsilon,
         [True, True, True],
     )
-
-
-@register_decomposition(aten.transpose.int, disable_meta=True)
-def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
-
-    # NB: these no-op views force this operator to return a
-    # fresh TensorImpl, which is important for autograd to
-    # work correctly (assert will fail if you don't do it)
-    if self.dim() <= 1:
-        return self.view(self.shape)
-
-    if dim0 == dim1:
-        return self.view(self.shape)
-    perm = list(range(self.dim()))
-    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
-    return torch.permute(self, perm)
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
