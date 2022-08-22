@@ -5,7 +5,11 @@
     "torch.nn.quantized.modules": "torch.ao.nn.quantized.modules",
     "torch.nn.quantized.dynamic": "torch.ao.nn.quantized.dynamic",
     "torch.nn.quantized.dynamic.modules": "torch.ao.nn.quantized.dynamic.modules",
-    "torch.nn.quantized.dynamic.modules.rnn": "torch.ao.nn.quantized.dynamic.modules.rnn"
+    "torch.nn.quantized.dynamic.modules.rnn": "torch.ao.nn.quantized.dynamic.modules.rnn",
+    "torch.nn.quantizable": "torch.ao.nn.quantizable",
+    "torch.nn.quantizable.modules": "torch.ao.nn.quantizable.modules",
+    "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
+    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
   "torch.ao.quantization": [
     "ABC",
