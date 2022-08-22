@@ -681,8 +681,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         auto view_fn = view_info.view_fn();
         Tensor diff_view;
         {
-          // The first time this view is materialized can happen when
-          // grad_mode is disabled
+          // We can reach this path with grad_mode disabled, e.g. engine
           AutoGradMode grad_mode(true);
           diff_view = view_fn(view_info.base_);
         }
