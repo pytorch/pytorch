@@ -1,3 +1,4 @@
+import itertools
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
@@ -183,6 +184,32 @@ class NonWrapperTensor(torch.Tensor):
     def new_empty(self, shape):
         return type(self)(torch.empty(shape))
 
+class RedispatchTensor(torch.Tensor):
+    def __new__(cls, data):
+        t = torch.Tensor._make_subclass(cls, data)
+        t.call_log = []
+        return t
+
+    @classmethod
+    def __torch_function__(cls, func, types, args, kwargs=None):
+        if func in (torch.Tensor.__repr__,):
+            return super().__torch_function__(func, types, args, kwargs)
+
+        def append_log(x):
+            if isinstance(x, RedispatchTensor):
+                x.call_log.append((func.__qualname__, types, args, kwargs))
+
+        _ = tree_map(append_log, args)
+        if kwargs:
+            _ = tree_map(append_log, kwargs)
+
+        ret = torch.overrides.redispatch_function(
+            func, types, args, kwargs)
+        def wrap(x):
+            if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
+                return RedispatchTensor(x)
+            return x
+        return tree_map(wrap, ret)
 
 # Class used to store info about subclass tensors used in testing.
 class SubclassInfo:
@@ -215,5 +242,9 @@ subclass_db = {
         'diag_tensor_below',
         create_fn=lambda shape: DiagTensorBelow(torch.randn(shape)),
         closed_under_ops=False  # sparse semantics
+    ),
+    RedispatchTensor: SubclassInfo(
+        "redispatch_tensor",
+        create_fn=lambda shape: RedispatchTensor(torch.randn(shape))
     ),
 }

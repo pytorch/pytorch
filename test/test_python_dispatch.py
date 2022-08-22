@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 import logging
@@ -393,12 +393,10 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch.Tensor):
+            class A(torch._C._TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-                __torch_function__ = torch._C._disabled_torch_function_impl
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -655,7 +653,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             elem: torch.Tensor
 
             __slots__ = ['elem']
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
@@ -674,6 +671,10 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                     return args[0].elem.clone()
                 raise RuntimeError("NYI")
 
+            # NB: The default Tensor.__torch_function__ implementation called for deepcopy
+            # disables __torch_function__ by the time we get to clone(), so there is no need to
+            # explicitly disable __torch_function__ for this subclass.
+
         x = MyWrapperTensor(torch.randn(3))
         with self.assertRaisesRegex(RuntimeError,
                                     "for which cloning returns another instance of the same subclass"):
@@ -683,12 +684,10 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
         # Ensure correct error is thrown for common error cases.
         class SubTensorError1(torch.Tensor):
-            # Without __torch_function__, new_empty() by default returns a plain tensor.
-            __torch_function__ = torch._C._disabled_torch_function_impl
+            # Default implementation of new_empty() returns a plain tensor.
+            pass
 
         class SubTensorError2(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             # new_empty() incorrectly returns a different type (i.e. a plain tensor).
             def new_empty(self, shape):
                 return torch.Tensor(shape)
@@ -872,6 +871,24 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
+
+    def test_shallow_copy_and_detach(self) -> None:
+        seen = set()
+        test_case = self
+
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                tree_map_only(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
+                if kwargs is None:
+                    kwargs = {}
+                r = func(*args, **kwargs)
+                tree_map_only(torch.Tensor, lambda t: seen.add(t), r)
+                return r
+
+        with TestMode():
+            x = torch.randn(3, requires_grad=True)
+            loss = (x * x).sum()
+            loss.backward()
 
     def test_nested_enable_torch_dispatch_mode(self) -> None:
         class A(LoggingTensorMode):
