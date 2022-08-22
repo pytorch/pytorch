@@ -687,6 +687,7 @@ class FullyShardedDataParallel(nn.Module):
 
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        self._debug_level = dist.get_debug_level()
         self._handles: List[FlatParamHandle] = []
         # Validate the ignored modules and derive the ignored parameters/buffers
         ignored_modules = self._get_ignored_modules(module, ignored_modules)
@@ -3378,7 +3379,12 @@ class FullyShardedDataParallel(nn.Module):
         if not eod.is_first_iter:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
-            if eod.warn_status == _ExecOrderWarnStatus.WARNED:
+            # and if TORCH_DISTRIBUTED_DEBUG >= INFO.
+            allowed_debug_levels = [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]
+            if (
+                eod.warn_status == _ExecOrderWarnStatus.WARNED
+                or dist.get_debug_level() not in allowed_debug_levels
+            ):
                 return
             # However, we may issue multiple warnings on the first deviating
             # iteration to help debugging, where either:
