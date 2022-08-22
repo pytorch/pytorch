@@ -311,7 +311,7 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
     backend_config = get_native_backend_config()
     for node_arg in op_node.args:
         if node_arg_is_weight(op_node, node_arg, backend_config):
-            assert(isinstance(node_Arg, node) and node_arg.op == 'call_module' and
+            assert(isinstance(node_Arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg
     return None
