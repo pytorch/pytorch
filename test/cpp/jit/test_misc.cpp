@@ -1434,6 +1434,10 @@ class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
  public:
   TestSymIntNodeImpl(int64_t i) : i_(i) {}
 
+  bool bool_() override {
+    return static_cast<bool>(i_);
+  };
+
 #define OPDEF3(NAME, OP, RET)                                            \
   RET NAME(const c10::SymIntNode& other) override {                      \
     return make_intrusive<TestSymIntNodeImpl>(                           \
@@ -1441,14 +1445,21 @@ class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
   }
 
 #define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymIntNode)
-
   OPDEF2(add, +)
   OPDEF2(sub, -)
   OPDEF2(mul, *)
   OPDEF2(floordiv, /)
   OPDEF2(mod, %)
+
+  OPDEF2(eq, ==)
+  OPDEF2(ne, !=)
+  OPDEF2(lt, <)
+  OPDEF2(le, <=)
+  OPDEF2(gt, >)
+  OPDEF2(ge, >=)
 #undef OPDEF2
 #undef OPDEF3
+
   int64_t i_;
 };
 
@@ -1470,6 +1481,12 @@ TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
         ASSERT_EQ(get(a / b), i / j);
         ASSERT_EQ(get(a % b), i % j);
       }
+      ASSERT_EQ(a == b, i == j);
+      ASSERT_EQ(a != b, i != j);
+      ASSERT_EQ(a < b, i < j);
+      ASSERT_EQ(a <= b, i <= j);
+      ASSERT_EQ(a > b, i > j);
+      ASSERT_EQ(a >= b, i >= j);
     }
   }
 }
