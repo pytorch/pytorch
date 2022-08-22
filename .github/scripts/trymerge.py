@@ -1113,7 +1113,7 @@ def get_combined_checks_from_pr_and_land_validation(
     land_validation_checks = get_land_checkrun_conclusions(pr.org, pr.project, land_check_commit) if land_check_commit else {}
 
     # Merge the two checks together. Land validation check results (if any) overwrite pr check results
-    merged_checks = dict(pr_checks, **land_validation_checks)  # explanation: https://stackoverflow.com/a/9819617
+    merged_checks = {**pr_checks, **land_validation_checks}  # explanation: https://stackoverflow.com/a/26853961/21539
     return merged_checks
 
 def filter_checks_with_lambda(
