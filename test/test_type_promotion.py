@@ -329,8 +329,7 @@ class TestTypePromotion(TestCase):
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=device)
         torch.add(f, f, out=d)
         self.assertEqual(d.dtype, torch.double)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f + f, d)
+        self.assertEqual(f + f, d, exact_dtype=False)
 
     @float_double_default_dtype
     def test_mixed_type_backward(self, device):
@@ -339,8 +338,7 @@ class TestTypePromotion(TestCase):
         tens = f * ten
         s = (tens + 2).sum()
         s.backward()
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f.grad, tens)
+        self.assertEqual(f.grad, tens, exact_dtype=False)
 
         # If we don't convert the returned grad_input to the actual input type
         # we get an error like:
@@ -444,8 +442,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.arange(False, True, device=device), expected)
         self.assertEqual(torch.arange(True, device=device), expected)
         expected = torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=device)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(torch.arange(False, True, 0.5, device=device), expected)
+        self.assertEqual(torch.arange(False, True, 0.5, device=device), expected, exact_dtype=False)
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
