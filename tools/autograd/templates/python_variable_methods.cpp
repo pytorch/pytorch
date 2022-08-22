@@ -150,16 +150,16 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    SymIntArrayRef strides = self_.sym_strides();
+    at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     // TODO: consider factoring this out
     THPObjectPtr tuple(PyTuple_New(strides.size()));
     if (!tuple) throw python_error();
-    for (size_t i = 0; i != size; i++) {
+    for (size_t i = 0; i != strides.size(); i++) {
       PyObject* s = torch::toPyObject(strides[i]);
       if (!s) throw python_error();
-      PyTuple_SET_ITEM(tuple, i, s);
+      PyTuple_SET_ITEM(tuple.get(), i, s);
     }
     return tuple.release();
   }
