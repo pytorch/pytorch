@@ -2044,6 +2044,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_oop(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
 
+  int dev_in_group{0};
   return collective(
       inputTensors,
       outputTensors,
@@ -2052,12 +2053,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_oop(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * inputTensors.size() + opts.rootTensor;
+        const auto ncclDataType = getNcclDataType(input.scalar_type());
+        const auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
-            getNcclDataType(input.scalar_type()),
-            getNcclReduceOp(opts.reduceOp, input),
+            ncclDataType,
+            ncclReduceOp,
             (int)root,
             comm,
             stream.stream());
