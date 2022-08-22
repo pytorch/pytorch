@@ -3807,6 +3807,17 @@ class TestRandomness(TestCase):
         slices_equal.diagonal().zero_()
         self.assertEqual(slices_equal, torch.zeros_like(slices_equal))
 
+    def _assert_correct_size(self, fn, input_tensor, other_args, batch_dim, batch_size, batched_output):
+        if batch_dim == "first":
+            non_vmapped_input = input_tensor[0]
+        elif batch_dim == "last":
+            non_vmapped_input = input_tensor.move_dim(-1, 0)[0]
+        else:
+            assert batch_dim == "none"
+            non_vmapped_input = input_tensor
+        non_vmapped_out = fn(non_vmapped_input, *other_args)
+        self.assertEqual((batch_size, *non_vmapped_out.shape), batched_output.shape)
+
     def _assert_throws_in_error_mode(self, fn, args, in_dims):
         with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
             vmap(fn, in_dims=in_dims, randomness="error")(*args)
@@ -3926,10 +3937,12 @@ class TestRandomness(TestCase):
         self.assertTrue(p_estimate > 0.25)
 
         if randomness == 'different':
+            self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
             self._assert_all_slices_unique(vmap_result)
             return
 
         assert randomness == 'same'
+        self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize('randomness', ['error', 'same', 'different'])
@@ -3952,10 +3965,12 @@ class TestRandomness(TestCase):
         # seem wrong: https://github.com/pytorch/pytorch/issues/74004
         vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
         if randomness == 'different':
+            self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
             self._assert_all_slices_unique(vmap_result)
             return
 
         assert randomness == 'same'
+        self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize('randomness', ['error', 'same', 'different'])
@@ -3995,10 +4010,12 @@ class TestRandomness(TestCase):
         self.assertEqual(result, torch.ones_like(result, dtype=torch.bool))
 
         if randomness == 'different':
+            self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
             self._assert_all_slices_unique(vmap_result)
             return
 
         assert randomness == 'same'
+        self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize('randomness', ['error', 'same', 'different'])
@@ -4033,10 +4050,12 @@ class TestRandomness(TestCase):
         self.assertEqual(result, torch.ones_like(result, dtype=torch.bool))
 
         if randomness == 'different':
+            self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
             self._assert_all_slices_unique(vmap_result)
             return
 
         assert randomness == 'same'
+        self._assert_correct_size(op, passed, (always_batched,), batched_input, B0, vmap_result)
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize('randomness', ['error', 'same', 'different'])
@@ -4352,7 +4371,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:

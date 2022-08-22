@@ -212,10 +212,10 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
-  Tensor self_value;
+  Tensor orig_self_value;
   optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  self_value = moveBatchDimToFront(self_value, self_bdim);
+  std::tie(orig_self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto self_value = moveBatchDimToFront(orig_self_value, self_bdim);
 
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, self_bdim.has_value());
@@ -227,14 +227,14 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
     shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
     self_value = self_value.expand(shapeVec);
   }
-  if (self_value.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
+  if (orig_self_value.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
     self_value = reshape_dim_into(1, 0, self_value);
   }
   auto out = multinomial(self_value, num_samples, replacement, generator);
   if (randomness == RandomnessType::Same && !self_bdim) {
     return out;
   }
-  if(self_value.dim() == 3 && self_bdim) {
+  if(orig_self_value.dim() == 3 && self_bdim) {
     out = out.reshape(self.sizes());
   }
   return makeBatched(out, 0, cur_level);
