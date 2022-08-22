@@ -14,11 +14,15 @@ struct TORCH_API PythonTorchFunctionTLS {
   static const std::shared_ptr<c10::SafePyObject>& get_mode();
   static void swap_mode(std::shared_ptr<c10::SafePyObject>&);
 
+  static bool exchange_skip_next(bool);
+  static bool peek_skip_next();
+
   static void set_state(const PythonTorchFunctionTLS& state);
   static const PythonTorchFunctionTLS& get_state();
 
  private:
   bool disabled_;
+  bool skip_next_;
   std::shared_ptr<c10::SafePyObject> mode_;
 };
 

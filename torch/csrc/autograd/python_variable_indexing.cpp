@@ -34,7 +34,7 @@ namespace autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
@@ -55,7 +55,9 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
-static inline int64_t count_specified_dimensions(PyObject* index) {
+static inline int64_t count_specified_dimensions(
+    PyObject* index,
+    bool skip_torch_function) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
@@ -64,7 +66,8 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(
         index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    if (!skip_torch_function &&
+        (!THPVariable_CheckExact(obj) && check_has_torch_function(obj)))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
@@ -332,7 +335,9 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  const bool skip_torch_function = should_skip_torch_function();
+  if (!skip_torch_function &&
+      (!THPVariable_CheckExact(self) && check_has_torch_function(self))) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -378,7 +383,8 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  int64_t specified_dims = count_specified_dimensions(holder.get());
+  int64_t specified_dims =
+      count_specified_dimensions(holder.get(), skip_torch_function);
   if (specified_dims == -1) {
     return handle_torch_function_indexing(self, holder.get());
   }
@@ -434,9 +440,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-      (!THPVariable_CheckExact(py_value) &&
-       check_has_torch_function(py_value))) {
+  const bool skip_torch_function = should_skip_torch_function();
+  if (!skip_torch_function &&
+      ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
+       (!THPVariable_CheckExact(py_value) &&
+        check_has_torch_function(py_value)))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;
@@ -510,7 +518,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  int64_t specified_dims = count_specified_dimensions(holder.get());
+  int64_t specified_dims =
+      count_specified_dimensions(holder.get(), skip_torch_function);
   if (specified_dims == -1) {
     py::object val = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));

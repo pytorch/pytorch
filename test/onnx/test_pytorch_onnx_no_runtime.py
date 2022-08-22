@@ -122,9 +122,7 @@ class TestOptionalOutput(common_utils.TestCase):
             input_names=["x"],
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = symbolic_helper.scalar_type_to_onnx[
-            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)
-        ].value
+        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
@@ -169,7 +167,7 @@ class TestONNXExport(common_utils.TestCase):
         tm = TraceMe()
         tm = torch.jit.trace(tm, torch.rand(3, 4))
         f = io.BytesIO()
-        torch.onnx._export(tm, (torch.rand(3, 4),), f)
+        torch.onnx.export(tm, (torch.rand(3, 4),), f)
 
     def test_export_tensoroption_to(self):
         def foo(x):
@@ -829,6 +827,23 @@ class TestONNXExport(common_utils.TestCase):
                         shape.tolist(),
                         [max_position_embeddings, batch_size, hidden_size],
                     )
+
+    def test_is_fp_for_C_TypeList(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x.squeeze(1)
+                w = x.shape[2]
+                pos = x.view(2, -1).argmax(1)
+                x_int = pos % w
+                y_int = (pos - x_int) // w
+                return y_int, x_int
+
+        model = torch.jit.script(M())
+        inputs = torch.randn(2, 4, 6)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
+        )
 
 
 if __name__ == "__main__":

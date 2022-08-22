@@ -178,6 +178,7 @@ _lazy_call(_check_cubins)
 class DeferredCudaCallError(Exception):
     pass
 
+OutOfMemoryError = torch._C._OutOfMemoryError
 
 def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
