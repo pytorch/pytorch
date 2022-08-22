@@ -5,7 +5,7 @@ Do not use this module outside of `torch.onnx` and its tests.
 Be very judicious when adding any new global variables. Do not create new global
 variables unless they are absolutely necessary.
 """
-
+import os
 from typing import Optional
 
 import torch._C._onnx as _C_onnx
@@ -32,7 +32,9 @@ class _InternalGlobals:
         self.onnx_shape_inference: bool = True
 
         # Internal feature flags
-        self.runtime_type_check: bool = True
+        self.runtime_type_check: bool = (
+            os.getenv("TORCH_ONNX_RUNTIME_TYPE_CHECK") == "1"
+        )
 
     @property
     def training_mode(self):
