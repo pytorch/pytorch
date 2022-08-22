@@ -533,7 +533,9 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
 
   // parallelize group2 and its cached inputs
   {
-    reference2->axis(-1)->parallelize(ParallelType::Vectorize);
+    if (params.vectorize_factor2 > 1) {
+      reference2->axis(-1)->parallelize(ParallelType::Vectorize);
+    }
     reference2->axis(-2)->parallelize(ParallelType::TIDx);
     reference2->axis(-3)->parallelize(ParallelType::Unroll);
 
@@ -542,9 +544,27 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
     scheduler_utils::parallelizeAllLike(
         reference2,
         {group2_and_cached_inputs.begin(), group2_and_cached_inputs.end()},
-        {ParallelType::Vectorize, ParallelType::TIDx});
+        {ParallelType::TIDx});
 
-    // Only unrolled the axes that exactly maps to the unrolled axes
+    // Only vectorize the axes that exactly maps to the vectorized axes
+    //  on reference as support for permissively mapped axes are not
+    //  yet clearly defined.
+    std::vector<TensorView*> vectorized_group2_cached_inputs;
+    for (auto gin : group2_and_cached_inputs) {
+      if (std::any_of(
+              gin->domain()->domain().begin(),
+              gin->domain()->domain().end(),
+              [&ca_map, reference2](IterDomain* id) {
+                return ca_map.areMapped(
+                    id, reference2->axis(-1), IdMappingMode::EXACT);
+              })) {
+        vectorized_group2_cached_inputs.push_back(gin);
+      }
+    }
+    scheduler_utils::parallelizeAllLike(
+        reference2, vectorized_group2_cached_inputs, {ParallelType::Vectorize});
+
+    // Only unroll the axes that exactly maps to the unrolled axes
     //  on reference as support for permissively mapped axes are not
     //  yet clearly defined.
     std::vector<TensorView*> unrolled_group2_cached_inputs;
@@ -559,7 +579,6 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
         unrolled_group2_cached_inputs.push_back(gin);
       }
     }
-
     scheduler_utils::parallelizeAllLike(
         reference2, unrolled_group2_cached_inputs, {ParallelType::Unroll});
   }
@@ -571,7 +590,9 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
   reference1->merge(pos);
   reference1->split(pos, params.vectorize_factor1);
   reference1->split(pos, kThreadsPerBlock);
-  reference1->axis(-1)->parallelize(ParallelType::Vectorize);
+  if (params.vectorize_factor1 > 1) {
+    reference1->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
   reference1->axis(-2)->parallelize(ParallelType::TIDx);
   reference1->axis(-3)->parallelize(ParallelType::Unroll);
   // [..., Unroll, TIDx, Vectorize]
@@ -600,10 +621,26 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
         group1_and_cached_inputs.emplace_back(ir_utils::consumerTvsOf(tv)[0]);
       }
     }
-    scheduler_utils::parallelizeAllLike(
-        reference1, group1_and_cached_inputs, {ParallelType::Vectorize});
 
-    // Only unrolled the axes that exactly maps to the unrolled axes
+    // Only vectorize the axes that exactly maps to the vectorized axes
+    //  on reference as support for permissively mapped axes are not
+    //  yet clearly defined.
+    std::vector<TensorView*> vectorized_group1_cached_inputs;
+    for (auto gin : group1_and_cached_inputs) {
+      if (std::any_of(
+              gin->domain()->domain().begin(),
+              gin->domain()->domain().end(),
+              [&ca_map, reference1](IterDomain* id) {
+                return ca_map.areMapped(
+                    id, reference1->axis(-1), IdMappingMode::EXACT);
+              })) {
+        vectorized_group1_cached_inputs.push_back(gin);
+      }
+    }
+    scheduler_utils::parallelizeAllLike(
+        reference1, vectorized_group1_cached_inputs, {ParallelType::Vectorize});
+
+    // Only unroll the axes that exactly maps to the unrolled axes
     //  on reference as support for permissively mapped axes are not
     //  yet clearly defined.
     std::vector<TensorView*> unrolled_group1_cached_inputs;
@@ -618,7 +655,6 @@ void scheduleTranspose(Fusion* fusion, const TransposeParams& params) {
         unrolled_group1_cached_inputs.push_back(gin);
       }
     }
-
     scheduler_utils::parallelizeAllLike(
         reference1, unrolled_group1_cached_inputs, {ParallelType::Unroll});
   }

@@ -491,6 +491,36 @@ TEST_F(NVFuserTest, FusionScheduleBroadcastOnly_CUDA) {
   }
 }
 
+// mermaid graph:
+// ```mermaid
+// %%{
+//   init: {
+//     'theme': 'base',
+//     'themeVariables': { 'fontSize': '30px', 'fontFamily': 'times'}}
+// }%%
+// graph TD
+//   T0("T0(M, N, K)")
+//   T1("T1(N, M, K)")
+//   T2("T2(M, K, N)")
+//   T0 --> A("transpose(1, 2)") --> T3("T3(M, K, N)")
+//   T1 ---> sigmoid --> T5("T5(N, M, K)")
+//   T5 --> B("transpose(0, 2)") --> T7("T7(K, M, N)")
+//   T2 ----> C("add")
+//   T3 --> C --> T6("T6(M, K, N)")
+//   T6 --> D("transpose(0, 1)") --> T11("T11(K, M, N)")
+//   T11 --> E("add") -->T12("T12(K, M, N)")
+//   T7 --> E
+//   T1 ---> F("transpose(0, 1)") --> T4("T4(M, N, K)")
+//   T0 --> G("add") --> T8("T8(M, N, K)") --> relu ---> T9("T9(M, N, K)")
+//   T4 --> G
+//   T6 ---> sin ---> T10("T10(M, K, N)")
+//   style T0 fill:lightgreen
+//   style T1 fill:lightgreen
+//   style T2 fill:lightgreen
+//   style T12 fill:lightblue
+//   style T9 fill:lightblue
+//   style T10 fill:lightblue
+// ```
 TEST_F(NVFuserTest, FusionScheduleTransposeComplexDAG1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -546,6 +576,36 @@ TEST_F(NVFuserTest, FusionScheduleTransposeComplexDAG1_CUDA) {
       __FILE__);
 }
 
+// mermaid graph:
+// ```mermaid
+// %%{
+//   init: {
+//     'theme': 'base',
+//     'themeVariables': { 'fontSize': '30px', 'fontFamily': 'times'}}
+// }%%
+// graph TD
+//   T0("T0(M, N, K)")
+//   T1("T1(N, M, K)")
+//   T2("T2(M, K, N)")
+//   T0 --> A("transpose(1, 2)") --> T3("T3(M, K, N)")
+//   T1 ---> sigmoid --> T5("T5(N, M, K)")
+//   T5 --> B("transpose(0, 2)") --> T7("T7(K, M, N)")
+//   T2 ----> C("add")
+//   T3 --> C --> T6("T6(M, K, N)")
+//   T6 --> D("transpose(0, 1)") --> T11("T11(K, M, N)")
+//   T11 --> E("add") -->T12("T12(K, M, N)")
+//   T7 --> E
+//   T1 ---> F("transpose(0, 1)") --> T4("T4(M, N, K)")
+//   T0 --> G("add") --> T8("T8(M, N, K)") --> relu ---> T9("T9(M, N, K)")
+//   T4 --> G
+//   T6 ---> sin ---> T10("T10(M, K, N)")
+//   style T0 fill:lightgreen
+//   style T1 fill:lightgreen
+//   style T2 fill:lightgreen
+//   style T12 fill:lightblue
+//   style T9 fill:lightblue
+//   style T10 fill:lightblue
+// ```
 TEST_F(NVFuserTest, FusionManualScheduleTransposeComplexDAG1_CUDA) {
   // achieved: 833.526 GB/s on RTX 3090 (theoretical bandwidth: 936 GB/s)
   Fusion fusion;
@@ -727,6 +787,45 @@ TEST_F(NVFuserTest, FusionViewNoTranspose_CUDA) {
   fusion.addOutput(tv1);
 
   TORCH_CHECK(!hasAtLeastTwoValidGroups(&fusion));
+}
+
+// t0------------.
+// t2->broadcast->sub->mul->relu->t6
+// t1------------------'
+TEST_F(NVFuserTest, FusionScheduleTransposeMissingDim_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  auto tv1 = makeContigConcreteTensor({1, -1, 1});
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+  auto tv3 = broadcast(tv2, {true, false, true});
+  auto tv4 = sub(tv0, tv3);
+  auto tv5 = mul(tv4, tv1);
+  auto tv6 = relu(tv5);
+  fusion.addOutput(tv6);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::randn({512, 1024, 512}, options);
+  at::Tensor input1 = at::randn({1, 1024, 1}, options);
+  at::Tensor input2 = at::randn({1024}, options);
+
+  auto lparams = scheduleTranspose(&fusion, {input0, input1, input2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input0, input1, input2}, lparams);
+  auto outputs = fe.runFusion({input0, input1, input2}, lparams);
+
+  auto t3 = input2.unsqueeze(0).unsqueeze(-1);
+  auto t4 = input0 - t3;
+  auto t5 = t4 * input1;
+  auto t6 = at::relu(t5);
+
+  testValidate(
+      &fusion, outputs, {input0, input1, input2}, {t6}, __LINE__, __FILE__);
 }
 
 } // namespace jit
