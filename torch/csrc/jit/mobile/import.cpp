@@ -696,7 +696,6 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
@@ -707,6 +706,7 @@ void _load_extra_only_for_mobile(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::ZipFileFormat: {
+      std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
       auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);
