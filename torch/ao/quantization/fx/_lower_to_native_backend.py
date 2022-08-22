@@ -7,7 +7,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.quantized._reference as nnqr
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from .graph_module import QuantizedGraphModule
