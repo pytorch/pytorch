@@ -84,8 +84,8 @@ static void setupTranspose(
     return (is_transpose) ? transpose(tv, axes.first, axes.second) : tv;
   };
 
-  auto input1 = makeContigTensor(num_dims);
-  auto input2 = makeContigTensor(num_dims);
+  auto input1 = makeContigTensor(num_dims, dtype);
+  auto input2 = makeContigTensor(num_dims, dtype);
   fusion->addInput(input1);
   fusion->addInput(input2);
 

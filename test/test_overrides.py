@@ -10,6 +10,7 @@ import collections
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_subclass import RedispatchTensor
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -18,7 +19,13 @@ from torch.overrides import (
     is_tensor_method_or_property,
     TorchFunctionMode
 )
+from torch.testing._internal.common_device_type import (
+    ops,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_methods_invocations import op_db, clone_sample
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
+from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
 
@@ -33,7 +40,7 @@ def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""
     if has_torch_function((a, b, c)):
         return handle_torch_function(foo, (a, b, c), a, b, c=c)
-    if c:
+    if c is not None:
         return a + b + c
     return a + b
 
@@ -1133,7 +1140,7 @@ class TestTorchFunctionMode(TestCase):
         with A():
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
+            self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1482,19 +1489,26 @@ class TestTorchFunctionMode(TestCase):
                 if kwargs is None:
                     kwargs = {}
                 called += 1
-                return NotImplemented
+                # The first time we call, the mode sees an active type that
+                # it doesn't know how to deal with.  The second time, we're
+                # instructed to treat it "as if it were a tensor", and so
+                # we keep going.  I'm not entirely clear if the subclasses
+                # disappearing from types is the correct way to do it.
+                if any(t is not torch.Tensor for t in types):
+                    return NotImplemented
+                else:
+                    return func(*args, **kwargs)
 
         class B(torch.Tensor):
             pass
 
         b = B()
 
-        # TODO: What is the goal of this test, are we breaking desired behavior?
         with A():
             r = torch.neg(b)
 
         self.assertIs(type(r), B)
-        self.assertEqual(called, 1)
+        self.assertEqual(called, 2)
 
         called = 0
 
@@ -1502,7 +1516,7 @@ class TestTorchFunctionMode(TestCase):
             r = bar(b)
 
         self.assertIs(type(r), B)
-        self.assertEqual(called, 1)
+        self.assertEqual(called, 2)
 
     def test_disable_subclass_not_mode(self):
         called = False
@@ -1538,6 +1552,110 @@ class TestTorchFunctionMode(TestCase):
                 self.assertIsInstance(torch.sum(x), A)
             finally:
                 del g
+
+    def test_subclass_hash(self):
+        class DiagTensor(torch.Tensor):
+            def __init__(self, diag):
+                self._diag = diag
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                def get_full_matrices(t):
+                    if isinstance(t, DiagTensor):
+                        return torch.diag_embed(t._diag)
+                    else:
+                        return t
+
+                return func(*tree_map(get_full_matrices, args), **tree_map(get_full_matrices, kwargs))
+
+        d = torch.rand(2)
+        a = DiagTensor(d)
+
+        self.assertEqual((a + 1), torch.diag_embed(d) + 1)
+
+        # If the hash function was returning the same value, this would
+        # fail inside `Tensor.__eq__`.
+        # If __hash__ was going through torch_function, the implementation above would
+        # be wrong as it would compute the hash on a temporary Tensor thus not ensuring
+        # the uniqueness of the hash that we rely on for Tensors.
+        s = set()
+        s.add(a)
+        s.add(DiagTensor(d))
+
+class TestTorchFunctionRedispatch(TestCase):
+    def test_simple(self):
+        x = RedispatchTensor(torch.ones(1))
+        ret = bar(x)
+        self.assertIs(ret, x)
+        self.assertExpectedInline(pprint.pformat(x.call_log), """\
+[('bar',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1.]),),
+  {})]""")
+
+    def test_recursive(self):
+        x = RedispatchTensor(torch.full((1,), 1))
+        y = RedispatchTensor(torch.full((1,), 2))
+        z = RedispatchTensor(torch.full((1,), 3))
+        ret = foo(x, y, z)
+        self.assertEqual(ret, torch.full((1,), 6))
+        self.assertExpectedInline(pprint.pformat(x.call_log), """\
+[('foo',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1]), RedispatchTensor([2])),
+  {'c': RedispatchTensor([3])}),
+ ('_TensorBase.add',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1]), RedispatchTensor([2])),
+  None)]""")
+        self.assertExpectedInline(pprint.pformat(y.call_log), """\
+[('foo',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1]), RedispatchTensor([2])),
+  {'c': RedispatchTensor([3])}),
+ ('_TensorBase.add',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1]), RedispatchTensor([2])),
+  None)]""")
+        self.assertExpectedInline(pprint.pformat(z.call_log), """\
+[('foo',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([1]), RedispatchTensor([2])),
+  {'c': RedispatchTensor([3])}),
+ ('_TensorBase.add',
+  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
+  (RedispatchTensor([3]), RedispatchTensor([3])),
+  None)]""")
+
+class TestTorchFunctionRedispatchOps(TestCase):
+    @ops(op_db)
+    def test_redispatch(self, device, dtype, op):
+        def clone_preserving_strides(x):
+            if not x.layout == torch.strided:
+                ret = x.clone()
+            else:
+                ret = torch.empty_strided(x.shape, x.stride(), device=x.device, dtype=x.dtype)
+                ret.copy_(x)
+            ret.requires_grad_(x.requires_grad)
+            return ret
+
+        def wrap(x):
+            if isinstance(x, torch.Tensor):
+                return RedispatchTensor(clone_preserving_strides(x.detach()))
+            return x
+
+        for sample in op.sample_inputs(device=device, dtype=dtype):
+            wrapped = sample.transform(wrap)
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+            actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
+
+            with torch._C.DisableTorchFunction():
+                self.assertEqual(expect, actual)
+
+
+instantiate_device_type_tests(TestTorchFunctionRedispatchOps, globals())
 
 
 if __name__ == '__main__':

@@ -757,6 +757,23 @@ class Tensor(torch._C._TensorBase):
 
         return Resize.apply(self, tensor.size())
 
+    def split(self, split_size, dim=0):
+        r"""See :func:`torch.split`"""
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.split, (self,), self, split_size, dim=dim
+            )
+        if isinstance(split_size, Tensor):
+            try:
+                split_size = int(split_size)
+            except ValueError:
+                pass
+
+        if isinstance(split_size, int):
+            return torch._VF.split(self, split_size, dim)
+        else:
+            return torch._VF.split_with_sizes(self, split_size, dim)
+
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
 
@@ -823,7 +840,7 @@ class Tensor(torch._C._TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0 and not self.is_meta:
+        if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
@@ -895,8 +912,10 @@ class Tensor(torch._C._TensorBase):
         return iter(self.unbind(0))
 
     def __hash__(self):
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__hash__, (self,), self)
+        # Do NOT handle __torch_function__ here as user's default
+        # implementation that handle most functions will most likely do it wrong.
+        # It can be easily overridden by defining this method on the user
+        # subclass if needed.
         return id(self)
 
     def __dir__(self):
@@ -1178,7 +1197,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> renamed_imgs = imgs.rename(None)
             >>> renamed_imgs.names
-            (None,)
+            (None, None, None, None)
 
             >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
             >>> renamed_imgs.names
@@ -1236,14 +1255,18 @@ class Tensor(torch._C._TensorBase):
 
         While not mandatory, we recommend making `__torch_function__` a classmethod.
         """
+        if kwargs is None:
+            kwargs = {}
+
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        ret = torch._C._skip_one_hop_torch_function(func, types, args, kwargs)
-        if func in get_default_nowrap_functions():
-            return ret
-        else:
-            return _convert(ret, cls)
+        with _C.DisableTorchFunction():
+            ret = func(*args, **kwargs)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 

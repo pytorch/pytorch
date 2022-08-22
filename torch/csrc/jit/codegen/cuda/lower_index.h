@@ -55,6 +55,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   void handle(const kir::BlockSync*) final;
   void handle(const kir::GridSync*) final;
   void handle(const kir::CpAsyncWait*) final;
+  void handle(const kir::CpAsyncCommit*) final;
 
   void generate(const std::vector<Expr*>& exprs);
 
