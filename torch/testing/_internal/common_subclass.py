@@ -1,4 +1,3 @@
-import itertools
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
@@ -202,9 +201,9 @@ class RedispatchTensor(torch.Tensor):
         _ = tree_map(append_log, args)
         if kwargs:
             _ = tree_map(append_log, kwargs)
-
         ret = torch.overrides.redispatch_function(
             func, types, args, kwargs)
+
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
                 return RedispatchTensor(x)
