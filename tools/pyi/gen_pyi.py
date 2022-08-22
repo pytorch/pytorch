@@ -112,7 +112,6 @@ blocklist = [
     "chain_matmul",
     "stft",
     "tensordot",
-    "split",
     "unique_consecutive",
     "atleast_1d",
     "atleast_2d",
@@ -137,6 +136,10 @@ blocklist = [
     "floor_divide_",
     "floor_divide_out",
 ]
+# Blocklist for only methods
+method_blocklist = {
+    "split",
+}
 
 binary_ops = (
     "add",
@@ -765,6 +768,9 @@ def gen_pyi(
 
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
+        if name in method_blocklist:
+            continue
+
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
         named_tuple = returns_named_tuple_pyi(group.signature)
