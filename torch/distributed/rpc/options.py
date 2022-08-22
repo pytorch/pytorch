@@ -113,6 +113,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                 invertible.
 
         Example::
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')
@@ -127,7 +128,6 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> options.set_device_map("worker1", {1: 2})
             >>> # maps worker0's cuda:1 to worker1's cuda:2
             >>>
-            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc(
             >>>     "worker0",
             >>>     rank=0,
