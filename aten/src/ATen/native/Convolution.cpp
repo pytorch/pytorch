@@ -799,17 +799,26 @@ at::Tensor conv1d(
 }
 
 at::Tensor conv2d(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight_, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
+  const Tensor& bias_ = *bias_maybe_owned;
 
-  Tensor input;
+  // Promote inputs to common dtype
+  ScalarType common_type = at::result_type(input_, weight_);
+  Tensor bias = Tensor();
+  if (bias_.defined()) {
+    common_type = at::promote_types(common_type, bias_.dtype().toScalarType());
+    bias = bias_.to(common_type);
+  }
+  Tensor input = input_.to(common_type);
+  Tensor weight = weight_.to(common_type);
+
   bool is_batched;
-  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
+  std::tie(input, is_batched) = batchify(input, /*num_spatial_dims=*/ 2, "conv2d");
   Tensor output;
-  if (at::isComplexType(input_.scalar_type())) {
+  if (at::isComplexType(input.scalar_type())) {
     output = complex_convolution(input, weight, bias, stride, padding, dilation, {{0, 0}}, groups);
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
