@@ -22,7 +22,7 @@ from typing import List, Tuple, Type, Set, Dict
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.modules,
-    torch.nn.qat.modules,
+    torch.ao.nn.qat.modules,
     torch.nn.quantizable.modules,
     torch.nn.quantized.modules,
     torch.ao.nn.quantized.modules,

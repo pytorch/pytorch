@@ -4692,12 +4692,12 @@ class TestQuantizeFx(QuantizationTestCase):
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            is not torch.ao.nn.qat.modules.linear.Linear,
             "prepare_qat_fx shold not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            is not torch.ao.nn.qat.modules.linear.Linear,
             "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
         )
 
