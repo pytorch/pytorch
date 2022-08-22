@@ -1290,6 +1290,29 @@ class TestMPS(TestCase):
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
 
+    def test_scalar_from_slice_unary(self):
+        # https://github.com/pytorch/pytorch/issues/82543
+        tensor_list = torch.tensor([1.0, 1.2], device="mps")
+
+        for scalar in tensor_list:
+            r_mps = torch.ceil(scalar)
+            r_cpu = torch.ceil(scalar.to("cpu"))
+            self.assertEqual(r_mps.cpu(), r_cpu)
+
+    def test_scalar_from_slice_binary(self):
+        # https://github.com/pytorch/pytorch/issues/82543
+        def helper(binary_op):
+            tensor_list = torch.tensor([1.0, 1.2, 2.5, 1.0], device="mps")
+
+            for scalar in tensor_list:
+                r_mps = binary_op(scalar, 1.0)
+                r_cpu = binary_op(scalar.cpu(), 1.0)
+                self.assertEqual(r_mps.cpu(), r_cpu)
+        helper(torch.sub)
+        helper(torch.add)
+        helper(torch.not_equal)
+        helper(torch.eq)
+
     def test_slice_contiguous_view(self):
         # https://github.com/pytorch/pytorch/issues/77750
 
