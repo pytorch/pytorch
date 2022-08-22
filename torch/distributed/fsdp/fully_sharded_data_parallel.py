@@ -472,42 +472,38 @@ class _ExecOrderData:
         iteration with the expectation that the recorded order is reset in
         :meth:`next_iter`.
         """
-        if not handles:
-            return
         handles_key = tuple(handles)
-        if handles_key in self.handles_to_post_forward_order_index:
+        if handles_key and handles_key in self.handles_to_post_forward_order_index:
             return
         index = len(self.handles_post_forward_order)
-        self.handles_to_post_forward_order_index[handles_key] = index
+        if handles_key:
+            self.handles_to_post_forward_order_index[handles_key] = index
         self.handles_post_forward_order.append(handles_key)
 
     def record_pre_forward(self, handles: List[FlatParamHandle]) -> None:
         """
         Records ``handles`` in the pre-forward order on the first iteration,
         where ``handles`` should be a group of handles used in the same
-        module's forward. If ``handles`` is empty, then it is omitted.
+        module's forward.
 
         If the distributed debug level is at least INFO, then this additionally
         checks the execution order across ranks. See :meth:`_check_order` for
         details.
         """
-        # TODO (awgu): For now, we exclude modules with no parameters from the
-        # order, which is different from the existing implementation.
-        if not handles:
-            return
         handles_key = tuple(handles)
-        if self._checking_order:
+        if self._checking_order and handles_key:
             self._check_order(handles_key)
         # Fix the order after the first iteration
         # TODO (awgu): For now, only record the first usage of a module, which
         # is consistent with the existing implementation.
         if (
             not self.is_first_iter
-            or handles_key in self.handles_to_pre_forward_order_index
+            or (handles_key and handles_key in self.handles_to_pre_forward_order_index)
         ):
             return
         index = len(self.handles_pre_forward_order)
-        self.handles_to_pre_forward_order_index[handles_key] = index
+        if handles_key:
+            self.handles_to_pre_forward_order_index[handles_key] = index
         self.handles_pre_forward_order.append(handles_key)
 
     def _check_order(self, handles_key: Tuple[FlatParamHandle, ...]) -> None:
