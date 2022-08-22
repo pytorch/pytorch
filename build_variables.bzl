@@ -898,6 +898,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/passes/onnx/onnx_log.cpp",
+    "torch/csrc/jit/passes/onnx/naming.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
