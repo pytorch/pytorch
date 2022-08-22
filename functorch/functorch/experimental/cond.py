@@ -1,10 +1,11 @@
 import torch
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
-from functorch.experimental.ops import PyOperator
+from functorch.experimental.ops import PyOperator, fallthrough_fn
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
 import random
 import string
 
@@ -18,6 +19,7 @@ from contextlib import contextmanager
 @contextmanager
 def suspend_mode(mode):
     assert(mode is not None), "Cannot suspend None mode"
+    assert(isinstance(mode, TorchDispatchMode)), f"Unexpected mode type {mode.__class__}"
     torch._C._set_torch_dispatch_mode(None)
     try:
         yield
@@ -137,7 +139,7 @@ def python_fallback(op):
 cond = PyOperator('cond')
 cond.impl(DispatchKey.CPU, cond_dense)
 cond.impl(DispatchKey.Python, python_fallback(cond))
-cond.fallthrough(DispatchKey.PythonTLSSnapshot)
+cond.impl(DispatchKey.PythonTLSSnapshot, fallthrough_fn)
 cond.impl(DispatchKey.AutogradCPU, cond_autograd)
-cond.fallthrough(DispatchKey.ADInplaceOrView)
-cond.fallthrough(DispatchKey.BackendSelect)
+cond.impl(DispatchKey.ADInplaceOrView, fallthrough_fn)
+cond.impl(DispatchKey.BackendSelect, fallthrough_fn)

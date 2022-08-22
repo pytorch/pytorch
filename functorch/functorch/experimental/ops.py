@@ -13,15 +13,14 @@ class PyOperator:
 
     def impl(self, dispatch_key, fn):
         assert dispatch_key not in self.table
-        self.table[dispatch_key] = fn
+        if fn is fallthrough_fn:
+            self.table[dispatch_key] = fn(self, dispatch_key)
+        else:    
+            self.table[dispatch_key] = fn
 
     def lookup(self, keyset):
         dispatch_key = keyset.highestPriorityTypeId()
         return self.table[dispatch_key]
-
-    def fallthrough(self, dispatch_key):
-        assert dispatch_key not in self.table
-        self.table[dispatch_key] = fallthrough_fn(self, dispatch_key)
 
     def __call__(self, *args, **kwargs):
         flat_args = to_flat_tuple(args, kwargs)
