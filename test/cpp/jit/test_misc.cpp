@@ -80,6 +80,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "ATen/core/ATen_fwd.h"
+#include "c10/util/intrusive_ptr.h"
 
 namespace torch {
 namespace jit {
@@ -1120,7 +1122,7 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   { // START: global test
     addGlobalCallback(RecordFunctionCallback(
-        [](const RecordFunction&
+        [](const RecordFunction &
            /* unused */) -> std::unique_ptr<at::ObserverContext> {
           auto ctx = std::make_unique<TestContext>();
           ctx->a = 123;
@@ -1145,7 +1147,7 @@ TEST(RecordFunctionTest, Callbacks) {
     auto ctx_th = std::thread([]() {
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [](const RecordFunction&
+          [](const RecordFunction &
              /* unused */) -> std::unique_ptr<at::ObserverContext> {
             auto ctx = std::make_unique<TestContext>();
             ctx->a = 234;
@@ -1426,6 +1428,50 @@ TEST(TestSymInt, TestIntrusive) {
   as = bs;
   ASSERT_EQ(a.use_count(), 1);
   ASSERT_EQ(b.use_count(), 3);
+}
+
+class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
+ public:
+  TestSymIntNodeImpl(int64_t i) : i_(i) {}
+
+#define OPDEF3(NAME, OP, RET)                                            \
+  RET NAME(const c10::SymIntNode& other) override {                      \
+    return make_intrusive<TestSymIntNodeImpl>(                           \
+        this->i_ OP dynamic_cast<TestSymIntNodeImpl*>(other.get())->i_); \
+  }
+
+#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymIntNode)
+
+  OPDEF2(add, +)
+  OPDEF2(sub, -)
+  OPDEF2(mul, *)
+  OPDEF2(floordiv, /)
+  OPDEF2(mod, %)
+#undef OPDEF2
+#undef OPDEF3
+  int64_t i_;
+};
+
+TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
+  auto get = [](c10::SymInt si) {
+    auto node = si.toSymIntNodeImpl();
+    return dynamic_cast<TestSymIntNodeImpl*>(node.get())->i_;
+  };
+
+  std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
+  for (auto i : inputs) {
+    for (auto j : inputs) {
+      auto a = c10::make_intrusive<TestSymIntNodeImpl>(i)->toSymInt();
+      auto b = c10::make_intrusive<TestSymIntNodeImpl>(j)->toSymInt();
+      ASSERT_EQ(get(a + b), i + j);
+      ASSERT_EQ(get(a - b), i - j);
+      ASSERT_EQ(get(a * b), i * j);
+      if (j != 0) {
+        ASSERT_EQ(get(a / b), i / j);
+        ASSERT_EQ(get(a % b), i % j);
+      }
+    }
+  }
 }
 
 TEST(FallbackGraphsTest, Basic) {
