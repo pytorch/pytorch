@@ -520,6 +520,12 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
+    const at::Tensor& self,
+    bool upper) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
     const at::Tensor& input,
     const c10::optional<at::Tensor>& weight,
