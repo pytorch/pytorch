@@ -243,7 +243,7 @@ def _multi_tensor_rprop(params: List[Tensor],
     step_sizes = _view_complex_as_real(step_sizes)
 
     if maximize:
-        torch._foreach_neg(grads)
+        grads = torch._foreach_neg(grads)
 
     signs = torch._foreach_mul(grads, prevs)
     signs = [s.sign() for s in signs]
@@ -259,6 +259,7 @@ def _multi_tensor_rprop(params: List[Tensor],
 
     # for dir<0, dfdx=0
     # for dir>=0 dfdx=dfdx
+    grads = list(grads)
     for i in range(len(grads)):
         grads[i] = grads[i].clone(memory_format=torch.preserve_format)
         grads[i][signs[i].eq(etaminus)] = 0
