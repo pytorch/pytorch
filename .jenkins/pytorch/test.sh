@@ -199,7 +199,7 @@ test_dynamo_shard() {
       test_overrides \
       test_python_dispatch \
       test_fx \
-      test_importer \
+      test_package \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
