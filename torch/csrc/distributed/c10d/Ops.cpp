@@ -111,7 +111,8 @@ TORCH_LIBRARY(c10d, m) {
   // It's important to register the op to the CompositeExplicitAutograd key to
   // enable
   // __torch_dispatch__.
-  m.def("send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
+  m.def(
+      "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
