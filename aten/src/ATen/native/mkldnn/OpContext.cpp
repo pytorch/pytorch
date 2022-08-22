@@ -1,4 +1,5 @@
 #include <ATen/native/mkldnn/ConvPrepack.h>
+#include <ATen/native/mkldnn/LinearPrepack.h>
 #include <ATen/native/mkldnn/OpContext.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -108,6 +109,31 @@ Tensor MkldnnConvOpContext::run(const Tensor& input) {
 
 void MkldnnConvOpContext::run(const Tensor& input, void* output) {
   return mkldnn::internal::convolution::run(op_context_, input, output);
+}
+
+c10::intrusive_ptr<LinearOpContext> MkldnnLinearOpContext::create_context(
+    at::Tensor&& weight,
+    c10::optional<at::Tensor>&& bias,
+    std::vector<int64_t>&& input_size,
+    const ideep::attr_t& attr) {
+  auto op_context =
+      mkldnn::internal::linear::create(weight, bias, input_size, attr);
+
+  auto linear_op_context = c10::make_intrusive<MkldnnLinearOpContext>(
+      std::move(weight),
+      std::move(bias),
+      std::move(input_size),
+      std::move(op_context));
+
+  return linear_op_context;
+}
+
+Tensor MkldnnLinearOpContext::run(const Tensor& input) {
+  return mkldnn::internal::linear::run(op_context_, input);
+}
+
+void MkldnnLinearOpContext::run(const Tensor& input, void* output) {
+  return mkldnn::internal::linear::run(op_context_, input, output);
 }
 
 } // namespace mkldnn
