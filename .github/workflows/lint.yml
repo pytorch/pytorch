@@ -111,7 +111,7 @@ jobs:
     name: pr-sanity-checks
     runs-on: linux.20_04.4x
     # Only run this on pull requests
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
