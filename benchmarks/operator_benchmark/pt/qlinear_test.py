@@ -3,7 +3,7 @@ import operator_benchmark as op_bench
 
 import torch
 import torch.ao.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized.dynamic as nnqd
 
 from pt import configs
 
