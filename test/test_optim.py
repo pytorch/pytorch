@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm, skipIfTorchDynamo
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2770,11 +2770,15 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # dict
     p = p.clone()
     p.grad = grad
-    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in opt_differentiable_state.items()
+    }
     opt = opt_class([p], **kwargs)
     opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(v for v in opt_differentiable_state.values() if v.requires_grad)
+    return (p,) + tuple(
+        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2802,6 +2806,21 @@ class TestDifferentiableOptimizer(TestCase):
             (p, grad, state, torch.optim.Adam,
              {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
         )
+
+    def test_rmsprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step'] = 0
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['momentum_buffer'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # This can cause issues with large values and nan due to sqrt ops
+        state['grad_avg'] = 1e-2 * torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RMSprop,
+             {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
+             *state.values()))
 
 
 if __name__ == '__main__':
