@@ -44,7 +44,7 @@ custom_rules_works_list = {
     "avg_pool3d",
     "conv_transpose2d",
     "conv1d",
-    "conv2d",
+    # "conv2d",
     "hardswish",
     "avg_pool2d",
     "max_pool1d",
@@ -263,14 +263,14 @@ class TestDtypeAnalysis(TestDtypeBase):
         # Note that unlike the Conv2d module, the function conv2d
         # does not take dtype/device arguments.
 
-        def conv2d_fn(input, weight, bias):
-            return torch.nn.functional.conv2d(input, weight, bias)
+        # def conv2d_fn(input, weight, bias):
+        #     return torch.nn.functional.conv2d(input, weight, bias)
 
         def adaptive_avg_pool2d_fn(input, output_size: Tuple[int]):
             return torch._C._nn.adaptive_avg_pool2d(input, output_size)
 
         for fn, inputs_fn in (
-            (conv2d_fn, sample_inputs_conv2d),
+            # (conv2d_fn, sample_inputs_conv2d),
             (adaptive_avg_pool2d_fn, sample_inputs_adaptive_avg_pool2d),
         ):
             for dtype in (torch.int8, torch.float64):

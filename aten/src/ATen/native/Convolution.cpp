@@ -810,10 +810,10 @@ at::Tensor conv2d(
   Tensor bias = Tensor();
   if (bias_.defined()) {
     common_type = at::promote_types(common_type, bias_.dtype().toScalarType());
-    bias = bias_.to(common_type);
+    bias = bias_.dtype().toScalarType() == common_type ? bias_ : bias_.to(common_type);
   }
-  Tensor input = input_.to(common_type);
-  Tensor weight = weight_.to(common_type);
+  Tensor input = input_.dtype().toScalarType() == common_type ? input_ : input_.to(common_type);
+  Tensor weight = weight_.dtype().toScalarType() == common_type ? weight_ : weight_.to(common_type);
 
   bool is_batched;
   std::tie(input, is_batched) = batchify(input, /*num_spatial_dims=*/ 2, "conv2d");
