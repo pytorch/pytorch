@@ -1260,7 +1260,7 @@ class TestAutograd(TestCase):
 
         TestFn.apply(b).sum().backward()
 
-    def test_first_grad_fn_access_during_backward():
+    def test_first_grad_fn_access_in_no_grad_mode():
         a = torch.tensor([1 + 1j], requires_grad=True).clone()
         v = a.real
         a.add_(1)
