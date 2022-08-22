@@ -123,6 +123,8 @@ ALLOW_LIST = [
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
+    # Distributed c10d ops are all going to be updated
+    ("c10d::.*", datetime.date(2022, 10, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
