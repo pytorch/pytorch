@@ -1146,6 +1146,7 @@ class TestLRScheduler(TestCase):
 
         self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/948")
     def test_new_pattern_no_warning(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
@@ -1160,6 +1161,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/948")
     def test_new_pattern_no_warning_with_arg(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
