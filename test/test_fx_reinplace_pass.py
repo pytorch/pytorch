@@ -295,5 +295,32 @@ def forward(self, a__1):
     return select_scatter_default
     """)  # noqa: B950
 
+
+    def test_out_node_updated(self):
+        def f():
+            x = torch.zeros(2, 2)
+            y = x.diagonal()
+            y_updated = y.add(1)
+            z = torch.diagonal_scatter(x, y_updated)
+            # reinplace needs to know to replace output [z] with [x]
+            return [z]
+
+        if not HAS_FUNCTIONALIZATION:
+            return
+        f2 = reinplace(make_fx(functionalize(f))())
+        expected_out = f()
+        actual_out = f2()
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self):
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
+    diagonal_default = torch.ops.aten.diagonal.default(zeros)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, 1);  diagonal_default = None
+    return [zeros]
+    """)
+
 if __name__ == '__main__':
     run_tests()
