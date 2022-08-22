@@ -7,6 +7,26 @@ namespace ops {
 // Below are ProcessGroup's corresponding ops for each backend. Ops are but
 // routed through the dispatcher to be dispatched to the appropriate backend.
 // Currently a no-op as the process group does not have a list of backends.
+c10::intrusive_ptr<Work> send_cpu(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> send_cuda(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
 c10::intrusive_ptr<Work> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -61,6 +81,14 @@ c10::intrusive_ptr<Work> allreduce_cuda_(
 
 // register functions to dispatcher
 namespace {
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("send", send_cpu);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("send", send_cuda);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("broadcast_", broadcast_cpu_);
 }
