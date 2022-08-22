@@ -220,9 +220,6 @@ PyObject* THPFInfo_str(THPFInfo* self) {
 }
 
 PyObject* THPIInfo_str(THPIInfo* self) {
-  auto type = self->type;
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
 
   oss << "iinfo(min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr));
